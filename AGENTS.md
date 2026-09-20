@@ -18,6 +18,7 @@ GPL-3.0-or-later · Rust · GTK4 + libadwaita 外壳 · Cairo 画布 · 目标�
 | 配置 / 工程 | `~/.config/pixlay/` · `.pixlay` |
 | 工具链 | edition 2024 · resolver 3 · `rust-version` 跟 Arch 现装 rustc(现 `1.98`);基线数字一律 `--release` 测 |
 | app-id | `org.yangtse.Pixlay`(自有域名 `yangtse.org` 反写;不用 `io.github.*` 借来的命名空间) |
+| i18n | gettext,域 `pixlay`(源语言英文;`.pot`/`po/` 在仓库根;只用 `xgettext --language=Rust` 抽取) |
 
 ## 验证入口(每轮改动后必须跑)
 

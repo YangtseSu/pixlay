@@ -255,10 +255,16 @@ S7 里写着「撤销重做(命令历史 + AST 快照)」与「命中测试」�
 **S7**
 - "三分钟走通"按人工判据给出(见「需要人工介入」):脚本化步骤清单 + 计时
 - 补一条:大图导出时 UI 不冻结(导出在后台 + 进度反馈)——S0/S6 的操作是 6–7 s 级
-- **i18n 机制(建议,未反对即锁定)**:`gettext`(crate `gettext-rs`),域名 `pixlay`,源语言英文,
-  `.pot` + `po/POTFILES` 随仓库提交;依赖只进 `pixlay`(AGENTS 已禁 core/imaging/render/cli 引 i18n)。
+- **i18n 机制(已定)**:`gettext`(crate `gettext-rs`,**不 pin 版本**——照「追新」由 S7 的 `cargo update` 定),
+  域 `pixlay`,源语言英文,`.pot` + `po/POTFILES` 随仓库提交;依赖只进 `pixlay`(AGENTS 已禁
+  core/imaging/render/cli 引 i18n);该依赖与其余新依赖一并在「依赖登记」里登记。
   *理由:GTK 与 libadwaita 自身的按钮文案走系统 gettext,`.desktop` 与 AppStream metainfo 的翻译(S8)用同一套
   `xgettext` / `msgfmt` 工具链——换成 fluent 类方案要自己接 metainfo 那半边。*
+- 抽取命令用 **`xgettext --language=Rust`**:gettext-tools 1.0 的 Rust 后端实测能提
+  `gettext` / `ngettext` / `pgettext`,并给 `ngettext` 的两条 msgid 打上 `#, rust-format` 标记;
+  **别用 `--language=C` 绕**——能提出串,但丢掉 `rust-format`,`msgfmt --check-format` 就校验不了 `{}` 占位符
+  (抽取与 `msgfmt` 的行为是 2026-09-20 在本机 `gettext-tools 1.0` 上实测的,不是记忆)
+- `msgfmt --xml`(metainfo)与 `msgfmt --desktop`(desktop 文件)在 S8 与 `.po` 走同一条管线
 - 判据补充:`LANG` 缺失 / `C` / 未知语言三种情况下 GUI 都出英文且能启动(缺翻译回退是 gettext 默认行为,
   一条冒烟即可);本步**不提交任何 `.po` 翻译**,抽取与回退先成立即可
 - 硬编码串的判定边界:文案是否漏包装**不做机器判据**(提取器看不到漏掉的字符串),只做
