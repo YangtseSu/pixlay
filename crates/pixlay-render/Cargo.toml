@@ -11,3 +11,13 @@ publish = false
 
 [lints]
 workspace = true
+
+[dependencies]
+pixlay-core = { path = "../pixlay-core" }
+cairo-rs = "0.22.9"
+thiserror = "2.0"
+
+[dev-dependencies]
+# The `png` feature is only for the golden test: it writes the committed golden
+# image and reads it back. Production encoding lives in S6, not here.
+cairo-rs = { version = "0.22.9", features = ["png"] }

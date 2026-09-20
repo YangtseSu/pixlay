@@ -7,11 +7,14 @@
 > 读 `AGENTS.md`,再读 `docs/STEPS.md`。只做「当前进度」指向的那一步,不要提前做后面的。
 > 每步做完先跑该步的验证命令,把出口判据变成测试,然后更新本文件的「当前进度」。
 
-- **当前进度: S0 — 已完成并通过裁定(2026-09-20:**Cairo 保留**;判据与数字见「S0 结果」)→ 下一步 S1(新会话)**
+- **当前进度: S1 — 已完成(2026-09-20;契约读本 `docs/CONTRACT.md`,实测与偏离见「S1 结果」)
+  → 下一步:「S1 结束后:评审契约」这道人工闸口,评审通过后再开 S2(新会话)**
 - 硬约束与不变量在 `AGENTS.md`,本文件只排顺序与出口判据,不重复其内容。
 - 每一步开始前先跑一次 `cargo test`,确认基线是绿的。
 - **文末《审查补充》是本文件的补丁层**:每步新增的机器判据、待决策项、实测基线都在那里;
   执行某一步时同时读该步在补丁层里的条目。
+- **S0 的 spike 已随 S1 删除**(`crates/pixlay-cli/src/bin/a0-spike.rs`):S0 一次性的探针职责已由
+  `pixlay-render probe` 接管,数字留在本文件「S0 结果」与「六、实测基线」。
 
 ## 切分原则
 
@@ -55,6 +58,7 @@ S7 的 GNOME HIG 目视清单(`docs/HIG-REVIEW.md`:高对比 / 大字体 / 纯�
 - **不做**:不做 UI、不做模板库、不做取景数学、不做工程文件。
 - **已做(2026-09-20)**:实现是 `crates/pixlay-cli/src/bin/a0-spike.rs`(可抛弃,一次性的硬编码 `[[bin]]`),
   判据、数字与给 S1 的交接见「S0 结果」;`cargo test` 里有 5 条测试在 1/4 A0 尺寸上跑同一套探针。
+  **该 spike 已在 S1 删除**(见上);本节的数字是历史记录,保留下来的判据由 `pixlay-render probe` 承担。
 
 ## S1 · 冻结最小契约 + 反馈回路
 
@@ -75,6 +79,56 @@ S7 的 GNOME HIG 目视清单(`docs/HIG-REVIEW.md`:高对比 / 大字体 / 纯�
   - `pixlay-core` 与 `pixlay-render` 的 `cargo test` 不需要显示器
 - **不做**:不做 GUI、不做多模板、不做调色、不做文字排版。
 - **人工**:契约评审。
+
+**S1 结果** `[2026-09-20;契约读本 `docs/CONTRACT.md`;判据全在仓库内的测试里]`
+
+出口判据逐条落地:
+
+| 判据 | 落点 | 实测 |
+|---|---|---|
+| serde 往返逐字段相等 | `pixlay-core/tests/contract.rs` | 往返相等 + 字段名与 `[x,y]` 形状断言;未知字段、更高 `docVersion`、越界槽数/DPI/画布/取景全被拒 |
+| `render` 能读 `.pixlay` 出图 | `pixlay-cli/tests/cli.rs` | PNG/JPEG 都出;尺寸 = 画布 mm × dpi 的取整 |
+| CLI 机器面 | 同上 | 无 TTY、stdin 有数据也照常;四种 `LANG` 下 stdout/stderr 逐字节相同(含错误分支);退出码 0/1/2 各有覆盖;stdout 在失败时为空 |
+| `probe` 用数字回答三问 | `pixlay-cli/src/probe.rs` | 格内色精确匹配、格外非白计数、共用边混色像素数与三色凸组合残差 |
+| 阈值收紧必须变红 | `pixlay-render/tests/render.rs::the_comparison_can_actually_fail` | 永久自检:一列像素的扰动(等效 RMSE 12)必须超阈值,恒等必须为 0 |
+| core/render 测试无需显示器 | 全部测试 | 无 `DISPLAY`/`WAYLAND_DISPLAY` 下全绿 |
+
+**S1 对契约的偏离与补充**(评审时重点看这几条):
+
+1. `draw` 的签名是 `draw(doc, images, target)`:位图经 `Images`(槽位 → `Bitmap`)传入。
+   `Bitmap` 拥有一个 Cairo 表面,**不是 `Send`/`Sync`**——后台解码交回主线程时交的是裸缓冲,
+   由接收线程建 `Bitmap`,与 GTK 对象不跨线程是同一条纪律。
+2. `Target.scale` 与 `Target.band` 分开:`scale` 给预览,`band` 给 A0 分块(峰值 = 一块 + 位图总和)。
+   实测分块拼接与整图 RMSE 0.033(S0 的 941 MB 峰值因此还有下调空间,留到 S4)。
+3. `draw` 在文档含文字层时**报错**(`TextLayersUnsupported`)而不是静默不画。S5 接上后此错误消失。
+4. `TextLayer` 进了 v1 契约(字段已冻结),但渲染在 S5;`TextFallback.date` 已定义。
+   契约里显式列了 v1 非目标(见 `docs/CONTRACT.md` §六)。
+5. S1 还没有解码器(S4 的事),所以 `--content detail|flat` 用**确定性占位内容**填格子;
+   这个 flag 与 `pixlay-cli/src/content.rs` 在 S4 删除,`probe` 也随之下沉到 `pixlay-imaging`。
+   golden 测试与那 6 张 fixture 都不依赖它——fixture 只被「提交在仓库里」这一条要求
+   (`pixlay-cli/tests/fixtures.rs` 校验 EXIF Orientation=6、PNG alpha 通道、尺寸)。
+6. `--template mosaic-8-s14`:S1 由 `pixlay-cli/src/templates.rs` 手写提供(8 格、cut、
+   一格异形、坐标都是 1/8 的整数倍,所以在二进制浮点里精确),使 `AGENTS.md` 的验证命令从 S1 起可跑。
+   S2 用生成器替换几何,**名字与 `templateVersion` 不变**。
+7. `image` 0.25.10 留了下来(S1 的 PNG/JPEG 编码);`cairo-rs` 的 `png` feature 降级为 dev-only
+   (只给金标准读写)。`pangocairo` 随 spike 离开,回到 S5 再引。已登记进 `AGENTS.md`。
+8. 报告里**不含绝对路径**(`out = ...` 字段已去掉)——同输入同输出这条比"顺手打印输出路径"重要;
+   调用方自己知道它传了什么。
+
+**S1 实测**(`--release`,本机):
+
+| 项 | 值 |
+|---|---|
+| 金标准 RMSE | 0.0(同 build 确定);一列像素错的等效 RMSE 12.0 |
+| 预览 vs 导出(2N 降采样) | RMSE 2.32(阈值 6) |
+| 分块拼接 vs 整图 | RMSE 0.033,最大像素差 2/255,311/463080 字节不同 |
+| 8 格 300dpi 合成(`probe`) | 623 ms,**`VmHWM` 1611 MB**(14043×10532 输出表面 + 8 张格内尺寸位图) |
+| 8 格 300dpi 编码 JPEG q90 | 3727 ms → 42.5 MB;PNG 未测(无元数据需求,交给 S6) |
+| 缝混色(8 格 11 条共用边,300dpi) | 0.998–1.995 px/行,最宽 2 px,残差最差 0.63/255,`foreign` 全 0 |
+| 目视 | 8 格预览:异形格(橙)包住右下角灰格的两条边;1000 px 模板 smoke 预览:8 色块、无白缝 |
+
+`VmHWM` 1611 MB 高于 S0 的 941 MB,原因不同:S0 的 spike 只画一个 L 形 + 网格(照片缓冲少),
+这次是 8 张各按格内尺寸生成的位图,且没有走 `band`。预算 2.5 GB 仍有余量;S4 的缓冲阶梯会重新测一遍。
 
 ## S2 · 模板系统(只有几何)
 

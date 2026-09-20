@@ -25,10 +25,11 @@ GPL-3.0-or-later · Rust · GTK4 + libadwaita 外壳 · Cairo 画布 · 目标�
     cargo fmt --check
     cargo clippy --workspace --all-targets -- -D warnings
     cargo test
-    cargo run -p pixlay-cli -- render --template mosaic-8-s14 --dpi 300 --out /var/tmp/a.jpg
+    cargo run --release -p pixlay-cli -- render --template mosaic-8-s14 --dpi 300 --stats --out /var/tmp/a.jpg
 
 后两条:第二条产出真实图片,你要直接查看它。**看不到图就不要判断渲染对不对。**
-(S2 之前没有模板,这条命令从 S2 起有效;S0–S1 用程序化 fixtures 的等价命令。)
+(S1 起第二条已有效:`mosaic-8-s14` 由 `pixlay-cli` 的模板登记处提供,`--stats` 让每轮的尺子机器可读;
+S2 把它换成生成器产出的固化几何,名字与 `templateVersion` 不变。)
 
 配套口径:
 
@@ -205,3 +206,19 @@ stdout 只放机器可读结果、诊断走 stderr、退出码固定、同输入
 - 提交 `Cargo.lock`;依赖保持最少;`cargo vendor` 必须能通过
 - PKGBUILD 用 `--frozen --offline`,`depends=('gtk4' 'libadwaita')`
 - SPDX 统一 `GPL-3.0-or-later`(不是 `-only`)
+
+## 依赖登记
+
+每个新依赖在这里登记:**名字 / 版本 / 为什么 / 体积与影响**。判据是「删掉它要写多少代码」,
+以及它是否把某条硬约束变弱。政策见「版本策略:追新」:只取最新稳定版,不 pin 上限。
+
+| 依赖 | 用于 | 为什么 | 备注 |
+|---|---|---|---|
+| `serde` + `serde_derive` 1.0.229 | `pixlay-core` | `.pixlay` 是 JSON,`CollageDoc` 的每个字段都要能进能出;手写序列化等于自己实现一遍格式校验 | 体积小,无系统依赖 |
+| `serde_json` 1.0.151 | `pixlay-core`, `pixlay-cli`(dev) | JSON 读写;`deny_unknown_fields` 把「字段拼错」变成加载期错误 | 同上 |
+| `thiserror` 2.0.20 | `pixlay-core`, `pixlay-render` | core/render 的错误是 typed error(契约的一部分);`anyhow` 只允许出现在 `pixlay-cli` | 纯宏,零运行时 |
+| `cairo-rs` 0.22.9 | `pixlay-render` | 唯一的渲染后端;GTK4 本就依赖 cairo,打包零成本 | 系统库 cairo 1.18.4;`png` feature 只在 dev(金标准读写) |
+| `image` 0.25.10 | `pixlay-cli` | **临时代打**:S1 要出 PNG/JPEG,S6 才做「像素 + 色度采样 + ICC + DPI 一趟完成」的编码器;去留由 S6 定 | 目前在 S1 CLI 一处使用;S6 后若无人用则删 |
+
+`pangocairo` 曾由 S0 spike 临时依赖,随 spike 与 `cairo-rs/png` 的 spike 用途一并离开;
+S5 接文字层时按本表重新登记。
