@@ -42,9 +42,15 @@ GPL-3.0-or-later · Rust · GTK4 + libadwaita 外壳 · Cairo 画布 · 目标�
 
 - **一律英文**:commit message、代码注释(行内与 doc comment)、标识符、测试名、日志与错误信息、
   配置键名、PKGBUILD 的 `pkgdesc` 等一切面向机器与上游维护者的文本。
+  *理由:注释与错误信息是要和上游 crate、issue、patch 对话的文本;混语言等于每次都要再翻一遍。*
 - **保留中文**:`AGENTS.md`、`docs/*.md` 这类项目内部规划文档(与既有正文一致)。
-- 界面文案不在本条内,将来由 i18n 决定。
-- *理由:注释与错误信息是要和上游 crate、issue、patch 对话的文本;混语言等于每次都要再翻一遍。*
+- **界面文案只走 i18n,源语言英文**:GUI 文案以英文为 source string;`LANG` 缺失、未知或没有该语言的翻译时
+  一律回退英文。翻译是后加的语言包,不在 S7 做。翻译层**只在 `pixlay`**——`pixlay-core` / `-imaging` /
+  `-render` / `-cli` 不得依赖任何 i18n 库,它们的错误信息是英文标识性文本,GUI 原样附上即可。
+  *理由:core 的错误要与上游 crate 对话,翻译只会让它不可 grep;文案集中在一层才好抽。*
+- **CLI 不做多语言**:输出恒为英文,不读 `LANG` / `LC_ALL` / `LANGUAGE`,不按 locale 格式化数字与日期
+  (日期一律 ISO 8601);`--json` 的值是稳定英文枚举,不做本地化。
+  *理由:CLI 是机器接口,输出随环境变化等于每次解析都要重新猜。*
 
 ## 提交纪律
 
@@ -130,7 +136,8 @@ GPL-3.0-or-later · Rust · GTK4 + libadwaita 外壳 · Cairo 画布 · 目标�
 `pixlay-cli` 不得依赖 gtk4——它是快循环,编译时间就是迭代成本。
 
 **`pixlay-cli` 是唯一的机器操作面。** 任何能力都必须先有子命令:零交互(不读 stdin、不等提示)、
-stdout 只放机器可读结果、诊断走 stderr、退出码固定、同输入同输出。**禁止只有 GUI 能做而 CLI 做不到的事。**
+stdout 只放机器可读结果、诊断走 stderr、退出码固定、同输入同输出、**输出不受 locale 影响**。
+**禁止只有 GUI 能做而 CLI 做不到的事。**
 *理由:模型看不到窗口,只能读 CLI 的 stdout;而"看着对"不算判据——目视结论必须在 CLI 里变成数字(探针)。
 契约细节(子命令、字段、退出码)在测试与 `docs/STEPS.md`,此处不重复。*
 
