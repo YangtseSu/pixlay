@@ -237,6 +237,9 @@ S7 里写着「撤销重做(命令历史 + AST 快照)」与「命中测试」�
 - `check()` 里跑测试要分层:重测试(A0、HEIC、字体排版)标 `#[ignore]` 或 feature-gated,
   `check()` 只跑快层——干净 chroot 里没有字体缓存、没有 `$HOME`、没有显示器
 - 补 `.pixlay` 的 MIME 注册(shared-mime-info xml + desktop 文件 + 图标);`depends` 清单要按解码后端确定
+- 补 AppStream metainfo:文件名与 `<id>` **必须等于 app-id**(`org.yangtse.Pixlay.metainfo.xml`),
+  `<url type="homepage">` 指向 `yangtse.org` 下的实际页面;PKGBUILD 的 `url=` 与 `pkgdesc` 同样用英文并指向该页面。
+  缺 metainfo 的后果不是报错,而是软件中心里没名字、没截图、没图标
 - `makepkg` 的 `check()` 必须离线可跑 → fixtures 全在仓库内,`cargo vendor` 不能漏测试依赖
 
 ### 四、度量口径(数字能互相比较的前提)
@@ -257,7 +260,7 @@ S7 里写着「撤销重做(命令历史 + AST 快照)」与「命中测试」�
 | 字体 | 测试固定字体;文字层存 family + 归一化字号 |
 | `.pixlay` 路径解析 | 相对工程文件;缺失文件 = 明确报错 + 非零退出码;原子写(tmp+rename) |
 | `{date}` 取值时机 | 渲染时读 EXIF,缺失回退到工程里存的字符串 |
-| app-id 的 `<user>` | 已定:`io.github.yangtsesu.Pixlay`(随仓库 `YangtseSu/pixlay`) |
+| app-id 的 `<user>` | 已定:`org.yangtse.Pixlay`(自有域名 `yangtse.org`),取代早先的 `io.github.yangtsesu.Pixlay` |
 | 依赖登记 | 新增依赖必须在 AGENTS 登记(name / version / 为什么 / 体积) |
 
 ### 六、实测基线(2026-09-20,本机)
