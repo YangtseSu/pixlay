@@ -36,7 +36,8 @@
   评审前先看「五、待决策」:那张表里的每一条都会改变契约形状。
 
 其余步骤模型的自动闭环即可完成,除了**目视判据**(能算的已在「三」里换成可算量,剩下这些只能看):
-S0 的文字可读性、S4 的降采样质量、S5 的避头尾与标点挤压手感、S7 的"三分钟主路径"与界面文案有无线漏包装。
+S0 的文字可读性、S4 的降采样质量、S5 的避头尾与标点挤压手感、S7 的"三分钟主路径"与界面文案有无线漏包装、
+S7 的 GNOME HIG 目视清单(`docs/HIG-REVIEW.md`:高对比 / 大字体 / 纯键盘 / 屏幕阅读器 / 触摸与 OSK)。
 
 ---
 
@@ -135,7 +136,7 @@ S0 的文字可读性、S4 的降采样质量、S5 的避头尾与标点挤压�
 **从这里开始才出现窗口。** 底下那一层已被 S1–S6 锁死,所以本步出的问题只可能在 GUI 里。
 
 - **目标**:主路径三分钟内走通。
-- **做什么**:gtk4 + libadwaita 外壳;拖入照片;格内拖动/滚轮/双击;参考线拉直;文字层编辑;撤销重做(命令历史 + 轻量 AST 快照);命中测试;后台解码回主线程;**文案走 i18n**(英文为 source string,本步不产出任何翻译)。
+- **做什么**:gtk4 + libadwaita 外壳(照 `AGENTS.md` 的「GNOME HIG」一节选容器与样式);拖入照片;格内拖动/滚轮/双击;参考线拉直;文字层编辑;撤销重做(命令历史 + 轻量 AST 快照);命中测试;后台解码回主线程;**文案走 i18n**(英文为 source string,本步不产出任何翻译)。
 - **出口判据**:
   - 「选模板 → 放照片 → 调取景 → 导出」端到端可走通
   - `LANG` 未设、`LANG=C`、`LANG=<未知语言>` 三种情况下界面都是英文且能启动
@@ -143,6 +144,8 @@ S0 的文字可读性、S4 的降采样质量、S5 的避头尾与标点挤压�
     是否有文案漏了包装靠本步的目视判据兜(见「需要人工介入」)
   - Wayland 下正常,无阻塞 UI(解码/缩放在后台,主线程不卡)
   - 窗口渲染的画面与 `pixlay-cli render` 同一画布尺寸下像素一致(RMSE 阈值内)
+  - GNOME HIG 的可判定子集全绿(快捷键表、可访问名、键盘可达、窄宽度重排、两种样式下可启动;
+    明细见补丁层「S7」;目视部分逐条过 `docs/HIG-REVIEW.md`)
 - **不做**:不做模式切换;不做额外面板;不做翻译(语言包是后加的,本步只保证可抽取、可回退)。
 
 ## S8 · 打包
@@ -324,6 +327,24 @@ S0 这一页到此为止:spike 是**可抛弃**的,它的一次性探针在 S1 �
   一条冒烟即可);本步**不提交任何 `.po` 翻译**,抽取与回退先成立即可
 - 硬编码串的判定边界:文案是否漏包装**不做机器判据**(提取器看不到漏掉的字符串),只做
   `po/POTFILES` 与 `crates/pixlay/src/**/*.rs` 的集合比对 + 人工目视
+
+**S7 · GNOME HIG(`AGENTS.md` 已加「GNOME HIG」一节;这里只放可判定子集,其余进 `docs/HIG-REVIEW.md`)**
+- **快捷键**:`GAction` 的 accelerator 表 ⊇ HIG `reference/keyboard` 的必需集合(`Ctrl+Q` / `Ctrl+W` /
+  `Ctrl+O` / `Ctrl+S` / `Ctrl+Z` / `Shift+Ctrl+Z` / `Ctrl+A` / `Ctrl+?` 等,按本产品实际有的功能取子集),
+  且 ∩ 系统保留集合 = ∅(`Alt+*`、`Super+*`、`Ctrl+Alt+*`)。两张表抄成测试常量,不写进 `AGENTS.md`。
+- **可访问名**:遍历控件树,断言每个可交互控件的 accessible name/role 非空——GTK4 自带
+  `gtk_test_accessible_*`(gtk4-rs 有封装),不用第三方工具。对应 HIG「All interface elements should
+  have descriptive, accessible names」。
+- **键盘可达**:每个 `GAction` 都有键盘路径(加速键,或一个可聚焦 / 带助记的控件)——HIG「every action
+  should also be possible with the keyboard」。
+- **自适应**:窗口最小尺寸 + 窄宽度下重排(HIG `guidelines/adaptive`);断言最小尺寸下画布不被裁、
+  控件不被挤没。
+- **样式**:`ADW_COLOR_SCHEME_FORCE_DARK` 与 `FORCE_LIGHT` 两种样式下都能启动并渲染主路径;
+  **同一张画布在两种样式下逐像素相同**(白底是内容)——这一条顺便把"大字体不得缩放画布文字层"钉住。
+- **主菜单**:含 `Ctrl+?` 快捷键对话框与 `AdwAboutDialog`(app-id / version 从 `APP_ID` 与包元数据取,
+  不硬编码第二份)。
+- **目视**:逐条过 `docs/HIG-REVIEW.md`(高对比、大字体、纯键盘、屏幕阅读器、触摸与 OSK、间距与层级、
+  动画手感);HIG `guidelines/writing-style` 的措辞同样只走这份清单。
 
 **S8**
 - `check()` 里跑测试要分层:重测试(A0、HEIC、字体排版)标 `#[ignore]` 或 feature-gated,

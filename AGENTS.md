@@ -111,6 +111,31 @@ GPL-3.0-or-later · Rust · GTK4 + libadwaita 外壳 · Cairo 画布 · 目标�
 - **GTK 类型不实现 `Send`/`Sync`。** 后台解码与缩放必须经 channel 回主线程,不得跨线程持有 GTK 对象。
 - **`ui` 不得直接操作像素。**
 
+## GNOME HIG(只约束 `pixlay` 外壳)
+
+规范:https://developer.gnome.org/hig/ —— 平台定义就是 GTK4 + libadwaita,与「模块边界」一致。
+**只对 GUI 层生效**:`pixlay-core` / `-imaging` / `-render` / `-cli` 没有界面,不受影响,也不得为它引 GTK。
+HIG 没有版本号,**不做冻结**;引用 URL 与章节名,改 UI 的每一步开工时重读并更新 `docs/HIG-REVIEW.md`。
+
+- **控件**:默认用 libadwaita 的容器与控件(`AdwApplicationWindow` / `AdwToolbarView` / `AdwHeaderBar` /
+  `AdwToast` / `AdwStatusPage` / `AdwAboutDialog` 等,具体集合 S7 定)。自绘控件是例外,要写理由。
+- **样式**:只用 libadwaita 的 style class 与 CSS 变量,禁止硬编码颜色与间距(否则深浅色与高对比失效)。
+  界面样式**跟随系统**(`AdwStyleManager` 保持默认,不写死 light/dark);v1 不提供每应用样式切换控件。
+  画布与导出**恒为不透明白底,与 UI 主题无关**——白底是内容,不是界面样式(见「硬约束」)。
+- **键盘**:标准快捷键照 HIG `reference/keyboard`;禁止占用 `Alt+*`、`Super+*` 与系统保留组合;
+  只用键盘要能走完主路径,每个 action 都要有键盘路径。
+- **可访问性**:每个可交互控件都要有可访问名(HIG `guidelines/accessibility`)。
+- **文案**:遵循 HIG `guidelines/writing-style`(句子大小写、不用术语、不用敬语);机制仍走「语言约定」
+  的 i18n,不在这里重复。
+- **刻意偏离(不修,别当 bug)**:
+  - 不做 GNOME Shell 搜索提供者、不做通知工作流、不做手机型布局——与「不做」清单同一条纪律;
+  - 不做每应用样式偏好控件(light/dark/system 三选一):会加长主路径,而"跟随系统"已经覆盖用户
+    表达"想要深色"的方式;
+  - 「大字体」**不得**缩放画布内的文字层:那是文档内容,预览/导出必须逐像素同源;
+  - HIG `patterns/containers/selection-mode` **不适用**(没有集合视图与多选批量操作);且该页自身写明
+    "编辑就是主要交互时不应有独立编辑模式",与「不要做模式切换」同向,**不是**偏离。
+- 能机器判定的部分只写在 S7 的测试里(见 `docs/STEPS.md`);目视部分逐条过 `docs/HIG-REVIEW.md`。
+
 ## 不要"改进"的方向
 
 - **不要把 Cairo 换成 GPU 渲染**(wgpu / vello / skia 等)。Cairo 是刻意选择:CPU 无纹理尺寸上限
@@ -121,6 +146,7 @@ GPL-3.0-or-later · Rust · GTK4 + libadwaita 外壳 · Cairo 画布 · 目标�
 - **不要默认用 mozjpeg。** 默认 libjpeg-turbo 4:4:4,mozjpeg 只作为可选。
   *实测 A1/69.7MP:4590ms/6.79MB vs 475ms/8.50MB——9.7 倍时间换 20% 体积。*
 - **不要做模式切换**(编辑模式 / 拼图模式)。用户心智始终是"我在拼图",编辑只是当前选中格子的属性。
+  *(HIG 的 `selection-mode` 不适用,且其自身建议与本条同向——见「GNOME HIG」。)*
 - **不做**:美颜、色阶/曲线、在线地理编码、RAW、画笔标记、单图精修模式。
   *理由:色阶/曲线是专业控件且需完整 ICC 管线,目标用户看不懂;地理编码有 API 配额/实名/隐私成本,
   地点文字由用户手填替代;其余与拼图核心价值无关。*
