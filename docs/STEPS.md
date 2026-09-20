@@ -257,7 +257,7 @@ S7 里写着「撤销重做(命令历史 + AST 快照)」与「命中测试」�
 | 字体 | 测试固定字体;文字层存 family + 归一化字号 |
 | `.pixlay` 路径解析 | 相对工程文件;缺失文件 = 明确报错 + 非零退出码;原子写(tmp+rename) |
 | `{date}` 取值时机 | 渲染时读 EXIF,缺失回退到工程里存的字符串 |
-| app-id 的 `<user>` | 现在定死 |
+| app-id 的 `<user>` | 已定:`io.github.yangtsesu.Pixlay`(随仓库 `YangtseSu/pixlay`) |
 | 依赖登记 | 新增依赖必须在 AGENTS 登记(name / version / 为什么 / 体积) |
 
 ### 六、实测基线(2026-09-20,本机)

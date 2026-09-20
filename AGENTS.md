@@ -12,10 +12,11 @@ GPL-3.0-or-later · Rust · GTK4 + libadwaita 外壳 · Cairo 画布 · 目标�
 
 | 项 | 值 |
 |---|---|
+| 仓库 | `https://github.com/YangtseSu/pixlay`(private) |
 | crate | `pixlay` / `pixlay-core` / `pixlay-imaging` / `pixlay-render` / `pixlay-cli` |
 | 二进制 | `/usr/bin/pixlay`、`/usr/bin/pixlay-render` |
 | 配置 / 工程 | `~/.config/pixlay/` · `.pixlay` |
-| app-id | `io.github.<user>.Pixlay` |
+| app-id | `io.github.yangtsesu.Pixlay` |
 
 ## 验证入口(每轮改动后必须跑)
 
