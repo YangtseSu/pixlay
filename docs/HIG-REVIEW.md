@@ -6,7 +6,7 @@ clearly which chapters **have already been read page by page** and which have no
 
 - Spec: <https://developer.gnome.org/hig/> (no version number, **not frozen**; cite URLs and section names)
 - The most recent page-by-page read of this file: **2026-09-20**. At the start of every UI step (S7, S8), re-read the relevant chapters before updating this file.
-- As soon as a chapter is read, write that chapter's criteria into the table above: whatever can be computed goes into tests (`docs/STEPS.md`, the "S7 · GNOME HIG" patch layer),
+- As soon as a chapter is read, write that chapter's criteria into the table above: whatever can be computed goes into tests (`docs/STEPS.md`, "S7 · GNOME HIG additions"),
   whatever can only be looked at goes into "section 2". **Do not let it pile up** — HIG changes, and letting it pile up is the same as re-reading it next time.
 
 ## 1. Read chapters -> criteria

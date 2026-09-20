@@ -115,7 +115,7 @@ transcript, and the "Current progress" line in `docs/STEPS.md` is the **only aut
   *Reference shape: S0's `Ruling (2026-09-20, human): Cairo stays` plus the progress line
   `S0 — done and ruled on`.*
 - **Closing a gate takes five parts; missing one means it is not done**:
-  1. the ruling block written into that step's patch layer in `docs/STEPS.md`;
+  1. the ruling block written into that step's "Result" subsection in `docs/STEPS.md`;
   2. the "Current progress" line rewritten to "done and passed \_\_\_ → next X";
   3. the matching entry under "Where humans must step in" marked as passed or removed;
   4. any shape the ruling changed synchronized into `docs/CONTRACT.md`;

@@ -75,7 +75,7 @@ Conventions:
 | canvas vs template aspect ratio | difference ≤ 1e-6, otherwise a hard error | the two are each annotated independently, normalized coordinates carry no aspect ratio themselves; the GUI's template selector groups by aspect ratio and lists only the matching ones |
 | text font size | 0 < `sizeRel` ≤ 1.0 (fraction of canvas height) | — |
 | tiled step | both components > 0 | a step of 0 or a negative value makes tiling loop forever |
-| clamp degradation threshold | when the required scale is > 1.5×, **the rotation angle is limited** | `docs/STEPS.md` §5.B |
+| clamp degradation threshold | when the required scale is > 1.5×, **the rotation angle is limited** | `docs/STEPS.md`, "Open decisions → B. Confirmed" |
 
 ## 3. Templates
 

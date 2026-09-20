@@ -108,7 +108,7 @@ impl CropTransform {
 /// The stored transform is a request; what gets drawn is the fit. Below the
 /// zoom limit a sliver-shaped slot is covered by magnifying the photo, and past
 /// it the requested rotation angle is reduced instead of magnifying further
-/// (docs/STEPS.md §5.B, elongated-slot clamp degradation). The GUI needs to know which of the two
+/// (docs/STEPS.md, "Open decisions → B. Confirmed": elongated-slot clamp degradation). The GUI needs to know which of the two
 /// happened so it can say so; the renderer only needs `transform`.
 ///
 /// Produced by the fit function that S3 adds to this module.

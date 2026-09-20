@@ -89,5 +89,5 @@ pub const MAX_ZOOM: f64 = 1000.0;
 pub const MAX_ROTATION_DEG: f64 = 45.0;
 
 /// Zoom above which the clamp reduces the rotation angle instead of magnifying
-/// further (docs/STEPS.md §5.B, elongated-slot clamp degradation).
+/// further (docs/STEPS.md, "Open decisions → B. Confirmed": elongated-slot clamp degradation).
 pub const CLAMP_ZOOM_LIMIT: f64 = 1.5;
