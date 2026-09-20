@@ -16,7 +16,7 @@ GPL-3.0-or-later · Rust · GTK4 + libadwaita 外壳 · Cairo 画布 · 目标�
 | crate | `pixlay` / `pixlay-core` / `pixlay-imaging` / `pixlay-render` / `pixlay-cli` |
 | 二进制 | `/usr/bin/pixlay`、`/usr/bin/pixlay-render` |
 | 配置 / 工程 | `~/.config/pixlay/` · `.pixlay` |
-| 工具链 | edition 2024 · `rust-version = 1.85` · resolver 3;基线数字一律 `--release` 测 |
+| 工具链 | edition 2024 · resolver 3 · `rust-version` 跟 Arch 现装 rustc(现 `1.98`);基线数字一律 `--release` 测 |
 | app-id | `org.yangtse.Pixlay`(自有域名 `yangtse.org` 反写;不用 `io.github.*` 借来的命名空间) |
 
 ## 验证入口(每轮改动后必须跑)
@@ -56,6 +56,23 @@ GPL-3.0-or-later · Rust · GTK4 + libadwaita 外壳 · Cairo 画布 · 目标�
   `S2: Freeze template geometry and invariant tests`。非步骤性改动(文档、CI)用 `docs:` / `chore:` 前缀。
 - **commit 前必须跑「验证入口」的两条命令**(该命令对本步不适用时,跑本步自己的验证命令);红了不提交。
 - 不进库:`target/`(见 `.gitignore`)。进库:`Cargo.lock`(AUR 纪律)。
+
+## 版本策略:追新
+
+目标平台是 Arch(滚动),所以**没有理由为旧版本兼容**。一切跟着最新稳定版走。
+
+- **工具链**:跟 Arch 现装的 rustc。`rust-version` 直接写 Arch 的版本(现 `1.98`),不向下兼容;
+  Arch 升了就跟着升,不做"为了旧工具链少用一个特性"的妥协。
+- **依赖**:只取最新稳定版。不写 `=` / `<=` 上限,不 pin 旧版本;每步开工先 `cargo update --workspace`
+  再跑「验证入口」。升级带来的破坏**照修**,不写兼容 shim、不留旧路径(与 clean cutover 同一条规矩)。
+- **edition / style edition / resolver**:用当前 stable 支持的最高(现 edition 2024、resolver 3)。
+- **系统库与绑定**:GTK / cairo / pango / libadwaita 跟 Arch 系统版(现 gtk4 4.22.5、cairo 1.18.4、
+  libadwaita 1.9.4);对应绑定取最新。绑定要求的系统版本高于 Arch 时才降绑定,不降系统。
+- **CI / 打包**:容器用 `archlinux:latest`,不钉镜像 tag。
+- **依赖保持最少**与追新不冲突:数量少,但每一个都取最新。
+
+这条政策**不进测试**:测试不该依赖网络或工具链版本。它靠两点维持——每步开工的 `cargo update`,
+以及 review 时看 `Cargo.lock` 的差异。
 
 ## 硬约束
 
@@ -126,9 +143,13 @@ GPL-3.0-or-later · Rust · GTK4 + libadwaita 外壳 · Cairo 画布 · 目标�
   2 格合成 244 ms、81 次贴图 699 ms、旋转 CJK 文字 16 ms、整程峰值 543 MB、PNG/JPEG/TIFF 均出图。
   **S0 仍需按正式判据复测**,并补两件事:10 格时的峰值内存;格内照片不覆盖满时露出的画布背景是什么行为。
 - glycin 在**非 Flatpak** 环境(直接 pacman 安装运行)是否零配置可用,含 HEIC:
-  本机 glycin 2.1.5 实测**全格式失败**(PNG/JPEG/HEIC/AVIF 均报 `Operation not supported`;
-  loader 二进制与 bwrap 都在,带不带 session bus 一样)。原因未定位 → 不能当既定依赖,
-  S4 第一条必须是先证明它,且 CLI 与测试要有一条不依赖 glycin 的路。
+  本机 `glycin-thumbnailer`(发行版 2.1.5)**全格式失败**(PNG/JPEG/HEIC/AVIF 均报 `Operation not supported`;
+  loader 二进制与 bwrap 都在,带不带 session bus 一样),原因未定位。
+  追新政策下用的是 crates.io 的 `glycin` 4,源码实测:`glycin-core` 4.0.0 的 `COMPAT_VERSION = 2`
+  → 与 Arch 已装的 `2+` loader 兼容;但 `glycin` facade 在 Linux 上**硬依赖 `glycin-external`**
+  (沙箱 loader 进程,要 libseccomp/bwrap/系统 loader 包/D-Bus 连接)。
+  自包含替代:`glycin-builtin` + `builtin-image-rs`,进程内 loader,但**不含 HEIC**。
+  结论未定 → S4 第一条是两条路各跑一次真实解码再选,且 CLI 与测试要有一条不依赖沙箱 loader 的路。
 - Pango 中文避头尾与标点挤压的实际效果。
 - 异形格的旋转 clamp 采用外接轴对齐矩形做保守计算(允许轻微留白),是否可接受。
 - 细长格子的取景缩放下限可能爆炸(实测极端配置需 6.7–7.6 倍)。策略未定:

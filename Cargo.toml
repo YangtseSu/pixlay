@@ -5,7 +5,8 @@ resolver = "3"
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+# Policy: track Arch's rolling toolchain instead of supporting old rustc.
+rust-version = "1.98"
 license = "GPL-3.0-or-later"
 authors = ["Yangtse Su <yangtsesu@gmail.com>"]
 repository = "https://github.com/YangtseSu/pixlay"

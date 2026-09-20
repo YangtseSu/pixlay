@@ -261,7 +261,8 @@ S7 里写着「撤销重做(命令历史 + AST 快照)」与「命中测试」�
 - 构建档:基线一律 `--release`;`[profile.release]` 冻在 `lto = "thin"`、`codegen-units = 1`、`debug = 1`
 - `[profile.dev.package."*"] opt-level = 2`:只作用于**外部依赖**(实测工作区成员不带 `-C opt-level`,仍是 0),
   目的是让 S4 的图像管线在 dev 下可用,同时不拖慢自身 crate 的迭代编译
-- workspace:`edition = "2024"`、`rust-version = "1.85"`、`resolver = "3"`;`crates/*` 五个 crate 齐(见下)
+- workspace:`edition = "2024"`、`resolver = "3"`、`rust-version = "1.98"`(跟 Arch 现装 rustc,
+  见 AGENTS 的「版本策略:追新」而不是 edition 下限);`crates/*` 五个 crate 齐(见下)
 - license:每 crate `license = "GPL-3.0-or-later"` + 根 `LICENSE`(SPDX 原文)+ `publish = false`
 - 门禁:`cargo fmt --check` 与 `cargo clippy --workspace --all-targets -- -D warnings` 已进「验证入口」;
   lint 在根 `Cargo.toml` 的 `[workspace.lints]` 统一设(`unsafe_code = deny`、clippy `all` 全 deny、
@@ -308,10 +309,24 @@ S7 里写着「撤销重做(命令历史 + AST 快照)」与「命中测试」�
 |---|---|
 | 源 ICC | v1 不读源 ICC,一律按 sRGB 解释,并在文档里写明这是已知限制(真做需要 lcms2 + 渲染意图定义) |
 | 输出 ICC | 内嵌 sRGB IEC61966-2.1 profile 字节,不引 lcms2 |
-| 解码后端 | 先证 glycin(实测本机全格式失败);不成则 libheif/libavif 直连。**这个决定 S8 的 `depends`** |
+| 解码后端 | 见下方「解码后端的两条路」;先实测再定,**这个决定 S8 的 `depends`** |
 | 字体 | 生产不捆绑字体(Noto Sans CJK 太大);金标准文本测试用仓库内小号测试字体,系统字体渲染的检查标 `#[ignore]` |
 | 依赖登记 | 每个新依赖在 AGENTS 登记(name / version / 为什么 / 体积);S1 首批一次性登记 |
 | AUR 包名与版本 | 包名 `pixlay`;release tag `vX.Y.Z` 打到 GitHub,PKGBUILD `source=` 用 tag tarball |
+
+**解码后端的两条路**(来源:`glycin-core 4.0.0` / `glycin 4.0.0` 源码实测,不是记忆):
+
+- `glycin-core 4.0.0` 的 `COMPAT_VERSION = 2` → 它认 `/usr/share/glycin-loaders/2+/conf.d/`,
+  与 Arch `glycin` 包已装的 `2+` loader **兼容**(不存在"crate 4 要 loader 4+"的问题)。
+- 但 `glycin` facade 在 Linux 上**硬依赖 `glycin-external`**(`[target.'cfg(target_os = "linux")'.dependencies]`
+  里非 optional),即必须走**沙箱 loader 进程**:需要 libseccomp、bwrap、系统 loader 包,
+  以及 D-Bus 连接(loader 二进制要 `--dbus-fd`)。本机 `glycin-thumbnailer` 全格式失败那一测,
+  是发行版二进制的问题,与这条 crate 路径不是一回事。
+- **自包含方案**:直接依赖 `glycin-builtin`(=`glycin-core` + `builtin`)+ `builtin-image-rs` feature,
+  loader 在进程内,不需要 bwrap / D-Bus / 发行版 loader 包。代价:
+  1. `glycin-image-rs` 覆盖 PNG/JPEG/WebP/TIFF/GIF/AVIF 等,**不含 HEIC**;
+  2. HEIC 在 Arch 是独立的 `glycin-heif` loader(走 libheif),自包含方案要另找路径。
+- S4 第一步:这两条各跑一次真实解码(含 HEIC、含 EXIF Orientation=6),用数字选一条。
 
 **已定**:`app-id = org.yangtse.Pixlay`(自有域名 `yangtse.org`);仓库 `YangtseSu/pixlay`(private);提交纪律与语言约定(英文)。
 
