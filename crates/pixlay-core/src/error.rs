@@ -83,4 +83,10 @@ pub enum CoreError {
         token: String,
         known: &'static str,
     },
+
+    /// A tiled layer's step must be positive in both components or the tiling
+    /// never terminates. There is no upper bound, so this is its own error rather
+    /// than an `OutOfRange` whose range would be misleading.
+    #[error("tiled text step must be positive in both components, got ({x}, {y})")]
+    InvalidTiledStep { x: f64, y: f64 },
 }

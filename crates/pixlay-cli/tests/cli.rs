@@ -673,3 +673,50 @@ fn the_rendered_output_matches_what_draw_produces() {
     assert_eq!(differing, 0, "{differing} pixels differ from draw()");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The example in `docs/CONTRACT.md` §1 is the first thing a reader copies. It
+/// once declared a 297x210 canvas against a template whose aspect is 4:3, which
+/// this build refuses as a hard error — the contract contradicting itself.
+///
+/// Rather than restate the example here (a copy would drift), this test extracts
+/// the `jsonc` block from the document, strips its `//` comments, and loads it.
+/// The example is expected to be a *valid document*: the only reason it cannot be
+/// rendered today is that `draw` refuses text layers until S5.
+#[test]
+fn the_contract_example_is_a_valid_document() {
+    let doc_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/CONTRACT.md");
+    let text = std::fs::read_to_string(&doc_path).expect("read docs/CONTRACT.md");
+
+    let block = text
+        .split_once("```jsonc\n")
+        .and_then(|(_, rest)| rest.split_once("\n```"))
+        .map(|(block, _)| block)
+        .expect("docs/CONTRACT.md has a jsonc example");
+
+    // Strip the inline `//` comments the example uses to annotate fields. The
+    // example contains no string with `//` in it, so a split is exact.
+    let json: String = block
+        .lines()
+        .map(|line| line.split("//").next().unwrap_or(""))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let doc = CollageDoc::from_json(&json).expect("the contract example is a valid document");
+
+    // The template must be a cut template: the slots tile the canvas exactly.
+    let area: f64 = doc.template.slots.iter().map(|slot| slot.area).sum();
+    assert!(
+        (area - 1.0).abs() < 1e-12,
+        "the example's slot areas sum to {area}, not 1.0"
+    );
+    // The canvas must match the template's declared aspect, which is what makes
+    // the example loadable rather than a hard error.
+    assert!(
+        (doc.canvas.aspect() - doc.template.aspect).abs() < 1e-6,
+        "canvas aspect {} vs template aspect {}",
+        doc.canvas.aspect(),
+        doc.template.aspect
+    );
+    assert_eq!(doc.cells.len(), doc.template.slots.len());
+    assert_eq!(doc.text.len(), 1, "the example shows one text layer");
+}

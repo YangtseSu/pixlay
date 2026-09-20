@@ -13,17 +13,19 @@ Per the splitting principles in `docs/STEPS.md`, the contract must be **frozen a
 ```jsonc
 {
   "docVersion": 1,                 // format version; a higher version is refused outright, never guessed at, never downgraded
-  "canvas": { "widthMm": 297.0, "heightMm": 210.0 },
+  "canvas": { "widthMm": 280.0, "heightMm": 210.0 },   // 4:3, matching the template's aspect
   "template": {                    // geometry is data, not a reference: changing the template in the library does not touch a saved project
     "name": "mosaic-8-s14",
     "version": 1,                  // template geometry version
     "aspect": 1.3333333333333333,  // aspect ratio (width/height); the template matrix is grouped into families by it
-    "slots": [
-      { "outline": [[0,0],[0.375,0],[0.375,0.375],[0,0.375]], "area": 0.140625 }
+    "slots": [                     // a cut template: the slots tile the canvas exactly, areas summing to 1.0
+      { "outline": [[0,0],[0.5,0],[0.5,1],[0,1]], "area": 0.5 },
+      { "outline": [[0.5,0],[1,0],[1,1],[0.5,1]], "area": 0.5 }
     ]
   },
   "cells": [                        // one cell per slot, the order is the slot index
-    { "source": "photos/a.jpg", "crop": { "zoom": 1.0, "offset": [0,0], "rotationDeg": 0 } }
+    { "source": "photos/a.jpg", "crop": { "zoom": 1.0, "offset": [0,0], "rotationDeg": 0 } },
+    { "source": null, "crop": { "zoom": 1.0, "offset": [0,0], "rotationDeg": 0 } }   // an empty slot renders white
   ],
   "text": [                         // canvas-level text layers (rendered in S5)
     { "content": "{date} #{index}", "mode": {"kind":"free","position":[0.5,0.9],"anchor":"bottomCenter"},
@@ -32,6 +34,11 @@ Per the splitting principles in `docs/STEPS.md`, the contract must be **frozen a
   "textFallback": { "date": "2026-09-20" }
 }
 ```
+
+> This example is a valid document: the two slots give a cut template whose areas sum to
+> exactly 1.0, and the canvas is exactly 4:3 to match `template.aspect`. It is not
+> renderable as written, because `draw` refuses text layers until S5 (see §4); drop the
+> `text` array to render it today.
 
 **Version policy** (S1 review ruling, 2026-09-20: **breaking changes allowed, but no migrations written**).
 
@@ -51,8 +58,8 @@ Conventions:
 - **Field names are camelCase**; a point is written as a two-element array `[x, y]` (`Point`) — a `.pixlay` is meant to be read by humans.
 - All coordinates / sizes / font sizes are **normalized to `[0,1]`**; absolute pixels appear only after `CanvasSpec::pixel_size(dpi)`.
   Normalized font sizes exist so that UI scaling such as "large text" must not change the exported pixels (see `AGENTS.md` "Hard constraints").
-- **Empty slot = `source: null`**, and that cell renders white. `source` is a path relative to the project file; a missing file → an explicit error,
-  not a skip.
+- **Empty slot = `source: null`**, and that cell renders white. `source` is a path relative to the project file;
+  an absolute path is accepted as it stands. A missing file → an explicit error, not a skip.
 - `crop.zoom` is **absolute zoom** (displayed width / slot width), not "a multiple of fill":
   when the photo is swapped the baseline does not move and the framing does not jump focus.
 - `rotationDeg` is capped at ±45°, and every component of `crop.offset` has |offset| ≤ 1 (past that no clamp can get the coverage back).
@@ -70,12 +77,21 @@ Conventions:
 | DPI | 72..=600 | `AGENTS.md` |
 | canvas pixels | ≤ 200 MP | A0@300dpi = 139.5 MP, 43% of headroom left |
 | canvas edge length | ≤ 2000 mm | larger than any output device |
+| template aspect ratio | 0.1..=10.0 | a template outside this range is not a collage layout; it also bounds what a canvas can be matched to |
+| slot outline | ≥ 3 vertices, finite, every vertex inside `[0,1]`, area > 0 | a polygon with no interior is not a slot |
 | framing rotation | ±45° (clockwise is positive, canvas y points down) | `AGENTS.md` |
 | framing zoom | `0 < zoom ≤ 1000` | the upper bound is necessary: zoom determines the size of the decoded bitmap, and without an upper bound it overflows. S4's decoder sets a limit **separately by memory budget**; the two layers each mind their own |
+| crop offset | every component \|offset\| ≤ 1 (slot widths / heights) | beyond half a slot the photo centre leaves the slot, and no clamp can cover it again |
 | canvas vs template aspect ratio | difference ≤ 1e-6, otherwise a hard error | the two are each annotated independently, normalized coordinates carry no aspect ratio themselves; the GUI's template selector groups by aspect ratio and lists only the matching ones |
 | text font size | 0 < `sizeRel` ≤ 1.0 (fraction of canvas height) | — |
-| tiled step | both components > 0 | a step of 0 or a negative value makes tiling loop forever |
-| clamp degradation threshold | when the required scale is > 1.5×, **the rotation angle is limited** | `docs/STEPS.md`, "Open decisions → B. Confirmed" |
+| text position (free mode) | both components inside `[0,1]` | a free layer is placed in normalized canvas coordinates, so anything outside is off the canvas by definition |
+| tiled step | both components > 0, finite | step 0 or a negative value makes the tiling loop forever; there is no upper bound |
+| `--preview-px` | 1..=20000 (long edge, in pixels) | a preview larger than this cannot be reviewed by eye anyway |
+| clamp degradation threshold | when the required scale is > 1.5×, **the rotation angle is limited** (`CLAMP_ZOOM_LIMIT` in `pixlay-core`) | `docs/STEPS.md`, "Open decisions → B. Confirmed" |
+
+Every entry above is enforced with a typed error, never a panic, and each is covered by
+`crates/pixlay-core/tests/contract.rs` or `crates/pixlay-cli/tests/cli.rs`. An implementation
+limit that is not in this table is a contract gap.
 
 ## 3. Templates
 
@@ -136,7 +152,7 @@ pixlay-render probe  --project <file.pixlay>
 | probe lower bound | when `occupied = 0` (all empty slots) the verdict is **failed**: every question the probe asks is about some slot, and with no slot there is no conclusion. Previously it "passed vacuously" (status=ok, exit 0) |
 | output format | determined by the `--out` extension: `.png` / `.jpg` / `.jpeg`, anything else is a usage error |
 | `--preview-px n` | n pixels on the long edge; the same `draw`, only `scale` changes |
-| `--stats` | appends `{ms, encode_ms, peak_rss_mb, icc}`; the measurement rules are below |
+| `--stats` | appends `{ms, encode_ms, peak_rss_mb, icc}`; `render` emits all four, `probe` emits no `encode_ms` (it does not encode). The measurement rules are below |
 | `probe` | samples and outputs numbers (in-slot photo color, out-of-slot white background, shared-edge blended pixels, three-color convex combination residual), exit code 2 when the verdict is not passed |
 
 Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wall clock, with compositing and encoding reported separately.

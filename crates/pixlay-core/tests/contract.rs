@@ -451,6 +451,78 @@ fn text_tokens_are_scanned_and_unknown_ones_rejected() {
     doc.text[0].size_rel = 0.05;
     doc.text[0].source_slot = Some(7);
     assert!(doc.validate().is_err());
+    doc.text[0].source_slot = None;
+}
+
+/// A free layer is placed in normalized canvas coordinates, so a position outside
+/// `[0,1]` is off the canvas. Before this was checked, such a document loaded and
+/// `draw` refused it for an unrelated reason (the S5 text gate), which hid the
+/// real defect until S5 wired text up.
+#[test]
+fn text_position_must_be_on_the_canvas() {
+    let layer = |position: Point| TextLayer {
+        content: "hello".to_string(),
+        mode: TextMode::Free {
+            position,
+            anchor: Anchor::Center,
+        },
+        size_rel: 0.05,
+        rotation_deg: 0.0,
+        color: Rgba8::BLACK,
+        source_slot: None,
+    };
+
+    let mut doc = two_slot_doc();
+    doc.text.push(layer(Point::new(0.5, 0.9)));
+    doc.validate().expect("inside the canvas");
+    // The corners are on the canvas: the bound is inclusive.
+    doc.text[0] = layer(Point::new(0.0, 1.0));
+    doc.validate().expect("the canvas corners are allowed");
+
+    for position in [
+        Point::new(5.0, 5.0),
+        Point::new(-0.01, 0.5),
+        Point::new(0.5, 1.01),
+        Point::new(f64::NAN, 0.5),
+    ] {
+        doc.text[0] = layer(position);
+        let err = doc.validate().expect_err("position off the canvas");
+        assert!(
+            err.to_string().contains("text position"),
+            "{position:?}: {err}"
+        );
+    }
+}
+
+/// The tiled step's only precondition is "both components > 0 and finite": a step
+/// of 0 or a negative value would never terminate the tiling. The error is its own
+/// variant because there is no upper bound to name.
+#[test]
+fn tiled_step_must_be_positive() {
+    let layer = |step: (f64, f64)| TextLayer {
+        content: "wm".to_string(),
+        mode: TextMode::Tiled { step },
+        size_rel: 0.05,
+        rotation_deg: 0.0,
+        color: Rgba8::BLACK,
+        source_slot: None,
+    };
+
+    let mut doc = two_slot_doc();
+    doc.text.push(layer((0.25, 0.25)));
+    doc.validate().expect("a normal tiled watermark");
+    // Large steps are legitimate: one tile per canvas is a legal, if sparse,
+    // watermark. There is deliberately no upper bound.
+    doc.text[0] = layer((4.0, 4.0));
+    doc.validate().expect("a sparse tiling is allowed");
+
+    for step in [(0.0, 0.25), (0.25, -1.0), (f64::NAN, 0.25)] {
+        doc.text[0] = layer(step);
+        let err = doc
+            .validate()
+            .expect_err("step must be positive and finite");
+        assert!(err.to_string().contains("step"), "{step:?}: {err}");
+    }
 }
 
 #[test]

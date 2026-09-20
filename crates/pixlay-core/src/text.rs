@@ -186,22 +186,35 @@ impl TextLayer {
         }
         match self.mode {
             TextMode::Free { position, .. } => {
-                if !position.is_finite() {
-                    return Err(CoreError::OutOfRange {
-                        what: "text position",
-                        value: f64::NAN,
-                        min: 0.0,
-                        max: 1.0,
-                    });
+                // A free layer is placed in normalized canvas coordinates, so a
+                // position outside `[0, 1]` is off the canvas by definition. It
+                // has to be refused here: nothing downstream can tell an
+                // off-canvas placement from an intentional one, and S5 would
+                // simply paint nothing where the user expects text.
+                for (what, value) in [
+                    ("text position x", position.x),
+                    ("text position y", position.y),
+                ] {
+                    if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+                        return Err(CoreError::OutOfRange {
+                            what,
+                            value,
+                            min: 0.0,
+                            max: 1.0,
+                        });
+                    }
                 }
             }
             TextMode::Tiled { step } => {
+                // The contract's rule is "both components > 0": a step of 0 or a
+                // negative value would make the tiling loop forever, and that is
+                // the whole precondition. There is no upper bound to advertise,
+                // so this must not reuse `OutOfRange`, whose message names a
+                // range that would then be a lie.
                 if !step.0.is_finite() || !step.1.is_finite() || step.0 <= 0.0 || step.1 <= 0.0 {
-                    return Err(CoreError::OutOfRange {
-                        what: "tiled text step",
-                        value: step.0.min(step.1),
-                        min: f64::MIN_POSITIVE,
-                        max: 1.0,
+                    return Err(CoreError::InvalidTiledStep {
+                        x: step.0,
+                        y: step.1,
                     });
                 }
             }

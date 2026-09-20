@@ -16,13 +16,13 @@ The first sentence for a new session:
 
 Legend: ✅ done · 🚧 in progress · ⏸ blocked (waiting on a human decision or external input) · ⬜ not started
 
-**Current progress: S1 — ✅ done and passed contract review (2026-09-21, human; the contract reading is `docs/CONTRACT.md`, measurements and deviations in "S1 result")**
+**Current progress: S1 — ✅ done; contract reviewed twice and passes (review 2, 2026-09-21, human; reading `docs/CONTRACT.md`, results in "S1 result")**
 **Next action: start S2 in a new session.**
 
 | Step | Status | Date | What it delivers |
 |---|---|---|---|
 | S0 · Cairo limit spike | ✅ done | 2026-09-20 | Cairo renders A0@300dpi inside the budget: 185/551 ms compositing, 941 MB peak `VmHWM`, both formats written. Gate passed: Cairo stays |
-| S1 · Minimal contract + feedback loop | ✅ done | 2026-09-20 | `CollageDoc` v1 frozen, the single `draw`, `pixlay-render render` produces images, `probe` answers in numbers. Gate passed 2026-09-21: contract v1 passes |
+| S1 · Minimal contract + feedback loop | ✅ done | 2026-09-20 | `CollageDoc` v1 frozen, the single `draw`, `pixlay-render render` produces images, `probe` answers in numbers. Gate passed 2026-09-21 (review 1), defects from review 2 fixed the same day |
 | S2 · Template system (geometry only) | ⬜ not started | — | Regular and irregular template geometry, deterministic and frozen under a `templateVersion` |
 | S3 · Framing and clamp | ⬜ not started | — | Absolute-zoom framing with rotation and a clamp that always covers the slot |
 | S4 · Image pipeline | ⬜ not started | — | `pixlay-imaging`: decoding, EXIF rotation, 16-bit linear resampling, per-slot grading and the global filter |
@@ -255,7 +255,7 @@ The exit criteria, item by item:
 `VmHWM` 1611 MB is higher than S0's 941 MB, for a different reason: S0's spike drew only one L shape + a grid (fewer photo buffers),
 whereas this is 8 bitmaps each generated at in-slot size, and it does not go through `band`. The 2.5 GB budget still has room; S4's buffer ladder will measure it again.
 
-### S1 · ruling (2026-09-21, human)
+### S1 · contract review 1 (2026-09-21, human)
 
 `[the contract passes; the defects were fixed per the review's comments, and the repository is authoritative for what was fixed]`
 
@@ -277,11 +277,57 @@ whereas this is 8 bitmaps each generated at in-slot size, and it does not go thr
   the version policy "breaking changes allowed, no migrations written" (adding a field does not bump `DOC_VERSION`; changing a meaning or deleting a field does, and old projects are then rejected);
   a canvas/template aspect-ratio mismatch is a hard error, and the GUI's template picker groups by aspect ratio; `zoom` keeps its document-layer upper bound.
   With that, `S6.5`'s "version migration" item is cancelled.
-- **The gate has been closed**: the status row, the "Where humans must step in" table and this section's "Human" item were rewritten together;
-  the later shapes and limits are in `docs/CONTRACT.md`. The next action is a **new session** doing S2.
+- **The gate was NOT closed at the time** — this review's verdict was never written to disk, which is
+  why it is reproduced as review 1 above and why review 2 had to happen. The `docs/CONTRACT.md` state
+  it left behind is sound; only the record was missing.
 - **Left over (does not block S2)**: the table in "Open decisions → C. After S1, before S4" drew **no objection** in the review record, so by that table's own rule
   "locked as recommended unless objected to" — if something was orally rejected at review time, it must be recorded here and that table changed; otherwise S4 executes the recommendations when it starts.
   The two paths for the decoding backend are still S4's first measured question, and are not something this ruling can settle.
+
+### S1 · contract review 2 (2026-09-21, human)
+
+`[the contract was re-read against the release binary, not against the code comments; four defects and three optional items were raised and all seven are now fixed]`
+
+This review happened because the first ruling was never written to disk: the session that ran it
+committed the defect fixes and left the gate open. It re-checked every normative claim in
+`docs/CONTRACT.md` by running the built binary against hand-written `.pixlay` files — 22 scenarios —
+and found the contract had drifted from the implementation.
+
+- **D1 — the contract's own example did not load.** §1's `jsonc` block declared a `297.0 × 210.0`
+  canvas (aspect 1.4143) against a template whose `aspect` is `4/3` (1.3333), while §2 makes that
+  mismatch a hard error. Copying the example gave `exit 2: canvas aspect 1.4142857142857144 does not
+  match the template aspect 1.3333333333333333`. The example now uses `280.0 × 210.0` (exactly 4:3)
+  and two slots whose areas sum to exactly 1.0, and `crates/pixlay-cli/tests/cli.rs`
+  `the_contract_example_is_a_valid_document` extracts the block **out of the document itself** and
+  loads it, so the two can no longer drift.
+- **D2 — `TextLayer` positions were not bounded.** §1 promises every coordinate is normalized to
+  `[0,1]`, but `validate` only checked `is_finite`, so `position: [5.0, 5.0]` loaded and was refused
+  later by the unrelated S5 text gate — the real defect was hidden until S5. Bounds are now checked,
+  with `text_position_must_be_on_the_canvas` covering the corners (inclusive) and beyond.
+- **D3 — the limit table was incomplete.** It claimed to be the complete list, but three enforced
+  limits were missing: `template.aspect ∈ 0.1..=10.0`, the slot-outline rule, and
+  `--preview-px ∈ 1..=20000`. All three are in §2 now, and the table states that a limit absent from
+  it is a contract gap.
+- **D4 — the `--stats` field list was wrong in two places.** `probe` emits no `encode_ms` (it does not
+  encode), and `--help` did not mention `encode_ms` at all. §5 and the usage text now agree with each
+  other and with the binary.
+- **Optional items, also fixed**: the third `OutOfRange` misuse — a tiled step of 0 or less reported a
+  range up to `1.0` that was never enforced — is now its own `InvalidTiledStep` error, and the
+  contract says explicitly that there is no upper bound; `source` accepting an absolute path is
+  documented; the clamp row in "Open decisions → B. Confirmed" names `CLAMP_ZOOM_LIMIT` and
+  `CropFit::rotation_limited` so S3 can find them.
+- **Verified green in the same pass** (no change needed): slot/DPI/canvas-pixel/edge/rotation/zoom
+  bounds including their exact edge values, the version policy, `deny_unknown_fields`, empty-slot
+  white, relative-path resolution, the slot-area cross-check, unknown text tokens, `draw` refusing
+  text layers, stdout purity on usage errors, byte-identical output under four locales, stdin being
+  ignored, exit codes, and the `probe` "numbers on stdout, verdict on stderr" rule.
+- **Residual, not a defect**: `text` is refused by `draw` until S5, so the §1 example is a valid
+  document but is not renderable as written. The example says so.
+- **Verdict: the contract still passes after these fixes.** All seven items were ruled *fix now*, not defer — D1 and D3 make
+  the contract lie about itself, and D2 is a validation gap that S5 would turn into a visible bug.
+- **The gate's five parts are complete** with this commit, so **S2 may start in a new session**. The
+  tables under "Open decisions → C. After S1, before S4" drew no objection and stay locked as
+  recommended; the decoding backend is still S4's first measured question.
 
 ## S2 · Template system (geometry only) — ⬜ not started
 
@@ -561,7 +607,7 @@ Not done: `cargo vendor` currently has empty dependencies, so this criterion can
 | undo granularity and snapshots | one gesture = one command (committed when the drag ends); a snapshot stores the whole `CollageDoc`, with no diff |
 | config storage | serde files under `~/.config/pixlay/` (the same scheme as `.pixlay`); **no GSettings** |
 | limit constants | canvas ≤ **200 MP**, DPI **72–600**, slot count **2–10**; out of range gives a clear error, not a panic (A0@300dpi = 139.5 MP, leaving 43% headroom) |
-| Elongated-slot clamp degradation | when the required zoom is > **1.5×**, **limit the rotation angle**; the clamp result carries a "limited" flag for the UI |
+| Elongated-slot clamp degradation | when the required zoom is > **1.5×** (`CLAMP_ZOOM_LIMIT` in `pixlay-core`, beside `MAX_ZOOM` / `MAX_ROTATION_DEG`), **limit the rotation angle**; the clamp result (`CropFit::rotation_limited`) carries a "limited" flag for the UI |
 | `.pixlay` path resolution | relative to the project file; a missing file = a clear error + a non-zero exit code; atomic write (tmp + rename) |
 
 ### C. After S1, before S4 (still recommendations; locked as recommended unless objected to)

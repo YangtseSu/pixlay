@@ -37,7 +37,8 @@ RENDER OPTIONS:
     --out <file>        Output file. Format comes from the extension:
                         .png, .jpg, .jpeg. Required.
     --dpi <n>           Export resolution, 72..=600. Default 300.
-    --preview-px <n>    Render the long edge at n pixels instead of full size.
+    --preview-px <n>    Render the long edge at n pixels instead of full size,
+                        1..=20000. The same draw, only the scale changes.
     --content <mode>    Placeholder content for cells: detail (default) or flat.
                         Until S4 there is no decoder, so cells are filled with
                         deterministic content instead of the photo they name.
@@ -48,7 +49,8 @@ PROBE OPTIONS:
 
 COMMON OPTIONS:
     --json              Print one JSON object instead of key = value lines.
-    --stats             Add measured fields: ms, peak_rss_mb, icc.
+    --stats             Add measured fields: ms, peak_rss_mb, icc. `render`
+                        adds encode_ms as well; `probe` does not encode.
     -h, --help          Print this help.
     -V, --version       Print the version.
 
