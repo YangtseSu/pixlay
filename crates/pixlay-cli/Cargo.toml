@@ -15,3 +15,13 @@ path = "src/main.rs"
 
 [lints]
 workspace = true
+
+[dependencies]
+# S0 spike only (src/bin/a0-spike.rs, disposable): `cairo-rs` and `pangocairo`
+# move to pixlay-render together with the real `draw(doc, target)`; the `png`
+# feature exists for `write_to_png`, which the spike uses to measure cairo's own
+# PNG writer. `image` provides the JPEG encoder and the output size check here —
+# it leaves with the spike unless S4/S6 adopts it.
+cairo-rs = { version = "0.22.9", features = ["png"] }
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
+pangocairo = "0.22.9"
