@@ -250,18 +250,52 @@ S7 里写着「撤销重做(命令历史 + AST 快照)」与「命中测试」�
 - 产物写磁盘(`/var/tmp` 或 `$XDG_CACHE_HOME`),不写 `/tmp`
 - 每个阈值常量在代码里注释**来源**(实测值 + 日期)——AGENTS 的"只留测试"才成立
 
-### 五、待决策(必须在 S1 契约评审前定,否则契约返工)
+### 五、开工前待决策
+
+按"错了要返工多少"分三档。第三列是建议,**未反对即按建议锁定**。
+
+#### A. 开 S0 之前(否则测量与脚手架白做)
 
 | 问题 | 建议 |
 |---|---|
+| 度量基准的构建档 | 所有基线数字用 `--release` 测(debug 下合成/编码时间差数倍,拿 debug 数当基准后面判据全废) |
+| `[profile.release]` | `lto = "thin"`、`codegen-units = 1`、`debug = 1`(留行号便于 perf,不剥符号) |
+| workspace 脚手架 | `edition = "2024"` + `rust-version = "1.85"`(edition 下限;Arch 现装 1.98) |
+| license | 每个 crate `license = "GPL-3.0-or-later"` + 仓库根 `LICENSE`;`Cargo.lock` 入库 |
+| 门禁 | `cargo fmt --check` 与 `cargo clippy -- -D warnings` 进「验证入口」 |
+| CI | S0–S6 先不做;S8 加一个 Arch 容器 job 跑快层测试(与 `makepkg check()` 同口径) |
+
+#### B. S1 契约冻结前(错了全量返工)
+
+| 问题 | 建议 |
+|---|---|
+| **画布预设集与模板↔长宽比** | 模板几何只在特定长宽比下成立 → `Template` 必须声明长宽比。v1 预设:A4/A3/A0 各纵横 + 1:1 + 3:2 + 4:3 + 16:9 + 自定义 |
+| **`.pixlay` 序列化格式** | JSON(`serde_json`)。RON 的注释好处不值多一个解析依赖,TOML 表达不了嵌套几何 |
+| 工程版本策略 | 加 `docVersion`;读到更高版本**直接拒绝并报错**,不猜、不降级 |
+| **`draw` 的 target 抽象** | 必须带 `{ cairo ctx, scale, band }`,不是裸 ctx:预览缩放与 A0 分块渲染都只是调用方的参数,不用重写渲染器 |
+| 错误类型策略 | core/render 用 typed error(`thiserror`);`anyhow` 只出现在 `pixlay-cli` |
+| imaging 线程模型 | `pixlay-imaging` 暴露**同步纯函数**,不带线程/通道;并发由调用方决定(CLI 可并行、GUI 经 channel 回主线程)→「channel 回主线程」因此仍只是 UI 的事 |
 | 格内源图 alpha | 合成到不透明白(产品是照片拼图);进契约并测试 |
+| 文字层 v1 契约 | 字号**归一化**;v1 token 只有 `{date}` / `{filename}` / `{index}`,其余进"v1 非目标" |
+| `{date}` 时区口径 | 取 EXIF `DateTimeOriginal` **原样不换算**;缺失回退到工程里存的字符串。测试 pin `TZ` |
+| 撤销粒度与快照 | 一次手势 = 一条命令(拖动结束才提交);快照存整份 `CollageDoc`(它很小),不做 diff |
+| 配置存放 | 二选一:`~/.config/pixlay/` 的 serde 文件(建议,与 `.pixlay` 同一套)或 GSettings(schema 路径 `/org/yangtse/Pixlay/`) |
+| 上限常数 | 画布 ≤ 200 MP、DPI 72–600、槽数 2–10;越界给明确错误,不 panic |
 | 细长格 clamp 退化 | 需要缩放 > 1.5× 时限制旋转角;clamp 结果带"被限"标记 |
-| 解码后端 | 先证 glycin(实测本机全格式失败),不成则 libheif/libavif 直连;两者都影响 S8 依赖 |
-| 字体 | 测试固定字体;文字层存 family + 归一化字号 |
-| `.pixlay` 路径解析 | 相对工程文件;缺失文件 = 明确报错 + 非零退出码;原子写(tmp+rename) |
-| `{date}` 取值时机 | 渲染时读 EXIF,缺失回退到工程里存的字符串 |
-| app-id 的 `<user>` | 已定:`org.yangtse.Pixlay`(自有域名 `yangtse.org`),取代早先的 `io.github.yangtsesu.Pixlay` |
-| 依赖登记 | 新增依赖必须在 AGENTS 登记(name / version / 为什么 / 体积) |
+| `.pixlay` 路径解析 | 相对工程文件;缺文件 = 明确报错 + 非零退出码;原子写(tmp+rename) |
+
+#### C. S1 之后、S4 之前(牵动依赖与 AUR)
+
+| 问题 | 建议 |
+|---|---|
+| 源 ICC | v1 不读源 ICC,一律按 sRGB 解释,并在文档里写明这是已知限制(真做需要 lcms2 + 渲染意图定义) |
+| 输出 ICC | 内嵌 sRGB IEC61966-2.1 profile 字节,不引 lcms2 |
+| 解码后端 | 先证 glycin(实测本机全格式失败);不成则 libheif/libavif 直连。**这个决定 S8 的 `depends`** |
+| 字体 | 生产不捆绑字体(Noto Sans CJK 太大);金标准文本测试用仓库内小号测试字体,系统字体渲染的检查标 `#[ignore]` |
+| 依赖登记 | 每个新依赖在 AGENTS 登记(name / version / 为什么 / 体积);S1 首批一次性登记 |
+| AUR 包名与版本 | 包名 `pixlay`;release tag `vX.Y.Z` 打到 GitHub,PKGBUILD `source=` 用 tag tarball |
+
+**已定**:`app-id = org.yangtse.Pixlay`(自有域名 `yangtse.org`);仓库 `YangtseSu/pixlay`(private);提交纪律与语言约定(英文)。
 
 ### 六、实测基线(2026-09-20,本机)
 
