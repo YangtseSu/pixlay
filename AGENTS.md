@@ -16,14 +16,17 @@ GPL-3.0-or-later · Rust · GTK4 + libadwaita 外壳 · Cairo 画布 · 目标�
 | crate | `pixlay` / `pixlay-core` / `pixlay-imaging` / `pixlay-render` / `pixlay-cli` |
 | 二进制 | `/usr/bin/pixlay`、`/usr/bin/pixlay-render` |
 | 配置 / 工程 | `~/.config/pixlay/` · `.pixlay` |
+| 工具链 | edition 2024 · `rust-version = 1.85` · resolver 3;基线数字一律 `--release` 测 |
 | app-id | `org.yangtse.Pixlay`(自有域名 `yangtse.org` 反写;不用 `io.github.*` 借来的命名空间) |
 
 ## 验证入口(每轮改动后必须跑)
 
+    cargo fmt --check
+    cargo clippy --workspace --all-targets -- -D warnings
     cargo test
     cargo run -p pixlay-cli -- render --template mosaic-8-s14 --dpi 300 --out /var/tmp/a.jpg
 
-第二条产出真实图片,你要直接查看它。**看不到图就不要判断渲染对不对。**
+后两条:第二条产出真实图片,你要直接查看它。**看不到图就不要判断渲染对不对。**
 (S2 之前没有模板,这条命令从 S2 起有效;S0–S1 用程序化 fixtures 的等价命令。)
 
 配套口径:

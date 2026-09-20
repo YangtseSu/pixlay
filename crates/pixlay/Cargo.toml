@@ -1,0 +1,13 @@
+[package]
+name = "pixlay"
+description = "GTK4 and libadwaita shell for the Pixlay collage editor."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true

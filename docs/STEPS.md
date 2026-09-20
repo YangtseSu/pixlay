@@ -7,7 +7,7 @@
 > 读 `AGENTS.md`,再读 `docs/STEPS.md`。只做「当前进度」指向的那一步,不要提前做后面的。
 > 每步做完先跑该步的验证命令,把出口判据变成测试,然后更新本文件的「当前进度」。
 
-- **当前进度: S0 — 未开始**
+- **当前进度: S0 — 未开始**(脚手架已就绪:五个 crate、release profile 冻结、fmt/clippy/test 全绿;见「五、A」)
 - 硬约束与不变量在 `AGENTS.md`,本文件只排顺序与出口判据,不重复其内容。
 - 每一步开始前先跑一次 `cargo test`,确认基线是绿的。
 - **文末《审查补充》是本文件的补丁层**:每步新增的机器判据、待决策项、实测基线都在那里;
@@ -254,16 +254,34 @@ S7 里写着「撤销重做(命令历史 + AST 快照)」与「命中测试」�
 
 按"错了要返工多少"分三档。第三列是建议,**未反对即按建议锁定**。
 
-#### A. 开 S0 之前(否则测量与脚手架白做)
+#### A. 已落地(2026-09-20)
 
-| 问题 | 建议 |
-|---|---|
-| 度量基准的构建档 | 所有基线数字用 `--release` 测(debug 下合成/编码时间差数倍,拿 debug 数当基准后面判据全废) |
-| `[profile.release]` | `lto = "thin"`、`codegen-units = 1`、`debug = 1`(留行号便于 perf,不剥符号) |
-| workspace 脚手架 | `edition = "2024"` + `rust-version = "1.85"`(edition 下限;Arch 现装 1.98) |
-| license | 每个 crate `license = "GPL-3.0-or-later"` + 仓库根 `LICENSE`;`Cargo.lock` 入库 |
-| 门禁 | `cargo fmt --check` 与 `cargo clippy -- -D warnings` 进「验证入口」 |
-| CI | S0–S6 先不做;S8 加一个 Arch 容器 job 跑快层测试(与 `makepkg check()` 同口径) |
+脚手架进仓库,`cargo fmt --check` / `cargo clippy -- -D warnings` / `cargo test` / `cargo build --release` 全绿。
+
+- 构建档:基线一律 `--release`;`[profile.release]` 冻在 `lto = "thin"`、`codegen-units = 1`、`debug = 1`
+- `[profile.dev.package."*"] opt-level = 2`:只作用于**外部依赖**(实测工作区成员不带 `-C opt-level`,仍是 0),
+  目的是让 S4 的图像管线在 dev 下可用,同时不拖慢自身 crate 的迭代编译
+- workspace:`edition = "2024"`、`rust-version = "1.85"`、`resolver = "3"`;`crates/*` 五个 crate 齐(见下)
+- license:每 crate `license = "GPL-3.0-or-later"` + 根 `LICENSE`(SPDX 原文)+ `publish = false`
+- 门禁:`cargo fmt --check` 与 `cargo clippy --workspace --all-targets -- -D warnings` 已进「验证入口」;
+  lint 在根 `Cargo.toml` 的 `[workspace.lints]` 统一设(`unsafe_code = deny`、clippy `all` 全 deny、
+  `dbg_macro` / `todo` / `unimplemented` deny —— 后两条同时机械封住"留 TODO 占位"这条路)
+- CI:S0–S6 不做;S8 加 Arch 容器 job
+
+脚手架现状(给下一个会话):
+
+    Cargo.toml            工作区 + profile + lints;members = crates/*
+    rustfmt.toml          edition/style_edition = 2024
+    LICENSE               GPL-3.0-or-later(SPDX 原文,232 行)
+    crates/pixlay-core    文档骨架,内容来自 S1/S2/S3/S6.5;禁止 gtk/cairo
+    crates/pixlay-imaging 文档骨架,S4;暴露同步纯函数(线程归调用方)
+    crates/pixlay-render  文档骨架,S1;唯一的 draw(doc, target)
+    crates/pixlay-cli     bin 名为 `pixlay-render`(非 `pixlay-cli`),当前是以退出码 2 报"未实现"的占位;
+                          禁止 gtk4
+    crates/pixlay         lib 骨架,只钉住 `APP_ID`;GUI 与 `pixlay` bin 目标 S7 才加
+                          (这样 S0–S6 的 `cargo test` 不必编译 gtk4-rs)
+
+未做:`cargo vendor` 目前是空依赖,验不了这条判据;等 S1 引入首批依赖后再验。
 
 #### B. S1 契约冻结前(错了全量返工)
 
