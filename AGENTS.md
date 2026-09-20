@@ -123,11 +123,16 @@ GPL-3.0-or-later · Rust · GTK4 + libadwaita 外壳 · Cairo 画布 · 目标�
     pixlay-core     CollageDoc、模板、几何、取景变换、命令历史。禁止依赖 gtk / cairo
     pixlay-imaging  解码(glycin)、重采样、调色、EXIF、色彩空间。禁止依赖 gtk
     pixlay-render   唯一的 draw(doc, target),Cairo + pangocairo。禁止依赖 gtk
-    pixlay-cli      无窗口渲染入口,同时是自动化验证工具。禁止依赖 gtk4
+    pixlay-cli      无窗口渲染入口、自动化验证工具,兼 AI 的操作面。禁止依赖 gtk4
     pixlay          gtk4 + libadwaita 外壳与交互
 
 `pixlay-core` 与 `pixlay-imaging` 必须能在无显示器环境下 `cargo test`,保持毫秒级到秒级。
 `pixlay-cli` 不得依赖 gtk4——它是快循环,编译时间就是迭代成本。
+
+**`pixlay-cli` 是唯一的机器操作面。** 任何能力都必须先有子命令:零交互(不读 stdin、不等提示)、
+stdout 只放机器可读结果、诊断走 stderr、退出码固定、同输入同输出。**禁止只有 GUI 能做而 CLI 做不到的事。**
+*理由:模型看不到窗口,只能读 CLI 的 stdout;而"看着对"不算判据——目视结论必须在 CLI 里变成数字(探针)。
+契约细节(子命令、字段、退出码)在测试与 `docs/STEPS.md`,此处不重复。*
 
 ## 必须存在的不变量
 
