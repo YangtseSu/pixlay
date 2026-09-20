@@ -144,6 +144,56 @@ fn document_from_a_newer_version_is_rejected() {
 }
 
 #[test]
+fn older_versions_are_refused_with_an_actionable_message() {
+    // Policy (decided at the S1 review, docs/CONTRACT.md §一): adding a field does
+    // NOT bump `DOC_VERSION`, so a version mismatch always means a breaking change
+    // and the document cannot be interpreted. There is no migration, so the message
+    // has to tell the user what to do instead of leaving them stuck.
+    assert_eq!(
+        pixlay_core::DOC_VERSION_MIN,
+        DOC_VERSION,
+        "this build reads exactly one version; widening the window is a deliberate policy change"
+    );
+
+    let doc = two_slot_doc();
+    let current = doc.to_json().expect("serializes");
+    CollageDoc::from_json(&current).expect("the current version loads");
+
+    let older = current.replace(
+        &format!("\"docVersion\": {DOC_VERSION}"),
+        &format!("\"docVersion\": {}", DOC_VERSION - 1),
+    );
+    let err = CollageDoc::from_json(&older).expect_err("an older version must be refused");
+    assert!(
+        err.to_string().contains("rebuild the project"),
+        "the message must be actionable, got: {err}"
+    );
+}
+
+#[test]
+fn a_canvas_whose_aspect_contradicts_its_template_is_rejected() {
+    // The template's geometry is normalized, so it is stretched onto whatever
+    // canvas is declared. A mismatch silently distorts the layout and nothing
+    // downstream can see it.
+    let mut doc = two_slot_doc();
+    doc.canvas = CanvasSpec::new(160.0, 90.0); // 16:9 against a 4:3 template
+    let err = doc
+        .validate()
+        .expect_err("aspect mismatch must be rejected");
+    assert!(
+        err.to_string()
+            .contains("does not match the template aspect"),
+        "{err}"
+    );
+
+    // A rounding-level difference is fine: canvases are authored in millimetres.
+    let mut doc = two_slot_doc();
+    doc.canvas = CanvasSpec::new(120.000_000_1, 90.0);
+    doc.validate()
+        .expect("millimetre rounding is not a mismatch");
+}
+
+#[test]
 fn unknown_json_fields_are_rejected() {
     let doc = two_slot_doc();
     let json = doc
@@ -251,6 +301,17 @@ fn crop_transform_limits() {
         },
         CropTransform {
             offset: (1.5, 0.0),
+            ..CropTransform::IDENTITY
+        },
+        // The zoom sizes the decoded bitmap, so it needs an upper bound: 1e5 used
+        // to abort on a failed 30-petabyte allocation and 1e308 wrapped the width
+        // to i32::MIN.
+        CropTransform {
+            zoom: 1e308,
+            ..CropTransform::IDENTITY
+        },
+        CropTransform {
+            zoom: pixlay_core::MAX_ZOOM + 1.0,
             ..CropTransform::IDENTITY
         },
     ] {

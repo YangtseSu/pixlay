@@ -110,10 +110,47 @@ pub struct ProbeReport {
 }
 
 impl ProbeReport {
+    /// True when the probe actually examined something.
+    ///
+    /// Every question the probe answers is about a *cell*: is the photo where the
+    /// geometry says, does it blend with its neighbour, does the canvas stay
+    /// white around it. A document whose cells are all empty has none of those —
+    /// its render is a blank sheet — so reporting `ok` for it would claim a
+    /// verdict about content that was never drawn. Before this floor existed, an
+    /// all-empty project reported `status = ok`, `occupied = 0`,
+    /// `seam.0.blended = 0`, exit 0.
+    pub fn is_meaningful(&self) -> bool {
+        !self.occupied.is_empty()
+    }
+
     pub fn ok(&self) -> bool {
-        self.interiors.iter().all(SlotProbe::matches)
+        self.is_meaningful()
+            && self.interiors.iter().all(SlotProbe::matches)
             && self.background.is_clean()
             && self.seams.iter().all(SeamProbe::is_clean)
+    }
+
+    /// Why the probe failed, for the summary line on stderr. `None` when it
+    /// passed.
+    pub fn failure(&self) -> Option<String> {
+        if self.ok() {
+            return None;
+        }
+        if !self.is_meaningful() {
+            return Some(
+                "no cell is occupied, so there is nothing to probe: fill a cell \
+                 with a photo, or render a template instead"
+                    .to_string(),
+            );
+        }
+        Some(format!(
+            "{} background pixel(s) not white, {} of {} slot samples matched, {} of {} seams unclean",
+            self.background.non_white,
+            self.interiors.iter().filter(|slot| slot.matches()).count(),
+            self.interiors.len(),
+            self.seams.iter().filter(|seam| !seam.is_clean()).count(),
+            self.seams.len()
+        ))
     }
 }
 

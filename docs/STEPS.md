@@ -88,7 +88,7 @@ S7 的 GNOME HIG 目视清单(`docs/HIG-REVIEW.md`:高对比 / 大字体 / 纯�
 |---|---|---|
 | serde 往返逐字段相等 | `pixlay-core/tests/contract.rs` | 往返相等 + 字段名与 `[x,y]` 形状断言;未知字段、更高 `docVersion`、越界槽数/DPI/画布/取景全被拒 |
 | `render` 能读 `.pixlay` 出图 | `pixlay-cli/tests/cli.rs` | PNG/JPEG 都出;尺寸 = 画布 mm × dpi 的取整 |
-| CLI 机器面 | 同上 | 无 TTY、stdin 有数据也照常;四种 `LANG` 下 stdout/stderr 逐字节相同(含错误分支);退出码 0/1/2 各有覆盖;stdout 在失败时为空 |
+| CLI 机器面 | 同上 | 无 TTY、stdin 有数据也照常;四种 `LANG` 下 stdout/stderr 逐字节相同(含错误分支);退出码 0/1/2 各有覆盖;失败时 stdout 为空(唯一例外:`probe` 判定不通过——数字就是结果,照常出) |
 | `probe` 用数字回答三问 | `pixlay-cli/src/probe.rs` | 格内色精确匹配、格外非白计数、共用边混色像素数与三色凸组合残差 |
 | 阈值收紧必须变红 | `pixlay-render/tests/render.rs::the_comparison_can_actually_fail` | 永久自检:一列像素的扰动(等效 RMSE 12)必须超阈值,恒等必须为 0 |
 | core/render 测试无需显示器 | 全部测试 | 无 `DISPLAY`/`WAYLAND_DISPLAY` 下全绿 |
@@ -237,10 +237,12 @@ S7 的 GNOME HIG 目视清单(`docs/HIG-REVIEW.md`:高对比 / 大字体 / 纯�
 S7 里写着「撤销重做(命令历史 + AST 快照)」与「命中测试」。这两件都是纯 `pixlay-core` 逻辑、可无窗口测试,
 却又是 GUI 里最容易错的部分;放进 S7 同时破坏两条切分原则(S7 才是最后一个窗口步骤;可机器判定的东西不该等到那时)。
 
-- **做什么**:`Command` + 撤销栈;`.pixlay` 保存/加载 + 版本迁移;点 → 格子命中测试(含旋转与异形格)。
+- **做什么**:`Command` + 撤销栈;`.pixlay` 保存/加载(原子写 tmp + rename);点 → 格子命中测试(含旋转与异形格)。
+  **不写版本迁移**(S1 评审裁定):加字段不抬版本,改含义/删字段才抬,旧工程此时被拒绝并提示重建。
 - **出口判据**:
   - 任意操作序列连续 undo 回到初始态后,`draw` 出的像素与初始态**逐像素相同**;redo 同构
   - 保存 → 加载 → 再保存 逐字节相同;缺失文件/坏版本必须给明确错误 + 非零退出码
+    (版本策略见 `docs/CONTRACT.md` §一:「允许破坏,不写迁移」)
   - 命中测试扫掠(每模板 × 每格质心 × 每格边界外侧 1px),结果与几何解析解一致
 - **不做**:不做 UI 事件绑定,不做手势。
 
@@ -308,11 +310,14 @@ S0 这一页到此为止:spike 是**可抛弃**的,它的一次性探针在 S1 �
   - **零交互**:不读 stdin、不等提示、无 TTY 时行为不变;`--help` 覆盖全部 flag 与退出码
   - **不受 locale 影响**:stdout/stderr 文本在 `LANG` / `LC_ALL` / `LANGUAGE` 变化下**逐字节相同**(含错误分支)。
     渲染出的像素不在此约束内——文字层的字形回退确实受 locale 影响,所以测试仍固定 `LANG`(见下)
-  - `--stats` 输出 `{ms, peak_rss, out_w, out_h, dpi, icc}`,口径照「四、度量口径」,之后每步复用同一把尺子
+  - `--stats` 在原报告上**追加** `{ms, encode_ms, peak_rss_mb, icc}`,口径照「四、度量口径」,
+    之后每步复用同一把尺子(`out_w` / `out_h` / `dpi` 本来就在报告里,不因 `--stats` 才出现)
   - `probe`:采样若干坐标点并输出数字(格内照片色、格外白底、相邻格共用边上的混色像素数);
     AGENTS 的"像素级结论写成探针"由它承担,后续各步不再各写一份一次性脚本
   - `--preview-px <n>`:同一个 `draw` 的缩放目标,产出可直接目视的预览(A0 无法整体目视)
-  - 退出码:0 成功 / 1 用法错 / 2 解码或渲染失败;失败时 stderr 打印缺失文件路径,stdout 保持为空
+  - 退出码:0 成功 / 1 用法错 / 2 解码或渲染失败;失败时 stderr 打印缺失文件路径,stdout 保持为空。
+    `probe` 判定不通过**不属于**这一类:它的数字就是结果(是判定依据),所以 stdout 照常出全部数字、
+    stderr 出一行综述、退出码 2。见 `docs/CONTRACT.md` §五
   - **v1 非目标**(与 AGENTS「不做」同一条纪律):MCP server、REPL / watch、自然语言参数、
     从配置文件读默认值因而改变行为——都不做
 - `--stats` 落地后,把 AGENTS「验证入口」第二条命令换成带 `--stats` 的形式:每轮的尺子因此是机器可读的
@@ -329,6 +334,9 @@ S0 这一页到此为止:spike 是**可抛弃**的,它的一次性探针在 S1 �
   曲线会把这三条变成"容差内大概对"
 - 模板生成器随仓库提交(bin,不是 `build.rs`),并测试:重新生成 → 与固化数据逐字节相同
 - 不引入外部 SVG 解析器(AGENTS:依赖最少);路径就是模板数据里的命令表
+- 模板与画布长宽比的对应关系要在本步入库:**模板矩阵按长宽比分族**(§五.B 已定),S7 的模板选择器
+  按当前画布的长宽比过滤、只列出匹配的(`CollageDoc::validate` 已经会把不匹配的工程判为硬错误)。
+  这意味着 `templates` 子命令要能按长宽比查询,而不只是列出全部名字。
 - CLI 补两个面向调用方的子命令(S1 已冻结机器面,这两个只是加数据来源):
   `templates --json` 出模板名 / 格数 / 长宽比,`init --template <name> --out x.pixlay` 出可加载的默认工程——
   调用方(含 AI)不必读源码就能选模板、也不必手写 `.pixlay` JSON(不引 `schemars`)
@@ -446,8 +454,8 @@ S0 这一页到此为止:spike 是**可抛弃**的,它的一次性探针在 S1 �
     crates/pixlay-core    文档骨架,内容来自 S1/S2/S3/S6.5;禁止 gtk/cairo
     crates/pixlay-imaging 文档骨架,S4;暴露同步纯函数(线程归调用方)
     crates/pixlay-render  文档骨架,S1;唯一的 draw(doc, target)
-    crates/pixlay-cli     bin 名为 `pixlay-render`(非 `pixlay-cli`),当前是以退出码 2 报"未实现"的占位;
-                          禁止 gtk4
+    crates/pixlay-cli     bin 名为 `pixlay-render`(非 `pixlay-cli`);S1 起是 lib + bin:
+                          lib 出 `cli::run`(集成测试直接调),bin 只是壳;禁止 gtk4
     crates/pixlay         lib 骨架,只钉住 `APP_ID`;GUI 与 `pixlay` bin 目标 S7 才加
                           (这样 S0–S6 的 `cargo test` 不必编译 gtk4-rs)
 

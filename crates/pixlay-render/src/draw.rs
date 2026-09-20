@@ -34,8 +34,10 @@ pub struct Target<'a> {
 /// A horizontal stripe of the canvas.
 ///
 /// Rendering an A0 sheet in bands keeps the peak allocation to a slice of the
-/// output instead of the whole sheet. Rows are split as evenly as possible, so
-/// the bands of one canvas can be stitched back without fractional offsets.
+/// output instead of the whole sheet. The split is taken in *output* pixels, not
+/// canvas pixels: `round` is not additive, so splitting canvas rows and rounding
+/// each band's height separately makes the bands sum to more (or fewer) rows
+/// than the whole once `scale != 1`. See [`Band::out_rows`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Band {
     pub index: u32,
@@ -43,15 +45,25 @@ pub struct Band {
 }
 
 impl Band {
-    /// `(first_row, rows)` of the full canvas, in canvas pixels.
-    pub fn rows(&self, total_px: i32) -> Result<(i32, i32), RenderError> {
+    /// The stripe of `total_out_px` output rows this band owns: `(first, count)`.
+    ///
+    /// The partition is always taken over the *rendered* surface's rows, which is
+    /// the only space in which the stripes tile the whole exactly: `round` is not
+    /// additive, so partitioning canvas rows and rounding each band's height
+    /// separately makes the bands sum to 26 or 27 rows against a 26-row whole at
+    /// scale 0.1. With cumulative partitioning the sum of `count` over all bands
+    /// equals `total_out_px` for every total, count and scale.
+    ///
+    /// `count == 0` or an out-of-range index is a caller bug, reported rather than
+    /// clamped.
+    pub fn out_rows(&self, total_out_px: i32) -> Result<(i32, i32), RenderError> {
         if self.count == 0 || self.index >= self.count {
             return Err(RenderError::InvalidBand {
                 index: self.index,
                 count: self.count,
             });
         }
-        let total = i64::from(total_px.max(0));
+        let total = i64::from(total_out_px.max(0));
         let count = i64::from(self.count);
         let first = total * i64::from(self.index) / count;
         let next = total * (i64::from(self.index) + 1) / count;
@@ -74,9 +86,16 @@ pub fn draw(doc: &CollageDoc, images: &Images, target: &Target) -> Result<(), Re
         });
     }
 
+    // The band's offset is taken in output pixels and divided back into canvas
+    // pixels, so a band's top row is the row the caller asked for whatever the
+    // scale. Splitting canvas rows instead would drift by up to a pixel per band
+    // once `scale != 1`.
     let first_row = match target.band {
-        Some(band) => band.rows(target.canvas_px.height)?.0,
-        None => 0,
+        Some(band) => {
+            let total_out = output_px(target.canvas_px.height, target.scale);
+            f64::from(band.out_rows(total_out)?.0) / target.scale
+        }
+        None => 0.0,
     };
 
     let ctx = target.ctx;
@@ -84,7 +103,7 @@ pub fn draw(doc: &CollageDoc, images: &Images, target: &Target) -> Result<(), Re
     // the only places device pixels appear.
     ctx.save()?;
     ctx.scale(target.scale, target.scale);
-    ctx.translate(0.0, -f64::from(first_row));
+    ctx.translate(0.0, -first_row);
 
     // Opaque white base: the export never has alpha, and everything a photo does
     // not cover stays white.
@@ -185,16 +204,20 @@ pub fn render_surface(
     scale: f64,
     band: Option<Band>,
 ) -> Result<ImageSurface, RenderError> {
+    if !scale.is_finite() || scale <= 0.0 {
+        return Err(RenderError::InvalidScale(scale));
+    }
     let canvas_px = doc.canvas.pixel_size(dpi)?;
+    // The whole render's size, rounded once. Band sizes are then carved out of
+    // it in output pixels, which is the only partition whose parts sum to the
+    // whole (rounding is not additive).
+    let width = output_px(canvas_px.width, scale);
+    let full_height = output_px(canvas_px.height, scale);
     let height = match band {
-        Some(band) => band.rows(canvas_px.height)?.1,
-        None => canvas_px.height,
+        Some(band) => band.out_rows(full_height)?.1,
+        None => full_height,
     };
-    let surface = ImageSurface::create(
-        Format::ARgb32,
-        output_px(canvas_px.width, scale),
-        output_px(height, scale),
-    )?;
+    let surface = ImageSurface::create(Format::ARgb32, width, height)?;
     let ctx = Context::new(&surface)?;
     draw(
         doc,

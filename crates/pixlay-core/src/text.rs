@@ -49,9 +49,18 @@ pub enum Anchor {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind", deny_unknown_fields)]
 pub enum TextMode {
-    /// Placed once; `position` is in normalized canvas coordinates.
+    /// Placed once; `position` is in normalized canvas coordinates and is the
+    /// point `anchor` names (so `BottomCenter` puts the text's baseline area
+    /// above the point).
     Free { position: Point, anchor: Anchor },
     /// Repeated on a grid of `step` (normalized canvas units per repeat).
+    ///
+    /// The tile grid starts at the canvas origin `(0, 0)` — the first tile's
+    /// anchor is the top-left corner of the canvas — so the pattern is a function
+    /// of `step` alone and does not move when the tiles are re-laid out. The
+    /// layer's `rotation_deg` rotates each tile about its own anchor, and its
+    /// `size_rel` sizes every tile identically; there is no per-tile variation
+    /// (a watermark that gets denser toward one corner is not v1).
     Tiled { step: (f64, f64) },
 }
 

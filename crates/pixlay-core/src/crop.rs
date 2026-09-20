@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::MAX_ROTATION_DEG;
+use crate::MAX_ZOOM;
 use crate::error::CoreError;
 
 /// How one photo is framed inside one slot.
@@ -24,8 +25,13 @@ pub struct CropTransform {
     /// Photo centre offset from the slot centre, in slot widths and heights.
     /// `(0, 0)` is centred.
     pub offset: (f64, f64),
-    /// Rotation in degrees about the photo centre. Rotation only crops edges —
-    /// the canvas and the slot never grow.
+    /// Rotation in degrees about the photo centre, **clockwise on screen** (the
+    /// canvas has y pointing down, and cairo's `rotate` is clockwise in that
+    /// space; the renderer passes this value through unchanged).
+    ///
+    /// Rotation only crops edges — the canvas and the slot never grow, so the
+    /// clamp recomputes `zoom` and this angle must stay within the covering
+    /// bound. S3 owns that fit.
     pub rotation_deg: f64,
 }
 
@@ -54,7 +60,20 @@ impl CropTransform {
                 what: "crop zoom",
                 value: self.zoom,
                 min: f64::MIN_POSITIVE,
-                max: f64::MAX,
+                max: MAX_ZOOM,
+            });
+        }
+        // An upper bound is not cosmetic: the zoom multiplies the slot's pixel
+        // size to size the decoded bitmap, so an unbounded value either overflows
+        // the dimension arithmetic or asks for an allocation the machine cannot
+        // satisfy. 1000x is far past any real framing and still leaves the
+        // product of zoom and a 200 MP canvas inside i32.
+        if self.zoom > MAX_ZOOM {
+            return Err(CoreError::OutOfRange {
+                what: "crop zoom",
+                value: self.zoom,
+                min: f64::MIN_POSITIVE,
+                max: MAX_ZOOM,
             });
         }
         for (what, value) in [

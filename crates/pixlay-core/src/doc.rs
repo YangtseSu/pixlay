@@ -4,12 +4,12 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::DOC_VERSION;
 use crate::canvas::CanvasSpec;
 use crate::crop::CropTransform;
 use crate::error::CoreError;
 use crate::template::Template;
 use crate::text::{TextFallback, TextLayer};
+use crate::{ASPECT_TOLERANCE, DOC_VERSION, DOC_VERSION_MIN};
 
 /// What one slot shows.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -45,6 +45,8 @@ pub struct CollageDoc {
     pub template: Template,
     /// One cell per slot, in template order.
     pub cells: Vec<Cell>,
+    /// Canvas-level text layers, painted in vector order: a later layer draws over
+    /// an earlier one, and all of them draw over every cell.
     #[serde(default)]
     pub text: Vec<TextLayer>,
     #[serde(default)]
@@ -75,13 +77,27 @@ impl CollageDoc {
                 supported: DOC_VERSION,
             });
         }
-        if self.doc_version != DOC_VERSION {
+        // Read at exactly one version: adding a field does not bump DOC_VERSION,
+        // so an older version here means a breaking change happened and this
+        // document cannot be interpreted. There is no migration by decision.
+        if self.doc_version < DOC_VERSION_MIN {
             return Err(CoreError::VersionUnsupported {
                 found: self.doc_version,
                 supported: DOC_VERSION,
             });
         }
         self.canvas.validate()?;
+        // The canvas aspect and the template aspect are both part of the layout:
+        // the template's normalized geometry is stretched onto the canvas, so a
+        // mismatch silently distorts every slot. Nothing downstream can detect it,
+        // because normalized coordinates carry no aspect of their own.
+        let canvas_aspect = self.canvas.aspect();
+        if (canvas_aspect - self.template.aspect).abs() > ASPECT_TOLERANCE {
+            return Err(CoreError::AspectMismatch {
+                canvas: canvas_aspect,
+                template: self.template.aspect,
+            });
+        }
         self.template.validate()?;
         if self.cells.len() != self.template.slots.len() {
             return Err(CoreError::CellCount {

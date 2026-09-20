@@ -1,10 +1,12 @@
-//! The template registry.
+//! The template library.
 //!
-//! S2 replaces this with the deterministic generator plus the full template
-//! matrix, its invariant tests (zero overlap, no holes, exact area) and the
-//! `templates`/`init` subcommands. S1 needs one valid template so that the
-//! CLI's photo-free smoke path — the command `AGENTS.md` lists as the per-round
-//! verification — exists and is exercised from S1 onward.
+//! Templates are document data, so the library lives in `pixlay-core` next to the
+//! types it produces (`AGENTS.md`, module boundaries): the GUI needs it to offer
+//! a template picker, and the CLI needs it for the photo-free smoke render. S2
+//! replaces the hand-written geometry below with the deterministic generator plus
+//! the full matrix and its invariant tests (zero overlap, no holes, exact area).
+//! S1 needs one valid template so that the CLI's photo-free smoke path — the
+//! command `AGENTS.md` lists as the per-round verification — exists from S1 on.
 //!
 //! The layout below is a *cut* template: the slots tile the canvas exactly, so
 //! their areas sum to exactly 1.0 and every coordinate is a multiple of 1/8,
@@ -12,7 +14,7 @@
 //! path, the probe's interior sampling and (in S6.5) the hit test all see a
 //! non-rectangular outline.
 
-use pixlay_core::{CanvasSpec, CollageDoc, Point, Polygon, Slot, Template};
+use crate::{CanvasSpec, CollageDoc, Point, Polygon, Slot, Template};
 
 /// The name `AGENTS.md`'s verification command uses. S2 keeps this name and
 /// freezes the geometry behind [`TEMPLATE_VERSION`]; changing either afterwards

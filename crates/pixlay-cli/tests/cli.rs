@@ -309,6 +309,33 @@ fn a_failing_probe_still_prints_its_numbers() {
 }
 
 #[test]
+fn a_probe_with_nothing_to_probe_fails_instead_of_passing_vacuously() {
+    // Every question the probe answers is about an occupied cell. A project whose
+    // cells are all empty renders a blank sheet, so "all checks passed" would be
+    // a verdict about content that was never drawn: measured before this floor,
+    // it reported status = ok, occupied = 0, exit 0.
+    let dir = out_dir("probe-vacuous");
+    let project = write_project(&dir, "empty.pixlay", false);
+    let output = run(&[
+        "probe",
+        "--project",
+        project.to_str().unwrap(),
+        "--dpi",
+        "150",
+    ]);
+    assert_eq!(code(&output), 2, "an empty project must not pass the probe");
+    assert_eq!(field(&output, "occupied"), "0");
+    assert_eq!(field(&output, "passed"), "false");
+    assert_eq!(field(&output, "status"), "failed");
+    assert!(
+        stderr(&output).contains("no cell is occupied"),
+        "{}",
+        stderr(&output)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn json_output_parses_and_is_byte_stable() {
     let dir = out_dir("json");
     let output = run(&[

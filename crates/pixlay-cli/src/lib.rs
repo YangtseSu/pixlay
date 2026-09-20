@@ -35,4 +35,3 @@ pub mod encode;
 pub mod probe;
 pub mod report;
 pub mod stats;
-pub mod templates;

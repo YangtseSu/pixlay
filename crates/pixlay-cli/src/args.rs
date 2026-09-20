@@ -59,8 +59,9 @@ OUTPUT:
 
 EXIT CODES:
     0  success
-    1  usage error
-    2  project, decode or render failure (the failing path is on stderr)
+    1  usage error (unknown flag, out-of-range value, unknown template)
+    2  project, decode or render failure, or a probe verdict of `failed`
+       (the failing path or the failing check is on stderr)
 ";
 
 /// What the command line asked for.

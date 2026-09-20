@@ -28,6 +28,13 @@ mod geometry;
 mod template;
 mod text;
 
+/// The template library: name to frozen geometry.
+///
+/// A module rather than a flat re-export, because its verbs (`get`, `names`,
+/// `document`) would collide with nothing useful as bare functions and callers
+/// should be able to read where the geometry came from.
+pub mod templates;
+
 pub use canvas::{CanvasSpec, MAX_CANVAS_MM, MM_PER_INCH, PixelSize};
 pub use crop::{CropFit, CropTransform};
 pub use doc::{Cell, CollageDoc, Project};
@@ -41,6 +48,21 @@ pub use text::{
 /// Version of the document format this build reads and writes.
 pub const DOC_VERSION: u32 = 1;
 
+/// Oldest `docVersion` this build reads.
+///
+/// Policy (docs/CONTRACT.md §一): the format is read at exactly one version — this
+/// one. A change that only *adds* a field does not bump `DOC_VERSION` (the field
+/// carries a `serde` default, so existing projects still load); a change that
+/// alters an existing field's meaning or removes one bumps it, and projects from
+/// the old version are then refused with an actionable message. There is no
+/// migration by decision (S1 review, 2026-09-20).
+pub const DOC_VERSION_MIN: u32 = 1;
+
+/// Tolerance when comparing the canvas aspect with the template's declared
+/// aspect. Both are authored separately, so an exact comparison would reject a
+/// project whose canvas was rounded in millimetres; 1e-6 is ~1e-3 px on A0.
+pub const ASPECT_TOLERANCE: f64 = 1e-6;
+
 /// Smallest and largest slot count a template may declare.
 pub const MIN_SLOTS: usize = 2;
 pub const MAX_SLOTS: usize = 10;
@@ -52,6 +74,15 @@ pub const MAX_DPI: u32 = 600;
 /// Largest canvas the product renders, in pixels. A0 at 300 dpi is 139.5 MP, so
 /// this leaves ~43% of headroom.
 pub const MAX_CANVAS_PIXELS: u64 = 200_000_000;
+
+/// Largest framing zoom accepted, as displayed photo width over slot width.
+///
+/// The zoom sizes the decoded bitmap (`slot pixels * zoom`), so it needs an upper
+/// bound or the dimension arithmetic overflows: measured before this constant
+/// existed, `zoom = 1e5` aborted the process on a failed 30-petabyte allocation
+/// and `zoom = 1e308` wrapped the bitmap width to `i32::MIN`. 1000x is far beyond
+/// any real framing.
+pub const MAX_ZOOM: f64 = 1000.0;
 
 /// Largest framing rotation, in degrees. Rotation only crops edges, so beyond
 /// this a slot would need absurd magnification to stay covered.

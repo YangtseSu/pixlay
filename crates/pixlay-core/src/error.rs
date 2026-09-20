@@ -25,7 +25,13 @@ pub enum CoreError {
     #[error("document version {found} is newer than the supported version {supported}")]
     VersionTooNew { found: u32, supported: u32 },
 
-    #[error("unsupported document version {found} (this build writes {supported})")]
+    /// An older version is only reached when a breaking change bumped
+    /// `DOC_VERSION`. There is no migration by decision, so the message has to say
+    /// what the user can do about it.
+    #[error(
+        "document version {found} predates the current format {supported} and cannot be \
+         opened: rebuild the project with this version"
+    )]
     VersionUnsupported { found: u32, supported: u32 },
 
     #[error("source image does not exist: {path}")]
@@ -46,6 +52,9 @@ pub enum CoreError {
 
     #[error("slot {slot}: {reason}")]
     InvalidSlot { slot: usize, reason: &'static str },
+
+    #[error("canvas aspect {canvas} does not match the template aspect {template}")]
+    AspectMismatch { canvas: f64, template: f64 },
 
     #[error("template slot {slot} declares area {declared} but its outline covers {outline}")]
     SlotAreaMismatch {

@@ -380,45 +380,64 @@ fn preview_and_export_agree() {
 fn bands_stitch_back_into_the_whole_canvas() {
     let doc = doc();
     let images = pattern_images();
-    let whole = render_rgb8(&doc, &images, DPI, 1.0, None).expect("renders");
-
-    let count = 3;
-    let mut stitched = Rgb8Image {
-        width: whole.width,
-        height: 0,
-        data: Vec::new(),
-    };
-    for index in 0..count {
-        let band = Band { index, count };
-        let part = render_rgb8(&doc, &images, DPI, 1.0, Some(band)).expect("renders");
-        assert_eq!(part.width, whole.width);
-        stitched.height += part.height;
-        stitched.data.extend_from_slice(&part.data);
+    // Scale is part of the test: the partition has to hold in output pixels, and
+    // rounding each band's canvas height separately used to make the bands sum to
+    // one row more than the whole (measured at 72 dpi / scale 0.1 and 0.3).
+    for scale in [1.0, 0.5, 0.3, 0.1] {
+        let whole = render_rgb8(&doc, &images, DPI, scale, None).expect("renders");
+        let count = 3;
+        let mut stitched = Rgb8Image {
+            width: whole.width,
+            height: 0,
+            data: Vec::new(),
+        };
+        for index in 0..count {
+            let band = Band { index, count };
+            let part = render_rgb8(&doc, &images, DPI, scale, Some(band)).expect("renders");
+            assert_eq!(part.width, whole.width, "scale {scale}");
+            stitched.height += part.height;
+            stitched.data.extend_from_slice(&part.data);
+        }
+        assert_eq!(
+            stitched.height, whole.height,
+            "scale {scale}: bands must cover exactly the whole render"
+        );
+        // Not bit-exact: the band's cairo translation shifts the pattern origin,
+        // and pixman picks a different sampling path for a shifted origin, so
+        // some pixels differ by a level or two. Measured 0.033 at scale 1.0,
+        // worst pixel 2/255, 311 of 463080 bytes (2026-09-20). A real
+        // misalignment — one row — would be ~12.
+        let error = rmse(&stitched, &whole);
+        assert!(
+            error <= 0.5,
+            "scale {scale}: band stitch RMSE {error} exceeds 0.5"
+        );
     }
-    assert_eq!(stitched.height, whole.height);
-    // Not bit-exact: the band's cairo translation shifts the pattern origin, and
-    // pixman picks a different sampling path for a shifted origin, so some
-    // pixels differ by a level or two. Measured 0.033, worst pixel 2/255, 311 of
-    // 463080 bytes differing (2026-09-20). A real misalignment — one row — would
-    // be ~12.
-    let error = rmse(&stitched, &whole);
-    assert!(error <= 0.5, "band stitch RMSE {error} exceeds 0.5");
-    assert_eq!(stitched.pixel(0, 0), whole.pixel(0, 0));
-    assert_eq!(stitched.data.len(), whole.data.len());
 }
 
 #[test]
-fn band_rows_split_the_canvas_exactly() {
-    let rows = |index, count| Band { index, count }.rows(100).expect("rows");
-    assert_eq!(rows(0, 3), (0, 33));
-    assert_eq!(rows(1, 3), (33, 33));
-    assert_eq!(rows(2, 3), (66, 34));
-    let sum: i32 = (0..7).map(|i| rows(i, 7).1).sum();
-    assert_eq!(sum, 100);
-    assert!(Band { index: 3, count: 3 }.rows(100).is_err());
-    assert!(Band { index: 0, count: 0 }.rows(100).is_err());
+fn band_rows_split_the_output_exactly() {
+    let rows = |index, count, total| Band { index, count }.out_rows(total).expect("rows");
+    assert_eq!(rows(0, 3, 100), (0, 33));
+    assert_eq!(rows(1, 3, 100), (33, 33));
+    assert_eq!(rows(2, 3, 100), (66, 34));
+    for total in [1, 2, 3, 7, 26, 100, 255, 2528, 14043] {
+        for count in [2, 3, 5, 7, 16] {
+            let sum: i32 = (0..count).map(|i| rows(i, count, total).1).sum();
+            assert_eq!(sum, total, "total {total}, count {count}");
+            // Contiguous and starting at zero: the stripes tile 0..total.
+            let mut next = 0;
+            for i in 0..count {
+                let (first, len) = rows(i, count, total);
+                assert_eq!(first, next, "total {total}, count {count}");
+                next += len;
+            }
+            assert_eq!(next, total);
+        }
+    }
+    assert!(Band { index: 3, count: 3 }.out_rows(100).is_err());
+    assert!(Band { index: 0, count: 0 }.out_rows(100).is_err());
 }
-
 #[test]
 fn text_layers_are_refused_until_s5() {
     let mut doc = doc();

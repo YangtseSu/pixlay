@@ -13,7 +13,7 @@ use pixlay_render::Images;
 use crate::args::{self, Command, ProbeArgs, RenderArgs, Source, USAGE};
 use crate::encode::Format;
 use crate::report::Report;
-use crate::{content, encode, probe, stats, templates};
+use crate::{content, encode, probe, stats};
 
 /// Exit codes, as the contract fixes them.
 pub const EXIT_SUCCESS: u8 = 0;
@@ -65,13 +65,13 @@ fn render(args: RenderArgs) -> Result<u8, Failure> {
             (project.doc().clone(), sources)
         }
         Source::Template(name) => {
-            let template = templates::get(name).ok_or_else(|| {
+            let template = pixlay_core::templates::get(name).ok_or_else(|| {
                 Failure::Usage(format!(
                     "unknown template {name}; this build knows: {}",
-                    templates::names().join(", ")
+                    pixlay_core::templates::names().join(", ")
                 ))
             })?;
-            (templates::document(&template), Vec::new())
+            (pixlay_core::templates::document(&template), Vec::new())
         }
     };
     doc.validate()
@@ -184,26 +184,15 @@ fn probe(args: ProbeArgs) -> Result<u8, Failure> {
         report.int(&format!("{prefix}.foreign"), seam.foreign as i64);
         report.bool(&format!("{prefix}.clean"), seam.is_clean());
     }
+    report.bool("passed", result.ok());
     add_stats(&mut report, args.stats, compose, None);
     emit(&report, args.json);
 
-    if result.ok() {
-        Ok(EXIT_SUCCESS)
-    } else {
-        // The numbers are the result, so they go to stdout; the verdict on
-        // stderr, and the exit code says the document did not pass.
-        Err(Failure::Failed(format!(
-            "probe failed: {} background pixel(s) not white, {} of {} slot samples matched, {} of {} seams unclean",
-            result.background.non_white,
-            result
-                .interiors
-                .iter()
-                .filter(|slot| slot.matches())
-                .count(),
-            result.interiors.len(),
-            result.seams.iter().filter(|seam| !seam.is_clean()).count(),
-            result.seams.len()
-        )))
+    // The numbers are the result, so they go to stdout; the verdict on stderr,
+    // and the exit code says whether the document passed.
+    match result.failure() {
+        Some(reason) => Err(Failure::Failed(format!("probe failed: {reason}"))),
+        None => Ok(EXIT_SUCCESS),
     }
 }
 
