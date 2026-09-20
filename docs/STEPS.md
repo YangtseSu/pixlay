@@ -16,14 +16,14 @@ The first sentence for a new session:
 
 Legend: ✅ done · 🚧 in progress · ⏸ blocked (waiting on a human decision or external input) · ⬜ not started
 
-**Current progress: S1 — ✅ done; contract reviewed twice and passes (review 2, 2026-09-21, human; reading `docs/CONTRACT.md`, results in "S1 result")**
-**Next action: start S2 in a new session.**
+**Current progress: S2 — ✅ done (2026-09-21, no human gate; the session ends here because the frozen geometry is irreversible)**
+**Next action: start S3 in a new session.**
 
 | Step | Status | Date | What it delivers |
 |---|---|---|---|
 | S0 · Cairo limit spike | ✅ done | 2026-09-20 | Cairo renders A0@300dpi inside the budget: 185/551 ms compositing, 941 MB peak `VmHWM`, both formats written. Gate passed: Cairo stays |
 | S1 · Minimal contract + feedback loop | ✅ done | 2026-09-20 | `CollageDoc` v1 frozen, the single `draw`, `pixlay-render render` produces images, `probe` answers in numbers. Gate passed 2026-09-21 (review 1), defects from review 2 fixed the same day |
-| S2 · Template system (geometry only) | ⬜ not started | — | Regular and irregular template geometry, deterministic and frozen under a `templateVersion` |
+| S2 · Template system (geometry only) | ✅ done | 2026-09-21 | 12 templates covering 2–10 slots, grouped by aspect ratio, generated on a dyadic lattice and frozen under a `templateVersion`; `templates` and `init` added to the CLI |
 | S3 · Framing and clamp | ⬜ not started | — | Absolute-zoom framing with rotation and a clamp that always covers the slot |
 | S4 · Image pipeline | ⬜ not started | — | `pixlay-imaging`: decoding, EXIF rotation, 16-bit linear resampling, per-slot grading and the global filter |
 | S5 · Text layers | ⬜ not started | — | Canvas-level text, free placement and tiled watermark through one mechanism, `{date}` from EXIF |
@@ -329,7 +329,7 @@ and found the contract had drifted from the implementation.
   tables under "Open decisions → C. After S1, before S4" drew no objection and stay locked as
   recommended; the decoding backend is still S4's first measured question.
 
-## S2 · Template system (geometry only) — ⬜ not started
+## S2 · Template system (geometry only) — ✅ done (2026-09-21)
 
 - **Goal**: the geometry of regular and irregular templates is entirely correct and checkable.
 - **Work**: irregular slots use SVG paths; regular slots can be parameterized with grid spans; **generation must be deterministic**, and the result is frozen data carrying a `templateVersion`.
@@ -356,6 +356,93 @@ and found the contract had drifted from the implementation.
   so callers (including the AI) can pick a template without reading the source and do not have to hand-write `.pixlay` JSON (no `schemars` pulled in)
 - **The entry command depends on S2's product.** `mosaic-8-s14` does not exist as generator output until S2. Ruling: the S2 exit criteria name that template
   (8 slots, irregular, a fixed `templateVersion`, a reproducible generator); before S2, treat that command as "valid from S2 on".
+
+### S2 result (2026-09-21)
+
+`[all criteria are in the tests in the repository; the numbers below are the release binary's output on this machine]`
+
+The exit criteria, item by item:
+
+| Criterion | Landing point | Measured |
+|---|---|---|
+| zero overlap between slots | `pixlay-core/tests/templates.rs::slots_never_overlap_and_leave_no_hole` | 12 templates, 262144 samples each, **0 overlapping pairs**. Exact, not sampled: the coordinates are dyadic and the samples sit at cell centers (see below) |
+| no interior hole in the union | same test, plus `a_non_cut_template_is_a_gutter_not_an_interior_hole` | 11 cut templates: **0 uncovered samples**. The one non-cut template (`grid-4-2x2g`): its uncovered samples are a gutter that a flood fill reaches from the border, so **0 sealed samples** |
+| parsed path area matches the declared area | same file, `every_coordinate_lies_on_the_lattice_and_areas_are_exact` (per slot, every template) and `cut_templates_declare_areas_summing_to_exactly_one` | declared area == outline area, **exactly** (not within tolerance), and the cut templates sum to **exactly 1.0** |
+| repeated generation with the same `templateVersion` is bit-identical | `the_frozen_data_is_exactly_what_the_generator_produces` | the bin run twice: `sha256 ba3ce76e…` both times and equal to the committed `frozen.rs`; regeneration is byte-identical, and the served data equals a fresh `generate()` |
+| covers 2–10 slots, at least one each | `every_slot_count_from_two_to_ten_is_covered` | all nine counts present: 2×2, 3×1, 4×3, 5×1, 6×1, 7×1, 8×1, 9×1, 10×1 |
+
+**The matrix** (library order, which is by slot count; `templates` prints exactly this):
+
+| # | name | slots | aspect | layout |
+|---|---|---|---|---|
+| 0 | `strip-2-1x2` | 2 | 2:3 | two bands, portrait |
+| 1 | `strip-2-2x1` | 2 | 3:2 | two equal columns |
+| 2 | `strip-3-3x1` | 3 | 16:9 | three columns, 5/16 · 6/16 · 5/16 |
+| 3 | `grid-4-2x2` | 4 | 1:1 | equal 2×2 |
+| 4 | `grid-4-2x2g` | 4 | 1:1 | 2×2 with a 1/16 gutter (**not a cut template**) |
+| 5 | `strip-4-4x1` | 4 | 16:9 | four equal columns |
+| 6 | `mosaic-5-hero` | 5 | 4:3 | left half + four stacked panels |
+| 7 | `grid-6-3x2` | 6 | 3:2 | 3×2, unequal columns |
+| 8 | `mosaic-7-t4b3` | 7 | 4:3 | a band of four over a band of three |
+| 9 | `mosaic-8-s14` | 8 | 4:3 | **S1's frozen geometry**, one L-shaped slot |
+| 10 | `grid-9-3x3` | 9 | 1:1 | 3×3, unequal columns and rows |
+| 11 | `strip-10-10x1` | 10 | 16:9 | ten columns |
+
+### S2 · decisions this step made
+
+- **Polygons only, and the lattice is what makes the invariants exact.** The S2 review offered "restrict the geometry to polygons, or declare a
+  curve discretization tolerance"; restricting to polygons removes the tolerance, which is why the three geometric criteria are equalities here.
+  On top of that, every coordinate is an integer multiple of **1/32** of a canvas edge: areas are sums of exactly representable terms, so
+  "sums to exactly 1.0" is `==`, and the coverage grid is exact too — `512` samples per axis is a multiple of `32` and the samples sit at cell
+  centers (`(i + 0.5)/512`), while every edge lies on an even/1024 line, so no sample is ever ambiguous. The tests assert this lattice rather than
+  assuming it (`every_coordinate_lies_on_the_lattice_and_areas_are_exact`), because the whole file's exactness claim rests on it.
+- **The generator is a recipe table plus a committed artifact.** `pixlay-core/src/templates.rs` became `templates/{mod,generator,frozen}.rs`:
+  `generator.rs` holds one recipe per template (lattice spans for rectangles, an explicit point list for an irregular slot), `frozen.rs` is the
+  committed data, `mod.rs` serves it. Regeneration is `cargo run -p pixlay-core --bin pixlay-gen-templates`, and only that: a `build.rs` would
+  rewrite an interface silently, which is exactly what must not happen to frozen geometry.
+- **`mosaic-8-s14` is unchanged.** Same name, same `version = 1`, same aspect, same slot order, same coordinates, same one concave slot; the
+  test pins the area sequence (`9,6,9,3,6,6,19,6` sixty-fourths) so a reordering cannot slip through. S2 changed how the geometry is *produced*,
+  not what it is. `AGENTS.md`'s verification command and `docs/CONTRACT.md` §1's example are therefore untouched.
+- **No new dependency, no SVG parser, and no rendering added.** A path is the point list `Polygon` already is. `pixlay-render` was used only as S1's
+  existing smoke path, to look at the geometry (below) — S2 itself introduces no image and no rendering code.
+- **Two caller-facing subcommands, in S1's frozen machine surface**: `templates [--aspect W:H|decimal] [--json]` prints `name/slots/aspect/version`
+  per template plus `count`, and `init --template <name> --out x.pixlay` writes a photo-free default project through `CollageDoc::to_json`.
+  Both keep every S1 CLI rule, verified: `--json` on both, an empty stdout on usage errors, exit 1 for unknown template and for a non-`.pixlay`
+  `--out`, byte-identical output under `LANG=C/zh_CN.UTF-8/de_DE.UTF-8`, and no timestamps. A flag belonging to another subcommand is a usage
+  error rather than being ignored, because a silently dropped `--dpi` looks like it worked.
+- **How S2 reads the "not doing": no image in, no rendering out.** `init` writes a document whose cells are all `source: null`, and the library
+  gained no pixel code. `probe` refuses such a project (`occupied = 0` → verdict `failed`, exit 2), which is S1's vacuous-pass rule working as
+  intended; the geometry's visual confirmation therefore goes through `render --template`, the path that exists for it.
+
+### S2 · measured (2026-09-21, `--release`, this machine)
+
+| Item | Value |
+|---|---|
+| frozen geometry | `src/templates/frozen.rs`, **7967 bytes**, sha256 `ba3ce76e…`; regenerating gives the same bytes twice and equals the committed file |
+| libraries' exactness | 12 templates, 12/12 on the 1/32 lattice, declared area == outline area exactly, 11 cut templates summing to exactly 1.0, 0 overlaps, 0 holes |
+| `mosaic-8-s14` 300dpi render (the `AGENTS.md` verification command) | 14043×10532, **ms 2345** compositing + **encode_ms 3802** JPEG, **`peak_rss_mb` 1610**, 42.5 MB — the S1 numbers are reproduced, so the regenerated geometry is pixel-for-pixel the geometry S1 froze |
+| every template rendered at `--preview-px 480` | 12/12 exit 0, `occupied == cells`, correct pixel size for each aspect (480×320, 480×270, 480×360, 480×480) |
+| `templates` (whole library) | 12 entries, `count = 12`, exit 0; `--aspect 4:3` → 3 entries; `--aspect 1:1` → 3; `--aspect 7:5` → 0 with exit 0 |
+| `init` + reload | `mosaic-8-s14` → 4234-byte `.pixlay` that `Project::load` accepts, `doc.template == templates::get("mosaic-8-s14")`, all cells empty; a second run on the same path fails with exit 2 and leaves the file untouched |
+| visual inspection | the 8-slot render shows 8 color regions with the orange region **L-shaped** and no white inside the image; the 2×2 gutter template shows four equal squares whose white gutter reaches the border, and its corner pixels are slot colors, so the slots do meet the canvas edge |
+
+### S2 · deviations from and additions to the review additions
+
+1. **The Work line said "irregular slots use SVG paths"; the review additions said polygons.** The two contradict each other, and the review
+   additions win (they are the later, more specific ruling and they are what makes the criteria checkable). Irregular slots are explicit point
+   lists in the recipe. No SVG parser exists in the dependency set.
+2. **`Slot::area` is generated, not typed.** The recipe gives geometry and the generator computes the declared area from the outline it just
+   built, so the declared value can never drift from the path; the test then re-derives it independently. The `AREA_TOLERANCE = 1e-6` cross-check
+   still runs, but on this geometry it is never the thing that makes a template valid.
+3. **One member is deliberately not a cut template** (`grid-4-2x2g`). S1's test file assumed every template tiles the canvas; left alone, the
+   matrix would have shipped only cut layouts and the margin branch of that test would have stayed dead code. The gutter is real product behavior
+   (a printed collage does not have to bleed to the edge), and it is the sharper case for "no hole": a flood fill proves the gutter is reachable
+   from the border rather than sealed between slots.
+4. **The band names are asymmetric on purpose.** A 4:3 canvas is landscape for 2–10 slots in this matrix except the 2-slot case, where the
+   portrait counterpart (`strip-2-1x2`, 2:3) is a separate template rather than a stretched one — a portrait and a landscape layout are different
+   compositions even when the slot count matches, and `CollageDoc::validate` refuses to stretch one onto the other.
+5. **`count` is part of the `templates` report** (not only the `template.N.*` rows): a caller filtering by aspect needs to know "there are none"
+   without counting rows, and it keeps `--json` self-describing.
 
 ## S3 · Framing and clamp — ⬜ not started
 

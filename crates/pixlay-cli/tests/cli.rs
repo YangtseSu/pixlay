@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-use pixlay_core::{CanvasSpec, Cell, CollageDoc, Polygon, Project, Slot, Template};
+use pixlay_core::{CanvasSpec, Cell, CollageDoc, Polygon, Project, Slot, Template, templates};
 
 /// `CARGO_BIN_EXE_<name>` is set by Cargo for integration tests.
 const BIN: &str = env!("CARGO_BIN_EXE_pixlay-render");
@@ -719,4 +719,301 @@ fn the_contract_example_is_a_valid_document() {
     );
     assert_eq!(doc.cells.len(), doc.template.slots.len());
     assert_eq!(doc.text.len(), 1, "the example shows one text layer");
+}
+
+#[test]
+fn templates_lists_the_library_and_filters_by_aspect() {
+    let all = run(&["templates"]);
+    assert_eq!(code(&all), 0, "{}", stderr(&all));
+    assert!(stderr(&all).is_empty(), "{}", stderr(&all));
+    assert_eq!(field(&all, "status"), "ok");
+
+    // Every slot count of the product range appears, which is S2's coverage
+    // criterion seen from the outside.
+    let count: usize = field(&all, "count").parse().unwrap();
+    let mut slot_counts: Vec<usize> = Vec::new();
+    for index in 0..count {
+        let name = field(&all, &format!("template.{index}.name"));
+        let slots: usize = field(&all, &format!("template.{index}.slots"))
+            .parse()
+            .unwrap();
+        let aspect = field(&all, &format!("template.{index}.aspect"));
+        assert!(!name.is_empty());
+        assert!((2..=10).contains(&slots), "{name}: {slots} slots");
+        assert!(
+            aspect.contains(':'),
+            "{name}: aspect {aspect} is not in W:H form"
+        );
+        if !slot_counts.contains(&slots) {
+            slot_counts.push(slots);
+        }
+    }
+    for wanted in 2..=10 {
+        assert!(
+            slot_counts.contains(&wanted),
+            "no template with {wanted} slots in {slot_counts:?}"
+        );
+    }
+
+    // Filtering by canvas shape returns only that group, and the same entries
+    // the unfiltered list holds.
+    for (ratio, expected) in [
+        ("4:3", "mosaic-8-s14"),
+        ("1:1", "grid-4-2x2"),
+        ("16:9", "strip-3-3x1"),
+    ] {
+        let filtered = run(&["templates", "--aspect", ratio]);
+        assert_eq!(code(&filtered), 0, "{ratio}: {}", stderr(&filtered));
+        assert_eq!(field(&filtered, "aspect"), ratio);
+        let filtered_count: usize = field(&filtered, "count").parse().unwrap();
+        assert!(filtered_count > 0, "{ratio}: no template");
+        let mut found = false;
+        for index in 0..filtered_count {
+            assert_eq!(field(&filtered, &format!("template.{index}.aspect")), ratio);
+            if field(&filtered, &format!("template.{index}.name")) == expected {
+                found = true;
+            }
+        }
+        assert!(found, "{ratio}: {expected} missing from the group");
+        assert!(filtered_count < count, "{ratio}: filter matched everything");
+    }
+
+    // A decimal is the same query as the ratio it names.
+    let decimal = run(&["templates", "--aspect", "1.3333333333333333"]);
+    assert_eq!(code(&decimal), 0, "{}", stderr(&decimal));
+    assert_eq!(
+        field(&decimal, "count"),
+        field(&run(&["templates", "--aspect", "4:3"]), "count")
+    );
+
+    // A shape nothing was authored for is an empty list, not an error: the
+    // picker asks with whatever the canvas is.
+    let none = run(&["templates", "--aspect", "7:5"]);
+    assert_eq!(code(&none), 0, "{}", stderr(&none));
+    assert_eq!(field(&none, "count"), "0");
+    assert!(stdout(&none).contains("status = ok"));
+
+    // Same input, same bytes, and `--json` is the same data.
+    assert_eq!(stdout(&all), stdout(&run(&["templates"])));
+    let json = run(&["templates", "--aspect", "4:3", "--json"]);
+    let value: serde_json::Value = serde_json::from_str(&stdout(&json)).expect("valid JSON");
+    assert_eq!(value["count"], 3);
+    assert_eq!(value["template.2.name"], "mosaic-8-s14");
+
+    // Out-of-range and malformed ratios are usage errors with an empty stdout.
+    for bad in ["0", "20", "4:0", "x:y", "", "4:3:2"] {
+        let output = run(&["templates", "--aspect", bad]);
+        assert_eq!(code(&output), 1, "--aspect {bad:?}");
+        assert!(
+            stdout(&output).is_empty(),
+            "--aspect {bad:?} wrote to stdout"
+        );
+    }
+}
+
+#[test]
+fn init_writes_a_project_that_loads_back() {
+    let dir = out_dir("init");
+    let path = dir.join("new.pixlay");
+    let output = run(&[
+        "init",
+        "--template",
+        "mosaic-8-s14",
+        "--out",
+        path.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert!(stderr(&output).is_empty(), "{}", stderr(&output));
+    assert_eq!(field(&output, "status"), "ok");
+    assert_eq!(field(&output, "template"), "mosaic-8-s14");
+    assert_eq!(field(&output, "cells"), "8");
+    assert_eq!(
+        std::fs::metadata(&path).expect("stat").len().to_string(),
+        field(&output, "bytes")
+    );
+
+    // The file is a real project, not a shape that merely looks like one: it
+    // loads through the same loader `render --project` uses, its template is the
+    // one the library ships, and every cell is empty.
+    let project = Project::load(&path).expect("the written project loads");
+    let doc = project.doc();
+    let shipped = templates::get("mosaic-8-s14").expect("registered");
+    assert_eq!(doc.template, shipped);
+    assert_eq!(doc.canvas.aspect(), doc.template.aspect);
+    assert_eq!(doc.cells.len(), doc.template.slots.len());
+    assert!(doc.cells.iter().all(|cell| cell.source.is_none()));
+    assert_eq!(doc.doc_version, pixlay_core::DOC_VERSION);
+    assert!(
+        project
+            .sources()
+            .expect("no missing files")
+            .iter()
+            .all(Option::is_none)
+    );
+
+    // And it renders: an empty project renders a blank sheet, which is the
+    // documented behavior of an empty cell.
+    let rendered = run(&[
+        "render",
+        "--project",
+        path.to_str().unwrap(),
+        "--dpi",
+        "72",
+        "--out",
+        dir.join("new.png").to_str().unwrap(),
+    ]);
+    assert_eq!(code(&rendered), 0, "{}", stderr(&rendered));
+    assert_eq!(field(&rendered, "occupied"), "0");
+
+    // `init` never overwrites: the second run fails with the path named, and the
+    // file is untouched.
+    let before = std::fs::read_to_string(&path).expect("read");
+    let again = run(&[
+        "init",
+        "--template",
+        "mosaic-8-s14",
+        "--out",
+        path.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&again), 2, "{}", stderr(&again));
+    assert!(
+        stdout(&again).is_empty(),
+        "stdout must stay empty on failure"
+    );
+    assert!(stderr(&again).contains("new.pixlay"), "{}", stderr(&again));
+    assert_eq!(std::fs::read_to_string(&path).expect("read"), before);
+
+    // Same input, same bytes: init carries no timestamp.
+    let other = dir.join("other.pixlay");
+    let first = std::fs::read_to_string(&path).expect("read");
+    let _ = std::fs::remove_file(&path);
+    run(&[
+        "init",
+        "--template",
+        "mosaic-8-s14",
+        "--out",
+        path.to_str().unwrap(),
+    ]);
+    assert_eq!(std::fs::read_to_string(&path).expect("read"), first);
+
+    // A different template is a different project, and every template the
+    // library lists inits successfully.
+    run(&[
+        "init",
+        "--template",
+        "grid-4-2x2",
+        "--out",
+        other.to_str().unwrap(),
+    ]);
+    let other_doc = CollageDoc::load(&other).expect("loads");
+    assert_eq!(other_doc.template.slots.len(), 4);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn init_and_templates_keep_the_usage_and_locale_rules() {
+    let dir = out_dir("init-usage");
+
+    // Usage errors: unknown template and a non-.pixlay output, both exit 1 with
+    // an empty stdout. The unknown name lists what the build knows.
+    let unknown = run(&[
+        "init",
+        "--template",
+        "nope",
+        "--out",
+        dir.join("x.pixlay").to_str().unwrap(),
+    ]);
+    assert_eq!(code(&unknown), 1);
+    assert!(stdout(&unknown).is_empty());
+    assert!(
+        stderr(&unknown).contains("mosaic-8-s14"),
+        "{}",
+        stderr(&unknown)
+    );
+
+    let bad_extension = run(&[
+        "init",
+        "--template",
+        "mosaic-8-s14",
+        "--out",
+        dir.join("x.json").to_str().unwrap(),
+    ]);
+    assert_eq!(code(&bad_extension), 1);
+    assert!(stdout(&bad_extension).is_empty());
+    assert!(
+        stderr(&bad_extension).contains("x.json"),
+        "{}",
+        stderr(&bad_extension)
+    );
+
+    // Missing required flags, and a flag that belongs to another subcommand.
+    for args in [
+        vec!["init", "--out", "x.pixlay"],
+        vec!["init", "--template", "mosaic-8-s14"],
+        vec!["templates", "--out", "x.png"],
+        vec!["templates", "--dpi", "300"],
+        vec![
+            "init",
+            "--template",
+            "mosaic-8-s14",
+            "--out",
+            "x.pixlay",
+            "--stats",
+        ],
+    ] {
+        let output = run(&args);
+        assert_eq!(code(&output), 1, "{args:?}: {}", stderr(&output));
+        assert!(stdout(&output).is_empty(), "{args:?} wrote to stdout");
+        assert!(!stderr(&output).is_empty(), "{args:?} said nothing");
+    }
+
+    // stdout and stderr are byte-identical under any locale, on the success and
+    // the failure branch alike.
+    let out = dir.join("locale.pixlay");
+    for (lang, all) in [
+        ("C", "C"),
+        ("zh_CN.UTF-8", "zh_CN.UTF-8"),
+        ("de_DE.UTF-8", "de_DE.UTF-8"),
+    ] {
+        let listed = run_in(&["templates", "--json"], None, Some((lang, all)));
+        assert_eq!(code(&listed), 0, "{lang}: {}", stderr(&listed));
+        assert!(!listed.stdout.is_empty());
+        if lang == "C" {
+            std::fs::write(dir.join("reference.json"), &listed.stdout).expect("write");
+        } else {
+            assert_eq!(
+                listed.stdout,
+                std::fs::read(dir.join("reference.json")).expect("read"),
+                "templates changed under LANG={lang}"
+            );
+        }
+        let _ = std::fs::remove_file(&out);
+        let created = run_in(
+            &[
+                "init",
+                "--template",
+                "strip-2-2x1",
+                "--out",
+                out.to_str().unwrap(),
+            ],
+            None,
+            Some((lang, all)),
+        );
+        assert_eq!(code(&created), 0, "{lang}: {}", stderr(&created));
+        assert!(created.stderr.is_empty());
+    }
+    // The failure branch: a relative path keeps the message free of machine text.
+    let mut messages = Vec::new();
+    for (lang, all) in [("C", "C"), ("zh_CN.UTF-8", "zh_CN.UTF-8")] {
+        let output = run_in(
+            &["init", "--template", "mosaic-8-s14", "--out", "x.png"],
+            Some(&dir),
+            Some((lang, all)),
+        );
+        assert_eq!(code(&output), 1);
+        assert!(stdout(&output).is_empty());
+        messages.push(stderr(&output));
+    }
+    assert_eq!(messages[0], messages[1], "{messages:?}");
+    let _ = std::fs::remove_dir_all(&dir);
 }

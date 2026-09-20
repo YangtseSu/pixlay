@@ -7,9 +7,11 @@
 //! The command contract (frozen in S1, `docs/CONTRACT.md`):
 //!
 //! ```text
-//! pixlay-render render --project <file.pixlay> --dpi <n> --out <file>
-//! pixlay-render render --template <name> --dpi <n> --out <file>   # no photos
-//! pixlay-render probe  --project <file.pixlay>
+//! pixlay-render render    --project <file.pixlay> --dpi <n> --out <file>
+//! pixlay-render render    --template <name> --dpi <n> --out <file>   # no photos
+//! pixlay-render probe     --project <file.pixlay>
+//! pixlay-render templates [--aspect <ratio>] [--json]
+//! pixlay-render init      --template <name> --out <file.pixlay>
 //! ```
 //!
 //! * stdout carries only the machine-readable result (sorted `key = value`

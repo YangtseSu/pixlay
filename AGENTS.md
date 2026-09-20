@@ -32,9 +32,10 @@ longer? If so, cut it.
 
 Of the last two: the second one produces a real image, and you must look at it directly.
 **If you cannot see the image, do not judge whether the render is correct.**
-(That command has been valid since S1: `mosaic-8-s14` is provided by `pixlay-cli`'s template
-registry, and `--stats` makes each round's ruler machine-readable; S2 replaces it with geometry
-emitted by the generator, keeping the name and the `templateVersion`.)
+`mosaic-8-s14` has been valid since S1 and, since S2, is emitted by the template generator
+(`pixlay-core/src/templates/generator.rs`) under the same name and the same `templateVersion`;
+`--stats` makes each round's ruler machine-readable. `pixlay-render templates` lists what this build
+ships, and `pixlay-render init --template <name> --out x.pixlay` writes a project to start from.
 
 Measurement rules that go with it:
 

@@ -10,7 +10,7 @@ use std::io::Write;
 use pixlay_core::Project;
 use pixlay_render::Images;
 
-use crate::args::{self, Command, ProbeArgs, RenderArgs, Source, USAGE};
+use crate::args::{self, Command, InitArgs, ProbeArgs, RenderArgs, Source, TemplatesArgs, USAGE};
 use crate::encode::Format;
 use crate::report::Report;
 use crate::{content, encode, probe, stats};
@@ -42,7 +42,113 @@ pub fn run(argv: &[OsString]) -> Result<u8, Failure> {
         }
         Command::Render(args) => render(args),
         Command::Probe(args) => probe(args),
+        Command::Templates(args) => list_templates(args),
+        Command::Init(args) => init_project(args),
     }
+}
+
+/// `templates`: the library, optionally filtered to one canvas shape.
+///
+/// This is the query S7's picker runs and the one a caller needs before it can
+/// name a template: a canvas and a template only fit each other when their aspect
+/// ratios agree, and the canvas is what the user picks first. The list stays in
+/// library order (by slot count), so the output is stable.
+fn list_templates(args: TemplatesArgs) -> Result<u8, Failure> {
+    // The filter is the library's own query, so `templates --aspect 4:3` and the
+    // picker cannot disagree about what "the same aspect" means.
+    let listed = match args.aspect {
+        Some(aspect) => pixlay_core::templates::of_aspect(aspect),
+        None => pixlay_core::templates::all(),
+    };
+    let mut report = Report::new();
+    report.text("status", "ok");
+    report.text("command", "templates");
+    if let Some(aspect) = args.aspect {
+        report.text("aspect", ratio_label(aspect));
+    }
+    for (index, template) in listed.iter().enumerate() {
+        let prefix = report.row("template", index);
+        report.text(&format!("{prefix}.name"), template.name.clone());
+        report.int(&format!("{prefix}.slots"), template.slots.len() as i64);
+        report.text(&format!("{prefix}.aspect"), ratio_label(template.aspect));
+        report.int(&format!("{prefix}.version"), i64::from(template.version));
+    }
+    report.int("count", listed.len() as i64);
+    emit(&report, args.json);
+    Ok(EXIT_SUCCESS)
+}
+
+/// `init`: a template as a loadable, photo-free project.
+///
+/// Callers should not have to hand-write `.pixlay` JSON — the format has one
+/// canonical writer (`CollageDoc::to_json`) and this is where they reach it. The
+/// file is never overwritten: replacing a project the user already has is not
+/// something a command called `init` should do quietly.
+fn init_project(args: InitArgs) -> Result<u8, Failure> {
+    let template = pixlay_core::templates::get(&args.template).ok_or_else(|| {
+        Failure::Usage(format!(
+            "unknown template {}; this build knows: {}",
+            args.template,
+            pixlay_core::templates::names().join(", ")
+        ))
+    })?;
+    let doc = pixlay_core::templates::document(&template);
+    // Validating before writing is cheap, and it keeps a bug in the library from
+    // shipping as an unloadable file.
+    doc.validate()
+        .map_err(|error| Failure::Failed(error.to_string()))?;
+    if args.out.exists() {
+        return Err(Failure::Failed(format!(
+            "{} exists; init never overwrites a project",
+            args.out.display()
+        )));
+    }
+    let json = doc
+        .to_json()
+        .map_err(|error| Failure::Failed(error.to_string()))?;
+    std::fs::write(&args.out, &json)
+        .map_err(|error| Failure::Failed(format!("{}: {error}", args.out.display())))?;
+
+    let mut report = Report::new();
+    report.text("status", "ok");
+    report.text("command", "init");
+    report.text("template", doc.template.name.clone());
+    report.int("version", i64::from(doc.template.version));
+    report.text("aspect", ratio_label(doc.template.aspect));
+    report.text(
+        "canvas",
+        format!("{}x{}", doc.canvas.width_mm, doc.canvas.height_mm),
+    );
+    report.int("cells", doc.cells.len() as i64);
+    report.int("bytes", json.len() as i64);
+    emit(&report, args.json);
+    Ok(EXIT_SUCCESS)
+}
+
+/// `W:H` when the ratio is one a person would name, a decimal otherwise.
+///
+/// The recipes declare ratios as divisions of small integers (`4/3` is
+/// `1.3333333333333333`), and a caller comparing `--aspect` values by hand reads
+/// `4:3` far more easily. Matching is on the numeric value, so a ratio that only
+/// prints approximately stays usable.
+fn ratio_label(aspect: f64) -> String {
+    // Small-integer ratios cover every canvas shape the product has a name for.
+    for (width, height) in [
+        (1, 1),
+        (4, 3),
+        (3, 2),
+        (16, 9),
+        (2, 3),
+        (3, 4),
+        (9, 16),
+        (2, 1),
+        (1, 2),
+    ] {
+        if (f64::from(width) / f64::from(height) - aspect).abs() <= 1e-12 {
+            return format!("{width}:{height}");
+        }
+    }
+    format!("{aspect:.6}")
 }
 
 fn render(args: RenderArgs) -> Result<u8, Failure> {

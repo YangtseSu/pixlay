@@ -96,16 +96,26 @@ limit that is not in this table is a contract gap.
 ## 3. Templates
 
 - `Slot::outline` is a **closed polygon** (the last point connects back to the first), with ≥ 3 vertices, finite, inside `[0,1]`, area > 0.
+  Polygons only, no curves: S2's review offered "restrict the crop geometry to polygons, or declare a curve discretization tolerance",
+  and polygons are what make area, overlap and holes decidable rather than approximate. A path is the outline's command list — **no SVG parser** is involved.
 - `Slot::area` is the declared area and is cross-checked against the outline's actual area (tolerance 1e-6). The two are not allowed to drift.
-- S2's complete invariants (pairwise zero overlap, no interior hole in the union, cut-type areas summing to exactly 1.0) live in S2's tests;
-  v1's `Template` shape already holds them (the outline is a command list, no SVG parser needed).
+- S2 owns the complete invariants (pairwise zero overlap, no interior hole in the union, cut-type areas summing to exactly 1.0);
+  they live in `crates/pixlay-core/tests/templates.rs`.
+- **The library is a generator plus committed data** (`pixlay_core::templates`): `templates/generator.rs` holds one recipe per
+  template on an integer lattice, `templates/frozen.rs` is the committed geometry a build ships, and the module serves both.
+  Regeneration is `cargo run -p pixlay-core --bin pixlay-gen-templates` (a **committed bin, not `build.rs`** — the frozen geometry is an
+  interface, so rewriting it must be a reviewed commit); the determinism test runs that bin into a scratch path and compares the bytes.
+- **Coordinates are dyadic**: every vertex is an integer multiple of `1/32` of a canvas edge, so every area is an exact binary value and
+  "the areas sum to exactly 1.0" is an equality, not a tolerance. The coverage check in the tests depends on it too: `512` samples per axis
+  is a multiple of `32` and the samples sit at cell centers, so no sample lands on an edge and none can miss a feature.
+- **The matrix is grouped by aspect ratio**, because a canvas and a template only fit each other when their ratios agree (see the limit table).
+  The families are `strip-<slots>-<cols>x<rows>` (one band), `grid-<slots>-<cols>x<rows>` (a rectangular tiling, `g` = with a gutter) and
+  `mosaic-<slots>-<variant>` (mixed splits or a non-rectangular slot) — plus the frozen `mosaic-8-s14`, whose name, `version`, aspect,
+  slot order and coordinates are unchanged by S2 (S1's hand-written geometry is now produced by the generator instead of written out).
 - **Geometry version and document version are separate**: `template.version` follows the template family, `docVersion` follows the format.
-- **The template library lives in `pixlay-core`** (`pixlay_core::templates`): a template is document data, not a CLI resource —
-  the GUI relies on it for the template selector, the CLI relies on it for the smoke render. S1's `mosaic-8-s14` is hand-written cut geometry
-  (one irregular slot, coordinates that are integer multiples of 1/8, declared area summing to **exactly** 1.0); S2 replaces it with a generator but **the name and the version do not change**;
-  its invariants (zero overlap, no holes, area sum, determinism) are already pinned down by `crates/pixlay-core/tests/templates.rs`.
 - **The canvas aspect ratio must agree with what the template declares** (tolerance 1e-6): the geometry is normalized, and declaring a canvas with a different ratio silently
   stretches the template, while this error is invisible no matter which layer you look at it from.
+- **The library covers every slot count from 2 to 10**, at least one template each; the CLI's `templates` reports the matrix and filters it by aspect ratio.
 
 ## 4. Rendering: `draw(doc, images, target)`
 
@@ -135,9 +145,11 @@ Images                            // slot → Bitmap; absent = that cell is left
 ## 5. CLI: the machine operating surface
 
 ```text
-pixlay-render render --project <file.pixlay> --dpi <n> --out <file>
-pixlay-render render --template <name> --dpi <n> --out <file>   # no project, no photos
-pixlay-render probe  --project <file.pixlay>
+pixlay-render render    --project <file.pixlay> --dpi <n> --out <file>
+pixlay-render render    --template <name> --dpi <n> --out <file>   # no project, no photos
+pixlay-render probe     --project <file.pixlay>
+pixlay-render templates [--aspect <ratio>] [--json]
+pixlay-render init      --template <name> --out <file.pixlay>
 ```
 
 | Item | Contract |
@@ -146,7 +158,7 @@ pixlay-render probe  --project <file.pixlay>
 | stability | same input, same output; the results carry no timestamps and no absolute paths. `--stats`'s `ms`/`encode_ms`/`peak_rss_mb` are the **only** exception (they are the measurement) |
 | locale | under any value of `LANG` / `LC_ALL` / `LANGUAGE`, stdout and stderr are **byte-identical** (including the error branches) |
 | interaction | does not read stdin, does not wait for a prompt, works with no TTY; `--help` covers every flag and every exit code |
-| exit codes | 0 success / 1 usage error / 2 project, decode or render failure / 2 probe verdict not passed |
+| exit codes | 0 success / 1 usage error / 2 project, decode, render or write failure / 2 probe verdict not passed |
 | usage error and "failed to produce a result" | stdout stays empty; stderr names the failing path (or the missing flag) |
 | probe verdict not passed | **not "failed to produce a result"**: the numbers are the result, so stdout emits all the numbers as usual, with `status = failed` and `passed = false`, stderr emits a one-line summary, and the exit code is 2 |
 | probe lower bound | when `occupied = 0` (all empty slots) the verdict is **failed**: every question the probe asks is about some slot, and with no slot there is no conclusion. Previously it "passed vacuously" (status=ok, exit 0) |
@@ -154,6 +166,17 @@ pixlay-render probe  --project <file.pixlay>
 | `--preview-px n` | n pixels on the long edge; the same `draw`, only `scale` changes |
 | `--stats` | appends `{ms, encode_ms, peak_rss_mb, icc}`; `render` emits all four, `probe` emits no `encode_ms` (it does not encode). The measurement rules are below |
 | `probe` | samples and outputs numbers (in-slot photo color, out-of-slot white background, shared-edge blended pixels, three-color convex combination residual), exit code 2 when the verdict is not passed |
+
+**S2's two subcommands report the template library and create a project.** They add a data source, not a new failure mode:
+
+| Item | `templates` | `init` |
+|---|---|---|
+| shape | `template.<i>.{name,slots,aspect,version}` plus `count` (and `aspect`, when filtering) | `template`, `version`, `aspect`, `canvas`, `cells`, `bytes` |
+| `--aspect` | the only flag it takes: accepts `W:H` (`4:3`) or a decimal, matched against the template's declared ratio within `ASPECT_TOLERANCE` (the same comparison `CollageDoc::validate` applies). A ratio nothing was authored for is `count = 0` and exit 0 | — |
+| `--template` / `--out` | — | both required; `--out` must end in `.pixlay` |
+| refusal | any other flag (`--dpi`, `--project`, …) is a usage error (exit 1) | same; and an existing `--out` path is a **failure** (exit 2) because `init` never overwrites a project |
+| unknown template | — | usage error (exit 1), stderr lists the names this build knows |
+| content | the whole library in library order (by slot count) | a photo-free default project at the template's aspect on a 1189 mm long edge, every cell empty, written by `CollageDoc::to_json` and loadable by `Project::load` |
 
 Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wall clock, with compositing and encoding reported separately.
 
@@ -177,7 +200,8 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
 - curves / levels / masking / brushes; all of them in `AGENTS.md`'s "Directions not to improve" → "Not doing"
 - multi-page / multi-canvas projects
 - **version migration** for `.pixlay` (not written; higher refused, lower refused too, see "Version policy")
-- **writing `.pixlay`** (S1 is read-only; the equivalence of the atomic write tmp+rename and the on-disk path is S6.5's job)
+- **writing an edited `.pixlay`** (S6.5 owns saving a document the user changed, atomic tmp+rename included). `init` writes a *new* file
+  and refuses to overwrite an existing one, which is a creation, not a save: it never touches a document that already holds the user's work
 - MCP server, REPL / watch, natural-language arguments, reading defaults from a config file
 
 ## 7. Implemented later but the shape is already frozen
@@ -185,7 +209,7 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
 | Item | Lands in | Shape |
 |---|---|---|
 | clamp math | S3 | `CropTransform` + `CropFit { transform, rotation_limited }` (the types are already in `pixlay-core`) |
-| template generator | S2 | `Template`'s outline command list; the `templates --json` / `init` subcommands |
+| template generator | **S2, landed** | `pixlay_core::templates` (`generator` recipes + the committed `frozen` data) and the `templates` / `init` subcommands; see §3 and §5 |
 | command history / hit testing / project writing | S6.5 | not in the S1 contract; `CollageDoc` is their state carrier |
 | text rendering | S5 | `TextLayer` is already in the contract; `draw` refuses it for now |
 | encoding and metadata | S6 | for now the `image` crate stands in; S6 replaces it with a single pass writing pixels + chroma sampling + ICC + DPI |
