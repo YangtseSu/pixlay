@@ -145,7 +145,7 @@ fn document_from_a_newer_version_is_rejected() {
 
 #[test]
 fn older_versions_are_refused_with_an_actionable_message() {
-    // Policy (decided at the S1 review, docs/CONTRACT.md §一): adding a field does
+    // Policy (decided at the S1 review, docs/CONTRACT.md §1): adding a field does
     // NOT bump `DOC_VERSION`, so a version mismatch always means a breaking change
     // and the document cannot be interpreted. There is no migration, so the message
     // has to tell the user what to do instead of leaving them stuck.

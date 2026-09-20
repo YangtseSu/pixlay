@@ -400,7 +400,7 @@ fn stats_adds_measurements_without_changing_the_rest() {
     assert!(field(&with_stats, "ms").parse::<f64>().unwrap() > 0.0);
     assert_eq!(field(&with_stats, "icc"), "none");
 
-    // Everything except the measured fields is identical, so the尺子 adds
+    // Everything except the measured fields is identical, so the ruler adds
     // fields rather than changing the report.
     let strip = |text: &str| {
         text.lines()

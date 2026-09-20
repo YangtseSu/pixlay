@@ -1,298 +1,298 @@
-# Pixlay 实施步骤
+# Pixlay implementation steps
 
-按顺序执行。**一次只做一步**,做完一步再开下一步。
+Run them in order. **Do one step at a time**; finish a step before starting the next.
 
-给新会话的第一句话:
+The first sentence for a new session:
 
-> 读 `AGENTS.md`,再读 `docs/STEPS.md`。只做「当前进度」指向的那一步,不要提前做后面的。
-> 每步做完先跑该步的验证命令,把出口判据变成测试,然后更新本文件的「当前进度」。
+> Read `AGENTS.md`, then read `docs/STEPS.md`. Do only the step the "Current progress" points at, and do not do the later ones ahead of time.
+> After finishing each step, first run that step's verification command, turn the exit criteria into tests, then update this file's "Current progress".
 
-- **当前进度: S1 — 已完成并通过契约评审(2026-09-21,人行;契约读本 `docs/CONTRACT.md`,实测与偏离见「S1 结果」)
-  → 下一步 S2(新会话)**
-- 硬约束与不变量在 `AGENTS.md`,本文件只排顺序与出口判据,不重复其内容。
-- 每一步开始前先跑一次 `cargo test`,确认基线是绿的。
-- **文末《审查补充》是本文件的补丁层**:每步新增的机器判据、待决策项、实测基线都在那里;
-  执行某一步时同时读该步在补丁层里的条目。
-- **S0 的 spike 已随 S1 删除**(`crates/pixlay-cli/src/bin/a0-spike.rs`):S0 一次性的探针职责已由
-  `pixlay-render probe` 接管,数字留在本文件「S0 结果」与「六、实测基线」。
+- **Current progress: S1 — done and passed contract review (2026-09-21, human; the contract reading is `docs/CONTRACT.md`, measurements and deviations in "S1 results")
+  → next S2 (new session)**
+- Hard constraints and invariants are in `AGENTS.md`; this file only orders the steps and gives the exit criteria, and does not repeat their content.
+- Before starting each step, run `cargo test` once to confirm the baseline is green.
+- **The "Review addendum" at the end is this file's patch layer**: each step's new machine criteria, open decisions and measured baselines are all there;
+  when executing a step, read that step's entries in the patch layer at the same time.
+- **S0's spike was deleted along with S1** (`crates/pixlay-cli/src/bin/a0-spike.rs`): S0's one-off probe duty has been
+  taken over by `pixlay-render probe`, and the numbers stay in this file's "S0 results" and "6. Measured baseline".
 
-## 切分原则
+## Splitting principles
 
-1. 每步都必须有一个**能机器判定**的出口。没有可判定出口的"步骤"不是步骤。
-2. 先做能推翻整个选型的那一件事(S0)。
-3. 契约先冻结,再上量(S1)。
-4. **GUI 放最后(S7)**——S0–S6 全部在无窗口、无截图的快循环里完成。
-5. **会话边界对齐「闸口」,不对齐步骤数。** 一步做完不必换会话,但这三种情况**必须**停:
-   该步结尾有**人工判据或人工决策**(S0 的 Cairo 去留、S1 的契约评审、各步的目视质量、S7 的三分钟主路径);
-   该步产出**不可逆的契约或固化数据**(S1 的 `CollageDoc` 形状、S2 的 `templateVersion`、S4 的解码后端
-   决定 S8 的 `depends`);该步**可能推翻前序选型**。
-   *理由:同一个会话里,模型会把自己没落盘的草稿当成既定前提继续盖楼;契约评审要由"没写过这份草稿"的会话
-   执行才有意义。*
-   *前提:边界成立的条件是**结论已落盘**(测试里的阈值常量 + 本文件补丁层的实测数字 + 「当前进度」行)。
-   没落盘的结论换会话等于重测一遍。*
-   按此规则的天然边界是 `S0 ┊ S1 ┊ S2+S3 ┊ S4 ┊ S5+S6 ┊ S7 ┊ S8`(六个会话,不是九个)。
+1. Every step must have a **machine-checkable** exit. A "step" with no checkable exit is not a step.
+2. First do the one thing that can overturn the whole choice of technology (S0).
+3. Freeze the contract first, then scale up (S1).
+4. **Put the GUI last (S7)** — S0–S6 all complete in a windowless, screenshot-free fast loop.
+5. **Session boundaries line up with "gates", not with step counts.** Finishing a step does not require a new session, but these three cases **must** stop:
+   the step ends with a **human criterion or a human decision** (S0's Cairo keep-or-drop, S1's contract review, each step's visual quality, S7's three-minute main path);
+   the step produces an **irreversible contract or frozen data** (S1's `CollageDoc` shape, S2's `templateVersion`, S4's decoding backend
+   deciding S8's `depends`); the step **may overturn an earlier choice of technology**.
+   *Rationale: within one session, the model treats its own unwritten draft as an established premise and keeps building on it; a contract review is only meaningful
+   when executed by a session that did not write that draft.*
+   *Precondition: a boundary holds only if the **conclusion is already on disk** (the threshold constants in the tests + the measured numbers in this file's patch layer + the "Current progress" line).
+   A conclusion that is not on disk means switching session equals measuring it again.*
+   By this rule the natural boundaries are `S0 ┊ S1 ┊ S2+S3 ┊ S4 ┊ S5+S6 ┊ S7 ┊ S8` (six sessions, not nine).
 
-## 需要人工介入的地方
+## Where humans must step in
 
-- **S0 结束后**:看数字,决定 Cairo 能不能用。**已过(2026-09-20,人行):Cairo 保留。**
-- **S1 结束后**:评审契约。这是唯一必须由人确认的地方——契约错了后面七步全废,而模型自己看不出"这个契约将来会不够用"。
-  评审前先看「五、待决策」:那张表里的每一条都会改变契约形状。
-  **已过(2026-09-21,人行):契约通过,缺陷按评审意见修毕(见「S1 结果」的裁定块)。**
+- **After S0 ends**: look at the numbers and decide whether Cairo is usable. **Passed (2026-09-20, human): Cairo stays.**
+- **After S1 ends**: review the contract. This is the only place a human must confirm — if the contract is wrong, the seven steps after it are all wasted, and the model itself cannot see that "this contract will not be enough later".
+  Before reviewing, first read "5. Open decisions": every entry in that table changes the contract's shape.
+  **Passed (2026-09-21, human): the contract passes, and the defects were fixed per the review's comments (see the ruling block in "S1 results").**
 
-**闸口的收口动作**见 `AGENTS.md`「会话与落盘纪律」:裁定块 + 进度行 + 本条 + `docs/CONTRACT.md` + commit,
-五条缺一不算做完。
+**The gate's closing action** is in `AGENTS.md` "Session and persistence discipline": a ruling block + a progress line + this item + `docs/CONTRACT.md` + commit,
+and it is not done if one of the five is missing.
 
-其余步骤模型的自动闭环即可完成,除了**目视判据**(能算的已在「三」里换成可算量,剩下这些只能看):
-S0 的文字可读性、S4 的降采样质量、S5 的避头尾与标点挤压手感、S7 的"三分钟主路径"与界面文案有无线漏包装、
-S7 的 GNOME HIG 目视清单(`docs/HIG-REVIEW.md`:高对比 / 大字体 / 纯键盘 / 屏幕阅读器 / 触摸与 OSK)。
+The remaining steps complete through the model's automatic loop, except the **visual criteria** (what could be computed has already been turned into computable quantities in "3"; the rest can only be looked at):
+S0's text readability, S4's downsampling quality, S5's kinsoku and punctuation squeezing feel, S7's "three-minute main path" and whether interface copy has any missed wrapping,
+S7's GNOME HIG visual checklist (`docs/HIG-REVIEW.md`: high contrast / large text / keyboard-only / screen reader / touch and OSK).
 
 ---
 
-## S0 · Cairo 极限 spike
+## S0 · Cairo limit spike
 
-**性质:可抛弃。** 这一步允许脏、允许硬编码、允许一次性脚本。
+**Nature: disposable.** This step may be dirty, may hardcode, may use one-off scripts.
 
-- **目标**:证明 Cairo 能渲出 A0@300dpi。
-- **做什么**:一个硬编码的 `[[bin]]`,用 `cairo::ImageSurface` 建 9933×14043 表面,画一条不规则多边形 clip,贴一张带仿射变换的照片,叠一行旋转的 CJK 文字,写出 PNG 与 JPEG。
-- **出口判据**:
-  - 输出文件存在,`identify` 尺寸为 9933×14043
-  - 合成耗时、峰值内存有具体数字
-  - 无崩溃、无显存/内存耗尽
-  - 照片在格子内、格子外无渗色、文字可读
-- **不做**:不做 UI、不做模板库、不做取景数学、不做工程文件。
-- **已做(2026-09-20)**:实现是 `crates/pixlay-cli/src/bin/a0-spike.rs`(可抛弃,一次性的硬编码 `[[bin]]`),
-  判据、数字与给 S1 的交接见「S0 结果」;`cargo test` 里有 5 条测试在 1/4 A0 尺寸上跑同一套探针。
-  **该 spike 已在 S1 删除**(见上);本节的数字是历史记录,保留下来的判据由 `pixlay-render probe` 承担。
+- **Goal**: prove Cairo can render A0@300dpi.
+- **Work**: one hardcoded `[[bin]]` that builds a 9933×14043 surface with `cairo::ImageSurface`, draws an irregular polygon clip, blits a photo with an affine transform, overlays one line of rotated CJK text, and writes PNG and JPEG.
+- **Exit criteria**:
+  - the output file exists and `identify` reports a size of 9933×14043
+  - compositing time and peak memory have concrete numbers
+  - no crash, no video-memory / memory exhaustion
+  - the photo is inside the slot, there is no bleeding outside the slot, and the text is readable
+- **Not doing**: no UI, no template library, no framing math, no project file.
+- **Done (2026-09-20)**: the implementation is `crates/pixlay-cli/src/bin/a0-spike.rs` (disposable, a one-off hardcoded `[[bin]]`),
+  and its criteria, numbers and handoff to S1 are in "S0 results"; `cargo test` has 5 tests that run the same probe set at 1/4 A0 size.
+  **That spike was deleted in S1** (see above); this section's numbers are a historical record, and the criteria that were kept are carried by `pixlay-render probe`.
 
-## S1 · 冻结最小契约 + 反馈回路
+## S1 · Freeze the minimal contract + feedback loop
 
-- **目标**:让 CLI 闭环成立,后续所有步骤都在它上面做。
-- **做什么**:
-  - `pixlay-core`: `CollageDoc` / `CanvasSpec` / `Template` / `Slot` / `TextLayer` / `CropTransform` v1,带 serde 与 `templateVersion`
-  - `pixlay-render`: 唯一的 `draw(doc, target)`
+- **Goal**: make the CLI loop hold, and every later step is built on top of it.
+- **Work**:
+  - `pixlay-core`: `CollageDoc` / `CanvasSpec` / `Template` / `Slot` / `TextLayer` / `CropTransform` v1, with serde and `templateVersion`
+  - `pixlay-render`: the single `draw(doc, target)`
   - `pixlay-cli`: `render --project x.pixlay --dpi 300 --out y.jpg`
-  - fixtures:6 张测试图(EXIF Orientation=6、带 alpha 的 PNG、竖构图、横构图、4:3、方图)
-  - 金标准像素测试
-- **出口判据**:
-  - serde 往返:序列化再反序列化后逐字段相等
-  - `pixlay-cli render` 能读 `.pixlay` 出图
-  - CLI 的机器面成立:无 TTY、无 stdin 时命令照常成功;stdout 只有机器可读结果;退出码符合契约;
-    `LANG` 变化不改变 stdout/stderr 文本
-  - `probe` 能用数字回答"格内是否变、格外是否干净、缝上混色多少"
-  - 把像素阈值收紧到不可能通过时,测试**必须变红**(验证测试真的在校验)
-  - `pixlay-core` 与 `pixlay-render` 的 `cargo test` 不需要显示器
-- **不做**:不做 GUI、不做多模板、不做调色、不做文字排版。
-- **人工**:契约评审。**已过(2026-09-21,人行)——裁定见下方「S1 评审裁定」。**
+  - fixtures: 6 test images (EXIF Orientation=6, a PNG with alpha, portrait, landscape, 4:3, square)
+  - golden-image pixel tests
+- **Exit criteria**:
+  - serde round-trip: field-by-field equality after serializing and deserializing
+  - `pixlay-cli render` can read a `.pixlay` and produce an image
+  - the CLI's machine surface holds: with no TTY and no stdin the command still succeeds; stdout carries machine-readable results only; exit codes match the contract;
+    a change of `LANG` does not change the stdout/stderr text
+  - `probe` can answer with numbers "did the slot change, is everything outside it clean, how much blends across the seam"
+  - when the pixel thresholds are tightened so that passing is impossible, the tests **must go red** (verifying that the tests really check)
+  - `cargo test` for `pixlay-core` and `pixlay-render` needs no display
+- **Not doing**: no GUI, no multiple templates, no color grading, no text layout.
+- **Human**: the contract review. **Passed (2026-09-21, human) — the ruling is in "S1 review ruling" below.**
 
-**S1 结果** `[2026-09-20;契约读本 `docs/CONTRACT.md`;判据全在仓库内的测试里]`
+**S1 results** `[2026-09-20; the contract reading is `docs/CONTRACT.md`; all criteria are in the tests in the repository]`
 
-出口判据逐条落地:
+The exit criteria, item by item:
 
-| 判据 | 落点 | 实测 |
+| Criterion | Landing point | Measured |
 |---|---|---|
-| serde 往返逐字段相等 | `pixlay-core/tests/contract.rs` | 往返相等 + 字段名与 `[x,y]` 形状断言;未知字段、更高 `docVersion`、越界槽数/DPI/画布/取景全被拒 |
-| `render` 能读 `.pixlay` 出图 | `pixlay-cli/tests/cli.rs` | PNG/JPEG 都出;尺寸 = 画布 mm × dpi 的取整 |
-| CLI 机器面 | 同上 | 无 TTY、stdin 有数据也照常;四种 `LANG` 下 stdout/stderr 逐字节相同(含错误分支);退出码 0/1/2 各有覆盖;失败时 stdout 为空(唯一例外:`probe` 判定不通过——数字就是结果,照常出) |
-| `probe` 用数字回答三问 | `pixlay-cli/src/probe.rs` | 格内色精确匹配、格外非白计数、共用边混色像素数与三色凸组合残差 |
-| 阈值收紧必须变红 | `pixlay-render/tests/render.rs::the_comparison_can_actually_fail` | 永久自检:一列像素的扰动(等效 RMSE 12)必须超阈值,恒等必须为 0 |
-| core/render 测试无需显示器 | 全部测试 | 无 `DISPLAY`/`WAYLAND_DISPLAY` 下全绿 |
+| serde round-trip field-by-field equality | `pixlay-core/tests/contract.rs` | round-trip equality + assertions on field names and the `[x,y]` shape; unknown fields, a higher `docVersion`, and out-of-range slot counts/DPI/canvas/framing are all rejected |
+| `render` can read a `.pixlay` and produce an image | `pixlay-cli/tests/cli.rs` | both PNG and JPEG are produced; size = the rounding of the canvas mm × dpi |
+| CLI machine surface | same as above | no TTY and data on stdin still work as usual; stdout/stderr are byte-identical under four `LANG` values (including the error branches); exit codes 0/1/2 each have coverage; on failure stdout is empty (the only exception: a `probe` criterion not passing — the numbers are the result, and are emitted as usual) |
+| `probe` answers three questions with numbers | `pixlay-cli/src/probe.rs` | exact in-slot color match, out-of-slot non-white count, shared-edge blended pixel count and the three-color convex combination residual |
+| tightened thresholds must go red | `pixlay-render/tests/render.rs::the_comparison_can_actually_fail` | permanent self-check: a perturbation of one column of pixels (equivalent RMSE 12) must exceed the threshold, and identity must be 0 |
+| core/render tests need no display | all tests | all green with no `DISPLAY`/`WAYLAND_DISPLAY` |
 
-**S1 对契约的偏离与补充**(评审时重点看这几条):
+**S1's deviations from and additions to the contract** (look at these in particular during review):
 
-1. `draw` 的签名是 `draw(doc, images, target)`:位图经 `Images`(槽位 → `Bitmap`)传入。
-   `Bitmap` 拥有一个 Cairo 表面,**不是 `Send`/`Sync`**——后台解码交回主线程时交的是裸缓冲,
-   由接收线程建 `Bitmap`,与 GTK 对象不跨线程是同一条纪律。
-2. `Target.scale` 与 `Target.band` 分开:`scale` 给预览,`band` 给 A0 分块(峰值 = 一块 + 位图总和)。
-   实测分块拼接与整图 RMSE 0.033(S0 的 941 MB 峰值因此还有下调空间,留到 S4)。
-3. `draw` 在文档含文字层时**报错**(`TextLayersUnsupported`)而不是静默不画。S5 接上后此错误消失。
-4. `TextLayer` 进了 v1 契约(字段已冻结),但渲染在 S5;`TextFallback.date` 已定义。
-   契约里显式列了 v1 非目标(见 `docs/CONTRACT.md` §六)。
-5. S1 还没有解码器(S4 的事),所以 `--content detail|flat` 用**确定性占位内容**填格子;
-   这个 flag 与 `pixlay-cli/src/content.rs` 在 S4 删除,`probe` 也随之下沉到 `pixlay-imaging`。
-   golden 测试与那 6 张 fixture 都不依赖它——fixture 只被「提交在仓库里」这一条要求
-   (`pixlay-cli/tests/fixtures.rs` 校验 EXIF Orientation=6、PNG alpha 通道、尺寸)。
-6. `--template mosaic-8-s14`:S1 由 `pixlay-cli/src/templates.rs` 手写提供(8 格、cut、
-   一格异形、坐标都是 1/8 的整数倍,所以在二进制浮点里精确),使 `AGENTS.md` 的验证命令从 S1 起可跑。
-   S2 用生成器替换几何,**名字与 `templateVersion` 不变**。
-7. `image` 0.25.10 留了下来(S1 的 PNG/JPEG 编码);`cairo-rs` 的 `png` feature 降级为 dev-only
-   (只给金标准读写)。`pangocairo` 随 spike 离开,回到 S5 再引。已登记进 `AGENTS.md`。
-8. 报告里**不含绝对路径**(`out = ...` 字段已去掉)——同输入同输出这条比"顺手打印输出路径"重要;
-   调用方自己知道它传了什么。
+1. `draw`'s signature is `draw(doc, images, target)`: bitmaps are passed in through `Images` (slot → `Bitmap`).
+   `Bitmap` owns a Cairo surface and **is not `Send`/`Sync`** — what a background decode hands back to the main thread is a bare buffer,
+   and the receiving thread builds the `Bitmap`, the same discipline as GTK objects not crossing threads.
+2. `Target.scale` and `Target.band` are separate: `scale` is for the preview and `band` is for A0 banding (peak = one band + the sum of bitmaps).
+   Measured: band stitching vs the whole image has RMSE 0.033 (so S0's 941 MB peak still has room to come down; left to S4).
+3. When the document contains text layers, `draw` **errors** (`TextLayersUnsupported`) instead of silently not drawing them. Once S5 is hooked up this error disappears.
+4. `TextLayer` went into the v1 contract (its fields are frozen), but rendering is in S5; `TextFallback.date` is already defined.
+   The contract lists the v1 non-goals explicitly (see `docs/CONTRACT.md` §6).
+5. S1 has no decoder yet (that is S4's business), so `--content detail|flat` fills slots with **deterministic placeholder content**;
+   that flag and `pixlay-cli/src/content.rs` are deleted in S4, and `probe` sinks down to `pixlay-imaging` along with it.
+   The golden tests and those 6 fixtures do not depend on it — the fixtures are required only by "committed in the repository"
+   (`pixlay-cli/tests/fixtures.rs` checks EXIF Orientation=6, the PNG alpha channel, and the size).
+6. `--template mosaic-8-s14`: in S1 it is provided by hand in `pixlay-cli/src/templates.rs` (8 slots, a cut,
+   one irregular slot, and coordinates that are all integer multiples of 1/8, hence exact in binary floating point), which lets `AGENTS.md`'s verification command run from S1 on.
+   S2 replaces the geometry with a generator, **keeping the name and the `templateVersion` unchanged**.
+7. `image` 0.25.10 stayed (S1's PNG/JPEG encoding); `cairo-rs`'s `png` feature was demoted to dev-only
+   (only for golden-image read/write). `pangocairo` left with the spike and comes back in S5. Registered in `AGENTS.md`.
+8. The report **contains no absolute paths** (the `out = ...` field was removed) — identical input yielding identical
+   output matters more than "conveniently printing the output path"; the caller already knows what it passed.
 
-**S1 实测**(`--release`,本机):
+**S1 measured** (`--release`, this machine):
 
-| 项 | 值 |
+| Item | Value |
 |---|---|
-| 金标准 RMSE | 0.0(同 build 确定);一列像素错的等效 RMSE 12.0 |
-| 预览 vs 导出(2N 降采样) | RMSE 2.32(阈值 6) |
-| 分块拼接 vs 整图 | RMSE 0.033,最大像素差 2/255,311/463080 字节不同 |
-| 8 格 300dpi 合成(`probe`) | 623 ms,**`VmHWM` 1611 MB**(14043×10532 输出表面 + 8 张格内尺寸位图) |
-| A0 横 10 格 300dpi(整图) | 592 ms 合成 + 2483 ms JPEG 编码,**`VmHWM` 1470 MB**;同一张图分成 16 块渲染降到 **597 MB**(输出尺寸与逐像素和一致) |
-| 8 格 300dpi 编码 JPEG q90 | 3727 ms → 42.5 MB;PNG 未测(无元数据需求,交给 S6) |
-| 缝混色(8 格 11 条共用边,300dpi) | 0.998–1.995 px/行,最宽 2 px,残差最差 0.63/255,`foreign` 全 0 |
-| 目视 | 8 格预览:异形格(橙)包住右下角灰格的两条边;1000 px 模板 smoke 预览:8 色块、无白缝 |
+| golden-image RMSE | 0.0 (deterministic within one build); the equivalent RMSE of one wrong column of pixels is 12.0 |
+| preview vs export (2N downsample) | RMSE 2.32 (threshold 6) |
+| band stitching vs the whole image | RMSE 0.033, max pixel difference 2/255, 311/463080 bytes differ |
+| 8-slot 300dpi compositing (`probe`) | 623 ms, **`VmHWM` 1611 MB** (14043×10532 output surface + 8 bitmaps at in-slot size) |
+| A0 landscape 10 slots 300dpi (whole image) | 592 ms compositing + 2483 ms JPEG encoding, **`VmHWM` 1470 MB**; the same image rendered in 16 bands drops to **597 MB** (output size and the per-pixel sum agree) |
+| 8-slot 300dpi JPEG q90 encoding | 3727 ms → 42.5 MB; PNG not measured (no metadata requirement, left to S6) |
+| seam blended pixels (8 slots, 11 shared edges, 300dpi) | 0.998–1.995 px/row, widest 2 px, worst residual 0.63/255, `foreign` all 0 |
+| visual inspection | 8-slot preview: the irregular slot (orange) wraps the two edges of the lower-right gray slot; 1000 px template smoke preview: 8 color blocks, no white seam |
 
-`VmHWM` 1611 MB 高于 S0 的 941 MB,原因不同:S0 的 spike 只画一个 L 形 + 网格(照片缓冲少),
-这次是 8 张各按格内尺寸生成的位图,且没有走 `band`。预算 2.5 GB 仍有余量;S4 的缓冲阶梯会重新测一遍。
+`VmHWM` 1611 MB is higher than S0's 941 MB, for a different reason: S0's spike drew only one L shape + a grid (fewer photo buffers),
+whereas this is 8 bitmaps each generated at in-slot size, and it does not go through `band`. The 2.5 GB budget still has room; S4's buffer ladder will measure it again.
 
-**S1 评审裁定** `[2026-09-21,人行:契约通过;缺陷按评审意见修毕,修毕内容以仓库为准(见下)]`
+**S1 review ruling** `[2026-09-21, human: the contract passes; the defects were fixed per the review's comments, and the repository is authoritative for what was fixed (see below)]`
 
-- **结论:契约 v1 通过。** 允许动手做 S2;`docs/CONTRACT.md` 是评审读本,测试是权威实现。
-- **评审提出的缺陷已修**(全部在 `ec5ef27` 里,先用 release 二进制复现再改):
-  1. `Band` 按画布行划分、每块各自取整 → `round` 不可加,72dpi/scale 0.3 下三块合计 759 行 vs 整图 758 行;
-     改为在**输出像素**上划分(`Band::out_rows`),拼接测试覆盖 scale 0.1/0.3/0.5/1.0。这条正是 S6 的导出路径。
-  2. 画布与模板长宽比不一致时静默拉伸(4:3 画布 + 16:9 模板照样出图、退出码 0);
-     `CollageDoc::validate` 加 1e-6 交叉校验 → 硬错误。
-  3. `CropTransform::zoom` 只有下界:`zoom=1e5` 触发 30 PB 分配失败并 abort,`zoom=1e308` 把位图宽度回绕成 `i32::MIN`;
-     加 `MAX_ZOOM = 1000`(文档层),S4 解码器另按内存预算设上限。
-  4. `probe` 可空过:全空槽工程报 `status = ok` / `occupied = 0` / 退出码 0;改为要求至少一个占用格,
-     失败综述区分「没有可探测的格子」与「判定不通过」。
-  5. 模板库从 CLI 搬到 `pixlay_core::templates`(GUI 的模板选择器要用);`mosaic-8-s14` 的
-     面积和恰为 1.0 / 零重叠 / 无空洞已成测试,S2 的生成器继承它们。
-  6. 旋转方向钉死为屏幕顺时针(y 朝下);平铺文字定义为「网格锚在画布原点、每瓦片绕自己锚点旋转、无逐瓦片变化」;
-     alpha 规则补测试(黑 50% 压白 = 127、全透明不留痕、不透明不被改动)。
-- **评审给出并已落进契约的裁定**(`docs/CONTRACT.md` §一 / §二):
-  版本策略「允许破坏、不写迁移」(加字段不抬 `DOC_VERSION`,改含义/删字段才抬并拒绝旧工程);
-  画布/模板长宽比不一致是硬错误、GUI 模板选择器按长宽比分族;`zoom` 保留文档层上界。
-  随之 `S6.5` 的「版本迁移」条目取消。
-- **闸口已收口**:进度行、`docs/STEPS.md` 的人工介入清单、本节的「人工」条目同步改写;
-  后续形状与限制见 `docs/CONTRACT.md`。下一个动作是**新会话**做 S2。
-- **遗留(不阻塞 S2)**:§五.C 那张表(S1 之后、S4 之前)在评审记录里**没有反对**,按该表自身的规则
-  「未反对即按建议锁定」——若评审时曾口头否决某条,必须在此补记并改该表;否则 S4 开工时按建议执行。
-  解码后端的两条路仍是 S4 第一条的实测题目,不是本裁定能定的。
+- **Verdict: contract v1 passes.** S2 may start; `docs/CONTRACT.md` is the review reading and the tests are the authoritative implementation.
+- **The defects the review raised are fixed** (all in `ec5ef27`; reproduce with the release binary first, then change):
+  1. `Band` divided by canvas rows and each band rounded on its own → `round` is not additive: at 72dpi/scale 0.3 three bands add up to 759 rows vs 758 for the whole image;
+     changed to divide on **output pixels** (`Band::out_rows`), and the stitching test covers scale 0.1/0.3/0.5/1.0. This is exactly S6's export path.
+  2. A canvas whose aspect ratio differs from the template's was silently stretched (a 4:3 canvas + a 16:9 template still produced an image, exit code 0);
+     `CollageDoc::validate` gained a 1e-6 cross-check → hard error.
+  3. `CropTransform::zoom` had only a lower bound: `zoom=1e5` triggers a 30 PB allocation failure and aborts, and `zoom=1e308` wraps the bitmap width to `i32::MIN`;
+     added `MAX_ZOOM = 1000` (document layer), and S4's decoder sets its own upper bound by memory budget.
+  4. `probe` could pass vacuously: an all-empty-slot project reported `status = ok` / `occupied = 0` / exit code 0; changed to require at least one occupied slot,
+     and the failure summary distinguishes "no slot that can be probed" from "criterion not met".
+  5. The template library moved from the CLI to `pixlay_core::templates` (the GUI's template picker needs it); `mosaic-8-s14`'s
+     areas summing to exactly 1.0 / zero overlap / no hole are already tests, and S2's generator inherits them.
+  6. The rotation direction is pinned down as screen-clockwise (y pointing down); tiled text is defined as "the grid anchored at the canvas origin, each tile rotated about its own anchor, no per-tile variation";
+     and the alpha rules gained tests (black 50% over white = 127, fully transparent leaves no trace, opaque is not modified).
+- **The rulings the review gave and that have already landed in the contract** (`docs/CONTRACT.md` §1 / §2):
+  the version policy "breaking changes allowed, no migrations written" (adding a field does not bump `DOC_VERSION`; changing a meaning or deleting a field does, and old projects are then rejected);
+  a canvas/template aspect-ratio mismatch is a hard error, and the GUI's template picker groups by aspect ratio; `zoom` keeps its document-layer upper bound.
+  With that, `S6.5`'s "version migration" item is cancelled.
+- **The gate has been closed**: the progress line, `docs/STEPS.md`'s list of where humans must step in, and this section's "Human" item were rewritten together;
+  the later shapes and limits are in `docs/CONTRACT.md`. The next action is a **new session** doing S2.
+- **Left over (does not block S2)**: the table in §5.C (after S1, before S4) drew **no objection** in the review record, so by that table's own rule
+  "locked as recommended unless objected to" — if something was orally rejected at review time, it must be recorded here and that table changed; otherwise S4 executes the recommendations when it starts.
+  The two paths for the decoding backend are still S4's first measured question, and are not something this ruling can settle.
 
-## S2 · 模板系统(只有几何)
+## S2 · Template system (geometry only)
 
-- **目标**:规则与不规则模板的几何全部正确且可校验。
-- **做什么**:异形格用 SVG path;规则格可用 grid span 参数化;**生成必须确定性**,结果固化并带 `templateVersion`。
-- **出口判据**:
-  - 格子之间**零重叠**
-  - 并集**无内部空洞**
-  - 解析出的路径面积与声明面积一致(容差内)
-  - 同一 `templateVersion` 重复生成结果逐位相同
-  - 覆盖 2–10 格各至少一个模板
-- **不做**:不引入任何图片;不做渲染。
+- **Goal**: the geometry of regular and irregular templates is entirely correct and checkable.
+- **Work**: irregular slots use SVG paths; regular slots can be parameterized with grid spans; **generation must be deterministic**, and the result is frozen data carrying a `templateVersion`.
+- **Exit criteria**:
+  - **zero overlap** between slots
+  - **no interior hole** in the union
+  - the area of the parsed path matches the declared area (within tolerance)
+  - repeated generation with the same `templateVersion` yields a bit-identical result
+  - covers 2–10 slots, at least one template each
+- **Not doing**: introduce no image at all; do no rendering.
 
-## S3 · 取景与 clamp
+## S3 · Framing and clamp
 
-- **目标**:格内取景数学完全正确,含任意角度旋转。
-- **做什么**:绝对 zoom(显示宽度 / 画布宽度)、位移、旋转;「父容器裁剪 + 子图元变换」;旋转或格子变化后重算 clamp。可用假图片尺寸,不需要图像管线。
-- **出口判据**:
-  - 扫掠 (旋转 × 缩放 × 位移 × 每类格子形状),clamp 后照片**恒覆盖整个格子**
-  - 旋转角改变触发 clamp 重算,有测试覆盖
-  - 只裁边、不扩画布:画布尺寸在任意取景下不变
-- **不做**:不做 GUI 手势;不做图像解码。
+- **Goal**: the in-slot framing math is entirely correct, including rotation by any angle.
+- **Work**: absolute zoom (displayed width / canvas width), offset, rotation; "parent container clips + child primitive transforms"; recompute the clamp after a rotation or a slot change. Fake image sizes are fine; no image pipeline is needed.
+- **Exit criteria**:
+  - sweep (rotation × zoom × offset × each slot shape), and after the clamp the photo **always covers the entire slot**
+  - a change of rotation angle triggers a clamp recomputation, covered by a test
+  - crop edges only, never grow the canvas: the canvas size is unchanged under any framing
+- **Not doing**: no GUI gestures; no image decoding.
 
-## S4 · 图像管线
+## S4 · Image pipeline
 
-- **目标**:进入渲染的位图在解码、方向、色彩、位深上都是对的。
-- **做什么**:`pixlay-imaging`——glycin 解码(含 HEIC/AVIF)、EXIF 自动旋转、重采样(`sRGB → 线性 → 处理 → sRGB`,Lanczos3)、16-bit 中间缓冲、每格调色 + 全局统一滤镜。后台工作经 channel 回主线程的结构先定好。
-- **出口判据**:
-  - **调色恒等**:`factor=1, s=1, Δ=0` 时输出与输入逐像素一致
-  - HEIC 能解;EXIF Orientation=6 自动转正
-  - 大幅降采样(4000px → 400px)质量目视无锯齿、无糊
-  - 中间缓冲是 16-bit,量化只发生在管线末端
-- **不做**:不做调色的 UI。
+- **Goal**: by the time a bitmap enters rendering it is right in decoding, orientation, color and bit depth.
+- **Work**: `pixlay-imaging` — glycin decoding (including HEIC/AVIF), automatic EXIF rotation, resampling (`sRGB → linear → process → sRGB`, Lanczos3), a 16-bit intermediate buffer, per-slot color grading + a global uniform filter. The structure for background work returning to the main thread through a channel is settled first.
+- **Exit criteria**:
+  - **grading identity**: with `factor=1, s=1, Δ=0` the output is pixel-identical to the input
+  - HEIC decodes; EXIF Orientation=6 is automatically rotated upright
+  - large-ratio downsampling (4000px → 400px) is visually free of aliasing and mush
+  - the intermediate buffer is 16-bit, and quantization happens only at the end of the pipeline
+- **Not doing**: no grading UI.
 
-## S5 · 文字层
+## S5 · Text layers
 
-- **目标**:画布级文字正确,两种形态走同一套机制。
-- **做什么**:文字层为基本单位,平铺水印是它的一种模式;`{date}` 等 EXIF 动态字段;Pango + pangocairo 排版。
-- **出口判据**:
-  - 自由摆放与平铺水印都能出图
-  - `{date}` 从 EXIF 填充正确;**EXIF 缺失时回退行为有测试**
-  - CJK 避头尾与标点挤压目视正确
-  - 文字在旋转后位置稳定(验证「内容层后执行」这条约束)
-- **不做**:不做文字编辑 UI。
+- **Goal**: canvas-level text is correct, and both forms go through the same mechanism.
+- **Work**: a text layer is the basic unit, and a tiled watermark is one of its modes; dynamic EXIF fields such as `{date}`; Pango + pangocairo layout.
+- **Exit criteria**:
+  - free placement and a tiled watermark both produce an image
+  - `{date}` is filled correctly from EXIF; **the fallback behavior when EXIF is missing has a test**
+  - CJK kinsoku and punctuation squeezing are visually correct
+  - the text position is stable after a rotation (verifying the "content layers run last" constraint)
+- **Not doing**: no text editing UI.
 
-## S6 · 导出
+## S6 · Export
 
-- **目标**:两种导出模式都正确,元数据一趟完成。
-- **做什么**:物理尺寸 + DPI 模式;指定长边像素模式;编码与元数据在同一条管线内。
-- **出口判据**:
-  - 物理尺寸模式:文件带正确 DPI 与 ICC
-  - 长边像素模式:输出长边像素与请求精确一致
-  - 色度采样与请求一致(专抓两趟元数据陷阱)
-  - A0 能出 PNG / JPEG / TIFF
-- **不做**:不做导出 UI;不做 PDF(未列入范围)。
+- **Goal**: both export modes are correct, and metadata is done in one pass.
+- **Work**: physical size + DPI mode; specified long-edge-in-pixels mode; encoding and metadata inside the same pipeline.
+- **Exit criteria**:
+  - physical-size mode: the file carries the correct DPI and ICC
+  - long-edge-pixel mode: the output long-edge pixel count matches the request exactly
+  - chroma subsampling matches the request (specifically catching the two-pass metadata trap)
+  - A0 can produce PNG / JPEG / TIFF
+- **Not doing**: no export UI; no PDF (not in scope).
 
-## S7 · GTK 外壳与交互
+## S7 · GTK shell and interaction
 
-**从这里开始才出现窗口。** 底下那一层已被 S1–S6 锁死,所以本步出的问题只可能在 GUI 里。
+**This is where windows appear for the first time.** The layer underneath has been locked down by S1–S6, so problems from this step can only be in the GUI.
 
-- **目标**:主路径三分钟内走通。
-- **做什么**:gtk4 + libadwaita 外壳(照 `AGENTS.md` 的「GNOME HIG」一节选容器与样式);拖入照片;格内拖动/滚轮/双击;参考线拉直;文字层编辑;撤销重做(命令历史 + 轻量 AST 快照);命中测试;后台解码回主线程;**文案走 i18n**(英文为 source string,本步不产出任何翻译)。
-- **出口判据**:
-  - 「选模板 → 放照片 → 调取景 → 导出」端到端可走通
-  - `LANG` 未设、`LANG=C`、`LANG=<未知语言>` 三种情况下界面都是英文且能启动
-  - `po/POTFILES` 收录的文件集合 == `crates/pixlay/src/**/*.rs`(可机器比对),`.pot` 随仓库提交;
-    是否有文案漏了包装靠本步的目视判据兜(见「需要人工介入」)
-  - Wayland 下正常,无阻塞 UI(解码/缩放在后台,主线程不卡)
-  - 窗口渲染的画面与 `pixlay-cli render` 同一画布尺寸下像素一致(RMSE 阈值内)
-  - GNOME HIG 的可判定子集全绿(快捷键表、可访问名、键盘可达、窄宽度重排、两种样式下可启动;
-    明细见补丁层「S7」;目视部分逐条过 `docs/HIG-REVIEW.md`)
-- **不做**:不做模式切换;不做额外面板;不做翻译(语言包是后加的,本步只保证可抽取、可回退)。
+- **Goal**: walk through the main path in under three minutes.
+- **Work**: a gtk4 + libadwaita shell (pick containers and styling per `AGENTS.md`'s "GNOME HIG" section); drag photos in; drag inside a slot / wheel / double click; straighten with reference lines; edit text layers; undo/redo (command history + lightweight AST snapshots); hit testing; background decoding back to the main thread; **copy goes through i18n** (English is the source string; this step produces no translation).
+- **Exit criteria**:
+  - "pick a template → place photos → adjust framing → export" can be walked through end to end
+  - with `LANG` unset, `LANG=C`, and `LANG=<unknown language>` the interface is English and starts up
+  - the set of files listed in `po/POTFILES` == `crates/pixlay/src/**/*.rs` (machine-comparable), and the `.pot` is committed with the repository;
+    whether any copy missed its wrapping is caught by this step's visual criterion (see "Where humans must step in")
+  - normal under Wayland, with no blocking UI (decoding/scaling are in the background, the main thread does not stall)
+  - what the window renders is pixel-identical to `pixlay-cli render` at the same canvas size (within the RMSE threshold)
+  - the machine-checkable subset of GNOME HIG is all green (shortcut table, accessible names, keyboard reachability, narrow-width reflow, starts under both styles;
+    details in the patch layer "S7"; the visual part goes item by item through `docs/HIG-REVIEW.md`)
+- **Not doing**: no mode switching; no extra panels; no translation (language packs are added later, and this step only guarantees extractability and fallback).
 
-## S8 · 打包
+## S8 · Packaging
 
-- **目标**:能进 AUR。
-- **做什么**:`PKGBUILD`、desktop 文件、图标、依赖清单;`po/` 下的翻译与 `.desktop` / metainfo 的多语言字段。
-- **出口判据**:
-  - `cargo vendor` 通过,`cargo build --frozen --offline` 通过
-  - `makepkg` 在干净 chroot 里成功
-  - 桌面文件与图标通过校验
-  - 装出的包能启动并跑通主路径
-  - `msgfmt --check` 通过;无语言包时界面是英文(chroot 里通常没有 locale,这条正好被它覆盖)
-- **不做**:不做 Flatpak / Snap / 其他发行版。
+- **Goal**: get into AUR.
+- **Work**: `PKGBUILD`, a desktop file, icons, a dependency list; the translations under `po/` and the multilingual fields of `.desktop` / metainfo.
+- **Exit criteria**:
+  - `cargo vendor` passes, `cargo build --frozen --offline` passes
+  - `makepkg` succeeds in a clean chroot
+  - the desktop file and icons pass validation
+  - the installed package starts and can walk through the main path
+  - `msgfmt --check` passes; with no language pack the interface is English (a chroot usually has no locale, and this criterion is exactly what that covers)
+- **Not doing**: no Flatpak / Snap / other distributions.
 
 ---
 
-## 审查补充 2026-09-20
+## Review addendum 2026-09-20
 
-来自一次文档审查 + 一次性探针(未进仓库,在 `/var/tmp/pixlay-spike/`)。原始数字见「六、实测基线」。
+From one document review + one one-off probe (not committed to the repository, in `/var/tmp/pixlay-spike/`). The raw numbers are in "6. Measured baseline".
 
-### 一、文档之间的冲突(需裁定)
+### 1. Conflicts between documents (need a ruling)
 
-1. **验证入口的 CLI 面与 S1 不一致。** `AGENTS.md` 用 `render --template mosaic-8-s14 --dpi 300 --out …`,
-   S1 定义的是 `render --project x.pixlay --dpi 300 --out y.jpg`。两个都要有:
-   `--template <name>`(无工程无照片,smoke 用)与 `--project <file>`(带照片)。S1 契约必须同时写这两面,
-   否则 `AGENTS.md` 那条"每轮必须跑"的命令要到 S2 才跑得动。
-2. **入口命令依赖 S2 的产物。** `mosaic-8-s14` 到 S2 才存在。裁定:S2 出口判据点名该模板
-   (8 格、不规则、`templateVersion` 固定、生成器可复现);S2 之前把该命令视为"S2 起有效"。
-3. **S1 的 fixtures 混入了 S4 的关注点。** "EXIF Orientation=6、带 alpha 的 PNG" 需要解码器与 EXIF 解析。
-   裁定:S1 只**提交**这些文件(数据便宜、离线可用),**使用**它们的测试归 S4;S1 的金标准测试用程序化生成的位图。
-4. **`io.github.<user>.Pixlay` 里的 `<user>` 未定。** 必须在 S7 写代码前定死,否则 S8 的 app-id 与 desktop 文件返工。
+1. **The CLI surface of the verification entry is inconsistent with S1.** `AGENTS.md` uses `render --template mosaic-8-s14 --dpi 300 --out …`,
+   whereas S1 defines `render --project x.pixlay --dpi 300 --out y.jpg`. Both must exist:
+   `--template <name>` (no project, no photo, used for smoke) and `--project <file>` (with photos). The S1 contract must write both surfaces,
+   otherwise `AGENTS.md`'s "must run every round" command cannot run until S2.
+2. **The entry command depends on S2's product.** `mosaic-8-s14` does not exist until S2. Ruling: the S2 exit criteria name that template
+   (8 slots, irregular, a fixed `templateVersion`, a reproducible generator); before S2, treat that command as "valid from S2 on".
+3. **S1's fixtures mixed in S4's concerns.** "EXIF Orientation=6, a PNG with alpha" needs a decoder and EXIF parsing.
+   Ruling: S1 only **commits** those files (the data is cheap and works offline), and the tests that **use** them belong to S4; S1's golden tests use procedurally generated bitmaps.
+4. **The `<user>` in `io.github.<user>.Pixlay` is undecided.** It must be fixed before S7 writes code, otherwise S8's app-id and desktop file have to be redone.
 
-### 二、新增步骤:S6.5 · 命令历史 / 工程 IO / 命中测试(仍无窗口)
+### 2. New step: S6.5 · Command history / project IO / hit testing (still windowless)
 
-S7 里写着「撤销重做(命令历史 + AST 快照)」与「命中测试」。这两件都是纯 `pixlay-core` 逻辑、可无窗口测试,
-却又是 GUI 里最容易错的部分;放进 S7 同时破坏两条切分原则(S7 才是最后一个窗口步骤;可机器判定的东西不该等到那时)。
+S7 says "undo/redo (command history + AST snapshots)" and "hit testing". Both are pure `pixlay-core` logic, testable without a window,
+yet they are the parts of the GUI most likely to go wrong; putting them into S7 breaks two splitting principles at once (S7 is the last window step; machine-checkable things should not wait until then).
 
-- **做什么**:`Command` + 撤销栈;`.pixlay` 保存/加载(原子写 tmp + rename);点 → 格子命中测试(含旋转与异形格)。
-  **不写版本迁移**(S1 评审裁定):加字段不抬版本,改含义/删字段才抬,旧工程此时被拒绝并提示重建。
-- **出口判据**:
-  - 任意操作序列连续 undo 回到初始态后,`draw` 出的像素与初始态**逐像素相同**;redo 同构
-  - 保存 → 加载 → 再保存 逐字节相同;缺失文件/坏版本必须给明确错误 + 非零退出码
-    (版本策略见 `docs/CONTRACT.md` §一:「允许破坏,不写迁移」)
-  - 命中测试扫掠(每模板 × 每格质心 × 每格边界外侧 1px),结果与几何解析解一致
-- **不做**:不做 UI 事件绑定,不做手势。
+- **Work**: `Command` + an undo stack; `.pixlay` save/load (atomic write tmp + rename); point → slot hit testing (including rotation and irregular slots).
+  **Write no version migration** (S1 review ruling): adding a field does not bump the version, changing a meaning or deleting a field does, and old projects are then rejected with a prompt to rebuild.
+- **Exit criteria**:
+  - after any operation sequence is undone continuously back to the initial state, the pixels `draw` produces are **pixel-identical** to the initial state; redo is isomorphic
+  - save → load → save again is byte-identical; a missing file / bad version must give a clear error + a non-zero exit code
+    (version policy in `docs/CONTRACT.md` §1: "breaking changes allowed, no migrations written")
+  - hit-test sweep (each template × each slot's centroid × 1px outside each slot's boundary), with results matching the analytic geometry solution
+- **Not doing**: no UI event binding, no gestures.
 
-### 三、各步出口判据的机器判定化(补充)
+### 3. Making each step's exit criteria machine-checkable (additions)
 
-原判据里"目视/可读/三分钟"这类,要么换成可算量,要么明确列为人工判据(已并入「需要人工介入」一节)。
+Where the original criteria said "visual / readable / three minutes", either replace them with computable quantities or list them explicitly as human criteria (already merged into the "Where humans must step in" section).
 
-**S0**(选型风险已基本退掉,见「实测基线」;建议本步改为"复现基线 + 补 10 格峰值内存")
-- 峰值内存统一 `VmHWM`(见「四、度量口径」),A0 合成峰值 ≤ 2.5 GB
-- "格内照片、格外无渗色" → 探针像素:格内采样点等于该格照片色;格外采样点等于画布背景色;
-  相邻格共用边上的混色像素数 ≤ 2 × 缝长
-- "文字可读" → 文字包围盒内墨色像素占比落在区间内
-- **测试内容必须非平坦**:平坦色块会同时低估编码时间与体积(实测差 4.6× / 78×)
-- 补一条:画布与未被照片覆盖处一律**白底**(已定,见 AGENTS「硬约束」);S0 只需确认渲染不漏出非白像素——
-  探针在格内未覆盖区、格外的画布区各取几点,断言就是纯白
+**S0** (the technology-choice risk has largely receded, see "Measured baseline"; this step is suggested to become "reproduce the baseline + add 10-slot peak memory")
+- peak memory is uniformly `VmHWM` (see "4. Measurement rules"), and the A0 compositing peak is ≤ 2.5 GB
+- "photo inside the slot, no bleeding outside the slot" → probe pixels: a sample point inside a slot equals that slot's photo color; a sample point outside equals the canvas background color;
+  the number of blended pixels on a shared edge between adjacent slots is ≤ 2 × the seam length
+- "text is readable" → the proportion of ink pixels inside the text bounding box falls in an interval
+- **Test content must be non-flat**: flat color blocks underestimate both encoding time and size (measured difference 4.6× / 78×)
+- one addition: the canvas and any area not covered by a photo are always **white** (already decided, see AGENTS "Hard constraints"); S0 only has to confirm that rendering leaks no non-white pixel —
+  the probe takes a few points each in the uncovered area of a slot and in the canvas area outside slots, and the assertion is pure white
 
-**S0 结果** `[2026-09-20 实测;代码 `crates/pixlay-cli/src/bin/a0-spike.rs`(可抛弃,进仓库只为可复现)]`
+**S0 results** `[2026-09-20 measured; code `crates/pixlay-cli/src/bin/a0-spike.rs` (disposable, committed only for reproducibility)]`
 
-上面每一条判据都进了那个 bin 的探针,不再有"看着对"这一步。跑法(release):
+Every criterion above went into that bin's probe, and there is no longer a "looks right" step. How to run it (release):
 
     cargo build --release -p pixlay-cli
     ./target/release/a0-spike --content flat   --slots 2  --skip-encode --out /var/tmp/pixlay-s0/flat2
@@ -300,305 +300,305 @@ S7 里写着「撤销重做(命令历史 + AST 快照)」与「命中测试」�
     ./target/release/a0-spike --content detail --slots 2  --out /var/tmp/pixlay-s0/detail2  --preview-px 1400
     ./target/release/a0-spike --content detail --slots 10 --out /var/tmp/pixlay-s0/detail10 --preview-px 1400
 
-四条全部 `verdict = ok`。断言与实测(阈值常量的来源都写在代码注释里):
+All four give `verdict = ok`. Assertions and measurements (the sources of the threshold constants are written in the code comments):
 
-| 判据 | 实测(A0) | 阈值 |
+| Criterion | Measured (A0) | Threshold |
 |---|---|---|
-| 输出尺寸 | PNG/JPEG 均 9933×14043 | 精确相等 |
-| 合成耗时 | 2 格 185 ms · 10 格 551 ms | 无 |
-| 合成峰值内存 `VmHWM` | 941 MB(2 格与 10 格相同) | ≤ 2560 MB |
-| 整程峰值 `VmHWM`(含编码) | 1340 MB | 无 |
-| 格外非白采样 | 0 / 136584(全白) | = 0 |
-| 格内未覆盖区(转过 8° 的格角、下移 4% 的条) | 全纯白 | 纯白 |
-| 缝混色 | 1.000 px/行,最宽 1 px,三层凸组合残差 0.20/255,0 个解释不了 | ≤ 2 px/行,最宽 ≤ 2 px |
-| 文字墨色比 | 0.1148(bbox 3637×610 px,字号 281 px) | 0.02–0.60 |
-| 内容非平坦(渲染后逐像素亮度步长) | 3.61(detail 2 格)/ 4.60(detail 10 格);flat 为 0.00 | > 2.0 |
+| output size | PNG/JPEG both 9933×14043 | exactly equal |
+| compositing time | 2 slots 185 ms · 10 slots 551 ms | none |
+| compositing peak memory `VmHWM` | 941 MB (the same for 2 slots and 10 slots) | ≤ 2560 MB |
+| whole-run peak `VmHWM` (including encoding) | 1340 MB | none |
+| non-white samples outside slots | 0 / 136584 (all white) | = 0 |
+| uncovered area inside a slot (a slot corner rotated 8°, a strip shifted down 4%) | all pure white | pure white |
+| seam blend | 1.000 px/row, widest 1 px, three-layer convex combination residual 0.20/255, 0 unexplained | ≤ 2 px/row, widest ≤ 2 px |
+| text ink ratio | 0.1148 (bbox 3637×610 px, font size 281 px) | 0.02–0.60 |
+| content non-flat (per-pixel luminance step after rendering) | 3.61 (detail 2 slots) / 4.60 (detail 10 slots); flat is 0.00 | > 2.0 |
 
-人工判据(照片在格内、格外无渗色、文字可读):2 格与 10 格的 1400 px 预览已逐张目视确认——
-不规则 L 形 clip 正确、旋转格的照片被 clip 住不越界、未覆盖处露白、CJK 字形完整可读、缝是 1 px 硬边无渗色。
+Human criteria (photo inside the slot, no bleeding outside the slot, text readable): the 2-slot and 10-slot 1400 px previews were confirmed visually one by one —
+the irregular L-shaped clip is correct, the rotated slot's photo is clipped and does not go out of bounds, uncovered areas show white, CJK glyphs are complete and readable, and the seam is a 1 px hard edge with no bleeding.
 
-**裁定(2026-09-20,人行)**:Cairo 保留。判据全绿、无一条否决条件触发(合成 185/551 ms;峰值 941 MB 合成、
-1340 MB 整程,预算 2.5 GB),`AGENTS.md` 的「不要换成 GPU 渲染」继续生效。
-S0 这一页到此为止:spike 是**可抛弃**的,它的一次性探针在 S1 由 CLI 的 `probe` 子命令接管,届时删除本文件。
+**Ruling (2026-09-20, human)**: Cairo stays. Every criterion is green and no veto condition triggered (compositing 185/551 ms; peak 941 MB compositing,
+1340 MB whole run, budget 2.5 GB), and `AGENTS.md`'s "Do not replace Cairo with GPU rendering" stays in force.
+S0's page ends here: the spike is **disposable**, its one-off probe is taken over in S1 by the CLI's `probe` subcommand, and this file is deleted when that happens.
 
-给 S1 的交接(3 个静默坑,都是本步踩出来的):
+Handoff to S1 (3 silent traps, all stepped in during this step):
 
-1. `cairo::SurfacePattern::set_matrix` 收的是 **用户空间 → pattern 空间**的矩阵:得把"放置矩阵"求逆再交进去。
-   方向写反时 cairo 不报错,只是**什么都不画**。
-2. `pango::FontDescription::set_absolute_size` 的单位是**像素 × `PANGO_SCALE`(1024)**。少乘这一下
-   得到 0.07 px 的字,同样静默(画了,看不见)。
-3. 缝的判据不能写成"位于两色之间":与**白底**混合的缝像素本来就会跑到两色的区间外(实测红/蓝缝
-   是 138,108,183,绿通道高过两侧)。改成"白 + 左格 + 右格的三层凸组合残差"才有判别力。
+1. `cairo::SurfacePattern::set_matrix` takes a **user space → pattern space** matrix: the "placement matrix" has to be inverted before handing it in.
+   When the direction is written the wrong way cairo reports no error, it just **draws nothing**.
+2. `pango::FontDescription::set_absolute_size`'s unit is **pixels × `PANGO_SCALE` (1024)**. Missing that one multiplication
+   yields 0.07 px text, equally silent (it drew, but nothing is visible).
+3. The seam criterion cannot be written as "lies between the two colors": a seam pixel blended with the **white background** will end up outside the interval of the two colors anyway (measured, a red/blue seam
+   is 138,108,183, with the green channel higher than both sides). Only "the three-layer convex combination residual of white + left slot + right slot" is discriminating.
 
-依赖(在 S1 的「依赖登记」里一并结算):`cairo-rs 0.22.9` + `pangocairo 0.22.9`(归 `pixlay-render`,长期)、
-`image 0.25.10`(S0 只用它的 JPEG 编码与尺寸读取,临时;去留由 S4/S6 定)。spike 删除时 `image` 也应一起走,
-除非那时已经有别的用途。
+Dependencies (settled together in S1's "Dependency registry"): `cairo-rs 0.22.9` + `pangocairo 0.22.9` (belonging to `pixlay-render`, long-term),
+`image 0.25.10` (S0 used only its JPEG encoding and size reading, temporary; whether it stays is decided by S4/S6). When the spike is deleted, `image` should go with it,
+unless it has another use by then.
 
 **S1**
-- **CLI 是 AI 的唯一操作面**(见 AGENTS「模块边界」),所以它的契约按机器面写,与 `render::draw` 的契约同级冻结:
-  - 每条子命令都支持 `--json`;stdout **只**出机器可读结果,诊断/进度/警告走 stderr;同输入同输出
-    (结果里不写时间戳、不写绝对路径)
-  - **零交互**:不读 stdin、不等提示、无 TTY 时行为不变;`--help` 覆盖全部 flag 与退出码
-  - **不受 locale 影响**:stdout/stderr 文本在 `LANG` / `LC_ALL` / `LANGUAGE` 变化下**逐字节相同**(含错误分支)。
-    渲染出的像素不在此约束内——文字层的字形回退确实受 locale 影响,所以测试仍固定 `LANG`(见下)
-  - `--stats` 在原报告上**追加** `{ms, encode_ms, peak_rss_mb, icc}`,口径照「四、度量口径」,
-    之后每步复用同一把尺子(`out_w` / `out_h` / `dpi` 本来就在报告里,不因 `--stats` 才出现)
-  - `probe`:采样若干坐标点并输出数字(格内照片色、格外白底、相邻格共用边上的混色像素数);
-    AGENTS 的"像素级结论写成探针"由它承担,后续各步不再各写一份一次性脚本
-  - `--preview-px <n>`:同一个 `draw` 的缩放目标,产出可直接目视的预览(A0 无法整体目视)
-  - 退出码:0 成功 / 1 用法错 / 2 解码或渲染失败;失败时 stderr 打印缺失文件路径,stdout 保持为空。
-    `probe` 判定不通过**不属于**这一类:它的数字就是结果(是判定依据),所以 stdout 照常出全部数字、
-    stderr 出一行综述、退出码 2。见 `docs/CONTRACT.md` §五
-  - **v1 非目标**(与 AGENTS「不做」同一条纪律):MCP server、REPL / watch、自然语言参数、
-    从配置文件读默认值因而改变行为——都不做
-- `--stats` 落地后,把 AGENTS「验证入口」第二条命令换成带 `--stats` 的形式:每轮的尺子因此是机器可读的
-- "阈值收紧到不可能通过时测试必须变红" → 改成**永久自检**:把金标准图在内存里加一个 > 阈值的扰动,
-  断言比较函数返回失败。一次性手改没有回归价值
-- 决定性环境在测试内固定:`TZ`、`LANG`、`FONTCONFIG_FILE`、`XDG_CACHE_HOME`;字体固定(随仓库一个 ttf,
-  或测试只用系统字体)——否则金标准测试随机器变红,S8 的 chroot 会先炸
-- fixtures:授权干净(CC0)、尺寸小、随仓库提交;程序化生成的图用固定种子
-- 契约 v1 必须**显式列出 v1 的非目标**(每格独立文字、嵌套组、混合模式、>±45° 旋转、源 ICC 保留…),
-  否则"将来不够用"这件事没人看得见
+- **The CLI is the AI's only operating surface** (see AGENTS "Module boundaries"), so its contract is written as a machine surface and frozen at the same level as `render::draw`'s contract:
+  - every subcommand supports `--json`; stdout emits machine-readable results **only**, and diagnostics/progress/warnings go to stderr; identical input yields identical output
+    (no timestamps and no absolute paths in the results)
+  - **zero interaction**: it does not read stdin, does not wait for a prompt, and behaves the same with no TTY; `--help` covers every flag and exit code
+  - **unaffected by locale**: the stdout/stderr text is **byte-identical** as `LANG` / `LC_ALL` / `LANGUAGE` change (including the error branches).
+    The rendered pixels are not under this constraint — glyph fallback for text layers really is locale-sensitive, so the tests still pin `LANG` (see below)
+  - `--stats` **appends** `{ms, encode_ms, peak_rss_mb, icc}` to the original report, measured per "4. Measurement rules",
+    and every later step reuses the same ruler (`out_w` / `out_h` / `dpi` are in the report anyway and do not appear only because of `--stats`)
+  - `probe`: samples several coordinates and outputs numbers (the photo color inside a slot, the white background outside, the number of blended pixels on a shared edge between adjacent slots);
+    AGENTS's "write pixel-level conclusions as a probe" is carried by it, and later steps no longer each write their own one-off script
+  - `--preview-px <n>`: the scaling target of the same `draw`, producing a preview that can be inspected visually directly (A0 cannot be inspected as a whole)
+  - exit codes: 0 success / 1 usage error / 2 decoding or rendering failure; on failure stderr prints the missing file path and stdout stays empty.
+    A `probe` criterion not passing **does not** belong to this class: its numbers are the result (the basis of the verdict), so stdout emits all the numbers as usual,
+    stderr emits a one-line summary, and the exit code is 2. See `docs/CONTRACT.md` §5
+  - **v1 non-goals** (the same discipline as AGENTS "Not doing"): an MCP server, a REPL / watch, natural-language arguments,
+    and reading defaults from a config file and thereby changing behavior — none of these are done
+- Once `--stats` has landed, replace the second command of AGENTS "Verification entry" with the `--stats` form: every round's ruler is thereby machine-readable
+- "when the thresholds are tightened so that passing is impossible the tests must go red" → changed to a **permanent self-check**: add a perturbation larger than the threshold to the golden image in memory,
+  and assert that the comparison function returns failure. A one-off manual edit has no regression value
+- the decisive environment is pinned inside the tests: `TZ`, `LANG`, `FONTCONFIG_FILE`, `XDG_CACHE_HOME`; the font is pinned (one ttf committed with the repository,
+  or the tests use only system fonts) — otherwise the golden tests go red per machine, and S8's chroot blows up first
+- fixtures: clean licensing (CC0), small size, committed with the repository; procedurally generated images use a fixed seed
+- contract v1 must **list v1's non-goals explicitly** (per-slot independent text, nested groups, blend modes, rotation >±45°, source ICC preservation…),
+  otherwise nobody can see that "it will not be enough later"
 
 **S2**
-- 建议**裁剪几何限定为多边形**(或明确定义曲线离散化容差):面积、零重叠、无空洞才都是解析可判定的;
-  曲线会把这三条变成"容差内大概对"
-- 模板生成器随仓库提交(bin,不是 `build.rs`),并测试:重新生成 → 与固化数据逐字节相同
-- 不引入外部 SVG 解析器(AGENTS:依赖最少);路径就是模板数据里的命令表
-- 模板与画布长宽比的对应关系要在本步入库:**模板矩阵按长宽比分族**(§五.B 已定),S7 的模板选择器
-  按当前画布的长宽比过滤、只列出匹配的(`CollageDoc::validate` 已经会把不匹配的工程判为硬错误)。
-  这意味着 `templates` 子命令要能按长宽比查询,而不只是列出全部名字。
-- CLI 补两个面向调用方的子命令(S1 已冻结机器面,这两个只是加数据来源):
-  `templates --json` 出模板名 / 格数 / 长宽比,`init --template <name> --out x.pixlay` 出可加载的默认工程——
-  调用方(含 AI)不必读源码就能选模板、也不必手写 `.pixlay` JSON(不引 `schemars`)
+- the suggestion is to **restrict the crop geometry to polygons** (or define the curve discretization tolerance explicitly): only then are area, zero overlap and no hole all analytically checkable;
+  curves turn these three into "roughly right within tolerance"
+- the template generator is committed with the repository (a bin, not `build.rs`), and tests: regenerate → byte-identical to the frozen data
+- do not introduce an external SVG parser (AGENTS: minimal dependencies); a path is just the command list in the template data
+- the correspondence between templates and canvas aspect ratios lands in this step: **the template matrix is grouped by aspect ratio** (§5.B already decided), and S7's template picker
+  filters by the current canvas's aspect ratio and lists only matches (`CollageDoc::validate` already judges a mismatched project a hard error).
+  This means the `templates` subcommand has to support querying by aspect ratio, not just listing all the names.
+- the CLI gains two caller-facing subcommands (S1 already froze the machine surface, and these two only add a data source):
+  `templates --json` outputs template name / slot count / aspect ratio, and `init --template <name> --out x.pixlay` outputs a loadable default project —
+  so callers (including the AI) can pick a template without reading the source and do not have to hand-write `.pixlay` JSON (no `schemars` pulled in)
 
 **S3**
-- **先裁定退化策略再写判据。** AGENTS 的待解决项(细长格需 6.7–7.6× 缩放)会改变 clamp 契约
-  (clamp 结果必须能报告"旋转被限"),而契约在 S1 冻结 → 这条必须在 **S1 契约评审前**定,不能留到 S3。
-- "覆盖整个格子"的 epsilon 给数值(建议归一化 1e-6,或 300dpi 下 ≤0.5px),写进测试常量
-- 命中测试(见 S6.5)与 clamp 同属几何,可并到本步
+- **Rule on the degradation policy before writing the criteria.** The AGENTS "Open / to be proven" entry (elongated slots need 6.7–7.6× zoom) changes the clamp contract
+  (the clamp result must be able to report "the rotation was limited"), and the contract is frozen in S1 → this must be decided **before the S1 contract review**, not left to S3.
+- the epsilon for "covers the entire slot" is given a number (normalized 1e-6 suggested, or ≤0.5px at 300dpi), written into the test constants
+- hit testing (see S6.5) and clamp are both geometry and can be merged into this step
 
 **S4**
-- 明确**缓冲阶梯**:哪几级是 16-bit、在什么分辨率上。全画布 16-bit RGBA 实测 1064 MB,10 张图不可能这么算。
-  建议:解码 → 16-bit 线性 → **降采样到格内显示尺寸** → 调色 → 全局滤镜 → sRGB 8-bit → Cairo;
-  峰值 = Σ(格内尺寸缓冲) + 输出表面 = O(输出像素)
-- 解码给尺寸上限(否则 100MP 手机图直接进内存);并发度按内存预算设上限,不是 `nproc`
-- 色彩决策写进契约:是否尊重源 ICC、输出 ICC 用 sRGB v2 还是 v4、CMYK JPEG、**源 alpha 怎么处理**
-  (S1 的"带 alpha 的 PNG" fixture 目前没有对应的期望行为)
-- "降采样目视无锯齿" → 与独立实现对比(ImageMagick `-filter Lanczos -resize`)的 RMSE 阈值,
-  再加一个 zone-plate 检查混叠能量
+- make the **buffer ladder** explicit: which stages are 16-bit, and at what resolution. A full-canvas 16-bit RGBA measures 1064 MB, and 10 images cannot be computed that way.
+  Suggested: decode → 16-bit linear → **downsample to in-slot display size** → color grading → global filter → sRGB 8-bit → Cairo;
+  peak = Σ (in-slot-size buffers) + the output surface = O(output pixels)
+- decoding gets a size cap (otherwise a 100MP phone image goes straight into memory); concurrency is capped by the memory budget, not by `nproc`
+- color decisions go into the contract: whether the source ICC is respected, whether the output ICC uses sRGB v2 or v4, CMYK JPEG, **how source alpha is handled**
+  (S1's "PNG with alpha" fixture currently has no corresponding expected behavior)
+- "downsampling visually free of aliasing" → an RMSE threshold against an independent implementation (ImageMagick `-filter Lanczos -resize`),
+  plus a zone-plate check of the aliasing energy
 
 **S5**
-- "CJK 避头尾正确"是可判定的:构造行首禁则标点的文本,Pango 分行后用 `pango_layout_get_line*`
-  断言没有一行以禁则字符开头;标点挤压断言相邻标点字距小于默认字距
-- 字号必须用**归一化画布相对单位**,否则预览/导出 RMSE 判据立刻失败
+- "CJK kinsoku is correct" is checkable: build text whose line start has forbidden punctuation, and after Pango breaks the lines use `pango_layout_get_line*`
+  to assert that no line starts with a forbidden character; punctuation squeezing asserts that the spacing between adjacent punctuation is smaller than the default spacing
+- the font size must use **normalized canvas-relative units**, otherwise the preview/export RMSE criterion fails immediately
 
 **S6**
-- "编码与元数据一趟完成"的实现含义:**cairo 只提供像素,编码器自己写元数据**。实测
-  `cairo_surface_write_to_png` 在 A0 上只写 IHDR/bKGD/IDAT——**没有 pHYs、没有 iCCP**
-  (`identify` 报 `Units: Undefined`),`set_fallback_resolution` 对位图后端无效。用 cairo 写 PNG 就必然丢 DPI。
-- 每格式字段清单写进判据:PNG = pHYs + iCCP(+ sRGB chunk);JPEG = JFIF density 或 EXIF resolution + APP2 ICC;
+- the implementation meaning of "encoding and metadata in one pass": **cairo supplies pixels only, the encoder writes the metadata itself**. Measured:
+  `cairo_surface_write_to_png` on A0 writes only IHDR/bKGD/IDAT — **no pHYs, no iCCP**
+  (`identify` reports `Units: Undefined`), and `set_fallback_resolution` has no effect on a bitmap backend. Writing PNG through cairo necessarily loses DPI.
+- the per-format field list is written into the criteria: PNG = pHYs + iCCP (+ sRGB chunk); JPEG = JFIF density or EXIF resolution + APP2 ICC;
   TIFF = XResolution/ResolutionUnit + ICCProfile
-- 长边像素模式的取整规则、以及"此模式下 DPI 写什么"必须定义并测试(AGENTS 要求任何输出都带 DPI)
-- 时间上限用相对值(≤ 3× 基线),基线见「实测基线」
-- **产物落磁盘路径**:本机 `/tmp` 是 tmpfs(7.5 GB),A0 照片 PNG 342 MB、TIFF 476 MB,写 tmpfs 等于再吃一份内存
+- the rounding rule of long-edge-pixel mode, and "what DPI is written in that mode", must be defined and tested (AGENTS requires every output to carry DPI)
+- the time cap uses a relative value (≤ 3× the baseline); the baseline is in "Measured baseline"
+- **the path where artifacts land on disk**: on this machine `/tmp` is tmpfs (7.5 GB), an A0 photo-content PNG is 342 MB and a TIFF 476 MB, so writing tmpfs costs another copy in memory
 
 **S7**
-- "三分钟走通"按人工判据给出(见「需要人工介入」):脚本化步骤清单 + 计时
-- 补一条:大图导出时 UI 不冻结(导出在后台 + 进度反馈)——S0/S6 的操作是 6–7 s 级
-- **i18n 机制(已定)**:`gettext`(crate `gettext-rs`,**不 pin 版本**——照「追新」由 S7 的 `cargo update` 定),
-  域 `pixlay`,源语言英文,`.pot` + `po/POTFILES` 随仓库提交;依赖只进 `pixlay`(AGENTS 已禁
-  core/imaging/render/cli 引 i18n);该依赖与其余新依赖一并在「依赖登记」里登记。
-  *理由:GTK 与 libadwaita 自身的按钮文案走系统 gettext,`.desktop` 与 AppStream metainfo 的翻译(S8)用同一套
-  `xgettext` / `msgfmt` 工具链——换成 fluent 类方案要自己接 metainfo 那半边。*
-- 抽取命令用 **`xgettext --language=Rust`**:gettext-tools 1.0 的 Rust 后端实测能提
-  `gettext` / `ngettext` / `pgettext`,并给 `ngettext` 的两条 msgid 打上 `#, rust-format` 标记;
-  **别用 `--language=C` 绕**——能提出串,但丢掉 `rust-format`,`msgfmt --check-format` 就校验不了 `{}` 占位符
-  (抽取与 `msgfmt` 的行为是 2026-09-20 在本机 `gettext-tools 1.0` 上实测的,不是记忆)
-- `msgfmt --xml`(metainfo)与 `msgfmt --desktop`(desktop 文件)在 S8 与 `.po` 走同一条管线
-- 判据补充:`LANG` 缺失 / `C` / 未知语言三种情况下 GUI 都出英文且能启动(缺翻译回退是 gettext 默认行为,
-  一条冒烟即可);本步**不提交任何 `.po` 翻译**,抽取与回退先成立即可
-- 硬编码串的判定边界:文案是否漏包装**不做机器判据**(提取器看不到漏掉的字符串),只做
-  `po/POTFILES` 与 `crates/pixlay/src/**/*.rs` 的集合比对 + 人工目视
+- "walk it through in three minutes" is given as a human criterion (see "Where humans must step in"): a scripted step list + timing
+- one addition: the UI does not freeze while a large image exports (export in the background + progress feedback) — S0/S6 operations are on the 6–7 s scale
+- **the i18n mechanism (decided)**: `gettext` (crate `gettext-rs`, **no pinned version** — per "track the latest" it is decided by S7's `cargo update`),
+  domain `pixlay`, source language English, `.pot` + `po/POTFILES` committed with the repository; the dependency goes only into `pixlay` (AGENTS already forbids
+  core/imaging/render/cli from pulling in i18n); that dependency is registered in the "Dependency registry" together with the other new ones.
+  *Rationale: GTK and libadwaita's own button copy goes through the system gettext, and the translations of `.desktop` and AppStream metainfo (S8) use the same
+  `xgettext` / `msgfmt` toolchain — switching to a fluent-style scheme means wiring up the metainfo half yourself.*
+- the extraction command uses **`xgettext --language=Rust`**: gettext-tools 1.0's Rust backend was measured to extract
+  `gettext` / `ngettext` / `pgettext`, and to tag `ngettext`'s two msgids with `#, rust-format`;
+  **do not take the `--language=C` detour** — it extracts the strings but loses `rust-format`, so `msgfmt --check-format` cannot validate the `{}` placeholders
+  (the behavior of extraction and `msgfmt` was measured on 2026-09-20 on this machine's `gettext-tools 1.0`, not recalled)
+- `msgfmt --xml` (metainfo) and `msgfmt --desktop` (desktop files) go through the same pipeline as `.po` in S8
+- criteria addition: with `LANG` missing / `C` / an unknown language, the GUI shows English and starts (missing-translation fallback is gettext's default behavior,
+  and one smoke test suffices); this step **commits no `.po` translation**, it is enough that extraction and fallback hold
+- the boundary for hardcoded strings: whether copy missed its wrapping **is not a machine criterion** (the extractor cannot see the strings that were missed), only the
+  set comparison between `po/POTFILES` and `crates/pixlay/src/**/*.rs` plus visual inspection
 
-**S7 · GNOME HIG(`AGENTS.md` 已加「GNOME HIG」一节;这里只放可判定子集,其余进 `docs/HIG-REVIEW.md`)**
-- **快捷键**:`GAction` 的 accelerator 表 ⊇ HIG `reference/keyboard` 的必需集合(`Ctrl+Q` / `Ctrl+W` /
-  `Ctrl+O` / `Ctrl+S` / `Ctrl+Z` / `Shift+Ctrl+Z` / `Ctrl+A` / `Ctrl+?` 等,按本产品实际有的功能取子集),
-  且 ∩ 系统保留集合 = ∅(`Alt+*`、`Super+*`、`Ctrl+Alt+*`)。两张表抄成测试常量,不写进 `AGENTS.md`。
-- **可访问名**:遍历控件树,断言每个可交互控件的 accessible name/role 非空——GTK4 自带
-  `gtk_test_accessible_*`(gtk4-rs 有封装),不用第三方工具。对应 HIG「All interface elements should
-  have descriptive, accessible names」。
-- **键盘可达**:每个 `GAction` 都有键盘路径(加速键,或一个可聚焦 / 带助记的控件)——HIG「every action
-  should also be possible with the keyboard」。
-- **自适应**:窗口最小尺寸 + 窄宽度下重排(HIG `guidelines/adaptive`);断言最小尺寸下画布不被裁、
-  控件不被挤没。
-- **样式**:`ADW_COLOR_SCHEME_FORCE_DARK` 与 `FORCE_LIGHT` 两种样式下都能启动并渲染主路径;
-  **同一张画布在两种样式下逐像素相同**(白底是内容)——这一条顺便把"大字体不得缩放画布文字层"钉住。
-- **主菜单**:含 `Ctrl+?` 快捷键对话框与 `AdwAboutDialog`(app-id / version 从 `APP_ID` 与包元数据取,
-  不硬编码第二份)。
-- **目视**:逐条过 `docs/HIG-REVIEW.md`(高对比、大字体、纯键盘、屏幕阅读器、触摸与 OSK、间距与层级、
-  动画手感);HIG `guidelines/writing-style` 的措辞同样只走这份清单。
+**S7 · GNOME HIG (a "GNOME HIG" section has been added to `AGENTS.md`; only the checkable subset goes here, and the rest goes into `docs/HIG-REVIEW.md`)**
+- **Shortcuts**: the `GAction` accelerator table ⊇ HIG `reference/keyboard`'s required set (`Ctrl+Q` / `Ctrl+W` /
+  `Ctrl+O` / `Ctrl+S` / `Ctrl+Z` / `Shift+Ctrl+Z` / `Ctrl+A` / `Ctrl+?` etc., taking the subset matching the features this product actually has),
+  and ∩ the system-reserved set = ∅ (`Alt+*`, `Super+*`, `Ctrl+Alt+*`). The two tables are copied into test constants and are not written into `AGENTS.md`.
+- **Accessible names**: walk the widget tree and assert that every interactive control's accessible name/role is non-empty — GTK4 ships
+  `gtk_test_accessible_*` (gtk4-rs wraps it), with no third-party tool needed. This corresponds to HIG "All interface elements should
+  have descriptive, accessible names".
+- **Keyboard reachable**: every `GAction` has a keyboard path (an accelerator, or a focusable / mnemonic-bearing control) — HIG "every action
+  should also be possible with the keyboard".
+- **Adaptive**: window minimum size + reflow at narrow widths (HIG `guidelines/adaptive`); assert that at the minimum size the canvas is not cropped and
+  no control is squeezed out of existence.
+- **Styling**: it starts and renders the main path under both `ADW_COLOR_SCHEME_FORCE_DARK` and `FORCE_LIGHT`;
+  **the same canvas is pixel-identical under both styles** (the white background is content) — this criterion also pins down "large text must not scale canvas text layers".
+- **Main menu**: contains the `Ctrl+?` shortcuts dialog and `AdwAboutDialog` (app-id / version taken from `APP_ID` and the package metadata,
+  not hardcoded a second time).
+- **Visual inspection**: go through `docs/HIG-REVIEW.md` item by item (high contrast, large text, keyboard-only, screen reader, touch and OSK, spacing and hierarchy,
+  animation feel); the wording of HIG `guidelines/writing-style` also goes only through that checklist.
 
 **S8**
-- `check()` 里跑测试要分层:重测试(A0、HEIC、字体排版)标 `#[ignore]` 或 feature-gated,
-  `check()` 只跑快层——干净 chroot 里没有字体缓存、没有 `$HOME`、没有显示器
-- 补 `.pixlay` 的 MIME 注册(shared-mime-info xml + desktop 文件 + 图标);`depends` 清单要按解码后端确定
-- 补 AppStream metainfo:文件名与 `<id>` **必须等于 app-id**(`org.yangtse.Pixlay.metainfo.xml`),
-  `<url type="homepage">` 指向 `yangtse.org` 下的实际页面;PKGBUILD 的 `url=` 与 `pkgdesc` 同样用英文并指向该页面。
-  缺 metainfo 的后果不是报错,而是软件中心里没名字、没截图、没图标
-- i18n 落地:`.desktop` 与 AppStream metainfo 的多语言字段(S7 已定 gettext)与 `.po` 一起装;
-  `check()` 里 `msgfmt --check` 必须离线可跑,且**没有任何语言包时界面仍是英文**
-- `makepkg` 的 `check()` 必须离线可跑 → fixtures 全在仓库内,`cargo vendor` 不能漏测试依赖
+- running tests inside `check()` has to be tiered: heavy tests (A0, HEIC, font layout) are marked `#[ignore]` or feature-gated,
+  and `check()` runs only the fast tier — a clean chroot has no font cache, no `$HOME`, no display
+- add the `.pixlay` MIME registration (a shared-mime-info xml + desktop file + icon); the `depends` list has to be determined by the decoding backend
+- add AppStream metainfo: the file name and `<id>` **must equal the app-id** (`org.yangtse.Pixlay.metainfo.xml`),
+  `<url type="homepage">` points at the actual page under `yangtse.org`; the PKGBUILD's `url=` and `pkgdesc` likewise use English and point at that page.
+  The consequence of missing metainfo is not an error, but a software center with no name, no screenshots and no icon
+- i18n lands: the multilingual fields of `.desktop` and AppStream metainfo (S7 already decided gettext) are installed together with `.po`;
+  `msgfmt --check` inside `check()` must be runnable offline, and **with no language pack at all the interface is still English**
+- `makepkg`'s `check()` must be runnable offline → all fixtures are inside the repository, and `cargo vendor` must not miss test dependencies
 
-### 四、度量口径(数字能互相比较的前提)
+### 4. Measurement rules (the precondition for numbers to be comparable)
 
-- 峰值内存 = `/proc/self/status` 的 `VmHWM`(或 `getrusage.ru_maxrss`),不用 RSS 采样
-- 时间 = `CLOCK_MONOTONIC` 墙钟,合成与编码分开报
-- 测试内容必须非平坦
-- 产物写磁盘(`/var/tmp` 或 `$XDG_CACHE_HOME`),不写 `/tmp`
-- 每个阈值常量在代码里注释**来源**(实测值 + 日期)——AGENTS 的"只留测试"才成立
+- peak memory = `VmHWM` from `/proc/self/status` (or `getrusage.ru_maxrss`), not RSS sampling
+- time = `CLOCK_MONOTONIC` wall clock, with compositing and encoding reported separately
+- test content must be non-flat
+- artifacts are written to disk (`/var/tmp` or `$XDG_CACHE_HOME`), not to `/tmp`
+- every threshold constant is annotated in the code with its **source** (measured value + date) — only then does AGENTS's "Every rule a test can enforce lives only in the tests" hold
 
-### 五、开工前待决策
+### 5. Open decisions before starting
 
-按"错了要返工多少"分三档。第三列是建议,**未反对即按建议锁定**。
+Divided into three tiers by "how much rework a wrong choice causes". The third column is the recommendation; **locked as recommended unless objected to**.
 
-#### A. 已落地(2026-09-20)
+#### A. Already landed (2026-09-20)
 
-脚手架进仓库,`cargo fmt --check` / `cargo clippy -- -D warnings` / `cargo test` / `cargo build --release` 全绿。
+The scaffolding entered the repository, and `cargo fmt --check` / `cargo clippy -- -D warnings` / `cargo test` / `cargo build --release` are all green.
 
-- 构建档:基线一律 `--release`;`[profile.release]` 冻在 `lto = "thin"`、`codegen-units = 1`、`debug = 1`
-- `[profile.dev.package."*"] opt-level = 2`:只作用于**外部依赖**(实测工作区成员不带 `-C opt-level`,仍是 0),
-  目的是让 S4 的图像管线在 dev 下可用,同时不拖慢自身 crate 的迭代编译
-- workspace:`edition = "2024"`、`resolver = "3"`、`rust-version = "1.98"`(跟 Arch 现装 rustc,
-  见 AGENTS 的「版本策略:追新」而不是 edition 下限);`crates/*` 五个 crate 齐(见下)
-- license:每 crate `license = "GPL-3.0-or-later"` + 根 `LICENSE`(SPDX 原文)+ `publish = false`
-- 门禁:`cargo fmt --check` 与 `cargo clippy --workspace --all-targets -- -D warnings` 已进「验证入口」;
-  lint 在根 `Cargo.toml` 的 `[workspace.lints]` 统一设(`unsafe_code = deny`、clippy `all` 全 deny、
-  `dbg_macro` / `todo` / `unimplemented` deny —— 后两条同时机械封住"留 TODO 占位"这条路)
-- CI:S0–S6 不做;S8 加 Arch 容器 job
+- build profile: the baseline is always `--release`; `[profile.release]` is frozen at `lto = "thin"`, `codegen-units = 1`, `debug = 1`
+- `[profile.dev.package."*"] opt-level = 2`: it applies only to **external dependencies** (measured: workspace members do not get `-C opt-level` and stay at 0),
+  and its purpose is to make S4's image pipeline usable under dev without slowing down iterative compilation of our own crates
+- workspace: `edition = "2024"`, `resolver = "3"`, `rust-version = "1.98"` (following Arch's installed rustc,
+  see AGENTS's "Version policy: track the latest" rather than the edition floor); the five crates under `crates/*` are all present (see below)
+- license: each crate has `license = "GPL-3.0-or-later"` + a root `LICENSE` (the SPDX original) + `publish = false`
+- gates: `cargo fmt --check` and `cargo clippy --workspace --all-targets -- -D warnings` are already in the "Verification entry";
+  lints are set uniformly in the root `Cargo.toml`'s `[workspace.lints]` (`unsafe_code = deny`, clippy `all` all deny,
+  `dbg_macro` / `todo` / `unimplemented` deny — the last two also mechanically close off the "leave a TODO placeholder" route)
+- CI: not done for S0–S6; S8 adds an Arch container job
 
-脚手架现状(给下一个会话):
+The scaffolding as it stands (for the next session):
 
-    Cargo.toml            工作区 + profile + lints;members = crates/*
+    Cargo.toml            workspace + profile + lints; members = crates/*
     rustfmt.toml          edition/style_edition = 2024
-    LICENSE               GPL-3.0-or-later(SPDX 原文,232 行)
-    crates/pixlay-core    文档骨架,内容来自 S1/S2/S3/S6.5;禁止 gtk/cairo
-    crates/pixlay-imaging 文档骨架,S4;暴露同步纯函数(线程归调用方)
-    crates/pixlay-render  文档骨架,S1;唯一的 draw(doc, target)
-    crates/pixlay-cli     bin 名为 `pixlay-render`(非 `pixlay-cli`);S1 起是 lib + bin:
-                          lib 出 `cli::run`(集成测试直接调),bin 只是壳;禁止 gtk4
-    crates/pixlay         lib 骨架,只钉住 `APP_ID`;GUI 与 `pixlay` bin 目标 S7 才加
-                          (这样 S0–S6 的 `cargo test` 不必编译 gtk4-rs)
+    LICENSE               GPL-3.0-or-later (the SPDX original, 232 lines)
+    crates/pixlay-core    doc skeleton, content from S1/S2/S3/S6.5; gtk/cairo forbidden
+    crates/pixlay-imaging doc skeleton, S4; exposes synchronous pure functions (threading is the caller's)
+    crates/pixlay-render  doc skeleton, S1; the single draw(doc, target)
+    crates/pixlay-cli     the bin is named `pixlay-render` (not `pixlay-cli`); from S1 it is a lib + bin:
+                          the lib exports `cli::run` (integration tests call it directly) and the bin is just a shell; gtk4 forbidden
+    crates/pixlay         lib skeleton, pinning only `APP_ID`; the GUI and the `pixlay` bin target are added in S7
+                          (so that S0–S6's `cargo test` does not have to compile gtk4-rs)
 
-未做:`cargo vendor` 目前是空依赖,验不了这条判据;等 S1 引入首批依赖后再验。
+Not done: `cargo vendor` currently has empty dependencies, so this criterion cannot be verified; verify it after S1 introduces the first batch of dependencies.
 
-#### B. 已确认(2026-09-20)——S1 契约冻结前必须遵守
+#### B. Confirmed (2026-09-20) — must be obeyed before the S1 contract is frozen
 
-| 条目 | 决定 |
+| Item | Decision |
 |---|---|
-| 画布预设集 | A4 / A3 / A0 各纵横 + 1:1 + 3:2 + 4:3 + 16:9 + 自定义;`Template` **声明所属长宽比**,模板矩阵按长宽比分族 |
-| `.pixlay` 格式 | JSON(`serde_json`) |
-| 工程版本策略 | 加 `docVersion`;读到更高版本**直接拒绝并报错**,不猜、不降级 |
-| `draw` 的 target | `{ cairo ctx, scale, band }`——预览缩放与 A0 分块渲染都只是调用方参数,不改渲染器 |
-| 错误类型策略 | core/render 用 `thiserror` typed error;`anyhow` 只出现在 `pixlay-cli` |
-| imaging 线程模型 | 暴露**同步纯函数**,不带线程/通道;并发归调用方(GUI 自己经 channel 回主线程) |
-| 格内源图 alpha | 合成到**不透明白**;导出永远不透明;预览与导出像素一致 |
-| 文字层 v1 | 字号**归一化**;token 仅 `{date}` / `{filename}` / `{index}`,其余进「v1 非目标」 |
-| `{date}` 口径 | 取 EXIF `DateTimeOriginal` **原样不换算**时区;缺失回退到工程里存的字符串;测试 pin `TZ` |
-| 撤销粒度与快照 | 一次手势 = 一条命令(拖动结束才提交);快照存整份 `CollageDoc`,不做 diff |
-| 配置存放 | `~/.config/pixlay/` 下的 serde 文件(与 `.pixlay` 同一套);**不用 GSettings** |
-| 上限常数 | 画布 ≤ **200 MP**、DPI **72–600**、槽数 **2–10**;越界给明确错误,不 panic(A0@300dpi = 139.5 MP,留 43% 余量) |
-| 细长格 clamp 退化 | 所需缩放 > **1.5×** 时**限制旋转角**;clamp 结果带「被限」标记给 UI |
-| `.pixlay` 路径解析 | 相对工程文件;缺文件 = 明确报错 + 非零退出码;原子写(tmp + rename) |
+| canvas preset set | A4 / A3 / A0 each portrait and landscape + 1:1 + 3:2 + 4:3 + 16:9 + custom; `Template` **declares the aspect ratio it belongs to**, and the template matrix is grouped by aspect ratio |
+| `.pixlay` format | JSON (`serde_json`) |
+| project version policy | add `docVersion`; reading a higher version **is rejected outright with an error**, no guessing, no downgrading |
+| `draw`'s target | `{ cairo ctx, scale, band }` — preview scaling and A0 banded rendering are both just caller arguments and do not change the renderer |
+| error type policy | core/render use `thiserror` typed errors; `anyhow` appears only in `pixlay-cli` |
+| imaging thread model | exposes **synchronous pure functions**, with no threads/channels; concurrency belongs to the caller (the GUI returns to the main thread through a channel itself) |
+| in-slot source alpha | composited onto **opaque white**; an export is never transparent; preview and export pixels are identical |
+| text layer v1 | font size **normalized**; tokens only `{date}` / `{filename}` / `{index}`, the rest goes into "v1 non-goals" |
+| `{date}` semantics | takes EXIF `DateTimeOriginal` **verbatim, with no timezone conversion**; when missing, falls back to the string stored in the project; tests pin `TZ` |
+| undo granularity and snapshots | one gesture = one command (committed when the drag ends); a snapshot stores the whole `CollageDoc`, with no diff |
+| config storage | serde files under `~/.config/pixlay/` (the same scheme as `.pixlay`); **no GSettings** |
+| limit constants | canvas ≤ **200 MP**, DPI **72–600**, slot count **2–10**; out of range gives a clear error, not a panic (A0@300dpi = 139.5 MP, leaving 43% headroom) |
+| Elongated-slot clamp degradation | when the required zoom is > **1.5×**, **limit the rotation angle**; the clamp result carries a "limited" flag for the UI |
+| `.pixlay` path resolution | relative to the project file; a missing file = a clear error + a non-zero exit code; atomic write (tmp + rename) |
 
-#### C. S1 之后、S4 之前(仍是建议,未反对即按建议锁定)
+#### C. After S1, before S4 (still recommendations; locked as recommended unless objected to)
 
-| 问题 | 建议 |
+| Question | Recommendation |
 |---|---|
-| 源 ICC | v1 不读源 ICC,一律按 sRGB 解释,并在文档里写明这是已知限制(真做需要 lcms2 + 渲染意图定义) |
-| 输出 ICC | 内嵌 sRGB IEC61966-2.1 profile 字节,不引 lcms2 |
-| 解码后端 | 见下方「解码后端的两条路」;先实测再定,**这个决定 S8 的 `depends`** |
-| 字体 | 生产不捆绑字体(Noto Sans CJK 太大);金标准文本测试用仓库内小号测试字体,系统字体渲染的检查标 `#[ignore]` |
-| 依赖登记 | 每个新依赖在 AGENTS 登记(name / version / 为什么 / 体积);S1 首批一次性登记 |
-| AUR 包名与版本 | 包名 `pixlay`;release tag `vX.Y.Z` 打到 GitHub,PKGBUILD `source=` 用 tag tarball |
+| source ICC | v1 does not read the source ICC and interprets everything as sRGB, and the documentation states that this is a known limitation (doing it properly needs lcms2 + a rendering-intent definition) |
+| output ICC | embed the sRGB IEC61966-2.1 profile bytes; do not pull in lcms2 |
+| decoding backend | see "The two paths for the decoding backend" below; measure first, then decide, **and this decision determines S8's `depends`** |
+| fonts | production does not bundle fonts (Noto Sans CJK is too large); the golden text tests use a small test font committed in the repository, and checks that render with system fonts are marked `#[ignore]` |
+| dependency registry | every new dependency is registered in AGENTS (name / version / why / size); S1 registers the first batch in one go |
+| AUR package name and version | package name `pixlay`; the release tag `vX.Y.Z` is pushed to GitHub, and the PKGBUILD's `source=` uses the tag tarball |
 
-**解码后端的两条路**(来源:`glycin-core 4.0.0` / `glycin 4.0.0` 源码实测,不是记忆):
+**The two paths for the decoding backend** (source: measured on the `glycin-core 4.0.0` / `glycin 4.0.0` source, not recalled):
 
-- `glycin-core 4.0.0` 的 `COMPAT_VERSION = 2` → 它认 `/usr/share/glycin-loaders/2+/conf.d/`,
-  与 Arch `glycin` 包已装的 `2+` loader **兼容**(不存在"crate 4 要 loader 4+"的问题)。
-- 但 `glycin` facade 在 Linux 上**硬依赖 `glycin-external`**(`[target.'cfg(target_os = "linux")'.dependencies]`
-  里非 optional),即必须走**沙箱 loader 进程**:需要 libseccomp、bwrap、系统 loader 包,
-  以及 D-Bus 连接(loader 二进制要 `--dbus-fd`)。本机 `glycin-thumbnailer` 全格式失败那一测,
-  是发行版二进制的问题,与这条 crate 路径不是一回事。
-- **自包含方案**:直接依赖 `glycin-builtin`(=`glycin-core` + `builtin`)+ `builtin-image-rs` feature,
-  loader 在进程内,不需要 bwrap / D-Bus / 发行版 loader 包。代价:
-  1. `glycin-image-rs` 覆盖 PNG/JPEG/WebP/TIFF/GIF/AVIF 等,**不含 HEIC**;
-  2. HEIC 在 Arch 是独立的 `glycin-heif` loader(走 libheif),自包含方案要另找路径。
-- S4 第一步:这两条各跑一次真实解码(含 HEIC、含 EXIF Orientation=6),用数字选一条。
+- `glycin-core 4.0.0`'s `COMPAT_VERSION = 2` → it recognizes `/usr/share/glycin-loaders/2+/conf.d/`,
+  which is **compatible** with the `2+` loaders Arch's `glycin` package already installs (there is no "crate 4 needs loader 4+" problem).
+- But the `glycin` facade **hard-depends on `glycin-external`** on Linux (non-optional in
+  `[target.'cfg(target_os = "linux")'.dependencies]`), i.e. it must go through a **sandboxed loader process**: it needs libseccomp, bwrap, the system loader packages,
+  and a D-Bus connection (the loader binary wants `--dbus-fd`). That measurement on this machine where `glycin-thumbnailer` failed for every format
+  is a problem of the distribution's binary, and is not the same thing as this crate path.
+- **The self-contained option**: depend directly on `glycin-builtin` (= `glycin-core` + `builtin`) + the `builtin-image-rs` feature,
+  with the loader in-process, needing no bwrap / D-Bus / distribution loader packages. The cost:
+  1. `glycin-image-rs` covers PNG/JPEG/WebP/TIFF/GIF/AVIF and so on, **but not HEIC**;
+  2. on Arch, HEIC is a separate `glycin-heif` loader (going through libheif), so the self-contained option has to find another path.
+- S4's first step: run one real decode down each of the two paths (including HEIC, including EXIF Orientation=6) and pick one with numbers.
 
-**已定**:`app-id = org.yangtse.Pixlay`(自有域名 `yangtse.org`);仓库 `YangtseSu/pixlay`(private);提交纪律与语言约定(英文)。
+**Decided**: `app-id = org.yangtse.Pixlay` (own domain `yangtse.org`); repository `YangtseSu/pixlay` (private); commit discipline and language conventions (English).
 
-### 六、实测基线(2026-09-20,本机)
+### 6. Measured baseline (2026-09-20, this machine)
 
-环境:cairo 1.18.4 · pixman 0.46.4 · gtk4 4.22.5 · libadwaita 1.9.4 · rustc 1.98.1 · 24 线程 ·
-15 GB RAM · `/tmp` tmpfs 剩 7.5 GB · lcms2 2.19.1 · libheif 1.23.4 · libavif · libjxl ·
-libtiff 4.7.2 · libjpeg-turbo 3.2.0 · glycin 2.1.5(loaders `2+`:heif / image-rs / jxl / svg)· bwrap 在。
+Environment: cairo 1.18.4 · pixman 0.46.4 · gtk4 4.22.5 · libadwaita 1.9.4 · rustc 1.98.1 · 24 threads ·
+15 GB RAM · `/tmp` tmpfs with 7.5 GB free · lcms2 2.19.1 · libheif 1.23.4 · libavif · libjxl ·
+libtiff 4.7.2 · libjpeg-turbo 3.2.0 · glycin 2.1.5 (loaders `2+`: heif / image-rs / jxl / svg) · bwrap present.
 
-A0 = 9933×14043(139.5 MP)`ARGB32` 表面,stride 39732:
+A0 = 9933×14043 (139.5 MP) `ARGB32` surface, stride 39732:
 
-| 项 | 结果 |
+| Item | Result |
 |---|---|
-| 表面创建 | 0.1 ms,558 MB |
-| 填白 | 43 ms |
-| 2 格合成(多边形 clip + 仿射贴图 + 硬填充) | 244 ms |
-| 81 次贴图(照片内容) | 699 ms |
-| 旋转 CJK 文字(pangocairo,Noto Sans CJK) | 16 ms |
-| `write_to_png`(平坦内容) | 1497 ms → 4.4 MB |
-| `write_to_png`(照片内容) | 6907 ms → 342 MB |
-| → JPEG q90 4:4:4(magick) | 5.5 s → 150 MB |
-| → TIFF LZW(magick) | 4.8 s → 476 MB |
-| 全画布 16-bit RGBA 中间缓冲 | 1064 MB 常驻,120 ms 触碰完 |
-| 整程峰值 `VmHWM` | **543 MB**(含 558 MB 表面;带文字层的那次 569 MB) |
+| surface creation | 0.1 ms, 558 MB |
+| fill white | 43 ms |
+| 2-slot compositing (polygon clip + affine blit + hard fill) | 244 ms |
+| 81 blits (photo content) | 699 ms |
+| rotated CJK text (pangocairo, Noto Sans CJK) | 16 ms |
+| `write_to_png` (flat content) | 1497 ms → 4.4 MB |
+| `write_to_png` (photo content) | 6907 ms → 342 MB |
+| → JPEG q90 4:4:4 (magick) | 5.5 s → 150 MB |
+| → TIFF LZW (magick) | 4.8 s → 476 MB |
+| full-canvas 16-bit RGBA intermediate buffer | 1064 MB resident, touched through in 120 ms |
+| whole-run peak `VmHWM` | **543 MB** (including the 558 MB surface; the run with a text layer is 569 MB) |
 
-**接缝**(AGENTS 的"必须在 Cairo 上重测")已测:相邻格共用边上的混色像素数 / 缝长 ≈ **1.08**
-(缝长为几何长度估计),在 A0 与 1/5 尺寸下**完全相同** → 混色宽度是 1 物理像素、与输出分辨率无关,
-且无强渗色(强混色像素数 0)。**推论:缝可见的是预览(低分辨率),不是导出**——300dpi 下 1px ≈ 0.085 mm。
-判据写成"混色像素数 ≤ 2 × 缝长",两种尺寸各测一次。
+**Seam** (AGENTS's "Open / to be proven") already measured: blended pixels on a shared edge between adjacent slots / seam length ≈ **1.08**
+(the seam length is a geometric length estimate), and it is **exactly the same** at A0 and at 1/5 size → the blend width is 1 physical pixel, independent of the
+output resolution, and there is no strong bleeding (the count of strongly blended pixels is 0). **Inference: what makes the seam visible is the preview (low resolution), not the export** — at 300dpi 1px ≈ 0.085 mm.
+The criterion is written as "blended pixel count ≤ 2 × the seam length", measured once at each of the two sizes.
 
-**glycin**:本机 `glycin-thumbnailer` 对 PNG / JPEG / HEIC / AVIF **全部**失败
-(`Failed to load file/stream: Operation not supported`),带 session bus 与不带都一样;loader 二进制与 bwrap 都在。
-原因未定位,但足以说明"glycin 非 Flatpak 零配置可用"**尚未成立** → S4 第一条必须是先证明它,
-且 CLI/测试要有一条不依赖 glycin 的路。
+**glycin**: on this machine `glycin-thumbnailer` fails for **all of** PNG / JPEG / HEIC / AVIF
+(`Failed to load file/stream: Operation not supported`), the same with and without a session bus; the loader binaries and bwrap are both present.
+The cause is not located, but it is enough to show that "glycin usable with zero configuration outside Flatpak" **does not yet hold** → S4's first item must be to prove it first,
+and the CLI/tests need a path that does not depend on glycin.
 
-#### S0 复测(2026-09-20,spike 进仓库之后,`--release`,同一台机器)
+#### S0 re-measurement (2026-09-20, after the spike entered the repository, `--release`, the same machine)
 
-上面那次是一次性探针(未进仓库),这次是仓库内 `a0-spike` 的正式判据。**内容模型不同**:
-照片按**格内显示尺寸 1:1** 生成(每像素带颗粒),而不是小图重复贴——这是 S4 缓冲阶梯
-(`解码 → 16-bit 线性 → 降采样到格内显示尺寸 → 调色 → 合成`)实际会拿到的输入形状。
+The run above was a one-off probe (not committed); this is the formal criteria of the in-repo `a0-spike`. **The content model is different**:
+photos are generated at **in-slot display size 1:1** (every pixel carries grain) rather than a small image blitted repeatedly — this is the input shape S4's buffer ladder
+(`decode → 16-bit linear → downsample to in-slot display size → color grading → compositing`) will actually receive.
 
-| 配置 | 合成 ms | PNG ms / MB | JPEG ms / MB | `VmHWM` 合成 / 整程 MB |
+| Configuration | compositing ms | PNG ms / MB | JPEG ms / MB | `VmHWM` compositing / whole run MB |
 |---|---|---|---|---|
-| flat 2 格 | 189 | — | — | 941 / 941 |
-| flat 10 格 | 550 | — | — | 941 / 941 |
-| detail 2 格 | 185 | 34002 / 120.0 | 3315 / 38.3 | 941 / 1340 |
-| detail 10 格 | 551 | 27773 / 125.6 | 3240 / 40.3 | 941 / 1340 |
+| flat 2 slots | 189 | — | — | 941 / 941 |
+| flat 10 slots | 550 | — | — | 941 / 941 |
+| detail 2 slots | 185 | 34002 / 120.0 | 3315 / 38.3 | 941 / 1340 |
+| detail 10 slots | 551 | 27773 / 125.6 | 3240 / 40.3 | 941 / 1340 |
 
-内存构成:输出表面 **558 MB** + 照片缓冲 **402 MB**(两档格数巧合相同:2 格时是两个大格,
-10 格时是一个大格加九个小格)= 960 MB,与实测 941 MB 一致。**10 格不额外吃内存**——峰值由
-输出表面加"格内显示尺寸的照片总和"决定,与格数无关,这是 S4 该照抄的结论。
+Memory composition: output surface **558 MB** + photo buffers **402 MB** (the two slot counts coincidentally the same: at 2 slots it is two large slots,
+at 10 slots it is one large slot plus nine small ones) = 960 MB, consistent with the measured 941 MB. **10 slots do not eat extra memory** — the peak is decided by
+the output surface plus "the sum of photos at in-slot display size", independent of the slot count, and this is the conclusion S4 should copy.
 
-与上面一次性探针的差异,两条都要记:
+Differences from the one-off probe above, both of which must be recorded:
 
-1. **PNG 慢得多:34 s / 120 MB vs 6.9 s / 342 MB。** 差别在内容:逐像素熵高的 A0 内容让 zlib
-   真干满 558 MB 的活(4 Mpx/s),而探针那次的"照片内容"可压缩性高得多(输出更大反而更快)。
-   `cairo_surface_write_to_png` 是**单线程 zlib**,S6 本来就因为元数据放弃它,现在多一条性能理由。
-2. **峰值不再是 543 MB 而接近 1 GB**,因为这次把照片缓冲算进去了(见上)。2.5 GB 预算仍有 1.6 GB 余量。
+1. **PNG is much slower: 34 s / 120 MB vs 6.9 s / 342 MB.** The difference is the content: A0 content with high per-pixel entropy makes zlib
+   really do the full work over 558 MB (4 Mpx/s), whereas the probe's "photo content" was far more compressible (the larger output was actually faster).
+   `cairo_surface_write_to_png` is **single-threaded zlib**, and S6 already gave it up for metadata reasons; now there is a performance reason as well.
+2. **The peak is no longer 543 MB but close to 1 GB**, because this time the photo buffers are counted (see above). The 2.5 GB budget still has 1.6 GB of headroom.
 
-`--preview-px` 出来的 1400×1979 预览(两张)已目视:不规则 L 形 clip 正确、旋转格被 clip 住、
-未覆盖处露白、CJK 字形完整、缝无渗色。
+The 1400×1979 previews (two of them) produced by `--preview-px` have been inspected: the irregular L-shaped clip is correct, the rotated slot is clipped,
+uncovered areas show white, CJK glyphs are complete, and the seam has no bleeding.
 
 ---
 
-## 完成后
+## After completion
 
-S0–S8 全部勾选后,本文件可以删。届时该有的约束已在 `AGENTS.md`,该有的规格已在测试里。
+Once S0–S8 are all checked off, this file can be deleted. By then the constraints that should exist are in `AGENTS.md`, and the specifications that should exist are in the tests.

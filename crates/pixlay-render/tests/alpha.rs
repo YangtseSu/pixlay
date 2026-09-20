@@ -1,7 +1,7 @@
 //! The alpha rule, as a test: a bitmap with transparency composites onto the
 //! opaque white base.
 //!
-//! `AGENTS.md` fixes this twice over — "合成到不透明白底", and preview and export
+//! `AGENTS.md` fixes this twice over — "Composite onto opaque white", and preview and export
 //! must be pixel-identical — so a bitmap that carries alpha has to reach the
 //! encoder already composited over white, not as a translucent value that some
 //! later step has to guess about. The other render tests use opaque bitmaps, so

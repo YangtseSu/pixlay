@@ -1,55 +1,56 @@
-# GNOME HIG 对照清单
+# GNOME HIG conformance checklist
 
-`AGENTS.md` 的「GNOME HIG」一节是**硬约束**,本文件是它的执行清单:把 HIG 的每一节落到
-「机器判据 / 目视判据 / 不适用」三档,并记清哪些章节**已经逐页读过**、哪些还没读。
+The "GNOME HIG" section of `AGENTS.md` is a **hard constraint**, and this file is its execution checklist: it sorts
+every HIG section into the three tiers "machine-checkable criteria / visual criteria / not applicable", and records
+clearly which chapters **have already been read page by page** and which have not.
 
-- 规范:<https://developer.gnome.org/hig/>(无版本号,**不冻结**;引用 URL 与章节名)
-- 本文件最近一次逐页阅读:**2026-09-20**。做 UI 的每一步(S7、S8)开工时先重读相关章节再更新本文件。
-- 读一节就把那一节的判据写进上表:能算的进测试(`docs/STEPS.md` 补丁层的「S7 · GNOME HIG」),
-  只能看的进「二」。**别攒着**——HIG 会变,攒着等于下次重读。
+- Spec: <https://developer.gnome.org/hig/> (no version number, **not frozen**; cite URLs and section names)
+- The most recent page-by-page read of this file: **2026-09-20**. At the start of every UI step (S7, S8), re-read the relevant chapters before updating this file.
+- As soon as a chapter is read, write that chapter's criteria into the table above: whatever can be computed goes into tests (`docs/STEPS.md`, the "S7 · GNOME HIG" patch layer),
+  whatever can only be looked at goes into "section 2". **Do not let it pile up** — HIG changes, and letting it pile up is the same as re-reading it next time.
 
-## 一、已读章节 → 判据
+## 1. Read chapters -> criteria
 
-| HIG 章节 | 落点 | 判据 |
+| HIG chapter | Landing point | Criteria |
 |---|---|---|
-| `index`(平台定义:GTK4 + libadwaita) | `AGENTS.md` | GUI 只在 `pixlay` crate;其余 crate 不引 GTK |
-| `guidelines/ui-styling` | `AGENTS.md` + S7 测试 | 只用 style class / CSS 变量,禁硬编码颜色与间距;跟随系统深色;两种样式下都能启动;**画布像素不随样式变** |
-| `guidelines/accessibility` | S7 测试 + 本文件「二」 | 每个可交互控件有可访问名(机器);高对比 / 大字体 / 纯键盘 / 屏幕阅读器 / OSK(目视) |
-| `guidelines/keyboard` | S7 测试 | 每个 action 有键盘路径;Tab 顺序覆盖全部控件 |
-| `reference/keyboard` | S7 测试 | 加速键表 ⊇ 必需集合,∩ 系统保留集合 = ∅;不绑 `Alt+*` / `Super+*` |
-| `patterns/containers`(windows / header-bars / popovers / utility-panes / boxed-lists / grid-views / list-column-views) | S7 设计 | 用 libadwaita 容器;本步选定后把实际用的容器回填到本表 |
-| `patterns/feedback`(toasts / banners / dialogs / placeholders / spinners / progress-bars / tooltips / notifications) | S7 设计 | 可撤销的短反馈走 `AdwToast`;破坏性操作走对话框;空状态走 `AdwStatusPage`;进度走进度条而非模态 |
-| `patterns/containers/selection-mode` | **不适用** | 没有集合视图与多选批量操作;该页自身写明"编辑是主要交互时不应有独立编辑模式",与「不要做模式切换」同向 |
+| `index` (platform definition: GTK4 + libadwaita) | `AGENTS.md` | GUI only in the `pixlay` crate; no other crate pulls in GTK |
+| `guidelines/ui-styling` | `AGENTS.md` + S7 tests | style classes / CSS variables only, hard-coded colors and spacing forbidden; follow the system dark mode; starts under both styles; **canvas pixels do not change with the style** |
+| `guidelines/accessibility` | S7 tests + "section 2" of this file | every interactive control has an accessible name (machine-checkable); high contrast / large text / keyboard-only / screen reader / OSK (visual inspection) |
+| `guidelines/keyboard` | S7 tests | every action has a keyboard path; the Tab order covers every control |
+| `reference/keyboard` | S7 tests | the accelerator table ⊇ the required set, ∩ the system-reserved set = ∅; do not bind `Alt+*` / `Super+*` |
+| `patterns/containers` (windows / header-bars / popovers / utility-panes / boxed-lists / grid-views / list-column-views) | S7 design | use libadwaita containers; once this step has chosen them, backfill the containers actually used into this table |
+| `patterns/feedback` (toasts / banners / dialogs / placeholders / spinners / progress-bars / tooltips / notifications) | S7 design | reversible short feedback goes through `AdwToast`; destructive operations go through a dialog; empty states go through `AdwStatusPage`; progress goes through a progress bar rather than a modal |
+| `patterns/containers/selection-mode` | **Not applicable** | there are no collection views and no multi-select batch operations; that page itself states that "when editing is the primary interaction there should be no separate edit mode", which points the same way as "do not add mode switching" |
 
-## 二、目视步骤
+## 2. Visual steps
 
-HIG `guidelines/accessibility` 的 "Testing for Accessibility" 逐条照做。**每条的第二步都是本产品的附加判据**:
-画布是**内容**,界面是**样式**,两者不得互相影响(见 `AGENTS.md`「合成到不透明白底」)。
+Follow the "Testing for Accessibility" of HIG `guidelines/accessibility` item by item. **The second step of every item is an additional criterion of this product**:
+the canvas is **content** and the interface is **styling**, and the two must not affect each other (see `AGENTS.md` "Composite onto opaque white").
 
-1. **高对比模式**(GTK Inspector 或系统无障碍设置):界面元素全部正常渲染;画布像素不变。
-2. **大字体**(系统无障碍设置):标签全部可读、不被截断;画布像素不变(文字层是文档内容,不随字号缩放)。
-3. **纯键盘**:只用键盘走完「选模板 → 放照片 → 调取景 → 导出」;焦点顺序合乎逻辑;
-   `F10` 开菜单、`Esc` 关浮层、`Tab` 覆盖全部控件。
-4. **屏幕阅读器**:每个控件都被读出,可访问名准确、简短;关掉显示器仍能操作。
-5. **触摸 / 屏上键盘(OSK)**:文字层内容与导出路径能被 OSK 输完。
-6. **S7 另加**:「三分钟主路径」计时(脚本化步骤清单 + 计时,见 `docs/STEPS.md`)与文案措辞
-   (`guidelines/writing-style` 的句子大小写、不用术语、不用敬语;漏包装不做机器判据)。
+1. **High contrast mode** (GTK Inspector or the system accessibility settings): every UI element renders normally; canvas pixels are unchanged.
+2. **Large text** (system accessibility settings): every label stays readable and is not truncated; canvas pixels are unchanged (text layers are document content and do not scale with the font size).
+3. **Keyboard-only**: walk "pick a template → place photos → adjust framing → export" with the keyboard alone; the focus order is logical;
+   `F10` opens the menu, `Esc` closes overlays, `Tab` covers every control.
+4. **Screen reader**: every control is read out, the accessible name is accurate and short; it stays operable with the monitor off.
+5. **Touch / on-screen keyboard (OSK)**: text-layer content and the export path can be typed entirely with the OSK.
+6. **S7 additions**: the "three-minute main path" timing (a scripted step list + timing, see `docs/STEPS.md`) and copy wording
+   (`guidelines/writing-style`'s sentence case, no jargon, no honorifics; omitted wrapping is not a machine-checkable criterion).
 
-## 三、刻意偏离(`AGENTS.md` 同一份,不修)
+## 3. Deliberate deviations (the same one as in `AGENTS.md`, do not fix)
 
-| HIG 条目 | 决定 | 理由 |
+| HIG item | Decision | Reason |
 |---|---|---|
-| GNOME Shell 搜索提供者、通知工作流 | 不做 | 与「不做」清单同一条纪律:不服务于主路径的功能不加 |
-| 手机型布局 | 不做 | 目标平台是 Arch 桌面;画布有物理尺寸语义 |
-| 每应用样式偏好(light / dark / system 三选一) | 不做 | 主路径最短;「跟随系统」已经覆盖用户表达"想要深色"的方式 |
-| 大字体模式作用于画布文字层 | 不作用 | 预览与导出必须逐像素同源;文字层是文档内容 |
-| access key(`Alt+` 助记符) | 不做 | 本应用没有菜单栏 |
+| GNOME Shell search provider, notification workflow | Not doing | the same discipline as the "Not doing" list: add no feature that does not serve the main path |
+| Phone-style layout | Not doing | the target platform is the Arch desktop; the canvas has physical-size semantics |
+| Per-app style preference (light / dark / system, pick one of the three) | Not doing | the shortest main path; "follow the system" already covers how a user expresses "I want dark" |
+| Large-text mode acting on canvas text layers | Not applied | preview and export must be from the same source, pixel by pixel; text layers are document content |
+| access keys (`Alt+` mnemonics) | Not doing | this application has no menu bar |
 
-## 四、尚未逐页读的章节(S7 / S8 开工时补读并回填「一」)
+## 4. Chapters not yet read page by page (read them and backfill section 1 when S7 / S8 start)
 
-- `principles`、`resources`
-- `guidelines`:`app-naming`(S8)、`app-icons`(S8)、`ui-icons`(S7)、`writing-style`(S7)、
-  `typography`(S7)、`navigation`(S7)、`pointer-touch`(S7)、`adaptive`(S7)
-- `patterns/nav`、`patterns/controls/*`
-- `patterns/containers/*` 与 `patterns/feedback/*` 的**各页细节**(本表目前只用了它们的索引页)
-- `reference/` 里的 UI colors
+- `principles`, `resources`
+- `guidelines`: `app-naming` (S8), `app-icons` (S8), `ui-icons` (S7), `writing-style` (S7),
+  `typography` (S7), `navigation` (S7), `pointer-touch` (S7), `adaptive` (S7)
+- `patterns/nav`, `patterns/controls/*`
+- the **per-page details** of `patterns/containers/*` and `patterns/feedback/*` (this table currently uses only their index pages)
+- the UI colors under `reference/`

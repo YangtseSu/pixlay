@@ -50,7 +50,7 @@ pub const DOC_VERSION: u32 = 1;
 
 /// Oldest `docVersion` this build reads.
 ///
-/// Policy (docs/CONTRACT.md §一): the format is read at exactly one version — this
+/// Policy (docs/CONTRACT.md §1): the format is read at exactly one version — this
 /// one. A change that only *adds* a field does not bump `DOC_VERSION` (the field
 /// carries a `serde` default, so existing projects still load); a change that
 /// alters an existing field's meaning or removes one bumps it, and projects from
@@ -89,5 +89,5 @@ pub const MAX_ZOOM: f64 = 1000.0;
 pub const MAX_ROTATION_DEG: f64 = 45.0;
 
 /// Zoom above which the clamp reduces the rotation angle instead of magnifying
-/// further (docs/STEPS.md, "细长格 clamp 退化").
+/// further (docs/STEPS.md §5.B, elongated-slot clamp degradation).
 pub const CLAMP_ZOOM_LIMIT: f64 = 1.5;
