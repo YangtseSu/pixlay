@@ -16,7 +16,7 @@ The first sentence for a new session:
 
 Legend: ✅ done · 🚧 in progress · ⏸ blocked (waiting on a human decision or external input) · ⬜ not started
 
-**Current progress: S6 — ✅ done (2026-09-21, no unfinished work; the step has no human gate of its own — the one visual question it inherits, S4's downsampling quality, stays open in "Where humans must step in")**
+**Current progress: S6 — ✅ done (2026-09-21, no unfinished work; the two human gates it inherits — S4's downsampling quality and S5's kinsoku and punctuation squeezing — were ruled on 2026-09-21 and both pass, so no gate is open any more until S7's own)**
 **Next action: start S6.5 (command history / project IO / hit testing), which is windowless and gate-free. The boundary list's session ended with the S5+S6 pair, and this session was that pair (S5 as its task, then S6); S7 opens a new session of its own, as the boundary list says.**
 
 | Step | Status | Date | What it delivers |
@@ -58,15 +58,16 @@ Wherever the original criteria said "visual / readable / three minutes", they we
 |---|---|---|
 | After S0 | Look at the numbers: is Cairo usable? | ✅ passed (2026-09-20, human): **Cairo stays** |
 | After S1 | Review the contract. This is the only place a human must confirm — if the contract is wrong, the seven steps after it are all wasted, and the model itself cannot see that "this contract will not be enough later". Before reviewing, first read "Open decisions": every entry in those tables changes the contract's shape | ✅ passed (2026-09-21, human): **contract v1 passes**, defects fixed per the review (see S1's ruling) |
-| After S4 | Look at the downsampling: is a 4000 px photo in a 400 px slot free of aliasing and mush? The numbers are on disk (RMSE 1.41 against ImageMagick's Lanczos, a 16x separation from one-sample-per-texel on the zone plate), the preview is `/var/tmp/verify-preview.png`, and S4's exit criteria call this the one human criterion of the step | ⏳ open — see "S4 · the one visual criterion" |
-| After S5 | Look at the text: do CJK line breaks and squeezed punctuation read right? The preview is `/var/tmp/pixlay-s5/text-preview.png` (the fixture `crates/pixlay-cli/tests/fixtures/text.pixlay`: a wrapped caption with `：“`, `。”` and a break inside a sentence, a `{date}` line, and a tiled watermark), the numbers are in "S5 · the one visual criterion", and S5's exit criteria call this the one human criterion of the step | ⏳ open — see "S5 · the one visual criterion" |
+| After S4 | Look at the downsampling: is a 4000 px photo in a 400 px slot free of aliasing and mush? The numbers are on disk (RMSE 1.41 against ImageMagick's Lanczos, a 16x separation from one-sample-per-texel on the zone plate), the preview is `/var/tmp/verify-preview.png`, and S4's exit criteria call this the one human criterion of the step | ✅ passed (2026-09-21, human): **the downsampling passes** — the resampler stays as built, and the optional permanent threshold was declined (see "S4 · ruling") |
+| After S5 | Look at the text: do CJK line breaks and squeezed punctuation read right? The preview is `/var/tmp/pixlay-s5/text-preview.png` (the fixture `crates/pixlay-cli/tests/fixtures/text.pixlay`: a wrapped caption with `：“`, `。”` and a break inside a sentence, a `{date}` line, and a tiled watermark), the numbers are in "S5 · the one visual criterion", and S5's exit criteria call this the one human criterion of the step | ✅ passed (2026-09-21, human): **the text passes** — kinsoku stays Pango's and squeezing stays `halt`; line-end trimming stays a non-goal (see "S5 · ruling") |
 
 **The gate's closing action** is in `AGENTS.md` "Session and persistence discipline": a ruling block + the status row + this table's entry + `docs/CONTRACT.md` + commit,
 and it is not done if one of the five is missing.
 
 The remaining steps complete through the model's automatic loop, except the **visual criteria** (what could be computed has already been turned into computable quantities in the exit criteria):
-S0's text readability, S4's downsampling quality, S5's kinsoku and punctuation squeezing feel, S7's "three-minute main path" and whether interface copy has any missed wrapping,
+S7's "three-minute main path" and whether interface copy has any missed wrapping, and
 S7's GNOME HIG visual checklist (`docs/HIG-REVIEW.md`: high contrast / large text / keyboard-only / screen reader / touch and OSK).
+S0's text readability, S4's downsampling quality and S5's kinsoku and punctuation squeezing have all been ruled on (2026-09-20 / 2026-09-21).
 
 ---
 
@@ -637,9 +638,30 @@ but not ringing. The same content at 8x against ImageMagick's Lanczos is an RMSE
 one-sample-per-texel gives 0.3183 — so the eye and the numbers are answering the
 same question.
 
-**Status: looked at, numbers on disk, and the human verdict is still the one that
-counts** (the gate table's row). It does not gate S5: nothing in the text layer's
-contract depends on the resampler's edge behaviour.
+**Status: looked at, numbers on disk, and ruled on 2026-09-21 (human) — the ruling is in
+"S4 · ruling" below.** It does not gate S5: nothing in the text layer's contract depends on
+the resampler's edge behaviour.
+
+### S4 · ruling (2026-09-21, human)
+
+**The downsampling passes.** Both previews were looked at — `/var/tmp/verify-preview.png`
+(eight real photos) and `/var/tmp/s4-downsample-check.png` (the wave fixture at 4-8x
+reductions) — and the numbers read: RMSE 1.41 against ImageMagick's Lanczos, and a 16x
+separation from one-sample-per-texel on the zone plate (0.0202 against 0.3183). The verdict is
+"pass, close the gate": no defect was named, so the resampler stays exactly as S4 built it —
+16-bit linear Lanczos3 with the kernel widened by the shrink ratio, over the region the slot
+shows, quantized only at the end.
+
+The optional hardening (a *new* permanent threshold) was **declined**, and on inspection it was
+mostly already there: S4's own tests pin both numbers — `a_large_reduction_matches_imagemagick_lanczos`
+asserts RMSE ≤ 3.0 (measured 1.41) and `a_large_reduction_does_not_alias` asserts the outer-band
+error ≤ 0.03 (measured 0.0202) *and* that the one-sample-per-texel baseline is at least 3x ours.
+So the verdict leaves nothing unpinned: the criterion is a look at the finished product, the look
+passed, and the numbers it was judged against are already assertions rather than measurements.
+
+No shape changed, so `docs/CONTRACT.md` needs no edit from this ruling — the numbers it already
+carries (§8 "S4") are the basis it was judged on. The gate row and the "Current progress" line
+were rewritten in the same commit, which is this ruling's other half.
 
 ### S4 · review additions (2026-09-20)
 
@@ -787,9 +809,27 @@ The exit criteria, item by item:
    runs are drawn at 3/4 of what they would cost uncompressed. Asked simply: do those two
    pairs read as tight typography, or as a collision?
 
-**Status: rendered, numbers on disk (`docs/CONTRACT.md` §8 "S5"), and the human verdict is
-the one that counts** (the gate table's row). It does not gate S6: nothing in the export
+**Status: rendered, numbers on disk (`docs/CONTRACT.md` §8 "S5"), and ruled on 2026-09-21
+(human) — the ruling is in "S5 · ruling" below.** It does not gate S6: nothing in the export
 step depends on how a squeezed mark looks.
+
+### S5 · ruling (2026-09-21, human)
+
+**The text passes.** `/var/tmp/pixlay-s5/text-preview.png` was looked at, and both halves of
+the criterion hold: the 45-character caption wraps inside its sentence with line 2 starting
+`字，` — no line starts with a mark and none ends with an opening mark — and `：“` and `。”`
+read as tight typography rather than as a collision, with the run's last mark keeping its full
+em (which is why `”` carries its own advance before `然后`). Kinsoku stays Pango's and
+squeezing stays the font's `halt`, exactly as S5 built them.
+
+Two alternatives were considered and **declined**: turning squeezing off (it would make the
+look independent of whether a font has `halt`, at the cost of a loose 2-em `。”` and of the
+compression tests), and adding JLREQ's 行末の約物 (trimming the trailing blank of a mark that
+ends a line). The latter therefore stays a v1 non-goal, recorded in `docs/CONTRACT.md` §6.
+
+No shape changed, so `docs/CONTRACT.md` needs no edit from this ruling beyond what §8 "S5"
+already records. The gate row and the "Current progress" line were rewritten in the same
+commit, which is this ruling's other half.
 
 Regenerate the preview with:
 
