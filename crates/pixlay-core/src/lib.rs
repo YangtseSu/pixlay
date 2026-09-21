@@ -27,6 +27,7 @@ mod crop;
 mod doc;
 mod error;
 mod geometry;
+mod grade;
 mod template;
 mod text;
 
@@ -38,10 +39,13 @@ mod text;
 pub mod templates;
 
 pub use canvas::{CanvasSpec, MAX_CANVAS_MM, MM_PER_INCH, PixelSize};
-pub use crop::{CropFit, CropTransform};
+pub use crop::{CropFit, CropTransform, DisplayRegion};
 pub use doc::{Cell, CollageDoc, Project};
 pub use error::CoreError;
 pub use geometry::{EPSILON, Point, Polygon, Rect};
+pub use grade::{
+    FilterPreset, GRADE_DELTA_RANGE, GRADE_FACTOR_RANGE, GRADE_SATURATION_RANGE, Grade,
+};
 pub use template::{AREA_TOLERANCE, SharedEdge, Slot, Template};
 pub use text::{
     Anchor, Rgba8, TextFallback, TextLayer, TextMode, TextToken, TextTokenUse, scan_tokens,

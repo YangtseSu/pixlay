@@ -16,7 +16,6 @@ use std::path::PathBuf;
 use pixlay_core::{MAX_DPI, MIN_DPI};
 
 use crate::cli::Failure;
-use crate::content::Mode;
 
 /// Largest preview edge in pixels; a preview larger than this cannot be reviewed
 /// by eye anyway.
@@ -33,6 +32,7 @@ USAGE:
     pixlay-render render --project <file.pixlay> --out <file> [OPTIONS]
     pixlay-render render --template <name> --dpi <n> --out <file> [OPTIONS]
     pixlay-render probe  --project <file.pixlay> [OPTIONS]
+    pixlay-render image  --photo <file> [--json]
     pixlay-render templates [--aspect <ratio>] [--json]
     pixlay-render init --template <name> --out <file.pixlay> [--json]
     pixlay-render --help | --version
@@ -45,14 +45,18 @@ RENDER OPTIONS:
     --dpi <n>           Export resolution, 72..=600. Default 300.
     --preview-px <n>    Render the long edge at n pixels instead of full size,
                         1..=20000. The same draw, only the scale changes.
-    --content <mode>    Placeholder content for cells: detail (default) or flat.
-                        Until S4 there is no decoder, so cells are filled with
-                        deterministic content instead of the photo they name.
 
 PROBE OPTIONS:
     --project <file>    Project to probe. Required.
     --dpi <n>           Resolution to probe at, 72..=600. Default 300.
 
+IMAGE OPTIONS:
+    --photo <file>      Decode one photo and report what the decoder found: the
+                        detected MIME type, the size after EXIF rotation, the
+                        sample depth (8 or 16 bits) and the EXIF date when the
+                        file carries one.
+
+TEMPLATES OPTIONS:
 TEMPLATES OPTIONS:
     --aspect <ratio>    List only the templates authored for this canvas shape,
                         as W:H (4:3) or a decimal (1.333333). Omit to list all.
@@ -87,6 +91,7 @@ EXIT CODES:
 pub enum Command {
     Render(RenderArgs),
     Probe(ProbeArgs),
+    Image(ImageArgs),
     Templates(TemplatesArgs),
     Init(InitArgs),
     Help,
@@ -106,8 +111,12 @@ pub struct RenderArgs {
     pub out: PathBuf,
     pub dpi: u32,
     pub preview_px: Option<i32>,
-    pub content: Mode,
     pub stats: bool,
+    pub json: bool,
+}
+
+pub struct ImageArgs {
+    pub photo: PathBuf,
     pub json: bool,
 }
 
@@ -137,7 +146,7 @@ struct Flags {
     out: Option<PathBuf>,
     dpi: Option<u32>,
     preview_px: Option<i32>,
-    content: Option<Mode>,
+    photo: Option<PathBuf>,
     aspect: Option<f64>,
     stats: bool,
     json: bool,
@@ -149,16 +158,9 @@ struct Flags {
 /// a silently dropped `--dpi 300` on `templates` looks like it was honored.
 fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static str)> {
     let valid: &[&str] = match name {
-        "render" => &[
-            "project",
-            "template",
-            "out",
-            "dpi",
-            "preview-px",
-            "content",
-            "stats",
-        ],
+        "render" => &["project", "template", "out", "dpi", "preview-px", "stats"],
         "probe" => &["project", "dpi", "stats"],
+        "image" => &["photo"],
         "templates" => &["aspect"],
         "init" => &["template", "out"],
         _ => &[],
@@ -169,7 +171,7 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
         ("out", flags.out.is_some()),
         ("dpi", flags.dpi.is_some()),
         ("preview-px", flags.preview_px.is_some()),
-        ("content", flags.content.is_some()),
+        ("photo", flags.photo.is_some()),
         ("aspect", flags.aspect.is_some()),
         ("stats", flags.stats),
     ];
@@ -188,10 +190,15 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
 fn reason(name: &str, flag: &str) -> &'static str {
     match (name, flag) {
         ("render", "aspect") => "render takes no --aspect; list the templates first",
+        ("render", "photo") => "render takes photos from a project, not from --photo",
+        ("probe", "photo") => "probe takes photos from a project",
+        ("image", "project") => "image decodes one file; use --photo",
+        ("image", "dpi") => "image decodes at the file's own size",
+        ("image", "out") => "image writes no file",
+        ("image", "template") => "image decodes one file; use --photo",
         ("probe", "template") => "probe reads a project",
         ("probe", "out") => "probe writes no file",
         ("probe", "preview-px") => "probe always renders at full size",
-        ("probe", "content") => "probe renders flat content on purpose",
         ("probe", "aspect") => "probe filters no template list",
         ("templates", _) => "templates only lists the library",
         ("init", "project") => "init takes a template, not a project",
@@ -208,7 +215,7 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
         .to_str()
         .ok_or_else(|| Failure::Usage("subcommand must be valid UTF-8".to_string()))?;
     let subcommand = match head {
-        "render" | "probe" | "templates" | "init" => head,
+        "render" | "probe" | "image" | "templates" | "init" => head,
         "--help" | "-h" | "help" => return Ok(Command::Help),
         "--version" | "-V" | "version" => return Ok(Command::Version),
         other if other.starts_with('-') => {
@@ -291,16 +298,7 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                 }
                 set_once(&mut flags.preview_px, pixels, "preview-px")?;
             }
-            "content" => {
-                let raw = value("content")?;
-                let name = raw
-                    .to_str()
-                    .ok_or_else(|| Failure::Usage("--content must be valid UTF-8".to_string()))?;
-                let mode = Mode::parse(name).ok_or_else(|| {
-                    Failure::Usage(format!("--content {name} is not one of detail, flat"))
-                })?;
-                set_once(&mut flags.content, mode, "content")?;
-            }
+            "photo" => set_once(&mut flags.photo, PathBuf::from(value("photo")?), "photo")?,
             "aspect" => {
                 let raw = value("aspect")?;
                 let aspect = parse_aspect(&raw)?;
@@ -325,6 +323,15 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                 project,
                 dpi: flags.dpi.unwrap_or(300),
                 stats: flags.stats,
+                json: flags.json,
+            }))
+        }
+        "image" => {
+            let photo = flags
+                .photo
+                .ok_or_else(|| Failure::Usage("image needs --photo <file>".to_string()))?;
+            Ok(Command::Image(ImageArgs {
+                photo,
                 json: flags.json,
             }))
         }
@@ -375,7 +382,6 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                 out,
                 dpi: flags.dpi.unwrap_or(300),
                 preview_px: flags.preview_px,
-                content: flags.content.unwrap_or(Mode::Detail),
                 stats: flags.stats,
                 json: flags.json,
             }))

@@ -8,7 +8,9 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-use pixlay_core::{CanvasSpec, Cell, CollageDoc, Polygon, Project, Slot, Template, templates};
+use pixlay_core::{
+    CanvasSpec, Cell, CollageDoc, CropTransform, Point, Polygon, Project, Slot, Template, templates,
+};
 
 /// `CARGO_BIN_EXE_<name>` is set by Cargo for integration tests.
 const BIN: &str = env!("CARGO_BIN_EXE_pixlay-render");
@@ -101,9 +103,32 @@ fn write_project(dir: &Path, name: &str, fill: bool) -> PathBuf {
         doc.cells[0] = Cell {
             source: Some(PathBuf::from("photo.png")),
             crop: Default::default(),
+            grade: Default::default(),
         };
     }
     let path = dir.join(name);
+    std::fs::write(&path, doc.to_json().expect("serializes")).expect("write project");
+    path
+}
+
+/// The same shape with **both** cells filled, so a shared edge is a seam between
+/// two painted slots rather than between a slot and the white canvas.
+///
+/// The two sides get different photos: identical content on both sides would make
+/// a blended seam pixel indistinguishable from the content itself.
+fn write_full_project(dir: &Path, name: &str) -> PathBuf {
+    let path = write_project(dir, name, true);
+    let mut doc = Project::load(&path).expect("loads").doc().clone();
+    std::fs::write(
+        dir.join("second.jpg"),
+        include_bytes!("fixtures/photos/landscape.jpg"),
+    )
+    .expect("write photo");
+    doc.cells[1] = Cell {
+        source: Some(PathBuf::from("second.jpg")),
+        crop: Default::default(),
+        grade: Default::default(),
+    };
     std::fs::write(&path, doc.to_json().expect("serializes")).expect("write project");
     path
 }
@@ -153,7 +178,10 @@ fn the_template_smoke_path_renders_without_a_project() {
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     assert_eq!(field(&output, "status"), "ok");
     assert_eq!(field(&output, "cells"), "8");
-    assert_eq!(field(&output, "occupied"), "8");
+    // A template carries no photos, so every cell is empty and the sheet is white:
+    // the smoke path checks that the geometry loads and the output path works, not
+    // what a photo looks like in a slot.
+    assert_eq!(field(&output, "occupied"), "0");
     assert!(stderr(&output).is_empty(), "{}", stderr(&output));
 
     // The declared canvas is 1189 x 891.75 mm; at 72 dpi that is 3370 x 2528 px.
@@ -247,13 +275,37 @@ fn probe_reports_numbers_the_renderer_can_be_judged_by() {
         field(&output, "bg_samples").parse::<i64>().unwrap() > 1000,
         "background sampler found nothing to check"
     );
-    // Slot 0 is filled, slot 1 is not: one interior sample, one seam to check.
+    // The probe paints the slots itself, so the interior samples must be the
+    // palette colors exactly — that is what makes a swapped cell or a misplaced
+    // bitmap fail rather than merely look odd.
     assert_eq!(field(&output, "slot.0.match"), "true");
     assert_eq!(field(&output, "slot.0.expected"), "200,30,40");
     assert_eq!(field(&output, "slot.0.actual"), "200,30,40");
     assert!(field(&output, "slot.0.depth_px").parse::<f64>().unwrap() > 100.0);
     assert_eq!(field(&output, "seam.0.clean"), "true");
-    assert!(field(&output, "seam.0.rows").parse::<i64>().unwrap() > 400);
+    // The right cell is empty, so this edge is between a slot and the white
+    // canvas: there is no blend to measure and the row count says so.
+    assert_eq!(field(&output, "seam.0.rows"), "0");
+
+    // With both cells filled the same edge is a real seam between two painted
+    // slots, and now it has to be measured: one antialiased pixel per seam pixel,
+    // nothing foreign, and both interiors on their own palette color.
+    let full = write_full_project(&dir, "full.pixlay");
+    let output = run(&["probe", "--project", full.to_str().unwrap(), "--dpi", "150"]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "occupied"), "2");
+    assert_eq!(field(&output, "slot.1.match"), "true");
+    assert_eq!(field(&output, "slot.1.expected"), "30,160,60");
+    assert_eq!(field(&output, "bg_non_white"), "0");
+    // Walked end to end: the walker keeps a guard band at both ends where the
+    // seam meets a corner, so the row count is the seam length minus 4.
+    let rows: i64 = field(&output, "seam.0.rows").parse().unwrap();
+    let length: f64 = field(&output, "seam.0.length_px").parse().unwrap();
+    assert!(
+        (length - rows as f64).abs() <= 5.0,
+        "{rows} rows of {length} px"
+    );
+    assert_eq!(field(&output, "seam.0.foreign"), "0");
     // The seam is the shared edge: the full height of the canvas.
     assert!((field(&output, "seam.0.length_px").parse::<f64>().unwrap() - 531.0).abs() <= 1.0);
     // One antialiased edge: about one blended pixel per seam pixel.
@@ -583,7 +635,9 @@ fn probe_refuses_flags_that_belong_to_render() {
     for args in [
         vec!["probe", "--template", "mosaic-8-s14"],
         vec!["probe", "--project", "x.pixlay", "--out", "y.png"],
-        vec!["probe", "--project", "x.pixlay", "--content", "flat"],
+        vec!["probe", "--project", "x.pixlay", "--preview-px", "100"],
+        vec!["image", "--photo", "x.jpg", "--out", "y.png"],
+        vec!["image", "--project", "x.pixlay"],
     ] {
         let output = run(&args);
         assert_eq!(code(&output), 1, "{args:?}");
@@ -638,22 +692,31 @@ fn the_rendered_output_matches_what_draw_produces() {
         project.to_str().unwrap(),
         "--dpi",
         "96",
-        "--content",
-        "flat",
         "--out",
         out.to_str().unwrap(),
     ]);
     assert_eq!(code(&output), 0, "{}", stderr(&output));
 
+    // The same document through the same two libraries: the CLI must be a thin
+    // wrapper over `pixlay_imaging` + `pixlay_render::draw`, not a second path.
     let loaded = Project::load(&project).expect("loads");
     let sources = loaded.sources().expect("sources");
-    let images = pixlay_cli::content::images(
-        loaded.doc(),
-        pixlay_cli::content::Fill::NamedCells(&sources),
-        pixlay_cli::content::Mode::Flat,
-        96,
-    )
-    .expect("placeholder content");
+    let canvas = loaded.doc().canvas.pixel_size(96).expect("canvas size");
+    let bitmaps = pixlay_imaging::slot_bitmaps(loaded.doc(), canvas, &sources).expect("decode");
+    let mut images = pixlay_render::Images::new();
+    for bitmap in &bitmaps {
+        images.insert(
+            bitmap.slot,
+            pixlay_render::Bitmap::from_argb32_region(
+                bitmap.width as i32,
+                bitmap.height as i32,
+                bitmap.origin,
+                bitmap.display,
+                bitmap.pixels.clone(),
+            )
+            .expect("bitmap"),
+        );
+    }
     let expected = pixlay_render::render_rgb8(loaded.doc(), &images, 96, 1.0, None).expect("draw");
     let actual = image::open(&out).expect("output").to_rgb8();
     assert_eq!(
@@ -678,6 +741,89 @@ fn the_rendered_output_matches_what_draw_produces() {
 /// the `jsonc` block from the document, strips its `//` comments, and loads it.
 /// The example is expected to be a *valid document*: the only reason it cannot be
 /// rendered today is that `draw` refuses text layers until S5.
+/// The whole path with a real photo: decode, resample in linear light, place,
+/// clip, encode.
+///
+/// A flat photo makes this exact rather than statistical. Every pixel more than a
+/// few pixels inside a slot must be *the photo's color*: a white sliver, a region
+/// that stops short, an offset that drifted or a channel swap anywhere in the
+/// pipeline shows up as a pixel that is not. The slot boundary itself is excluded
+/// because Cairo antialiases the clip, which legitimately blends with the white
+/// base underneath.
+#[test]
+fn a_decoded_photo_fills_its_slot() {
+    let dir = out_dir("decode-fills");
+    let color = [30u8, 140, 200];
+    let photo = dir.join("flat.png");
+    image::RgbImage::from_fn(1200, 900, |_, _| image::Rgb(color))
+        .save(&photo)
+        .expect("write photo");
+
+    // The two-slot cut template, both cells filled with the same flat photo, and
+    // framings that magnify, pan and rotate it.
+    let path = write_project(&dir, "flat.pixlay", true);
+    let mut doc =
+        CollageDoc::from_json(&std::fs::read_to_string(&path).expect("read")).expect("loads");
+    // Both cells point at the flat photo; the helper's own fixture photo stays
+    // unreferenced in the directory.
+    doc.cells[0].source = Some(photo.clone());
+    doc.cells[1] = Cell {
+        source: Some(photo.clone()),
+        crop: CropTransform {
+            zoom: 2.2,
+            offset: (0.3, -0.4),
+            rotation_deg: 25.0,
+        },
+        grade: Default::default(),
+    };
+    std::fs::write(&path, doc.to_json().expect("serializes")).expect("write project");
+
+    let out = dir.join("flat.png.out.png");
+    let output = run(&[
+        "render",
+        "--project",
+        path.to_str().unwrap(),
+        "--dpi",
+        "150",
+        "--out",
+        out.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+
+    let canvas = doc.canvas.pixel_size(150).expect("canvas size");
+    let image = image::open(&out).expect("output").to_rgb8();
+    assert_eq!(
+        (image.width() as i32, image.height() as i32),
+        (canvas.width, canvas.height)
+    );
+    let mut checked = 0;
+    for y in 0..canvas.height {
+        for x in 0..canvas.width {
+            let point = Point::new(
+                f64::from(x) / f64::from(canvas.width),
+                f64::from(y) / f64::from(canvas.height),
+            );
+            let depth = doc
+                .template
+                .slots
+                .iter()
+                .map(|slot| slot.outline.distance_to_boundary(point) * f64::from(canvas.height))
+                .fold(f64::INFINITY, f64::min);
+            if depth <= 3.0 {
+                continue;
+            }
+            checked += 1;
+            let got = image.get_pixel(x as u32, y as u32).0;
+            assert_eq!(
+                got, color,
+                "({x}, {y}) is {depth:.1} px inside a slot but is {got:?}"
+            );
+        }
+    }
+    assert!(checked > 100_000, "only {checked} pixels were checked");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn the_contract_example_is_a_valid_document() {
     let doc_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/CONTRACT.md");

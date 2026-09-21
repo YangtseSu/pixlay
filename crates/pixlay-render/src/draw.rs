@@ -155,8 +155,10 @@ fn draw_slot(
     let slot_w = bbox.width() * canvas_w;
     let slot_h = bbox.height() * canvas_h;
 
-    let photo_w = f64::from(bitmap.width());
-    let photo_h = f64::from(bitmap.height());
+    // The whole displayed photo, not this bitmap: a bitmap may hold only the part
+    // of the photo the slot can show (`Bitmap::from_argb32_region`), and the
+    // display scale has to be the one the fit produced either way.
+    let (photo_w, photo_h) = bitmap.display_size();
     let displayed_w = crop.zoom * slot_w;
     let displayed_h = displayed_w * photo_h / photo_w;
     let center_x = (bbox.center().x * canvas_w) + crop.offset.0 * slot_w;
@@ -164,12 +166,15 @@ fn draw_slot(
 
     // Cairo's pattern matrix maps user space to *pattern* space, so the
     // placement matrix is inverted before it is handed over. Getting the
-    // direction wrong is silent: cairo draws nothing.
+    // direction wrong is silent: cairo draws nothing. The pattern space of a
+    // partial bitmap is its own top-left corner, hence the extra translation by
+    // the region origin inside the displayed photo.
+    let (origin_x, origin_y) = bitmap.origin();
     let mut placement = Matrix::identity();
     placement.translate(center_x, center_y);
     placement.rotate(crop.rotation_deg.to_radians());
     placement.scale(displayed_w / photo_w, displayed_h / photo_h);
-    placement.translate(-photo_w / 2.0, -photo_h / 2.0);
+    placement.translate(-photo_w / 2.0 + origin_x, -photo_h / 2.0 + origin_y);
     let pattern_matrix = placement.try_invert()?;
 
     ctx.save()?;
@@ -335,6 +340,6 @@ pub fn render_rgb8(
 
 /// Output pixels for `canvas_px` at `scale`, rounding half away from zero — the
 /// same rule `CanvasSpec::pixel_size` uses for its own rounding.
-pub(crate) fn output_px(canvas_px: i32, scale: f64) -> i32 {
+pub fn output_px(canvas_px: i32, scale: f64) -> i32 {
     (f64::from(canvas_px) * scale).round().max(1.0) as i32
 }

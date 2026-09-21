@@ -1,15 +1,24 @@
 //! The committed fixtures, checked without a decoder.
 //!
-//! S1 commits six photos; S4 uses them. Two of their properties are invisible
-//! and would break S4 silently if a regeneration lost them, so they are pinned
-//! here: the EXIF orientation tag on `oriented-6.jpg`, and the alpha channel on
-//! `alpha.png`. Both are read straight out of the file bytes, so this test needs
-//! no image crate and no decoder — exactly the shape S1's tests must have.
+//! S1 committed six photos; S4 added the rest — a HEIC, a 12-bit-capable 16-bit
+//! PNG, a grayscale one, an Adobe RGB file with the sRGB conversion ImageMagick
+//! made of it, a photo with a date, a resampling source with the Lanczos
+//! reduction ImageMagick made of it, and the project `AGENTS.md`'s verification
+//! entry renders.
+//!
+//! The properties pinned here are the ones that are invisible and would break a
+//! later step silently if a regeneration lost them: the EXIF orientation tag, the
+//! alpha channel, the EXIF date, the ICC profile, the 16-bit depth, the container
+//! of the HEIC. They are read straight out of the file bytes, so this test needs
+//! no decoder — that is the other half of its job: it checks what the fixtures
+//! *are*, while `pixlay-imaging`'s tests check what they decode to.
 //!
 //! `generate.py` in the same directory produced these files; regenerate with
 //! `python3 crates/pixlay-cli/tests/fixtures/generate.py`.
 
 use std::path::{Path, PathBuf};
+
+use pixlay_core::Project;
 
 fn fixture_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
@@ -23,13 +32,19 @@ fn read(name: &str) -> Vec<u8> {
 /// Every fixture exists, is non-empty, and has the dimensions S4 expects.
 #[test]
 fn fixtures_are_committed() {
-    let expected: [(&str, u32, u32); 6] = [
+    let expected: [(&str, u32, u32); 12] = [
         ("photos/portrait.jpg", 600, 900),
         ("photos/landscape.jpg", 960, 540),
         ("photos/ratio-4-3.png", 800, 600),
         ("photos/square.png", 640, 640),
         ("photos/alpha.png", 800, 600),
         ("photos/oriented-6.jpg", 600, 1200),
+        ("photos/dated.jpg", 960, 540),
+        ("photos/photo-16bit.png", 800, 600),
+        ("photos/photo-gray.png", 800, 600),
+        ("photos/adobe-rgb.jpg", 800, 600),
+        ("photos/adobe-rgb-srgb.png", 800, 600),
+        ("photos/resample-source.png", 1600, 1200),
     ];
     for (name, width, height) in expected {
         let bytes = read(name);
@@ -41,7 +56,83 @@ fn fixtures_are_committed() {
         };
         assert_eq!(size, (width, height), "{name} changed size");
     }
+    assert_eq!(
+        png_size(&read("photos/resample-lanczos-200.png")),
+        (200, 150)
+    );
     assert!(fixture_dir().join("generate.py").is_file());
+}
+
+/// The HEIC is a HEIC, and it is one the decoder can be asked to read.
+#[test]
+fn the_heic_fixture_is_a_heic() {
+    let bytes = read("photos/photo.heic");
+    // An ISO base media file: a 4-byte size, then `ftyp`, then the major brand.
+    assert_eq!(&bytes[4..8], b"ftyp", "photo.heic is not an ISO media file");
+    let brand = &bytes[8..12];
+    assert!(
+        brand == b"heic" || brand == b"heix" || brand == b"mif1",
+        "unexpected HEIC brand {brand:?}"
+    );
+}
+
+/// The ICC fixture carries a profile, and the reference next to it does not: the
+/// pair is what makes "the source profile is honoured" measurable.
+#[test]
+fn the_icc_fixture_pair_is_intact() {
+    // JPEG carries the profile in APP2 segments, under the `ICC_PROFILE`
+    // signature; PNG carries it in an `iCCP` chunk. Each file must have its own
+    // container's marker and not the other's — a fixture that lost its profile
+    // would make the colour test pass vacuously, because both sides would then be
+    // raw numbers.
+    let jpeg = read("photos/adobe-rgb.jpg");
+    assert!(
+        find(&jpeg, b"ICC_PROFILE").is_some(),
+        "adobe-rgb.jpg lost its ICC profile"
+    );
+    let png = read("photos/adobe-rgb-srgb.png");
+    assert!(
+        find(&png, b"iCCP").is_some(),
+        "adobe-rgb-srgb.png lost the sRGB profile ImageMagick converted to"
+    );
+    assert!(
+        find(&png, b"ICC_PROFILE").is_none(),
+        "adobe-rgb-srgb.png is not a JPEG"
+    );
+}
+
+/// The 16-bit fixture is 16 bits deep: the pipeline's "the depth is the file's"
+/// test would otherwise compare two 8-bit files.
+#[test]
+fn the_deep_fixture_is_really_sixteen_bit() {
+    let bytes = read("photos/photo-16bit.png");
+    assert_eq!(png_size(&bytes), (800, 600));
+    // IHDR: bit depth is the byte after the colour type.
+    assert_eq!(bytes[24], 16, "photo-16bit.png is no longer 16-bit");
+    assert_eq!(bytes[25], 2, "photo-16bit.png is no longer truecolour");
+}
+
+/// The date fixture carries a date, in the format EXIF specifies.
+#[test]
+fn the_date_fixture_carries_the_date() {
+    let bytes = read("photos/dated.jpg");
+    assert!(
+        find(&bytes, b"2019:07:14 10:32:00").is_some(),
+        "dated.jpg lost its DateTimeOriginal"
+    );
+}
+
+/// `AGENTS.md`'s verification entry renders this project, so it has to load and
+/// every path in it has to exist.
+#[test]
+fn the_verification_project_loads_and_its_photos_exist() {
+    let path = fixture_dir().join("verify.pixlay");
+    let project =
+        Project::load(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    assert_eq!(project.doc().template.name, "mosaic-8-s14");
+    let sources = project.sources().expect("every photo exists");
+    assert_eq!(sources.len(), 8);
+    assert!(sources.iter().all(Option::is_some), "{sources:?}");
 }
 
 #[test]

@@ -2,8 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::canvas::PixelSize;
 use crate::error::CoreError;
-use crate::geometry::{Point, Polygon};
+use crate::geometry::{Point, Polygon, Rect};
 use crate::template::Slot;
 use crate::{CLAMP_ZOOM_LIMIT, MAX_ROTATION_DEG, MAX_ZOOM};
 
@@ -225,6 +226,108 @@ impl CropTransform {
                 rotation_deg,
             },
             rotation_limited,
+        }
+    }
+}
+
+/// The part of a placed photo that a slot can show, in the *displayed* photo's
+/// own pixel grid.
+///
+/// `pixlay-imaging` sizes and crops a bitmap from this: the displayed photo is
+/// `display` pixels wide and tall (the size the bitmap would have if the whole
+/// photo were passed to `draw`), and `rect` is the sub-rectangle the slot's
+/// outline can reach, plus a guard band for filtering. Handing `draw` only that
+/// rectangle is what keeps the memory ladder bounded by the output: a slot in a
+/// ten-column strip needs a photo 6x its own width, and passing the whole
+/// displayed photo would allocate six times the memory to display one tenth of
+/// it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DisplayRegion {
+    /// Full displayed photo size in output pixels: `(width, height)`.
+    pub display: (f64, f64),
+    /// The rectangle to hold, in the same grid: `(x, y, width, height)`.
+    pub rect: (f64, f64, f64, f64),
+}
+
+impl DisplayRegion {
+    /// The rectangle as integer texel bounds `(x0, y0, x1, y1)` for a bitmap,
+    /// floored/ceiled outward so no fractional part of the region is lost.
+    pub fn texels(&self) -> (i32, i32, i32, i32) {
+        let (x, y, w, h) = self.rect;
+        let x0 = x.floor();
+        let y0 = y.floor();
+        let x1 = (x + w).ceil();
+        let y1 = (y + h).ceil();
+        (x0 as i32, y0 as i32, (x1 - x0) as i32, (y1 - y0) as i32)
+    }
+}
+
+impl CropTransform {
+    /// The region of the displayed photo that `slot` can show.
+    ///
+    /// `canvas_px` is the canvas in output pixels and `photo_aspect` the decoded
+    /// photo's `width / height` — the same two inputs [`fit`](Self::fit) takes, so
+    /// this is the placement arithmetic of `draw` inverted, not a second
+    /// definition of where the photo goes: the slot's outline vertices are mapped
+    /// into the displayed photo's frame and their bounding box is taken. A polygon
+    /// lies inside its bounding box, so holding that box holds everything the
+    /// clip can show.
+    ///
+    /// `guard_px` is added on every side: cairo's filter reads a texel or so
+    /// outside the boundary it writes, and the clip edge itself is antialiased,
+    /// so a bitmap cut exactly at the boundary would show transparent slivers
+    /// inside the slot. The caller passes a constant with its source.
+    pub fn display_region(
+        &self,
+        slot: &Slot,
+        canvas_px: PixelSize,
+        photo_aspect: f64,
+        guard_px: f64,
+    ) -> DisplayRegion {
+        let bbox = slot.outline.bbox();
+        let slot_w = bbox.width() * f64::from(canvas_px.width);
+        let slot_h = bbox.height() * f64::from(canvas_px.height);
+        let displayed_w = (self.zoom * slot_w).max(1.0);
+        let displayed_h = (displayed_w / photo_aspect).max(1.0);
+        let centre = Point::new(
+            bbox.center().x * f64::from(canvas_px.width) + self.offset.0 * slot_w,
+            bbox.center().y * f64::from(canvas_px.height) + self.offset.1 * slot_h,
+        );
+
+        // The inverse of `draw`'s placement: a canvas point is expressed in the
+        // displayed photo's frame by undoing the rotation and the centring.
+        let (sin, cos) = self.rotation_deg.to_radians().sin_cos();
+        let to_display = |point: Point| {
+            let dx = point.x * f64::from(canvas_px.width) - centre.x;
+            let dy = point.y * f64::from(canvas_px.height) - centre.y;
+            Point::new(
+                dx * cos + dy * sin + displayed_w / 2.0,
+                dy * cos - dx * sin + displayed_h / 2.0,
+            )
+        };
+        let corners: Vec<Point> = slot
+            .outline
+            .points
+            .iter()
+            .copied()
+            .map(to_display)
+            .collect();
+        let Some(box_) = Rect::from_points(&corners) else {
+            return DisplayRegion {
+                display: (displayed_w, displayed_h),
+                rect: (0.0, 0.0, displayed_w, displayed_h),
+            };
+        };
+        // Clamped into the photo: the fit guarantees the outline is inside the
+        // photo rectangle, and the guard band has nothing to extend into past its
+        // edge.
+        let x0 = (box_.x0 - guard_px).clamp(0.0, displayed_w);
+        let y0 = (box_.y0 - guard_px).clamp(0.0, displayed_h);
+        let x1 = (box_.x1 + guard_px).clamp(0.0, displayed_w);
+        let y1 = (box_.y1 + guard_px).clamp(0.0, displayed_h);
+        DisplayRegion {
+            display: (displayed_w, displayed_h),
+            rect: (x0, y0, (x1 - x0).max(0.0), (y1 - y0).max(0.0)),
         }
     }
 }

@@ -9,14 +9,19 @@
 //!
 //! The images here are built by hand, pixel by pixel, so nothing in this file
 //! depends on the renderer being right: flat content in the color the probe
-//! expects, on the same two-slot document `tests/cli.rs` uses.
+//! expects, on a two-slot document.
+//!
+//! S4 moved the probe here from the CLI, with the CLI's `content.rs` deleted: the
+//! palette and the flat bitmaps a probe needs are the probe's own business now
+//! (`pixlay_imaging::probe::probe_bitmaps`), and real photos cannot be probed at
+//! all — a legitimately white photo has a white interior, and a photo with a hard
+//! edge beside a seam has no measurable blend.
 
 use std::path::PathBuf;
 
-use pixlay_cli::content;
-use pixlay_cli::probe::probe;
-use pixlay_core::{CanvasSpec, Cell, CollageDoc, Polygon, Slot, Template};
-use pixlay_render::Rgb8Image;
+use pixlay_core::{CanvasSpec, Cell, CollageDoc, Grade, Polygon, Slot, Template};
+use pixlay_imaging::Rgb8View;
+use pixlay_imaging::probe::{palette, probe};
 
 const DPI: u32 = 150;
 
@@ -44,6 +49,7 @@ fn doc() -> CollageDoc {
     doc.cells[0] = Cell {
         source: Some(PathBuf::from("photo.png")),
         crop: Default::default(),
+        grade: Grade::IDENTITY,
     };
     doc
 }
@@ -52,9 +58,9 @@ fn doc() -> CollageDoc {
 /// color the probe expects when `paint_left` is set. The fill stops two pixels
 /// short of the slot's boundary, so the seam between the two slots is a hard edge
 /// with nothing blended into it — the way a correct render leaves it.
-fn flat(doc: &CollageDoc, paint_left: bool) -> Rgb8Image {
+fn flat(doc: &CollageDoc, paint_left: bool) -> (Vec<u8>, i32, i32) {
     let canvas = doc.canvas.pixel_size(DPI).expect("canvas size");
-    let color = content::color(0);
+    let color = palette(0);
     let mut data = vec![255u8; canvas.width as usize * canvas.height as usize * 3];
     if paint_left {
         for y in 2..canvas.height - 2 {
@@ -66,10 +72,14 @@ fn flat(doc: &CollageDoc, paint_left: bool) -> Rgb8Image {
             }
         }
     }
-    Rgb8Image {
-        width: canvas.width,
-        height: canvas.height,
-        data,
+    (data, canvas.width, canvas.height)
+}
+
+fn view(image: &(Vec<u8>, i32, i32)) -> Rgb8View<'_> {
+    Rgb8View {
+        width: image.1,
+        height: image.2,
+        data: &image.0,
     }
 }
 
@@ -77,7 +87,8 @@ fn flat(doc: &CollageDoc, paint_left: bool) -> Rgb8Image {
 fn the_interior_probe_fails_when_a_slot_is_not_covered() {
     let doc = doc();
 
-    let good = probe(&doc, &flat(&doc, true), DPI);
+    let painted = flat(&doc, true);
+    let good = probe(&doc, &view(&painted), DPI);
     assert_eq!(good.interiors.len(), 1, "the filled cell must be sampled");
     assert!(
         good.ok(),
@@ -88,7 +99,8 @@ fn the_interior_probe_fails_when_a_slot_is_not_covered() {
     // The same document, rendered with nothing drawn at all. This is what the
     // probe exists to catch, and S3's clamp is what keeps a real document from
     // producing it.
-    let blank = probe(&doc, &flat(&doc, false), DPI);
+    let nothing = flat(&doc, false);
+    let blank = probe(&doc, &view(&nothing), DPI);
     assert!(!blank.ok(), "an empty slot must not pass");
     assert!(!blank.interiors[0].matches());
     assert_eq!(blank.interiors[0].actual, [255, 255, 255]);

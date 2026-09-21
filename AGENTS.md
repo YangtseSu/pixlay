@@ -28,14 +28,20 @@ longer? If so, cut it.
     cargo fmt --check
     cargo clippy --workspace --all-targets -- -D warnings
     cargo test
-    cargo run --release -p pixlay-cli -- render --template mosaic-8-s14 --dpi 300 --stats --out /var/tmp/a.jpg
+    cargo run --release -p pixlay-cli -- render --project crates/pixlay-cli/tests/fixtures/verify.pixlay --dpi 300 --stats --out /var/tmp/a.jpg
 
 Of the last two: the second one produces a real image, and you must look at it directly.
 **If you cannot see the image, do not judge whether the render is correct.**
-`mosaic-8-s14` has been valid since S1 and, since S2, is emitted by the template generator
-(`pixlay-core/src/templates/generator.rs`) under the same name and the same `templateVersion`;
-`--stats` makes each round's ruler machine-readable. `pixlay-render templates` lists what this build
-ships, and `pixlay-render init --template <name> --out x.pixlay` writes a project to start from.
+The project is `crates/pixlay-cli/tests/fixtures/verify.pixlay`: eight photos on `mosaic-8-s14`
+(JPEG, PNG, a 16-bit PNG, a HEIC, one carrying EXIF Orientation=6, one carrying a date), so the
+command exercises decode, resample, the clamp, `draw` and the encoder in one run. Until S3 the
+command used `--template mosaic-8-s14`, which renders every cell empty and is now a *white sheet*:
+the flag is a geometry smoke (it checks that the template loads and the output path works), not an
+image to judge. `mosaic-8-s14` has been valid since S1 and, since S2, is emitted by the template
+generator (`pixlay-core/src/templates/generator.rs`) under the same name and the same
+`templateVersion`; `--stats` makes each round's ruler machine-readable. `pixlay-render templates`
+lists what this build ships, and `pixlay-render init --template <name> --out x.pixlay` writes a
+project to start from.
 
 Measurement rules that go with it:
 
@@ -271,7 +277,7 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
 ## Module boundaries
 
     pixlay-core     CollageDoc, templates, geometry, framing transforms, command history. Must not depend on gtk / cairo
-    pixlay-imaging  decoding (glycin), resampling, grading, EXIF, color spaces. Must not depend on gtk
+    pixlay-imaging  decoding (glycin), resampling, grading, EXIF, color spaces. Must not depend on gtk or cairo
     pixlay-render   the single draw(doc, target), Cairo + pangocairo. Must not depend on gtk
     pixlay-cli      windowless render entry point, automation and verification tooling, and the AI's operating surface. Must not depend on gtk4
     pixlay          gtk4 + libadwaita shell and interaction
@@ -309,17 +315,16 @@ not a criterion — a visual conclusion must become a number (a probe) in the CL
   both emit 9933×14043, and the white-base / seam / text criteria are all green. Numbers in
   `docs/STEPS.md` under "S0 results".
   **Ruling (2026-09-20): Cairo stays** — "do not replace Cairo with GPU rendering" remains in force.
-- Whether glycin is usable with zero configuration in a **non-Flatpak** environment (installed and
-  run straight from pacman), HEIC included: on this machine `glycin-thumbnailer` (distro 2.1.5)
-  **fails for every format** (PNG/JPEG/HEIC/AVIF all report `Operation not supported`; the loader
-  binaries and bwrap are present, with or without a session bus), and the cause is not located.
-  Under the tracking policy the crates.io `glycin` 4 is what gets used; reading its source,
-  `glycin-core` 4.0.0 has `COMPAT_VERSION = 2` → compatible with Arch's installed `2+` loaders; but
-  the `glycin` facade **hard-depends on `glycin-external`** on Linux (a sandboxed loader process
-  requiring libseccomp / bwrap / system loader packages / a D-Bus connection).
-  Self-contained alternative: `glycin-builtin` + `builtin-image-rs`, an in-process loader, but
-  **without HEIC**. Conclusion open → S4's first task is to run one real decode down each path and
-  pick, and the CLI and the tests need a path that does not depend on the sandboxed loader.
+- glycin in a non-Flatpak environment: **settled by measurement (S4, 2026-09-21) — the sandboxed
+  path is what gets used.** `glycin` 4.0.0 decodes PNG/JPEG/HEIC/AVIF in 11–110 ms per 2400x1600
+  file, including a 12-bit HEIC and an EXIF-Orientation-6 JPEG, and it does so under an *empty*
+  environment (`env -i PATH=/usr/bin:/bin HOME=/nonexistent`, no session bus, no `XDG_RUNTIME_DIR`).
+  The distribution's `glycin-thumbnailer` failing for every format was that *binary's* problem, not
+  this crate path's. `glycin-builtin` + `builtin-image-rs` is not a candidate: it covers no HEIC and
+  no AVIF (those live in the external `glycin-heif` loader), and its in-process frames hang under a
+  plain async executor — they complete only while a glib `MainContext` is being iterated, which
+  `pixlay-imaging::driver` therefore provides on one private thread. Numbers and reasoning in
+  `docs/STEPS.md` "S4 · decisions" 1 and `docs/CONTRACT.md` §4.1.
 - The actual behavior of Pango's CJK line-breaking (kinsoku) and punctuation squeezing.
 - The conservative clamp for irregular slots — computed from a circumscribed axis-aligned rectangle,
   allowing slight white slivers — is **not needed and not used**: S3's clamp tests the outline's own
@@ -357,7 +362,9 @@ policy: track the latest": latest stable only, no upper pin.
 | `serde_json` 1.0.151 | `pixlay-core`, `pixlay-cli` (dev) | JSON read/write; `deny_unknown_fields` turns "misspelled field" into a load-time error | Same |
 | `thiserror` 2.0.20 | `pixlay-core`, `pixlay-render` | core/render errors are typed errors (part of the contract); `anyhow` is allowed only in `pixlay-cli` | Pure macro, zero runtime |
 | `cairo-rs` 0.22.9 | `pixlay-render` | The only rendering backend; GTK4 already depends on cairo, so packaging is free | System cairo 1.18.4; the `png` feature is dev-only (golden image read/write) |
-| `image` 0.25.10 | `pixlay-cli` | **Temporary stand-in**: S1 has to emit PNG/JPEG, and only S6 builds the encoder that writes "pixels + chroma subsampling + ICC + DPI in one pass"; S6 decides whether it stays | Currently used in one place in the S1 CLI; delete it after S6 if nothing uses it |
+| `image` 0.25.10 | `pixlay-cli` | **Temporary stand-in**: S1 has to emit PNG/JPEG, and only S6 builds the encoder that writes "pixels + chroma subsampling + ICC + DPI in one pass"; S6 decides whether it stays. Since S4 it is also a **dev-dependency of the CLI's tests**, which write flat PNG photos to render against; `pixlay-imaging`'s tests use it for nothing | Registered, unchanged |
+| `glycin` 4.0.0 | `pixlay-imaging` | The decoding backend, measured against the in-process alternative (S4): the sandboxed loader is the only one of the two that decodes HEIC and AVIF, and it works with an empty environment | Pulls `glib`/`gio` and, through `cfg(target_os = "linux")`, `libseccomp` / `bubblewrap` / `fontconfig` / the distro's loader packages — this is what S8's `depends` must name |
+| `glib` 0.22 / `gio` 0.22 | `pixlay-imaging` | The decode is driven on a private `MainContext`: a glycin frame request only completes while one is iterated (measured: every frame hung under a plain executor until glycin's own 60 s limit). `glib`'s `futures` feature provides `MainContext::block_on`; `gio::File` is glycin's own input type | Already in the tree with `glycin`; named here because the API is used directly |
 
 `pangocairo` was a temporary S0 spike dependency and left together with the spike and the spike's
 use of `cairo-rs/png`; register it again by this table when S5 takes on text layers.

@@ -24,9 +24,12 @@ Per the splitting principles in `docs/STEPS.md`, the contract must be **frozen a
     ]
   },
   "cells": [                        // one cell per slot, the order is the slot index
-    { "source": "photos/a.jpg", "crop": { "zoom": 1.0, "offset": [0,0], "rotationDeg": 0 } },
+    { "source": "photos/a.jpg",     // a path relative to the project file
+      "crop": { "zoom": 1.0, "offset": [0,0], "rotationDeg": 0 },
+      "grade": { "factor": 1.1, "saturation": 0.9, "delta": -0.1 } },   // per-slot colour (S4)
     { "source": null, "crop": { "zoom": 1.0, "offset": [0,0], "rotationDeg": 0 } }   // an empty slot renders white
   ],
+  "filter": "warm",                 // the canvas-wide one-click filter (S4); "none" is the default
   "text": [                         // canvas-level text layers (rendered in S5)
     { "content": "{date} #{index}", "mode": {"kind":"free","position":[0.5,0.9],"anchor":"bottomCenter"},
       "sizeRel": 0.02, "rotationDeg": 6, "color": {"r":0,"g":0,"b":0,"a":255}, "sourceSlot": 0 }
@@ -74,6 +77,11 @@ Conventions:
   and the second pass reports nothing. `draw` applies the fit, so no document this build accepts can render an uncovered
   slot; the fit's own boundary is a slot so extreme that covering it needs more than `MAX_ZOOM`, which gets the cap (and is
   what a decoder's memory budget, S4, limits from the other side).
+- **A cell's colour is its own**: `grade` is three numbers applied in linear light
+  (see §4), and `filter` is one preset name applied to every cell after its own
+  grade. Both were added by S4 with `serde` defaults, so a project written before
+  them loads unchanged — this is the "adding a field does not bump the version"
+  rule in practice, and it is why `DOC_VERSION` is still 1.
 - **Text layer order**: `text` is drawn in array order, later ones cover earlier ones, and all of them cover the cells.
 - **Tiled phase**: the tile grid starts from the canvas origin `(0,0)`, and each tile rotates around its own anchor; there is no per-tile variation.
 
@@ -96,6 +104,10 @@ Conventions:
 | text position (free mode) | both components inside `[0,1]` | a free layer is placed in normalized canvas coordinates, so anything outside is off the canvas by definition |
 | tiled step | both components > 0, finite | step 0 or a negative value makes the tiling loop forever; there is no upper bound |
 | `--preview-px` | 1..=20000 (long edge, in pixels) | a preview larger than this cannot be reviewed by eye anyway |
+| grade `factor` | 0.2..=5.0 | ±2 stops of exposure around 1.0; beyond that the control only saturates every channel |
+| grade `saturation` | 0.0..=4.0 | 0 is greyscale, 1 leaves the pixel alone |
+| grade `delta` (`Δ`, warmth) | -1.0..=1.0 | `r *= 1 + delta`, `b *= 1 - delta`; past 1 the mapping is no longer monotone |
+| decoded source | ≤ 120 MP and ≤ 20000 px per edge, 20 s | `MAX_DECODE_PIXELS` / `MAX_DECODE_EDGE` / `DECODE_TIMEOUT` in `pixlay-imaging`. A source is RGBA at its own depth, so 120 MP is 480 MB as 8-bit and 960 MB as 16-bit; the area cap is checked between the loader's header and its pixels, so a decompression bomb costs nothing |
 | clamp degradation threshold | when the zoom the **requested rotation** needs exceeds `CLAMP_ZOOM_LIMIT` = **1.5 times the upright covering zoom**, the angle is reduced to the widest one that fits (`CLAMP_ZOOM_LIMIT` in `pixlay-core`) | `docs/STEPS.md`, "Open decisions → B. Confirmed". The reference is the upright floor, not an absolute zoom: a ten-column strip needs 6x upright for a 4:3 photo and rotating it needs *less*, so it is never degraded. Measured kept angles, matching photo and 45° asked (2026-09-21): 45° (unlimited) at 1:1, 34.0° at 6:5, 27.3° at 4:3, 22.6° at 3:2, 18.0° at 16:9, 11.2° at 8:3, mirrored for portrait slots |
 
 Every entry above is enforced with a typed error, never a panic, and each is covered by
@@ -153,6 +165,75 @@ Images                            // slot → Bitmap; absent = that cell is left
   **Banding is a genuinely usable memory-saving measure**: A0 landscape 10 slots @300dpi is 1470 MB for the whole image → 597 MB for 16 bands (see §8).
 - Text layers **are refused by `draw`** in v1 (`TextLayersUnsupported`) — better to error than to export something with text missing.
   S5 wires it up and the contract does not change.
+
+### 4.1 The image pipeline (S4): what arrives at `draw`
+
+`AGENTS.md`: "All resampling belongs upstream; the canvas only blits and clips."
+The upstream is `pixlay-imaging`, and the frozen evaluation order is executed
+there, in this order:
+
+```text
+decode (upright, sRGB, straight, at the file's own depth)
+  → crop to the region the slot can show
+  → resample in linear light (Lanczos3, kernel widened by the shrink ratio)
+  → flatten onto the slot's opaque white base
+  → per-slot grade (factor, then delta, then saturation)
+  → the canvas-wide filter preset
+  → 8-bit sRGB in Cairo's ARgb32 layout
+```
+
+**Colour.** A source carrying its own ICC profile is converted to sRGB by the
+loader; a source without one is interpreted as sRGB. Output is always sRGB, and
+no colour code is ours (no `lcms2`): the conversion is the loader's, measured
+against ImageMagick's. Source alpha is preserved through the resample
+(premultiplied in linear light, so a transparent neighbourhood cannot bleed into
+an opaque pixel) and flattened onto white at the end, which is the same rule as
+§4's "composite onto opaque white".
+
+**Depth.** The decoded buffer keeps the file's own depth (8 or 16 bits per
+channel); everything after it is 16-bit — the resampler's output, the flattened
+buffer, the graded buffer — and the only quantization is the final 8-bit write.
+An 8-bit source is *widened* with `sample * 257`, which is exact, so 8-bit files
+do not pay for a 16-bit buffer they cannot fill.
+
+**The buffer ladder.** What exists at once, largest first:
+
+| Buffer | Size | Lifetime |
+|---|---|---|
+| the decoded source | `src_px × 4` bytes (8-bit) or `× 8` (16-bit), capped at 120 MP | one slot |
+| the resampler's row strip | `block_rows × dst_w × 16` bytes, block-bounded | one slot |
+| one slot's bitmap | `dst_px × 4` bytes | until the render ends |
+
+`Σ dst_px = O(output pixels)`: a bitmap holds the part of the photo the slot can
+show, not the whole displayed photo. That is not an optimization but a
+requirement — a slot in the ten-column strip needs its photo magnified 6x, so
+handing over the whole displayed photo would allocate 3.33 GB of bitmaps for a
+110.9 MP canvas **on top of** the 443 MB output surface, where the region crop
+measures 1182 MB peak for the whole render (§8). `decoding is one source at a
+time` follows from the same table: `N` concurrent slots need
+`N × source + Σ bitmaps + output ≤ budget`.
+
+**One exception, and why it stays: the framing rotation.** `AGENTS.md`'s sentence
+also names "rotation interpolation", and the framing rotation (≤ ±45°, from
+`CropTransform`) is still applied by `draw` itself, as S3 built it. The reason is
+what the bitmap *is*: it already arrives at exactly the size it is displayed at, so
+Cairo's affine is a rotation at 1:1, not the downscaling the constraint is about —
+and S3 measured that the placement is what makes "a crop is a request; what is drawn
+is its fit" true for every caller (28,800 framings, coverage exact to one ulp, and
+360 renders with every sample ≥3 px inside a slot showing that slot's colour). Where
+the constraint bites — decoding, downsampling, colour, grading, and *not* handing
+Cairo a photo to shrink — is exactly where S4 put the work.
+
+**The bitmap's region.** A bitmap may hold a sub-rectangle of the displayed
+photo. It then carries where it sits (`Bitmap::origin`, in displayed-photo
+pixels) and the whole displayed photo's size (`Bitmap::display_size`), because
+the display scale cannot be recovered from a partial bitmap's own dimensions.
+The rectangle comes from `CropTransform::display_region`, which inverts `draw`'s
+own placement — the slot's outline vertices mapped into the displayed photo's
+frame, plus a guard band (`REGION_GUARD_PX = 3` px) for Cairo's filter footprint
+and the antialiased clip edge. The property this buys is pinned by a test:
+rendering a document with the whole bitmap and with the region gives the same
+pixels.
 - `render_surface` / `render_rgb8` are just thin shells that allocate a surface + call `draw`; `rgb8` composites ARgb32 premultiplied uniformly
   onto a white background and gives the straight-through RGB the encoder wants.
 
@@ -162,6 +243,7 @@ Images                            // slot → Bitmap; absent = that cell is left
 pixlay-render render    --project <file.pixlay> --dpi <n> --out <file>
 pixlay-render render    --template <name> --dpi <n> --out <file>   # no project, no photos
 pixlay-render probe     --project <file.pixlay>
+pixlay-render image     --photo <file>
 pixlay-render templates [--aspect <ratio>] [--json]
 pixlay-render init      --template <name> --out <file.pixlay>
 ```
@@ -177,9 +259,10 @@ pixlay-render init      --template <name> --out <file.pixlay>
 | probe verdict not passed | **not "failed to produce a result"**: the numbers are the result, so stdout emits all the numbers as usual, with `status = failed` and `passed = false`, stderr emits a one-line summary, and the exit code is 2 |
 | probe lower bound | when `occupied = 0` (all empty slots) the verdict is **failed**: every question the probe asks is about some slot, and with no slot there is no conclusion. Previously it "passed vacuously" (status=ok, exit 0) |
 | output format | determined by the `--out` extension: `.png` / `.jpg` / `.jpeg`, anything else is a usage error |
-| `--preview-px n` | n pixels on the long edge; the same `draw`, only `scale` changes |
+| `--preview-px n` | n pixels on the long edge; the same `draw`, only `scale` changes. The **bitmaps are sized for the preview too** (S4): decoding and resampling a full A0 and letting Cairo shrink it would cost the export's time and memory for a thumbnail, and would do the shrinking with Cairo's filter instead of the pipeline's |
 | `--stats` | appends `{ms, encode_ms, peak_rss_mb, icc}`; `render` emits all four, `probe` emits no `encode_ms` (it does not encode). The measurement rules are below |
 | `probe` | samples and outputs numbers (in-slot photo color, out-of-slot white background, shared-edge blended pixels, three-color convex combination residual), exit code 2 when the verdict is not passed |
+| `image` | one file's decode facts: `mime`, `width`, `height`, `depth` (8 or 16), `aspect`, `exif_bytes`, `date` (EXIF `DateTimeOriginal`, empty when absent). It is how "HEIC decodes" and "orientation 6 is applied" are visible without rendering a project. `--out`/`--dpi`/etc. are usage errors: it decodes at the file's own size and writes nothing |
 
 **S2's two subcommands report the template library and create a project.** They add a data source, not a new failure mode:
 
@@ -210,7 +293,11 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
 - per-slot text layers (text is **canvas-level only**; a tiled watermark is one of its modes, not a second mechanism)
 - nested groups / layer trees / blend modes
 - framing rotation beyond ±45°; **rotation only crops edges, it never grows the canvas**
-- preserving the source ICC (v1 always interprets as sRGB), CMYK JPEG, per-slot color spaces
+- CMYK JPEG and per-slot colour spaces. **Not** the source ICC: v1 honours it — the
+  decoder converts a profiled file to sRGB (measured within 0.03 levels of
+  ImageMagick's own conversion, and 15.4 levels away from ignoring the profile), and
+  interprets an unprofiled file as sRGB. No colour code of our own: no `lcms2`, no
+  rendering intent to define (§4, "Colour")
 - curves / levels / masking / brushes; all of them in `AGENTS.md`'s "Directions not to improve" → "Not doing"
 - multi-page / multi-canvas projects
 - **version migration** for `.pixlay` (not written; higher refused, lower refused too, see "Version policy")
@@ -224,6 +311,7 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
 |---|---|---|
 | clamp math | **S3, landed** | `CropTransform::fit(slot, canvas_aspect, photo_aspect) -> CropFit { transform, rotation_limited }`, applied by `draw`; the fit is idempotent and never exceeds `MAX_ZOOM` |
 | template generator | **S2, landed** | `pixlay_core::templates` (`generator` recipes + the committed `frozen` data) and the `templates` / `init` subcommands; see §3 and §5 |
+| the image pipeline | **S4, landed** | `pixlay-imaging`: `Source::decode`, `resample`, `LinearRgb16::apply`, `slot_bitmap`/`slot_bitmaps`, `probe`; the buffer ladder and the colour decisions are §4.1 |
 | command history / hit testing / project writing | S6.5 | not in the S1 contract; `CollageDoc` is their state carrier |
 | text rendering | S5 | `TextLayer` is already in the contract; `draw` refuses it for now |
 | encoding and metadata | S6 | for now the `image` crate stands in; S6 replaces it with a single pass writing pixels + chroma sampling + ICC + DPI |
@@ -237,5 +325,21 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
 | band stitching vs whole image | RMSE **0.033**, max pixel difference 2/255, 311 / 463080 bytes differ (scale 1.0); scale 0.1/0.3/0.5 measured too, the sizes always sum to the whole image |
 | banding memory saving (A0 landscape 14043×9933, 10 slots, 300dpi) | whole image **1470 MB** → 4 bands **772 MB** → 16 bands **597 MB** (`VmHWM` measured in a separate process each time) |
 | seam blend `probe` | ≤ 2 px/row (the threshold), `foreign = 0` |
+
+### S4 (2026-09-21, `--release`, this machine)
+
+| Item | Value |
+|---|---|
+| the `AGENTS.md` verification render (`render --project tests/fixtures/verify.pixlay --dpi 300 --stats`, eight real photos: JPEG, PNG, 16-bit PNG, HEIC, EXIF-rotated, dated) | 14043×10532, **ms 6311** (decode + resample + draw) + **encode_ms 1844**, **`peak_rss_mb` 1633**, 9,056,692 bytes |
+| the same project as a 1200 px preview | 805 ms, 35 MB peak, 224,649 bytes |
+| the photo-free smoke path (`render --template mosaic-8-s14 --dpi 300`, A0, every cell empty) | draw only, 264 ms, 996 MB peak — a white sheet is what "no photos" means |
+| decode, per photo (`image`) | 20–52 ms over the eight fixtures, process start included; peak well under 100 MB |
+| the strip ladder (`strip-10-10x1`, A0 14043×7899, ten 4000×3000 photos) | compositing 5189 ms + encode 1744 ms, **`peak_rss_mb` 1182** — where handing `draw` the whole displayed photo would have taken 3.33 GB of bitmaps (10 × 333 MB) plus the 443 MB output surface |
+| resampling vs ImageMagick Lanczos, 1600 → 200 px | RMSE 1.41 (max channel difference 29 at the fixture's hard edge, where the two implementations' ringing differs) |
+| zone plate, 4096 → 512 px, mean error against the exact area average | outer band (past 2x Nyquist) **0.0202** against **0.3183** for one sample per output texel — a 16x separation; inner band 0.0182 against 0.0191 |
+| source ICC honoured | RMSE 0.04 against ImageMagick's own Adobe RGB → sRGB conversion, 15.4 against the same numbers unconverted |
+| 16-bit intermediate | the sRGB round trip is exact for all 256 code values; an 8-bit *linear* intermediate loses more than 16 of them |
+| grading identity | `factor = 1, s = 1, Δ = 0` is byte-identical; `factor = 1.25` moves the mean by more than 5 levels |
+| `probe` on the A0 project (flat content) | 532 ms, 2231 MB peak, 8/8 slots on their palette colour, 12/12 seams clean, blend 0.999 px per seam px, worst residual 0.12 (threshold 3.0), widest run 1 px (threshold 2), `foreign = 0` |
 
 Every threshold constant in the tests annotates this source, so a change in the numbers can be discovered.

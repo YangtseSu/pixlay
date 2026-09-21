@@ -1,0 +1,325 @@
+{
+  "docVersion": 1,
+  "canvas": {
+    "widthMm": 1189.0,
+    "heightMm": 891.75
+  },
+  "template": {
+    "name": "mosaic-8-s14",
+    "version": 1,
+    "aspect": 1.3333333333333333,
+    "slots": [
+      {
+        "outline": [
+          [
+            0.0,
+            0.0
+          ],
+          [
+            0.375,
+            0.0
+          ],
+          [
+            0.375,
+            0.375
+          ],
+          [
+            0.0,
+            0.375
+          ]
+        ],
+        "area": 0.140625
+      },
+      {
+        "outline": [
+          [
+            0.0,
+            0.375
+          ],
+          [
+            0.375,
+            0.375
+          ],
+          [
+            0.375,
+            0.625
+          ],
+          [
+            0.0,
+            0.625
+          ]
+        ],
+        "area": 0.09375
+      },
+      {
+        "outline": [
+          [
+            0.0,
+            0.625
+          ],
+          [
+            0.375,
+            0.625
+          ],
+          [
+            0.375,
+            1.0
+          ],
+          [
+            0.0,
+            1.0
+          ]
+        ],
+        "area": 0.140625
+      },
+      {
+        "outline": [
+          [
+            0.375,
+            0.0
+          ],
+          [
+            0.5,
+            0.0
+          ],
+          [
+            0.5,
+            0.375
+          ],
+          [
+            0.375,
+            0.375
+          ]
+        ],
+        "area": 0.046875
+      },
+      {
+        "outline": [
+          [
+            0.5,
+            0.0
+          ],
+          [
+            0.75,
+            0.0
+          ],
+          [
+            0.75,
+            0.375
+          ],
+          [
+            0.5,
+            0.375
+          ]
+        ],
+        "area": 0.09375
+      },
+      {
+        "outline": [
+          [
+            0.75,
+            0.0
+          ],
+          [
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.375
+          ],
+          [
+            0.75,
+            0.375
+          ]
+        ],
+        "area": 0.09375
+      },
+      {
+        "outline": [
+          [
+            0.375,
+            0.375
+          ],
+          [
+            1.0,
+            0.375
+          ],
+          [
+            1.0,
+            0.625
+          ],
+          [
+            0.75,
+            0.625
+          ],
+          [
+            0.75,
+            1.0
+          ],
+          [
+            0.375,
+            1.0
+          ]
+        ],
+        "area": 0.296875
+      },
+      {
+        "outline": [
+          [
+            0.75,
+            0.625
+          ],
+          [
+            1.0,
+            0.625
+          ],
+          [
+            1.0,
+            1.0
+          ],
+          [
+            0.75,
+            1.0
+          ]
+        ],
+        "area": 0.09375
+      }
+    ]
+  },
+  "cells": [
+    {
+      "source": "photos/portrait.jpg",
+      "crop": {
+        "zoom": 1.0,
+        "offset": [
+          0.0,
+          0.0
+        ],
+        "rotationDeg": 0.0
+      },
+      "grade": {
+        "factor": 1.0,
+        "saturation": 1.0,
+        "delta": 0.0
+      }
+    },
+    {
+      "source": "photos/landscape.jpg",
+      "crop": {
+        "zoom": 1.0,
+        "offset": [
+          0.0,
+          0.0
+        ],
+        "rotationDeg": 0.0
+      },
+      "grade": {
+        "factor": 1.0,
+        "saturation": 1.0,
+        "delta": 0.0
+      }
+    },
+    {
+      "source": "photos/ratio-4-3.png",
+      "crop": {
+        "zoom": 1.0,
+        "offset": [
+          0.0,
+          0.0
+        ],
+        "rotationDeg": 0.0
+      },
+      "grade": {
+        "factor": 1.0,
+        "saturation": 1.0,
+        "delta": 0.0
+      }
+    },
+    {
+      "source": "photos/square.png",
+      "crop": {
+        "zoom": 1.0,
+        "offset": [
+          0.0,
+          0.0
+        ],
+        "rotationDeg": 0.0
+      },
+      "grade": {
+        "factor": 1.0,
+        "saturation": 1.0,
+        "delta": 0.0
+      }
+    },
+    {
+      "source": "photos/oriented-6.jpg",
+      "crop": {
+        "zoom": 1.0,
+        "offset": [
+          0.0,
+          0.0
+        ],
+        "rotationDeg": 0.0
+      },
+      "grade": {
+        "factor": 1.0,
+        "saturation": 1.0,
+        "delta": 0.0
+      }
+    },
+    {
+      "source": "photos/dated.jpg",
+      "crop": {
+        "zoom": 1.0,
+        "offset": [
+          0.0,
+          0.0
+        ],
+        "rotationDeg": 0.0
+      },
+      "grade": {
+        "factor": 1.0,
+        "saturation": 1.0,
+        "delta": 0.0
+      }
+    },
+    {
+      "source": "photos/photo.heic",
+      "crop": {
+        "zoom": 1.0,
+        "offset": [
+          0.0,
+          0.0
+        ],
+        "rotationDeg": 0.0
+      },
+      "grade": {
+        "factor": 1.0,
+        "saturation": 1.0,
+        "delta": 0.0
+      }
+    },
+    {
+      "source": "photos/landscape.jpg",
+      "crop": {
+        "zoom": 1.0,
+        "offset": [
+          0.0,
+          0.0
+        ],
+        "rotationDeg": 0.0
+      },
+      "grade": {
+        "factor": 1.0,
+        "saturation": 1.0,
+        "delta": 0.0
+      }
+    }
+  ],
+  "text": [],
+  "filter": "none",
+  "textFallback": {
+    "date": ""
+  }
+}

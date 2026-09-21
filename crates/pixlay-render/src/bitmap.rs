@@ -22,6 +22,17 @@ use pixlay_core::Rgba8;
 #[derive(Clone, Debug)]
 pub struct Bitmap {
     surface: ImageSurface,
+    /// Where this bitmap sits inside the *displayed photo*, in displayed-photo
+    /// pixels: `(0, 0)` for a bitmap that holds the whole photo, the floored
+    /// region origin for one that holds only the part a slot can show.
+    origin: (f64, f64),
+    /// The size the whole displayed photo would have, in the same pixels, or
+    /// `None` for "this bitmap is the whole photo" (then it is its own size).
+    ///
+    /// It is what `draw` needs to place a partial bitmap: the display scale is
+    /// `displayed width / photo width`, and a bitmap holding a sub-rectangle
+    /// cannot answer that from its own dimensions.
+    display: Option<(f64, f64)>,
 }
 
 impl Bitmap {
@@ -32,20 +43,36 @@ impl Bitmap {
     /// pixels are identical in both layouts, so callers that composite onto
     /// white can pass straight color.
     pub fn from_argb32(width: i32, height: i32, data: Vec<u8>) -> Result<Self, RenderError> {
-        check_dimension("width", width)?;
-        check_dimension("height", height)?;
-        let expected = width as usize * height as usize * 4;
-        if data.len() != expected {
-            return Err(RenderError::BitmapSize {
-                width,
-                height,
-                expected,
-                got: data.len(),
-            });
-        }
-        let surface =
-            ImageSurface::create_for_data(data, Format::ARgb32, width, height, width * 4)?;
-        Ok(Self { surface })
+        let surface = surface_from_argb32(width, height, data)?;
+        Ok(Self {
+            surface,
+            origin: (0.0, 0.0),
+            display: None,
+        })
+    }
+
+    /// The same, for a bitmap that holds only part of the displayed photo.
+    ///
+    /// `origin` is the floored region origin and `display` the whole displayed
+    /// photo's size, both in displayed-photo pixels — exactly the pair
+    /// [`CropTransform::display_region`] returns with the texels it was cut to.
+    /// A bitmap that is not marked this way is treated as the whole photo, which
+    /// is what every caller before S4 builds, so nothing else changes.
+    ///
+    /// [`CropTransform::display_region`]: pixlay_core::CropTransform::display_region
+    pub fn from_argb32_region(
+        width: i32,
+        height: i32,
+        origin: (f64, f64),
+        display: (f64, f64),
+        data: Vec<u8>,
+    ) -> Result<Self, RenderError> {
+        let surface = surface_from_argb32(width, height, data)?;
+        Ok(Self {
+            surface,
+            origin,
+            display: Some(display),
+        })
     }
 
     /// A bitmap of one color. `a` is composited by Cairo, so the stored pixels
@@ -64,7 +91,11 @@ impl Bitmap {
         );
         ctx.paint()?;
         surface.flush();
-        Ok(Self { surface })
+        Ok(Self {
+            surface,
+            origin: (0.0, 0.0),
+            display: None,
+        })
     }
 
     pub fn width(&self) -> i32 {
@@ -75,14 +106,59 @@ impl Bitmap {
         self.surface.height()
     }
 
-    /// `width / height`.
+    /// `width / height` **of the whole displayed photo**, not of this bitmap.
+    ///
+    /// The fit is taken against the photo's aspect: a bitmap holding a
+    /// sub-rectangle has the same aspect only by accident, and passing its own
+    /// would re-fit the framing to a shape the user never chose.
     pub fn aspect(&self) -> f64 {
-        f64::from(self.width()) / f64::from(self.height())
+        let (width, height) = self.display_size();
+        width / height
+    }
+
+    /// The whole displayed photo's size in bitmap pixels.
+    pub fn display_size(&self) -> (f64, f64) {
+        self.display.unwrap_or_else(|| {
+            (
+                f64::from(self.surface.width()),
+                f64::from(self.surface.height()),
+            )
+        })
+    }
+
+    /// This bitmap's top-left corner inside the displayed photo, in pixels.
+    pub fn origin(&self) -> (f64, f64) {
+        self.origin
     }
 
     pub(crate) fn surface(&self) -> &ImageSurface {
         &self.surface
     }
+}
+
+fn surface_from_argb32(
+    width: i32,
+    height: i32,
+    data: Vec<u8>,
+) -> Result<ImageSurface, RenderError> {
+    check_dimension("width", width)?;
+    check_dimension("height", height)?;
+    let expected = width as usize * height as usize * 4;
+    if data.len() != expected {
+        return Err(RenderError::BitmapSize {
+            width,
+            height,
+            expected,
+            got: data.len(),
+        });
+    }
+    Ok(ImageSurface::create_for_data(
+        data,
+        Format::ARgb32,
+        width,
+        height,
+        width * 4,
+    )?)
 }
 
 /// The bitmaps of one render, keyed by cell index. A slot with no entry stays

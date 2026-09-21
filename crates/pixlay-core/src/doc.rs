@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::canvas::CanvasSpec;
 use crate::crop::CropTransform;
 use crate::error::CoreError;
+use crate::grade::{FilterPreset, Grade};
 use crate::template::Template;
 use crate::text::{TextFallback, TextLayer};
 use crate::{ASPECT_TOLERANCE, DOC_VERSION, DOC_VERSION_MIN};
@@ -21,6 +22,12 @@ pub struct Cell {
     pub source: Option<PathBuf>,
     #[serde(default)]
     pub crop: CropTransform,
+    /// Per-slot color grading, applied in linear light after the photo has been
+    /// placed. The default is the identity, so a document written before grading
+    /// existed loads unchanged and "adding a field does not bump the version"
+    /// holds (docs/CONTRACT.md §1, version policy).
+    #[serde(default)]
+    pub grade: Grade,
 }
 
 impl Default for Cell {
@@ -28,6 +35,7 @@ impl Default for Cell {
         Self {
             source: None,
             crop: CropTransform::IDENTITY,
+            grade: Grade::IDENTITY,
         }
     }
 }
@@ -49,6 +57,11 @@ pub struct CollageDoc {
     /// an earlier one, and all of them draw over every cell.
     #[serde(default)]
     pub text: Vec<TextLayer>,
+    /// The one-click canvas-wide filter. A preset expands to a [`Grade`] applied
+    /// to every slot after its own grade (docs/CONTRACT.md §4); `none` is the
+    /// default, so this field costs a project nothing until it is used.
+    #[serde(default)]
+    pub filter: FilterPreset,
     #[serde(default)]
     pub text_fallback: TextFallback,
 }
@@ -63,6 +76,7 @@ impl CollageDoc {
             template,
             cells,
             text: Vec::new(),
+            filter: FilterPreset::None,
             text_fallback: TextFallback::default(),
         }
     }
@@ -107,6 +121,7 @@ impl CollageDoc {
         }
         for cell in &self.cells {
             cell.crop.validate()?;
+            cell.grade.validate()?;
         }
         for (index, layer) in self.text.iter().enumerate() {
             layer.validate(index, self.template.slots.len())?;

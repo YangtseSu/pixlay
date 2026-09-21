@@ -11,3 +11,17 @@ publish = false
 
 [lints]
 workspace = true
+
+[dependencies]
+pixlay-core = { path = "../pixlay-core" }
+thiserror = "2.0"
+# Decoding backend (S4 measurement in docs/STEPS.md): the `glycin` facade, which
+# on Linux is the sandboxed loader process. It is the only backend measured that
+# decodes HEIC and AVIF; `glycin-builtin` covers neither, and its in-process
+# frames hang unless they are driven from a glib main context.
+glycin = "4.0.0"
+# `MainContext::block_on` is behind glib's `futures` feature. The decode is driven
+# on a dedicated thread that owns a `MainContext`, because a glycin frame request
+# only completes while its main context is being iterated.
+glib = { version = "0.22", features = ["futures"] }
+gio = "0.22"

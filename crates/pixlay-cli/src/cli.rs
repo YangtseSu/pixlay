@@ -8,12 +8,15 @@ use std::ffi::OsString;
 use std::io::Write;
 
 use pixlay_core::Project;
+use pixlay_imaging::{Rgb8View, SlotBitmap};
 use pixlay_render::Images;
 
-use crate::args::{self, Command, InitArgs, ProbeArgs, RenderArgs, Source, TemplatesArgs, USAGE};
+use crate::args::{
+    self, Command, ImageArgs, InitArgs, ProbeArgs, RenderArgs, Source, TemplatesArgs, USAGE,
+};
 use crate::encode::Format;
 use crate::report::Report;
-use crate::{content, encode, probe, stats};
+use crate::{encode, stats};
 
 /// Exit codes, as the contract fixes them.
 pub const EXIT_SUCCESS: u8 = 0;
@@ -42,6 +45,7 @@ pub fn run(argv: &[OsString]) -> Result<u8, Failure> {
         }
         Command::Render(args) => render(args),
         Command::Probe(args) => probe(args),
+        Command::Image(args) => image(args),
         Command::Templates(args) => list_templates(args),
         Command::Init(args) => init_project(args),
     }
@@ -183,29 +187,28 @@ fn render(args: RenderArgs) -> Result<u8, Failure> {
     doc.validate()
         .map_err(|error| Failure::Failed(error.to_string()))?;
 
-    let stopwatch = stats::Stopwatch::start();
-    let images: Images = match &args.source {
-        Source::Project(_) => content::images(
-            &doc,
-            content::Fill::NamedCells(&sources),
-            args.content,
-            args.dpi,
-        )?,
-        // The photo-free smoke path renders every slot, so the output shows the
-        // template's geometry instead of a blank sheet.
-        Source::Template(_) => {
-            content::images(&doc, content::Fill::AllSlots, args.content, args.dpi)?
-        }
-    };
+    let full = doc
+        .canvas
+        .pixel_size(args.dpi)
+        .map_err(|error| Failure::Failed(error.to_string()))?;
     let scale = match args.preview_px {
-        Some(long_edge) => {
-            let full = doc
-                .canvas
-                .pixel_size(args.dpi)
-                .map_err(|error| Failure::Failed(error.to_string()))?;
-            f64::from(long_edge) / f64::from(full.width.max(full.height))
-        }
+        Some(long_edge) => f64::from(long_edge) / f64::from(full.width.max(full.height)),
         None => 1.0,
+    };
+    // The bitmaps are sized in the space `draw` writes into, so a preview decodes
+    // and resamples at preview size instead of paying for the export and letting
+    // Cairo shrink it. `draw`'s own `scale` then brings canvas pixels to device
+    // pixels, and the pattern is 1:1 in both cases.
+    let canvas_px = pixlay_core::PixelSize {
+        width: pixlay_render::output_px(full.width, scale),
+        height: pixlay_render::output_px(full.height, scale),
+    };
+
+    let stopwatch = stats::Stopwatch::start();
+    // The photo-free path has no cells to decode: every slot stays white.
+    let images = match &args.source {
+        Source::Project(_) => decode_slots(&doc, &sources, canvas_px)?,
+        Source::Template(_) => Images::new(),
     };
     let image = pixlay_render::render_rgb8(&doc, &images, args.dpi, scale, None)
         .map_err(|error| Failure::Failed(error.to_string()))?;
@@ -225,11 +228,81 @@ fn render(args: RenderArgs) -> Result<u8, Failure> {
     report.int("out_w", i64::from(image.width));
     report.int("out_h", i64::from(image.height));
     report.int("bytes", bytes as i64);
-    report.text("content", args.content.name());
     if let Some(preview) = args.preview_px {
         report.int("preview_px", i64::from(preview));
     }
     add_stats(&mut report, args.stats, compose, Some(encode_ms));
+    emit(&report, args.json);
+    Ok(EXIT_SUCCESS)
+}
+
+/// Decodes every occupied cell into the bitmap set `draw` consumes.
+///
+/// The buffer ladder is `pixlay_imaging`'s (docs/CONTRACT.md §4): one source at a
+/// time, and the bitmaps are as large as the slots show. Nothing is cached
+/// between slots — a project that points all its cells at one file decodes it
+/// once per cell, which is the price of the ladder being `source + sum(bitmaps)`
+/// rather than `sources + sum(bitmaps)`.
+fn decode_slots(
+    doc: &pixlay_core::CollageDoc,
+    sources: &[Option<std::path::PathBuf>],
+    canvas_px: pixlay_core::PixelSize,
+) -> Result<Images, Failure> {
+    let bitmaps = pixlay_imaging::slot_bitmaps(doc, canvas_px, sources)
+        .map_err(|error| Failure::Failed(error.to_string()))?;
+    let mut images = Images::new();
+    for bitmap in bitmaps {
+        images.insert(bitmap.slot, render_bitmap(&bitmap)?);
+    }
+    Ok(images)
+}
+
+/// Wraps one decoded slot for the renderer, keeping the region it holds.
+fn render_bitmap(bitmap: &SlotBitmap) -> Result<pixlay_render::Bitmap, Failure> {
+    pixlay_render::Bitmap::from_argb32_region(
+        bitmap.width as i32,
+        bitmap.height as i32,
+        bitmap.origin,
+        bitmap.display,
+        bitmap.pixels.clone(),
+    )
+    .map_err(|error| Failure::Failed(error.to_string()))
+}
+
+/// `image`: what the decoder found in one file.
+///
+/// This is S4's machine-visible decode: the MIME type the loader detected, the
+/// size *after* EXIF rotation, the sample depth, and the EXIF date when the file
+/// carries one. Without it "HEIC decodes" and "orientation 6 is applied" could
+/// only be checked by rendering a project and reading pixels back.
+fn image(args: ImageArgs) -> Result<u8, Failure> {
+    let source = pixlay_imaging::Source::decode(&args.photo)
+        .map_err(|error| Failure::Failed(error.to_string()))?;
+    let mut report = Report::new();
+    report.text("status", "ok");
+    report.text("command", "image");
+    report.text("mime", source.mime().to_string());
+    report.int("width", i64::from(source.width()));
+    report.int("height", i64::from(source.height()));
+    report.text(
+        "depth",
+        match source.depth() {
+            pixlay_imaging::Depth::Eight => "8",
+            pixlay_imaging::Depth::Sixteen => "16",
+        },
+    );
+    report.text("aspect", format!("{:.6}", source.aspect()));
+    match source.exif() {
+        Some(exif) => {
+            report.int("exif_bytes", exif.len() as i64);
+            let date = pixlay_imaging::exif::date_time_original(exif);
+            report.text("date", date.unwrap_or_default());
+        }
+        None => {
+            report.int("exif_bytes", 0);
+            report.text("date", "");
+        }
+    }
     emit(&report, args.json);
     Ok(EXIT_SUCCESS)
 }
@@ -242,20 +315,36 @@ fn probe(args: ProbeArgs) -> Result<u8, Failure> {
         .map_err(|error| Failure::Failed(error.to_string()))?;
     let doc = project.doc().clone();
 
-    // Flat content: the probe separates a seam blend from the content, which
-    // only works when each slot has a single color.
     let stopwatch = stats::Stopwatch::start();
-    let images = content::images(
-        &doc,
-        content::Fill::NamedCells(&sources),
-        content::Mode::Flat,
-        args.dpi,
-    )?;
+    let full = doc
+        .canvas
+        .pixel_size(args.dpi)
+        .map_err(|error| Failure::Failed(error.to_string()))?;
+    // The probe renders **its own** content: flat colors, one per occupied cell
+    // (`pixlay_imaging::probe_bitmaps`). Real photos cannot be probed — a white
+    // photo has a white interior and a photo with a hard edge beside a seam has no
+    // measurable blend — and the contract fixes flat content for the probe.
+    //
+    // The render is full size: the probe samples pixel coordinates, and a preview
+    // would move every one of them.
+    let bitmaps = pixlay_imaging::probe::probe_bitmaps(&doc, full, &sources)
+        .map_err(|error| Failure::Failed(error.to_string()))?;
+    let mut images = Images::new();
+    for bitmap in &bitmaps {
+        images.insert(bitmap.slot, render_bitmap(bitmap)?);
+    }
     let image = pixlay_render::render_rgb8(&doc, &images, args.dpi, 1.0, None)
         .map_err(|error| Failure::Failed(error.to_string()))?;
     let compose = stopwatch.elapsed();
 
-    let result = probe::probe(&doc, &image, args.dpi);
+    // The probe reads the render itself: with real photos there is no placeholder
+    // color to compare against (see `pixlay_imaging::probe`).
+    let view = Rgb8View {
+        width: image.width,
+        height: image.height,
+        data: &image.data,
+    };
+    let result = pixlay_imaging::probe::probe(&doc, &view, args.dpi);
     let mut report = Report::new();
     report.text("status", if result.ok() { "ok" } else { "failed" });
     report.text("command", "probe");

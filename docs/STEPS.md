@@ -16,8 +16,8 @@ The first sentence for a new session:
 
 Legend: ✅ done · 🚧 in progress · ⏸ blocked (waiting on a human decision or external input) · ⬜ not started
 
-**Current progress: S3 — ✅ done (2026-09-21, no human gate; the session ends at the S3┊S4 boundary, which splitting principle 5 puts before S4's irreversible decoding-backend decision)**
-**Next action: start S4 in a new session (its first item is the decoding-backend measurement, which decides S8's `depends`).**
+**Current progress: S4 — ✅ done (2026-09-21, no human gate; the session ends at the S4┊S5 boundary, which splitting principle 5 puts after S4's irreversible decoding-backend decision — the one that decides S8's `depends`)**
+**Next action: start S5 in a new session (canvas-level text: free placement, the tiled watermark, `{date}` from EXIF through `pixlay-imaging::exif`).**
 
 | Step | Status | Date | What it delivers |
 |---|---|---|---|
@@ -25,7 +25,7 @@ Legend: ✅ done · 🚧 in progress · ⏸ blocked (waiting on a human decision
 | S1 · Minimal contract + feedback loop | ✅ done | 2026-09-20 | `CollageDoc` v1 frozen, the single `draw`, `pixlay-render render` produces images, `probe` answers in numbers. Gate passed 2026-09-21 (review 1), defects from review 2 fixed the same day |
 | S2 · Template system (geometry only) | ✅ done | 2026-09-21 | 12 templates covering 2–10 slots, grouped by aspect ratio, generated on a dyadic lattice and frozen under a `templateVersion`; `templates` and `init` added to the CLI |
 | S3 · Framing and clamp | ✅ done | 2026-09-21 | `CropTransform::fit`: absolute-zoom framing whose request is fitted to the slot by raising the zoom, clamping the pan and, past `CLAMP_ZOOM_LIMIT`, limiting the rotation; applied by `draw`, exact on all 64 shipped slots |
-| S4 · Image pipeline | ⬜ not started | — | `pixlay-imaging`: decoding, EXIF rotation, 16-bit linear resampling, per-slot grading and the global filter |
+| S4 · Image pipeline | ✅ done | 2026-09-21 | `pixlay-imaging`: the sandboxed glycin decoder (HEIC included), EXIF orientation applied to the pixels, a 16-bit linear Lanczos3 resample of the region each slot shows, per-slot grading and the global filter, the buffer ladder, and the probe moved down from the CLI |
 | S5 · Text layers | ⬜ not started | — | Canvas-level text, free placement and tiled watermark through one mechanism, `{date}` from EXIF |
 | S6 · Export | ⬜ not started | — | Physical size + DPI and long-edge-pixels modes, pixels and metadata written in one pass |
 | S6.5 · Command history / project IO / hit testing | ⬜ not started | — | `Command` + undo stack, `.pixlay` save/load with atomic write, point → slot hit testing |
@@ -58,6 +58,7 @@ Wherever the original criteria said "visual / readable / three minutes", they we
 |---|---|---|
 | After S0 | Look at the numbers: is Cairo usable? | ✅ passed (2026-09-20, human): **Cairo stays** |
 | After S1 | Review the contract. This is the only place a human must confirm — if the contract is wrong, the seven steps after it are all wasted, and the model itself cannot see that "this contract will not be enough later". Before reviewing, first read "Open decisions": every entry in those tables changes the contract's shape | ✅ passed (2026-09-21, human): **contract v1 passes**, defects fixed per the review (see S1's ruling) |
+| After S4 | Look at the downsampling: is a 4000 px photo in a 400 px slot free of aliasing and mush? The numbers are on disk (RMSE 1.41 against ImageMagick's Lanczos, a 16x separation from one-sample-per-texel on the zone plate), the preview is `/var/tmp/verify-preview.png`, and S4's exit criteria call this the one human criterion of the step | ⏳ open — see "S4 · the one visual criterion" |
 
 **The gate's closing action** is in `AGENTS.md` "Session and persistence discipline": a ruling block + the status row + this table's entry + `docs/CONTRACT.md` + commit,
 and it is not done if one of the five is missing.
@@ -520,6 +521,124 @@ The exit criteria, item by item:
 - **Not doing**: no grading UI.
 - **Human**: none, but this step ends its session: the decoding backend it picks is irreversible and determines S8's `depends` (splitting principle 5).
 
+### S4 result (2026-09-21)
+
+`[all criteria are in the tests in the repository; the numbers below are the release binary's output on this machine unless a test is named]`
+
+The exit criteria, item by item:
+
+| Criterion | Landing point | Measured |
+|---|---|---|
+| grading identity: `factor=1, s=1, Δ=0` is pixel-identical to the input | `pixlay-imaging/tests/resample.rs` (`the_identity_grade_changes_nothing_at_all`) | byte-identical, and the comparison can fail (`factor=1.25` moves the mean by more than 5 levels) |
+| HEIC decodes | `pixlay-imaging/tests/decode.rs` (`heic_decodes_at_its_own_depth`), fixtures `photos/photo.heic` | `image/heif`, 800×600, 16-bit samples from a 12-bit file, not flat |
+| EXIF Orientation=6 is rotated upright | `pixlay-imaging/tests/decode.rs` (`exif_orientation_is_applied_to_the_pixels`) | the fixture's bright rectangle lands at (399, 150)-(799, 300) after the rotation — the position rotation predicts and not the stored one, with the stored position asserted *not* bright |
+| large-ratio downsampling is free of aliasing and mush | `pixlay-imaging/tests/resample.rs` (`a_large_reduction_matches_imagemagick_lanczos`, `a_large_reduction_does_not_alias`) | 8× (1600→200) RMSE **1.41** against ImageMagick's Lanczos; on a 4096→512 zone plate the mean error against the exact area average is **0.0202** outside the passband against **0.3183** for one sample per output texel (16×), and 0.0182/0.0191 inside it |
+| the intermediate buffer is 16-bit, quantization only at the end | `pixlay-imaging/tests/resample.rs` (`a_sixteen_bit_intermediate_is_not_an_eight_bit_one`, `the_two_depths_agree_sample_for_sample`) | the sRGB round trip is exact for all 256 code values; an 8-bit *linear* intermediate loses 16+ of them; a 16-bit and an 8-bit fixture of identical content agree sample for sample |
+
+**The criteria the review additions added**, and where they landed:
+
+| Item | Landing point | Measured |
+|---|---|---|
+| the decoding backend, measured down both paths, including HEIC and Orientation=6 | "S4 · decisions" 1 | the sandboxed loader (path A) decodes PNG/JPEG/HEIC/AVIF in 11–110 ms per 2400×1600 file, under an *empty* environment; the in-process path (B) has no HEIC/AVIF at all and hangs under a plain executor |
+| the buffer ladder, with the size cap and the concurrency rule | `docs/CONTRACT.md` §4.1, `pixlay_imaging::layout` | one source at a time + `Σ` slot bitmaps + the output surface; strip-10 at A0 with ten 12 MP photos: **1182 MB** measured against 3.33 GB + 443 MB if the whole displayed photo were handed over |
+| colour decisions in the contract | `docs/CONTRACT.md` §4.1/§6 | the source profile is honoured (RMSE 0.04 against ImageMagick's conversion, 15.4 against ignoring it); output is always sRGB; alpha is flattened onto white; no `lcms2` |
+| `--content detail\|flat` and `content.rs` are deleted, and the probe sinks to `pixlay-imaging` | `crates/pixlay-imaging/src/probe.rs`, `crates/pixlay-cli/tests/probe.rs` → `crates/pixlay-imaging/tests/probe.rs` | the flag and the module are gone; the probe paints its own flat content and its falsifiability is pinned by a test that hands it an unpainted slot |
+
+### S4 · decisions this step made
+
+1. **The decoding backend is the sandboxed loader (`glycin` 4.0.0), measured, not assumed.** Both paths were run for real (2026-09-21, this machine):
+
+   | Path | HEIC | AVIF | 2400×1600 decode | Environment |
+   |---|---|---|---|---|
+   | A: `glycin` 4.0.0 — on Linux the facade *is* the sandboxed loader process | yes (12-bit → 16-bit samples) | yes | PNG 46 ms, JPEG 11–33 ms, HEIC 44–110 ms, AVIF 28 ms | works under `env -i PATH=/usr/bin:/bin HOME=/nonexistent`; no session bus, no XDG runtime dir |
+   | B: `glycin-builtin` 4.0.0 (in-process, `builtin-image-rs`) | **no** | **no** | not measurable — see below | needs a glib main context (below) |
+
+   Three measurements decided it. (i) **B cannot decode the formats the criterion names**: `glycin-builtin` covers PNG/JPEG/WebP/TIFF/GIF/BMP/QOI/EXR/JP2 through `builtin-image-rs`, and HEIC/AVIF live only in the distribution's external `glycin-heif` loader. (ii) **B does not even complete under a plain async executor**: driven with `futures_lite::block_on`, every frame request hung until glycin's own 60-second limit fired; the same call completes when the future is driven on a glib `MainContext` (`spawn_local` + `MainLoop::run`, measured), because a glycin frame is delivered through the context. (iii) A is not fragile the way the S0 note feared: the distro's `glycin-thumbnailer` failing for every format (the "Open / to be proven" entry) is that *binary's* problem, not the crate path's. The cost of A is S8's `depends`: `glib2`, `libseccomp`, `bubblewrap`, `fontconfig`, and the loader packages (`glycin`, `glycin-heif`, …) — recorded in `AGENTS.md`.
+
+2. **The decoder runs on one private thread that owns a `MainContext`,** and the pipeline is synchronous from the outside (`pixlay-imaging/src/driver.rs`). Rationale, from the measurement above: a frame request only completes while a main context is iterated, so *some* loop has to exist. A private context on a private thread keeps the GUI's GTK loop out of it entirely (it must not be iterated by, or block, the main thread), and `with_thread_default` makes glycin's own `MainContextSelector::Auto` pick *this* context instead of starting a hidden loop of its own. Jobs serialize: decoding is the memory-heaviest stage, and the ladder's `N × source + Σ bitmaps + output ≤ budget` is the caller's decision, not this thread's.
+
+3. **The bitmap holds the part of the photo the slot can show, and `draw` was taught where it sits.** This is the buffer ladder, and it is load-bearing rather than tidy: a slot in the ten-column strip needs its photo at 6× its own width, so the full displayed photo is 333 MB per slot at A0. `Bitmap` therefore carries `origin` + `display_size` (S3's bitmaps are unaffected: the constructor that does not name them means "this is the whole photo"), and `CropTransform::display_region` inverts `draw`'s own placement to produce the rectangle. The proof that the crop is transparent to the renderer is a test: the same document rendered from the whole bitmap and from the region is byte-identical where the blit is unrotated, and within interpolation round-off where Cairo has to interpolate.
+
+4. **Grading is three numbers in linear light, and the global filter is a named grade.** `factor` (exposure), `delta` (Δ, warmth), `saturation`, applied *in that order* per the frozen order's "per-slot grading → global filter": the cell's grade first, then the preset's. One mechanism, so the identity criterion is one code path, and a preset is data in `pixlay-core` while the arithmetic is in `pixlay-imaging`. The identity path returns without touching a sample, which is what makes "pixel-identical" exact in a pipeline that is otherwise also exact.
+
+5. **Saturation operates on the luminance of the exposed pixel, and the warmth shift is multiplicative.** `r *= 1 + Δ`, `b *= 1 - Δ`, `c = luma + s*(c - luma)` with the Rec. 709 weights. Clamped after exposure and warmth (the visible image) and again after saturation (the control cannot push a channel past white); the alternative — clamping only at the end — lets an over-exposed pixel desaturate into a value it never had.
+
+6. **The probe paints its own content, and the CLI's `--content` flag is gone with `content.rs`.** The two are the same decision seen from both ends. A probe of real photos cannot ask its questions (measured: 12/12 seams "unclean" and 802 "unpainted" samples on the verification project, all false), so flat content is the probe's own business now (`probe::probe_bitmaps`), sized from the same fit as a real bitmap. The user-facing placeholder generator is deleted, and `render --template` therefore renders a white sheet — documented in the contract §5 and used only as a geometry smoke.
+
+7. **`--preview-px` sizes the bitmaps, not just the output surface.** S1's design renders at full size and lets Cairo shrink it; with placeholder content that was free, and with real photos it means decoding and Lanczos-resampling an A0 to show a 1200 px thumbnail (measured before the change: 83 s and 1365 MB for one preview in the debug profile). The bitmaps are therefore sized in the space `draw` writes into (the *output* pixels), which is also what keeps the preview honest: the shrinking is the pipeline's Lanczos, not Cairo's filter.
+
+8. **The CLI gained `image`, and it is the decode stage's machine surface.** "HEIC decodes" and "orientation 6 is applied" have to be visible without rendering a project, and S5 needs the EXIF date to substitute `{date}`; `image` reports the detected MIME, the size *after* rotation, the depth, the EXIF block's size and `DateTimeOriginal`. It writes nothing and takes no `--out`/`--dpi`.
+
+9. **A 16-bit buffer is not a 16-bit buffer unless the offset is right — the step's one real bug.** `Source::pixel` multiplied the sample index by 4 for both depths, so every 16-bit source was read a half-image away: the HEIC and the 16-bit PNG rendered a comb of neighbouring-row content (visible in the first `--preview-px 1600` render of the verification project). It was found by looking at the image, then pinned by a test that cannot be fooled the same way: `photo-16bit.png` and `ratio-4-3.png` are the same content at the two depths, so the decodes must agree sample for sample. The lesson is S0's, again: "looks right" is not a criterion, and neither is a test that only checks a spread.
+
+### S4 · measured (2026-09-21, `--release`, this machine)
+
+| Item | Value |
+|---|---|
+| the `AGENTS.md` verification render (`render --project crates/pixlay-cli/tests/fixtures/verify.pixlay --dpi 300 --stats`, eight photos: JPEG, PNG, 16-bit PNG, HEIC, EXIF-rotated, dated) | 14043×10532, **ms 6311** + **encode_ms 1844**, **`peak_rss_mb` 1633**, 9,056,692 bytes |
+| where the 6.3 s goes | decode ≈150 ms (20–52 ms per photo), resample ≈5.8 s, `draw` 264 ms (measured on the photo-free smoke render, which is the same canvas) |
+| the same project as a 1200 px preview | 805 ms, 35 MB peak, 224,649 bytes |
+| `probe` at 300 dpi on the A0 project | 532 ms, 2231 MB peak, 8/8 slots on their palette colour, 12/12 seams clean, blend 0.999 px per seam px (threshold 2), worst residual 0.12 (threshold 3.0), `foreign = 0` |
+| `probe` at 96 dpi on the same project | 50 ms, 237 MB |
+| the strip ladder (`strip-10-10x1`, A0 14043×7899, ten 4000×3000 photos) | compositing 5189 ms + encode 1744 ms, **`peak_rss_mb` 1182**; the whole-displayed-photo alternative would be 3.33 GB of bitmaps + 443 MB of output |
+| resample accuracy | 8× reduction RMSE 1.41 against ImageMagick Lanczos; zone plate outer band 0.0202 against the exact average (one-sample baseline 0.3183), inner band 0.0182 |
+| source ICC | 0.04 RMSE against ImageMagick's Adobe RGB → sRGB conversion; 15.4 against ignoring the profile |
+| the fixtures | 14 files, 1.9 MB total, all CC0 and regenerable (`fixtures/generate.py`); `verify.pixlay` is 325 lines of the canonical `init` output with its cells filled |
+| visual inspection | `/var/tmp/verify-preview.png`: eight photos, the concave slot's content upright and continuous with its neighbours, no white inside any slot, the transparent PNG flattened onto white, the rotated fixture upright. The 16-bit comb of decision 9 was found this way |
+
+### S4 · deviations from and additions to the review additions
+
+1. **The review's suggested ladder keeps its shape but gained a crop.** "decode → 16-bit linear → downsample to in-slot display size → grade → filter → sRGB8 → Cairo" assumes the downsample target is the *slot*, and the measured version of that is the region each slot actually shows (decision 3): without it the strip template's ladder is not `O(output pixels)` at all.
+2. **The review asked for "a zone-plate check of the aliasing energy"; this is a stronger form of the same idea.** The energy is measured against the *exact area average* — the ideal answer, computed from the analytic plate — rather than against a threshold on "energy", so the test says how far from correct the result is instead of how much high-frequency content it has. The one-sample-per-texel baseline is measured in the same run, which is what shows the metric discriminates.
+3. **`pixlay-imaging` does not depend on `pixlay-render`,** so the probe takes a borrowed `Rgb8View` (width, height, `&[u8]`) rather than the renderer's `Rgb8Image`: the renderer owns Cairo, and a probe of an A0 render must not copy 350 MB to ask its question.
+4. **The CLI's `probe` renders full size even when `--preview-px` is given** (the flag is refused there): the probe samples pixel coordinates, and a preview moves every one of them.
+5. **The framing rotation is still Cairo's, and that is deliberate.** `AGENTS.md`'s
+   "rotation interpolation happens in `pixlay-imaging`" is about handing Cairo a photo
+   to shrink; S3's placement, where the rotation lives, keeps "what is drawn is the
+   fit" in one place for every caller. The bitmap arrives at display size, so the
+   rotation is a 1:1 kernel rather than a downsample, and the pixel test
+   (`a_decoded_photo_fills_its_slot`) renders a 25° rotation at 2.2x and finds the
+   photo's colour at every sample ≥3 px inside the slot. Recorded in `docs/CONTRACT.md` §4.1.
+6. **`--preview-px` now changes what the pipeline computes**, not just the target surface (decision 7). This is a behavior change for existing callers: the same document at the same DPI now produces a preview whose bitmaps are preview-sized. Nothing in the contract fixes "the preview resamples with Cairo", and the new behavior is the one the criterion "preview and export are the same `draw`" is about.
+
+### S4 · the one visual criterion
+
+The step's criteria say "Human: none", but "Where humans must step in" carries one
+item for S4 — the downsampling quality, "free of aliasing and mush" — and the
+allocation rule applies: "the second one produces a real image, and you must look
+at it directly".
+
+What is on disk for that look, each in one command:
+
+    cargo run --release -p pixlay-cli -- render \
+      --project crates/pixlay-cli/tests/fixtures/verify.pixlay --dpi 300 --stats --out /var/tmp/a.jpg
+    cargo run --release -p pixlay-cli -- render \
+      --project crates/pixlay-cli/tests/fixtures/verify.pixlay --dpi 300 --preview-px 1600 \
+      --out /var/tmp/verify-preview.png
+    # the downsampling case specifically: the wave fixture in the eight-slot layout
+    python3 - <<'EOF'
+    import json, pathlib
+    fix = pathlib.Path("crates/pixlay-cli/tests/fixtures").resolve()
+    doc = json.loads((fix / "verify.pixlay").read_text())
+    for cell in doc["cells"]:
+        cell["source"] = str(fix / "photos/resample-source.png")
+    pathlib.Path("/var/tmp/downsample.pixlay").write_text(json.dumps(doc, indent=2))
+    EOF
+    cargo run --release -p pixlay-cli -- render --project /var/tmp/downsample.pixlay \
+      --dpi 300 --preview-px 900 --out /var/tmp/s4-downsample-check.png
+
+`/var/tmp/s4-downsample-check.png` is the one that answers the question: the wave
+fixture at 4–8x reductions, and the concave slot at more than that. Looked at in
+this session (2026-09-21): smooth, no moiré, no mush, the hard square's edges soft
+but not ringing. The same content at 8x against ImageMagick's Lanczos is an RMSE of
+1.41, and against the exact area average it is 0.0202 outside the passband where
+one-sample-per-texel gives 0.3183 — so the eye and the numbers are answering the
+same question.
+
+**Status: looked at, numbers on disk, and the human verdict is still the one that
+counts** (the gate table's row). It does not gate S5: nothing in the text layer's
+contract depends on the resampler's edge behaviour.
+
 ### S4 · review additions (2026-09-20)
 
 - **Decoding is the first task**: run one real decode down each of the two paths in "Open decisions → the two paths for the decoding backend" (including HEIC, including EXIF Orientation=6) and pick one with numbers.
@@ -766,6 +885,7 @@ Not done: `cargo vendor` currently has empty dependencies, so this criterion can
   1. `glycin-image-rs` covers PNG/JPEG/WebP/TIFF/GIF/AVIF and so on, **but not HEIC**;
   2. on Arch, HEIC is a separate `glycin-heif` loader (going through libheif), so the self-contained option has to find another path.
 - S4's first step: run one real decode down each of the two paths (including HEIC, including EXIF Orientation=6) and pick one with numbers.
+  **Done, 2026-09-21: path A (the sandboxed loader) is picked; the measurements and the three reasons are in "S4 · decisions" 1.**
 
 ### Decided
 

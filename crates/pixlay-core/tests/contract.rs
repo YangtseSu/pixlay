@@ -61,6 +61,11 @@ fn serde_round_trip_is_field_identical() {
             offset: (0.1, -0.2),
             rotation_deg: -12.5,
         },
+        grade: pixlay_core::Grade {
+            factor: 1.2,
+            saturation: 0.8,
+            delta: -0.15,
+        },
     };
     doc.text.push(TextLayer {
         content: "trip {date} #{index}".to_string(),

@@ -25,6 +25,7 @@ pixlay-core = { path = "../pixlay-core" }
 pixlay-render = { path = "../pixlay-render" }
 # Interim encoding: S6 replaces this with an encoder that writes pixels,
 # chroma sampling, ICC and DPI in one pass. Registered in the dependency log.
+pixlay-imaging = { path = "../pixlay-imaging" }
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
 
 [dev-dependencies]

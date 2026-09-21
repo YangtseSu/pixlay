@@ -1,21 +1,106 @@
-//! Pixel probes: numbers instead of "looks right".
+//! The probe: numbers instead of "looks right".
 //!
-//! The probes answer the three questions every rendering step has to answer, on
-//! the same document the export draws:
+//! The probe answers three questions about a render, on the same document the
+//! export draws:
 //!
 //! 1. is the slot's own content where the geometry says it is,
 //! 2. is everything the slots do not cover exactly white,
 //! 3. how much do two adjacent slots blend into each other along their shared
 //!    edge.
 //!
-//! Probe mode renders flat content on purpose: a seam blend is only separable
-//! from the content when each slot has a single color, and the residual test
-//! below compares a blended pixel against white plus the two slot colors.
+//! # Why the probe paints the slots itself
+//!
+//! A probe of a real render cannot ask these questions. A seam blend is only
+//! separable from the content when each side of the seam is one flat color
+//! (`docs/CONTRACT.md` §5), and "is the photo where the geometry says it is" has
+//! no answer at all when the content is the user's own photo: a legitimately
+//! white photo leaves a white interior, and a photo with a hard edge beside a
+//! seam has no measurable blend. Measured 2026-09-21 on a real eight-photo
+//! project: all 12 seams reported unclean and a slot holding a transparent PNG
+//! reported 802 unpainted samples — every one of them a false alarm.
+//!
+//! So the probe renders **its own flat content**: one color per cell from
+//! [`palette`], sized exactly the way the real pipeline sizes a bitmap (the fit's
+//! display region). That is the shape S1 froze — "`probe` uses flat content (one
+//! color per slot)" — and it is what makes each of the three questions exact
+//! rather than statistical. The real pixels are checked by the render itself
+//! (`pixlay-render render`), the decoder by `pixlay-render image`, and the whole
+//! path by the tests that compare a render against the photo it was given.
+//!
+//! It lives here rather than in the CLI because the GUI needs the same answers
+//! (`AGENTS.md`: nothing may be possible only in the GUI), and because the
+//! questions are about pixels, which this crate owns.
 
-use pixlay_core::{CollageDoc, Point, Polygon, Rgba8, SharedEdge};
-use pixlay_render::Rgb8Image;
+use std::path::PathBuf;
 
-use crate::content;
+use pixlay_core::{CollageDoc, PixelSize, Point, Polygon, Rgba8, SharedEdge};
+
+/// The palette, indexed by cell.
+///
+/// Ten colors far apart from each other, so a mixed pixel between two slots is
+/// identifiable and a swapped cell is obvious.
+const PALETTE: [[u8; 3]; 10] = [
+    [200, 30, 40],
+    [30, 160, 60],
+    [40, 60, 220],
+    [230, 170, 20],
+    [150, 40, 190],
+    [20, 190, 190],
+    [240, 120, 60],
+    [90, 90, 90],
+    [10, 60, 120],
+    [120, 200, 40],
+];
+
+/// The color the probe paints cell `index` with.
+pub fn palette(index: usize) -> Rgba8 {
+    let [r, g, b] = PALETTE[index % PALETTE.len()];
+    Rgba8::rgb(r, g, b)
+}
+
+/// Straight 8-bit RGB pixels, the probe's input.
+///
+/// A borrow rather than an owned buffer on purpose: a probe of an A0 render would
+/// otherwise copy 350 MB to ask its questions. `pixlay-render`'s `Rgb8Image` has
+/// exactly these fields, and this crate must not depend on the renderer (which
+/// owns cairo) to name its pixels.
+pub struct Rgb8View<'a> {
+    pub width: i32,
+    pub height: i32,
+    /// `width * height * 3` bytes, row major.
+    pub data: &'a [u8],
+}
+
+impl Rgb8View<'_> {
+    pub fn pixel(&self, x: i32, y: i32) -> [u8; 3] {
+        let index = (y as usize * self.width as usize + x as usize) * 3;
+        [self.data[index], self.data[index + 1], self.data[index + 2]]
+    }
+}
+
+/// Flat bitmaps for the probe, one per occupied cell.
+///
+/// Sized from the same fit and the same display region as
+/// [`crate::slot_bitmap`]: a probe whose bitmaps were sized differently would be
+/// measuring a render nobody will ever produce.
+pub fn probe_bitmaps(
+    doc: &CollageDoc,
+    canvas_px: PixelSize,
+    sources: &[Option<PathBuf>],
+) -> Result<Vec<crate::SlotBitmap>, crate::ImagingError> {
+    let mut bitmaps = Vec::new();
+    for (index, source) in sources.iter().enumerate() {
+        if source.is_some() {
+            bitmaps.push(crate::layout::flat_bitmap(
+                doc,
+                index,
+                canvas_px,
+                palette(index),
+            )?);
+        }
+    }
+    Ok(bitmaps)
+}
 
 /// Largest residual, in levels, of a blended seam pixel fitted as a convex
 /// combination of white and the two slot colors. Measured 0.2 in S0 (see
@@ -154,8 +239,8 @@ impl ProbeReport {
     }
 }
 
-/// Samples `image`, which must be a full-size, flat-content render of `doc`.
-pub fn probe(doc: &CollageDoc, image: &Rgb8Image, dpi: u32) -> ProbeReport {
+/// Samples `image`, which must be a full-size render of `doc` painted with [`palette`].
+pub fn probe(doc: &CollageDoc, image: &Rgb8View<'_>, dpi: u32) -> ProbeReport {
     let canvas = doc
         .canvas
         .pixel_size(dpi)
@@ -174,7 +259,7 @@ pub fn probe(doc: &CollageDoc, image: &Rgb8Image, dpi: u32) -> ProbeReport {
         if !filled {
             continue;
         }
-        let expected = rgb_of(content::color(index));
+        let expected = rgb_of(palette(index));
         let at = deepest_point(&slot.outline);
         let (x, y) = pixel_of(at, canvas);
         let actual = image.pixel(x, y);
@@ -193,7 +278,7 @@ pub fn probe(doc: &CollageDoc, image: &Rgb8Image, dpi: u32) -> ProbeReport {
         .template
         .shared_edges()
         .into_iter()
-        .map(|seam| sample_seam(&seam, image, canvas))
+        .map(|seam| sample_seam(&seam, doc, image, canvas))
         .collect();
     ProbeReport {
         width: image.width,
@@ -212,7 +297,7 @@ fn stride(width: i32) -> i32 {
     (width / 1200).max(1)
 }
 
-fn sample_background(doc: &CollageDoc, image: &Rgb8Image) -> BackgroundProbe {
+fn sample_background(doc: &CollageDoc, image: &Rgb8View<'_>) -> BackgroundProbe {
     let step = stride(image.width);
     let mut probe = BackgroundProbe {
         samples: 0,
@@ -256,7 +341,7 @@ fn sample_background(doc: &CollageDoc, image: &Rgb8Image) -> BackgroundProbe {
 
 /// True when `point` is within two pixels of a slot boundary: those pixels are
 /// legitimately blended and are not background samples.
-fn near_slot(doc: &CollageDoc, point: Point, image: &Rgb8Image) -> bool {
+fn near_slot(doc: &CollageDoc, point: Point, image: &Rgb8View<'_>) -> bool {
     let margin_x = 2.0 / f64::from(image.width);
     let margin_y = 2.0 / f64::from(image.height);
     doc.template.slots.iter().enumerate().any(|(index, slot)| {
@@ -272,9 +357,23 @@ fn near_slot(doc: &CollageDoc, point: Point, image: &Rgb8Image) -> bool {
     })
 }
 
-fn sample_seam(seam: &SharedEdge, image: &Rgb8Image, canvas: pixlay_core::PixelSize) -> SeamProbe {
-    let left = rgb_of(content::color(seam.a));
-    let right = rgb_of(content::color(seam.b));
+fn sample_seam(
+    seam: &SharedEdge,
+    doc: &CollageDoc,
+    image: &Rgb8View<'_>,
+    canvas: pixlay_core::PixelSize,
+) -> SeamProbe {
+    // Only two painted slots share a blend. A seam beside an empty cell is the
+    // canvas edge, and probing it as a seam would report a blend between a slot
+    // and white.
+    let occupied = |index: usize| {
+        doc.cells
+            .get(index)
+            .map(|cell| cell.source.is_some())
+            .unwrap_or(false)
+    };
+    let left = rgb_of(palette(seam.a));
+    let right = rgb_of(palette(seam.b));
     let (x0, y0) = pixel_of_f(seam.from, canvas);
     let (x1, y1) = pixel_of_f(seam.to, canvas);
     let length_px = (x1 - x0).hypot(y1 - y0);
@@ -289,6 +388,10 @@ fn sample_seam(seam: &SharedEdge, image: &Rgb8Image, canvas: pixlay_core::PixelS
         foreign: 0,
         length_px,
     };
+
+    if !occupied(seam.a) || !occupied(seam.b) {
+        return probe;
+    }
 
     // Walk the seam row by row (or column by column for a horizontal seam),
     // skipping a guard band at both ends where the seam meets a corner.
