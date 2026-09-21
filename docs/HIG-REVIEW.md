@@ -47,7 +47,8 @@ the canvas is **content** and the interface is **styling**, and the two must not
 
 Run the app (`cargo run --release -p pixlay`, or the installed `pixlay` after S8) and time the whole list:
 
-1. *Pick a template*: choose the sheet size (A4), then a layout in the Template list — one click, no dialog.
+1. *Pick a template*: choose a layout in the Template list — one click, no dialog (the sheet size is
+   an export row, not a canvas one).
 2. *Place photos*: drop two to five photos on the canvas (or select a slot and press `Ctrl+I`), once each.
 3. *Adjust framing*: select a slot, drag inside it to move the photo, scroll to zoom, drag the Straighten slider to line the horizon up against the guides, then press `Ctrl+0` if it needs to go back.
 4. *Export*: press `Export` (the path is asked for once), and the progress bar in the bottom bar runs to the toast with the file's name and size.

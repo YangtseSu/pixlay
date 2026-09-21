@@ -1,5 +1,6 @@
-//! The utility pane: canvas size, template, photo, framing, colour, text and
-//! export.
+//! The utility pane: template, photo, framing, colour, text and export — the
+//! sheet size is one of the export rows, because a physical size only means
+//! something where the pixels are written.
 //!
 //! HIG `patterns/containers/utility-panes`: a vertical panel beside the main
 //! view, hidden with `F9`, overlaying the content when the window is too narrow
@@ -30,7 +31,7 @@ use pixlay_core::{Anchor, Command, FilterPreset, Rgba8, TextMode, templates};
 use crate::a11y;
 use crate::export::{Settings, Size};
 use crate::i18n::{fill, gettext, ngettext};
-use crate::window::EditorWindow;
+use crate::window::{DEFAULT_EXPORT_DPI, EditorWindow};
 
 /// Long edges the sheet chooser offers, in millimetres.
 ///
@@ -39,6 +40,11 @@ use crate::window::EditorWindow;
 /// that disagrees with it, so a preset is a long edge plus the current template's
 /// ratio (`CanvasSpec::with_ratio`). "A4" therefore means an A4-wide sheet of the
 /// collage's own shape, which is what printing a 4:3 collage on A4 gives.
+///
+/// The row that offers them is a row of the export form, next to the resolution
+/// (2026-09-22), because the long edge only becomes visible as pixels where the
+/// export multiplies it by a DPI: the canvas pane draws the template's shape and
+/// never shows the millimetres, so as a canvas setting the number looked inert.
 pub const CANVAS_SIZES: [(&str, f64); 3] = [("A4", 297.0), ("A3", 420.0), ("A0", 1189.0)];
 
 /// The anchors in the order the combo lists them.
@@ -57,7 +63,6 @@ const ANCHORS: [(Anchor, &str); 9] = [
 pub struct Sidebar {
     pub root: gtk::ScrolledWindow,
 
-    size_combo: adw::ComboRow,
     template_combo: adw::ComboRow,
     /// Names of the templates the combo currently lists, in combo order.
     template_names: Rc<RefCell<Vec<String>>>,
@@ -92,6 +97,7 @@ pub struct Sidebar {
     text_colour: gtk::ColorDialogButton,
     text_slot: adw::SpinRow,
 
+    size_combo: adw::ComboRow,
     size_mode: adw::ComboRow,
     export_size: adw::SpinRow,
     format_combo: adw::ComboRow,
@@ -109,29 +115,7 @@ impl Sidebar {
         let updating = Rc::new(Cell::new(false));
         let selected_layer = Rc::new(Cell::new(None));
 
-        // ---- canvas and template ------------------------------------------
-        let size_combo = adw::ComboRow::builder()
-            .title(gettext("Sheet size"))
-            .subtitle(gettext("The template decides the shape"))
-            .model(&string_list(
-                CANVAS_SIZES
-                    .iter()
-                    .map(|(name, mm)| format!("{name} — {mm:.0} mm")),
-            ))
-            .build();
-        a11y::label(&size_combo, &gettext("Sheet size"));
-        connect_combo(&size_combo, &updating, {
-            let window = window.downgrade();
-            move |index| {
-                let Some((_, long_edge)) = CANVAS_SIZES.get(index) else {
-                    return;
-                };
-                if let Some(window) = window.upgrade() {
-                    window.set_long_edge_mm(*long_edge);
-                }
-            }
-        });
-
+        // ---- template ------------------------------------------------------
         let template_combo = adw::ComboRow::builder()
             .title(gettext("Template"))
             .subtitle(gettext(
@@ -480,6 +464,33 @@ impl Sidebar {
         text_group.add(&text_slot);
 
         // ---- export --------------------------------------------------------
+        // The sheet size leads the form: with the resolution below it, it is what
+        // the exported pixel grid is made of (`mm * dpi`), and in the long-edge
+        // mode it is the DPI the file carries.
+        let size_combo = adw::ComboRow::builder()
+            .title(gettext("Sheet size"))
+            .subtitle(gettext(
+                "The physical size of the export; the template decides the shape",
+            ))
+            .model(&string_list(
+                CANVAS_SIZES
+                    .iter()
+                    .map(|(name, mm)| format!("{name} — {mm:.0} mm")),
+            ))
+            .build();
+        a11y::label(&size_combo, &gettext("Sheet size"));
+        connect_combo(&size_combo, &updating, {
+            let window = window.downgrade();
+            move |index| {
+                let Some((_, long_edge)) = CANVAS_SIZES.get(index) else {
+                    return;
+                };
+                if let Some(window) = window.upgrade() {
+                    window.set_long_edge_mm(*long_edge);
+                }
+            }
+        });
+
         let size_mode = adw::ComboRow::builder()
             .title(gettext("Size"))
             .model(&string_list([
@@ -496,6 +507,10 @@ impl Sidebar {
             1.0,
             0,
         );
+        // A spin button otherwise starts at the bottom of its range, which would
+        // make 72 dpi a new window's export resolution.
+        export_size.set_value(f64::from(DEFAULT_EXPORT_DPI));
+
         let format_combo = adw::ComboRow::builder()
             .title(gettext("Format"))
             .model(&string_list(["JPEG", "PNG", "TIFF"]))
@@ -519,6 +534,7 @@ impl Sidebar {
         let export_path_row = adw::ActionRow::new();
         export_path_row.add_suffix(&export_path_button);
         let export_group = group(gettext("Export"), "");
+        export_group.add(&size_combo);
         export_group.add(&size_mode);
         export_group.add(&export_size);
         export_group.add(&format_combo);
@@ -542,7 +558,11 @@ impl Sidebar {
                     if dpi { 72.0 } else { 1.0 },
                     if dpi { 600.0 } else { 30000.0 },
                 );
-                export_size.set_value(if dpi { 300.0 } else { 4000.0 });
+                export_size.set_value(if dpi {
+                    f64::from(DEFAULT_EXPORT_DPI)
+                } else {
+                    4000.0
+                });
                 export_size.set_title(&if dpi {
                     gettext("Resolution")
                 } else {
@@ -572,7 +592,6 @@ impl Sidebar {
 
         // ---- the page -------------------------------------------------------
         let page = adw::PreferencesPage::new();
-        page.add(&group_with(gettext("Canvas"), &[&size_combo]));
         page.add(&group_with(gettext("Template"), &[&template_combo]));
         page.add(&photo_group);
         page.add(&framing_group);
@@ -590,7 +609,6 @@ impl Sidebar {
 
         let sidebar = Self {
             root,
-            size_combo,
             template_combo,
             template_names,
             photo_group,
@@ -619,6 +637,7 @@ impl Sidebar {
             text_colour_row,
             text_colour,
             text_slot,
+            size_combo,
             size_mode,
             export_size,
             format_combo,
