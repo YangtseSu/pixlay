@@ -1,0 +1,190 @@
+//! S6.5 through the real pipeline: decode, resample, grade, filter, `draw`.
+//!
+//! `pixlay-render/tests/history.rs` measures the same criterion at `draw`'s own
+//! boundary, where only two command kinds can be seen: the canvas blits and clips,
+//! and everything that changes the photo or its framing reaches it as a different
+//! bitmap. Two commands that *do* change the finished pixels therefore cannot be
+//! measured there at all — `SetGrade` and `SetFilter` are applied to the bitmap by
+//! `pixlay-imaging`, upstream of the renderer — and the canvas size changes the
+//! grid the pixels are counted on.
+//!
+//! This file closes that gap by running the same walk over the real pipeline:
+//! committed photos are decoded by the sandboxed decoder, resampled and graded by
+//! the imaging crate, and composited by `draw`. The commands are the whole
+//! vocabulary except text, whose pixels need a pinned font (S5's child-process
+//! measurement) and whose undo is covered by document identity in
+//! `pixlay-core/tests/history.rs`.
+
+use std::path::{Path, PathBuf};
+
+use pixlay_core::{
+    CanvasSpec, CollageDoc, Command, CropTransform, FilterPreset, Grade, History, templates,
+};
+use pixlay_imaging::SlotBitmap;
+use pixlay_render::{Bitmap, Images, Rgb8Image, render_rgb8};
+
+/// A small grid: several states are rendered, each one decoding two photos, and
+/// the criterion is about equality of the two renders, not about resolution.
+const DPI: u32 = 96;
+
+fn fixture(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(name)
+}
+
+fn document(photos: &[PathBuf]) -> CollageDoc {
+    let template = templates::get(templates::SMOKE_TEMPLATE).expect("registered");
+    let mut doc = CollageDoc::new(CanvasSpec::with_ratio(template.aspect, 297.0), template);
+    for (slot, photo) in photos.iter().enumerate() {
+        doc.cells[slot].source = Some(photo.clone());
+    }
+    doc
+}
+
+/// The sources as `Cell::source` names them: absolute, so no project directory is
+/// involved.
+fn sources(doc: &CollageDoc) -> Vec<Option<PathBuf>> {
+    doc.cells.iter().map(|cell| cell.source.clone()).collect()
+}
+
+fn bitmap(bitmap: &SlotBitmap) -> Bitmap {
+    Bitmap::from_argb32_region(
+        bitmap.width as i32,
+        bitmap.height as i32,
+        bitmap.origin,
+        bitmap.display,
+        bitmap.pixels.clone(),
+    )
+    .expect("bitmap")
+}
+
+/// One full render: decode and grade every occupied cell, then draw.
+fn render(doc: &CollageDoc) -> Rgb8Image {
+    let canvas = doc.canvas.pixel_size(DPI).expect("canvas size");
+    let images = pixlay_imaging::slot_bitmaps(doc, canvas, &sources(doc)).expect("decodes");
+    let mut bitmaps = Images::new();
+    for slot in &images {
+        bitmaps.insert(slot.slot, bitmap(slot));
+    }
+    render_rgb8(doc, &bitmaps, DPI, 1.0, None).expect("renders")
+}
+
+/// Pixels that differ, for a failure message that says how much moved.
+fn differing_pixels(a: &Rgb8Image, b: &Rgb8Image) -> usize {
+    assert_eq!(
+        (a.width, a.height),
+        (b.width, b.height),
+        "the two renders are not the same size"
+    );
+    a.data
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .zip(b.data.as_chunks::<3>().0)
+        .filter(|(left, right)| left != right)
+        .count()
+}
+
+/// Whether two renders differ at all. A command that resizes the canvas changes
+/// the grid itself, which counts as a change even though the pixels cannot be
+/// compared one by one.
+fn changed(a: &Rgb8Image, b: &Rgb8Image) -> bool {
+    (a.width, a.height) != (b.width, b.height) || a.data != b.data
+}
+
+fn photo(slot: usize) -> PathBuf {
+    fixture(if slot.is_multiple_of(2) {
+        "photos/landscape.jpg"
+    } else {
+        "photos/portrait.jpg"
+    })
+}
+
+/// Every command kind but the text ones, in an order that stays valid.
+fn sequence() -> Vec<Command> {
+    vec![
+        Command::SetCrop {
+            slot: 0,
+            crop: CropTransform {
+                zoom: 1.5,
+                offset: (0.3, -0.2),
+                rotation_deg: 15.0,
+            },
+        },
+        Command::SetGrade {
+            slot: 0,
+            grade: Grade {
+                factor: 1.3,
+                saturation: 0.5,
+                delta: -0.2,
+            },
+        },
+        Command::SetFilter {
+            filter: FilterPreset::Cool,
+        },
+        // Placing a photo in a slot that was empty, and emptying one that was not.
+        Command::SetSource {
+            slot: 2,
+            source: Some(photo(2)),
+        },
+        Command::SetSource {
+            slot: 1,
+            source: None,
+        },
+        // A canvas resize at the same aspect: the pixel grid changes with it, and
+        // undo has to put it back.
+        Command::SetCanvas {
+            canvas: CanvasSpec::with_ratio(4.0 / 3.0, 420.0),
+        },
+    ]
+}
+
+#[test]
+fn every_command_kind_survives_undo_through_the_real_pipeline() {
+    let mut history = History::new(document(&[photo(0), photo(1)])).expect("a valid document");
+
+    // The starting point: two photos decoded and drawn.
+    let mut states = vec![render(history.doc())];
+    let painted = (0..states[0].data.len() / 3)
+        .filter(|index| states[0].data[index * 3..index * 3 + 3] != [255, 255, 255])
+        .count();
+    assert!(
+        painted > 10_000,
+        "the initial render has only {painted} non-white pixels: the photos did not decode"
+    );
+
+    for (index, command) in sequence().iter().enumerate() {
+        history.apply(command.clone()).expect("applies");
+        states.push(render(history.doc()));
+        assert!(
+            changed(&states[index], &states[index + 1]),
+            "command {index} changed no pixel, so this walk would prove nothing"
+        );
+    }
+
+    // Backwards to the initial pixels, one command at a time.
+    for expected in states.iter().rev().skip(1) {
+        assert!(history.undo(), "there is a step to undo");
+        let image = render(history.doc());
+        assert_eq!(
+            differing_pixels(&image, expected),
+            0,
+            "undo did not reproduce the pixels of the state it went back to"
+        );
+    }
+    assert!(!history.can_undo());
+
+    // Forwards through every state again.
+    for (index, expected) in states.iter().enumerate().skip(1) {
+        assert!(history.redo(), "step {index} is redoable");
+        let image = render(history.doc());
+        assert_eq!(
+            differing_pixels(&image, expected),
+            0,
+            "redo did not reproduce the pixels of state {index}"
+        );
+    }
+    assert!(!history.can_redo());
+    assert_eq!(history.undo_depth(), sequence().len());
+}

@@ -1713,3 +1713,434 @@ fn text_refuses_flags_that_belong_to_other_subcommands() {
         assert!(!stderr(&output).is_empty(), "{args:?} said nothing");
     }
 }
+
+// ---------------------------------------------------------------------------
+// S6.5: hit testing and saving a project
+// ---------------------------------------------------------------------------
+
+/// Writes a project through `init`, so the tests use the geometry the library
+/// actually ships rather than one they build themselves.
+fn init_project(dir: &Path, name: &str, template: &str) -> PathBuf {
+    let path = dir.join(name);
+    let output = run(&[
+        "init",
+        "--template",
+        template,
+        "--out",
+        path.to_str().expect("utf-8 path"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    path
+}
+
+#[test]
+fn hit_answers_which_slot_a_point_falls_in() {
+    let dir = out_dir("hit");
+    let project = init_project(&dir, "hit.pixlay", "mosaic-8-s14");
+    let template = templates::get("mosaic-8-s14").expect("registered");
+
+    // The declared slot centroids, computed here rather than asked of the hit
+    // test, so the answer is checked against the geometry and not itself.
+    let centroid = |index: usize| {
+        let points = &template.slots[index].outline.points;
+        let (mut area, mut x, mut y) = (0.0, 0.0, 0.0);
+        for i in 0..points.len() {
+            let a = points[i];
+            let b = points[(i + 1) % points.len()];
+            let cross = a.x * b.y - b.x * a.y;
+            area += cross;
+            x += (a.x + b.x) * cross;
+            y += (a.y + b.y) * cross;
+        }
+        (x / (3.0 * area), y / (3.0 * area))
+    };
+
+    for index in 0..template.slots.len() {
+        let (x, y) = centroid(index);
+        let at = format!("{x:.4},{y:.4}");
+        let output = run(&[
+            "hit",
+            "--project",
+            project.to_str().expect("utf-8 path"),
+            "--at",
+            &at,
+        ]);
+        assert_eq!(code(&output), 0, "{}", stderr(&output));
+        assert_eq!(field(&output, "slot"), index.to_string(), "centroid {at}");
+        assert_eq!(field(&output, "hit"), "true");
+        assert_eq!(field(&output, "slots"), "8");
+        assert_eq!(field(&output, "template"), "mosaic-8-s14");
+        assert_eq!(field(&output, "at"), at);
+    }
+
+    // The concave slot is the case a bounding box would get wrong: slot 6 is an L
+    // whose notch belongs to slot 7, and (0.9, 0.9) is inside that notch.
+    let notch = run(&[
+        "hit",
+        "--project",
+        project.to_str().expect("utf-8 path"),
+        "--at",
+        "0.9,0.9",
+    ]);
+    assert_eq!(code(&notch), 0);
+    assert_eq!(field(&notch, "slot"), "7");
+
+    // The gutter template's middle belongs to no slot, and that is an answer with
+    // exit code 0, not a failure.
+    let gutter = run(&["hit", "--template", "grid-4-2x2g", "--at", "0.5,0.5"]);
+    assert_eq!(code(&gutter), 0, "{}", stderr(&gutter));
+    assert_eq!(field(&gutter, "hit"), "false");
+    assert_eq!(field(&gutter, "slot"), "none");
+    assert!(stderr(&gutter).is_empty());
+    let cell = run(&["hit", "--template", "grid-4-2x2g", "--at", "0.2,0.2"]);
+    assert_eq!(field(&cell, "slot"), "0");
+
+    // `--json` is the same data in one object.
+    let json = run(&[
+        "hit",
+        "--template",
+        "strip-2-2x1",
+        "--at",
+        "0.25,0.5",
+        "--json",
+    ]);
+    assert_eq!(code(&json), 0);
+    let parsed: serde_json::Value = serde_json::from_str(&stdout(&json)).expect("parses");
+    assert_eq!(parsed["slot"], 0);
+    assert_eq!(parsed["hit"], true);
+    assert_eq!(parsed["slots"], 2);
+
+    // Hit testing is geometry: a project whose photos have moved still answers,
+    // because nothing here decodes one.
+    let mut doc = CollageDoc::load(&project).expect("loads");
+    doc.cells[0].source = Some(PathBuf::from("photos/nowhere.png"));
+    let moved = dir.join("moved.pixlay");
+    std::fs::write(&moved, doc.to_json().expect("serializes")).expect("write");
+    let (x, y) = centroid(0);
+    let answer = run(&[
+        "hit",
+        "--project",
+        moved.to_str().expect("utf-8 path"),
+        "--at",
+        &format!("{x:.4},{y:.4}"),
+    ]);
+    assert_eq!(code(&answer), 0, "{}", stderr(&answer));
+    assert_eq!(field(&answer, "slot"), "0");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn save_writes_the_project_that_was_read() {
+    let dir = out_dir("save");
+    let project = init_project(&dir, "a.pixlay", "mosaic-8-s14");
+
+    // A copy beside the original is the same bytes: same directory, so no path
+    // inside it needs rewriting, and the writer is the document's one writer.
+    let copy = dir.join("b.pixlay");
+    let output = run(&[
+        "save",
+        "--project",
+        project.to_str().expect("utf-8 path"),
+        "--out",
+        copy.to_str().expect("utf-8 path"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert!(stderr(&output).is_empty());
+    assert_eq!(field(&output, "status"), "ok");
+    assert_eq!(field(&output, "template"), "mosaic-8-s14");
+    assert_eq!(field(&output, "version"), "1");
+    assert_eq!(field(&output, "aspect"), "4:3");
+    assert_eq!(field(&output, "cells"), "8");
+    assert_eq!(field(&output, "text"), "0");
+    assert_eq!(
+        std::fs::metadata(&copy).expect("stat").len().to_string(),
+        field(&output, "bytes")
+    );
+    assert_eq!(
+        std::fs::read(&copy).expect("read"),
+        std::fs::read(&project).expect("read"),
+        "a copy beside the original is byte-identical"
+    );
+
+    // Save, load, save: the second generation is still the same bytes.
+    let again = dir.join("c.pixlay");
+    let second = run(&[
+        "save",
+        "--project",
+        copy.to_str().expect("utf-8 path"),
+        "--out",
+        again.to_str().expect("utf-8 path"),
+    ]);
+    assert_eq!(code(&second), 0, "{}", stderr(&second));
+    assert_eq!(
+        std::fs::read(&again).expect("read"),
+        std::fs::read(&project).expect("read")
+    );
+
+    // Saving in place replaces the file with the same document.
+    let in_place = run(&[
+        "save",
+        "--project",
+        project.to_str().expect("utf-8 path"),
+        "--out",
+        project.to_str().expect("utf-8 path"),
+    ]);
+    assert_eq!(code(&in_place), 0, "{}", stderr(&in_place));
+    assert!(Project::load(&project).is_ok());
+    assert_eq!(
+        std::fs::read(&project).expect("read"),
+        std::fs::read(&again).expect("read")
+    );
+
+    // Unlike `init`, `save` replaces what is there: that is what saving is.
+    let replaced = run(&[
+        "save",
+        "--project",
+        copy.to_str().expect("utf-8 path"),
+        "--out",
+        project.to_str().expect("utf-8 path"),
+    ]);
+    assert_eq!(code(&replaced), 0, "{}", stderr(&replaced));
+    assert!(Project::load(&project).is_ok());
+
+    // A save into another directory keeps the photos findable: the relative source
+    // is rewritten against the new home.
+    let photos = dir.join("photos");
+    std::fs::create_dir_all(&photos).expect("create photos");
+    std::fs::write(
+        photos.join("p.png"),
+        include_bytes!("fixtures/photos/square.png"),
+    )
+    .expect("write photo");
+    let mut doc = CollageDoc::load(&project).expect("loads");
+    doc.cells[0].source = Some(PathBuf::from("photos/p.png"));
+    std::fs::write(&project, doc.to_json().expect("serializes")).expect("write");
+    let elsewhere = dir.join("copies");
+    std::fs::create_dir_all(&elsewhere).expect("create copies");
+    let moved = elsewhere.join("moved.pixlay");
+    let rebased = run(&[
+        "save",
+        "--project",
+        project.to_str().expect("utf-8 path"),
+        "--out",
+        moved.to_str().expect("utf-8 path"),
+    ]);
+    assert_eq!(code(&rebased), 0, "{}", stderr(&rebased));
+    let copy = Project::load(&moved).expect("the copy loads");
+    assert_eq!(
+        copy.doc().cells[0].source,
+        Some(PathBuf::from("../photos/p.png"))
+    );
+    assert_eq!(
+        std::fs::canonicalize(
+            copy.sources()
+                .expect("the copy's photos resolve")
+                .first()
+                .expect("a cell")
+                .as_ref()
+                .expect("a source")
+        )
+        .expect("canonicalize"),
+        std::fs::canonicalize(photos.join("p.png")).expect("canonicalize")
+    );
+
+    // No temporary file is left behind anywhere.
+    for entry in std::fs::read_dir(&dir).expect("read") {
+        let name = entry
+            .expect("entry")
+            .file_name()
+            .to_string_lossy()
+            .into_owned();
+        assert!(!name.ends_with(".tmp"), "a temporary file survived: {name}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn save_reports_a_missing_project_and_a_newer_version() {
+    let dir = out_dir("save-errors");
+
+    let missing = run(&[
+        "save",
+        "--project",
+        dir.join("absent.pixlay").to_str().expect("utf-8 path"),
+        "--out",
+        dir.join("out.pixlay").to_str().expect("utf-8 path"),
+    ]);
+    assert_eq!(code(&missing), 2, "{}", stderr(&missing));
+    assert!(stdout(&missing).is_empty(), "stdout must stay empty");
+    assert!(
+        stderr(&missing).contains("absent.pixlay"),
+        "the message must name the file: {}",
+        stderr(&missing)
+    );
+    assert!(!dir.join("out.pixlay").exists(), "nothing was written");
+
+    // A document from a newer version is refused, not guessed at or rewritten.
+    let project = init_project(&dir, "newer.pixlay", "strip-2-2x1");
+    let json = std::fs::read_to_string(&project)
+        .expect("read")
+        .replace("\"docVersion\": 1", "\"docVersion\": 2");
+    std::fs::write(&project, json).expect("write");
+    let newer = run(&[
+        "save",
+        "--project",
+        project.to_str().expect("utf-8 path"),
+        "--out",
+        dir.join("other.pixlay").to_str().expect("utf-8 path"),
+    ]);
+    assert_eq!(code(&newer), 2, "{}", stderr(&newer));
+    assert!(stdout(&newer).is_empty());
+    assert!(
+        stderr(&newer).contains("newer than the supported version"),
+        "{}",
+        stderr(&newer)
+    );
+    assert!(!dir.join("other.pixlay").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `hit` and `save` keep the S1 rules: flags that belong elsewhere are refused,
+/// and no locale changes a byte of either stream.
+#[test]
+fn hit_and_save_keep_the_usage_and_locale_rules() {
+    let dir = out_dir("hit-save-usage");
+    let project = init_project(&dir, "u.pixlay", "strip-2-2x1");
+    let path = project.to_str().expect("utf-8 path");
+
+    for args in [
+        vec!["hit", "--project", path],
+        vec!["hit", "--at", "0.5,0.5"],
+        vec![
+            "hit",
+            "--project",
+            path,
+            "--template",
+            "strip-2-2x1",
+            "--at",
+            "0.5,0.5",
+        ],
+        vec!["hit", "--template", "nope", "--at", "0.5,0.5"],
+        vec!["hit", "--project", path, "--at", "0.5"],
+        vec!["hit", "--project", path, "--at", "0.5,1.5"],
+        vec!["hit", "--project", path, "--at", "nan,0.5"],
+        vec!["hit", "--project", path, "--at", "0.5,0.5", "--dpi", "300"],
+        vec!["hit", "--project", path, "--at", "0.5,0.5", "--stats"],
+        vec![
+            "hit",
+            "--project",
+            path,
+            "--at",
+            "0.5,0.5",
+            "--out",
+            "x.png",
+        ],
+        vec!["save"],
+        vec!["save", "--project", path],
+        vec![
+            "save",
+            "--project",
+            path,
+            "--out",
+            path,
+            "--json",
+            "--stats",
+        ],
+        vec![
+            "save",
+            "--project",
+            path,
+            "--out",
+            path,
+            "--template",
+            "strip-2-2x1",
+        ],
+        vec!["save", "--template", "strip-2-2x1", "--out", path],
+        vec!["save", "--project", path, "--out", "x.json"],
+        vec![
+            "save",
+            "--project",
+            path,
+            "--out",
+            "x.pixlay",
+            "--dpi",
+            "300",
+        ],
+        vec!["templates", "--at", "0.5,0.5"],
+        vec![
+            "render",
+            "--template",
+            "strip-2-2x1",
+            "--dpi",
+            "72",
+            "--out",
+            "x.png",
+            "--at",
+            "0.5,0.5",
+        ],
+    ] {
+        let output = run(&args);
+        assert_eq!(code(&output), 1, "{args:?}: {}", stderr(&output));
+        assert!(stdout(&output).is_empty(), "{args:?} wrote to stdout");
+        assert!(!stderr(&output).is_empty(), "{args:?} said nothing");
+    }
+    // The unknown-template message lists what this build knows.
+    let unknown = run(&["hit", "--template", "nope", "--at", "0.5,0.5"]);
+    assert!(
+        stderr(&unknown).contains("mosaic-8-s14"),
+        "{}",
+        stderr(&unknown)
+    );
+
+    // Byte-identical under any locale, on the success and the failure branch.
+    let copy = dir.join("locale.pixlay");
+    let mut success = Vec::new();
+    let mut failure = Vec::new();
+    for (lang, all) in [
+        ("C", "C"),
+        ("zh_CN.UTF-8", "zh_CN.UTF-8"),
+        ("de_DE.UTF-8", "de_DE.UTF-8"),
+    ] {
+        let hit = run_in(
+            &["hit", "--project", path, "--at", "0.25,0.5", "--json"],
+            None,
+            Some((lang, all)),
+        );
+        assert_eq!(code(&hit), 0, "{lang}: {}", stderr(&hit));
+        success.push(hit.stdout.clone());
+
+        let _ = std::fs::remove_file(&copy);
+        let saved = run_in(
+            &[
+                "save",
+                "--project",
+                path,
+                "--out",
+                copy.to_str().expect("utf-8 path"),
+            ],
+            None,
+            Some((lang, all)),
+        );
+        assert_eq!(code(&saved), 0, "{lang}: {}", stderr(&saved));
+
+        // The failure branch: a relative path keeps the message free of machine
+        // text.
+        let broken = run_in(
+            &["hit", "--project", "absent.pixlay", "--at", "0.5,0.5"],
+            Some(&dir),
+            Some((lang, all)),
+        );
+        assert_eq!(code(&broken), 2);
+        assert!(stdout(&broken).is_empty());
+        failure.push(broken.stderr.clone());
+    }
+    assert!(
+        success.iter().all(|stdout| stdout == &success[0]),
+        "hit changed under a locale"
+    );
+    assert!(
+        failure.iter().all(|stderr| stderr == &failure[0]),
+        "hit's failure message changed under a locale"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

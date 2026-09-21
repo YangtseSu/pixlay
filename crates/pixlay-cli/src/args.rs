@@ -11,9 +11,9 @@
 //! * `2` the document could not be read, decoded, written or rendered
 
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use pixlay_core::{MAX_DPI, MAX_LONG_EDGE_PX, MIN_DPI};
+use pixlay_core::{MAX_DPI, MAX_LONG_EDGE_PX, MIN_DPI, Point};
 use pixlay_imaging::Chroma;
 
 use crate::cli::Failure;
@@ -40,6 +40,9 @@ USAGE:
     pixlay-render text   --project <file.pixlay> [--json]
     pixlay-render templates [--aspect <ratio>] [--json]
     pixlay-render init --template <name> --out <file.pixlay> [--json]
+    pixlay-render hit    --project <file.pixlay> --at <x>,<y> [--json]
+    pixlay-render hit    --template <name> --at <x>,<y> [--json]
+    pixlay-render save   --project <file.pixlay> --out <file.pixlay> [--json]
     pixlay-render --help | --version
 
 RENDER OPTIONS:
@@ -79,17 +82,30 @@ TEXT OPTIONS:
                         read without rendering the project.
 
 TEMPLATES OPTIONS:
-TEXT OPTIONS:
-    --project <file>    Project whose text layers to report. Required. Each
-                        layer's `{date}` / `{filename}` / `{index}` is resolved the
-                        way `render` resolves it, so a token's actual text can be
-                        read without rendering the project.
-
-TEMPLATES OPTIONS:
     --aspect <ratio>    List only the templates authored for this canvas shape,
                         as W:H (4:3) or a decimal (1.333333). Omit to list all.
                         A template and a canvas must share an aspect ratio, so
                         this is the query to run before picking one.
+
+HIT OPTIONS:
+    --project <file>    Project whose layout to test. Required unless --template
+                        is given.
+    --template <name>   Test a template with no project. The geometry is the
+                        library's; a project's own embedded geometry is not.
+    --at <x>,<y>        The point to test, in normalized canvas coordinates
+                        (0,0 top-left to 1,1 bottom-right), like the `at` field
+                        `probe` prints. Required, and both components must be
+                        inside 0..=1.
+
+SAVE OPTIONS:
+    --project <file>    Project to read. Required. It is validated on the way in,
+                        so a document this build cannot open is not rewritten.
+    --out <file>        Project to write, .pixlay. Required. An existing file is
+                        **replaced** — that is what saving is — and the write is
+                        atomic (a temporary file in the same directory, renamed
+                        over the target). Relative photo paths are rebased when
+                        the copy lands in another directory, so it still finds
+                        its photos.
 
 INIT OPTIONS:
     --template <name>   Template of the project to create. Required.
@@ -123,11 +139,13 @@ pub enum Command {
     Text(TextArgs),
     Templates(TemplatesArgs),
     Init(InitArgs),
+    Hit(HitArgs),
+    Save(SaveArgs),
     Help,
     Version,
 }
 
-/// Which document a render starts from.
+/// Which document a command starts from.
 pub enum Source {
     /// A `.pixlay` project, photos included.
     Project(PathBuf),
@@ -186,6 +204,21 @@ pub struct InitArgs {
     pub json: bool,
 }
 
+/// `hit`: the point → slot question, answered with no rendering at all.
+pub struct HitArgs {
+    pub source: Source,
+    /// Normalized canvas coordinates, both components inside `0..=1`.
+    pub at: Point,
+    pub json: bool,
+}
+
+/// `save`: read a project and write it out, atomically.
+pub struct SaveArgs {
+    pub project: PathBuf,
+    pub out: PathBuf,
+    pub json: bool,
+}
+
 #[derive(Default)]
 struct Flags {
     project: Option<PathBuf>,
@@ -197,6 +230,7 @@ struct Flags {
     preview_px: Option<i32>,
     photo: Option<PathBuf>,
     aspect: Option<f64>,
+    at: Option<Point>,
     stats: bool,
     json: bool,
 }
@@ -222,9 +256,11 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
         "text" => &["project"],
         "templates" => &["aspect"],
         "init" => &["template", "out"],
+        "hit" => &["project", "template", "at"],
+        "save" => &["project", "out"],
         _ => &[],
     };
-    let present: [(&'static str, bool); 10] = [
+    let present: [(&'static str, bool); 11] = [
         ("project", flags.project.is_some()),
         ("template", flags.template.is_some()),
         ("out", flags.out.is_some()),
@@ -234,6 +270,7 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
         ("preview-px", flags.preview_px.is_some()),
         ("photo", flags.photo.is_some()),
         ("aspect", flags.aspect.is_some()),
+        ("at", flags.at.is_some()),
         ("stats", flags.stats),
     ];
     present
@@ -275,6 +312,11 @@ fn reason(name: &str, flag: &str) -> &'static str {
         ("init", "long-edge") => "init only writes the project file",
         ("init", "chroma") => "init only writes the project file",
         ("probe", "aspect") => "probe filters no template list",
+        ("render" | "probe" | "image" | "text", "at") => {
+            "only `hit` tests one point; the other commands work on a whole document"
+        }
+        ("hit", _) => "hit reads a layout and answers about one point in it",
+        ("save", _) => "save reads a project and writes a project",
         ("templates", _) => "templates only lists the library",
         ("init", "project") => "init takes a template, not a project",
         ("init", _) => "init only writes the project file",
@@ -290,7 +332,7 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
         .to_str()
         .ok_or_else(|| Failure::Usage("subcommand must be valid UTF-8".to_string()))?;
     let subcommand = match head {
-        "render" | "probe" | "image" | "text" | "templates" | "init" => head,
+        "render" | "probe" | "image" | "text" | "templates" | "init" | "hit" | "save" => head,
         "--help" | "-h" | "help" => return Ok(Command::Help),
         "--version" | "-V" | "version" => return Ok(Command::Version),
         other if other.starts_with('-') => {
@@ -401,6 +443,11 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                 let aspect = parse_aspect(&raw)?;
                 set_once(&mut flags.aspect, aspect, "aspect")?;
             }
+            "at" => {
+                let raw = value("at")?;
+                let point = parse_point(&raw)?;
+                set_once(&mut flags.at, point, "at")?;
+            }
             other => return Err(Failure::Usage(format!("unknown option --{other}"))),
         }
     }
@@ -445,6 +492,31 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
             aspect: flags.aspect,
             json: flags.json,
         })),
+        "hit" => {
+            let at = flags
+                .at
+                .ok_or_else(|| Failure::Usage("hit needs --at <x>,<y>".to_string()))?;
+            let source = source_of("hit", &flags)?;
+            Ok(Command::Hit(HitArgs {
+                source,
+                at,
+                json: flags.json,
+            }))
+        }
+        "save" => {
+            let project = flags
+                .project
+                .ok_or_else(|| Failure::Usage("save needs --project <file>".to_string()))?;
+            let out = flags
+                .out
+                .ok_or_else(|| Failure::Usage("save needs --out <file.pixlay>".to_string()))?;
+            require_project_extension(&out)?;
+            Ok(Command::Save(SaveArgs {
+                project,
+                out,
+                json: flags.json,
+            }))
+        }
         "init" => {
             let template = flags
                 .template
@@ -452,13 +524,7 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
             let out = flags
                 .out
                 .ok_or_else(|| Failure::Usage("init needs --out <file.pixlay>".to_string()))?;
-            let extension = out.extension().and_then(|value| value.to_str());
-            if extension != Some(PROJECT_EXTENSION) {
-                return Err(Failure::Usage(format!(
-                    "--out {}: expected a .{PROJECT_EXTENSION} file",
-                    out.display()
-                )));
-            }
+            require_project_extension(&out)?;
             Ok(Command::Init(InitArgs {
                 template,
                 out,
@@ -466,20 +532,7 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
             }))
         }
         _ => {
-            let source = match (flags.project, flags.template) {
-                (Some(_), Some(_)) => {
-                    return Err(Failure::Usage(
-                        "--project and --template are mutually exclusive".to_string(),
-                    ));
-                }
-                (Some(path), None) => Source::Project(path),
-                (None, Some(name)) => Source::Template(name),
-                (None, None) => {
-                    return Err(Failure::Usage(
-                        "render needs --project <file> or --template <name>".to_string(),
-                    ));
-                }
-            };
+            let source = source_of("render", &flags)?;
             let out = flags
                 .out
                 .ok_or_else(|| Failure::Usage("render needs --out <file>".to_string()))?;
@@ -512,8 +565,65 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
     }
 }
 
-/// Parses an aspect ratio: `W:H` with positive numbers, or a bare decimal.
+/// Which document a command starts from: `--project` and `--template` are the two
+/// ways to name one (a template with no photos), and both `render` and `hit` take
+/// either.
+fn source_of(name: &str, flags: &Flags) -> Result<Source, Failure> {
+    match (&flags.project, &flags.template) {
+        (Some(_), Some(_)) => Err(Failure::Usage(
+            "--project and --template are mutually exclusive".to_string(),
+        )),
+        (Some(path), None) => Ok(Source::Project(path.clone())),
+        (None, Some(template)) => Ok(Source::Template(template.clone())),
+        (None, None) => Err(Failure::Usage(format!(
+            "{name} needs --project <file> or --template <name>"
+        ))),
+    }
+}
+
+/// A `.pixlay` is a document, and a mistyped extension is more likely a typo than
+/// an intention — the same rule `init` has always had.
+fn require_project_extension(out: &Path) -> Result<(), Failure> {
+    if out.extension().and_then(|value| value.to_str()) != Some(PROJECT_EXTENSION) {
+        return Err(Failure::Usage(format!(
+            "--out {}: expected a .{PROJECT_EXTENSION} file",
+            out.display()
+        )));
+    }
+    Ok(())
+}
+
+/// Parses a point in normalized canvas coordinates: `x,y`, both inside `0..=1`.
 ///
+/// The range is part of the surface rather than a courtesy: the canvas *is*
+/// `[0,1]`, so a point outside it is not a hit test with an unusual answer, it is a
+/// caller that mis-scaled something. Refusing it here is what keeps `hit`'s
+/// answers meaningful.
+fn parse_point(value: &OsString) -> Result<Point, Failure> {
+    let text = value
+        .to_str()
+        .ok_or_else(|| Failure::Usage("--at must be valid UTF-8".to_string()))?;
+    let parsed = text
+        .split_once(',')
+        .ok_or_else(|| Failure::Usage(format!("--at must be x,y, got {text}")))?;
+    let component = |what: &str, raw: &str| -> Result<f64, Failure> {
+        let value = raw
+            .trim()
+            .parse::<f64>()
+            .map_err(|_| Failure::Usage(format!("--at {what} must be a number, got {raw}")))?;
+        if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+            return Err(Failure::Usage(format!(
+                "--at {what} {value} is outside 0..=1: canvas coordinates are normalized"
+            )));
+        }
+        Ok(value)
+    };
+    let x = component("x", parsed.0)?;
+    let y = component("y", parsed.1)?;
+    Ok(Point::new(x, y))
+}
+
+/// Parses an aspect ratio: `W:H` with positive numbers, or a bare decimal.
 /// `W:H` is the form a caller reads off a canvas, and the form the report prints
 /// back (`crate::cli::ratio_label`), so the round trip needs no conversion.
 fn parse_aspect(value: &OsString) -> Result<f64, Failure> {

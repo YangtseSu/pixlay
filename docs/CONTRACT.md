@@ -148,6 +148,7 @@ changed the document shape.
 | tiled step | both components > 0, finite | step 0 or a negative value makes the tiling loop forever; there is no upper bound |
 | tiles per text layer | ≤ 10,000 (`TextLayer::MAX_TILES`) | a step is unbounded from above and therefore unbounded *downward*: `1e-9` is a billion by a billion tiles. A 1/100 step is already a 101x101 grid = 10,201 tiles and is refused when the document loads, so the cap is where a person's watermark stops being a watermark. `pixlay_core::tiled_grid` answers the count; the renderer asks the same function and never hangs on an in-memory document either |
 | `--preview-px` | 1..=20000 (long edge, in pixels) | a preview larger than this cannot be reviewed by eye anyway |
+| `--at` (`hit`) | both components inside 0..=1 | the canvas *is* `[0,1]`: normalized coordinates are what the document stores and what `probe` prints, so a point outside the canvas is a caller that mis-scaled something, not a hit test with an unusual answer |
 | `--long-edge` (export size) | 1..=30000 (long edge, in pixels; `MAX_LONG_EDGE_PX` in `pixlay-core`) | a pixel count, not a resolution: A0 at the maximum DPI (600) is 28087 px on its long edge, so the range covers every resolution this product accepts. The **canvas pixel budget still applies to the grid it derives** (a square canvas at 20000 px is 400 MP and is refused, exit 2), so the flag's range and the budget are two different limits and both are checked |
 | JPEG output resolution | ≤ 65535 dpi (`MAX_JPEG_DPI` in `pixlay-imaging`) | JFIF stores the density in 16 bits. A physical-size export is inside this range by construction (≤ 600 dpi); a pixel-count export on a very narrow canvas can derive one past it (`--long-edge 20000` on a 1 mm canvas is 508000 dpi) and is then **refused**, not saturated — a written number that is not the one the grid has is a lie the file cannot take back |
 | grade `factor` | 0.2..=5.0 | ±2 stops of exposure around 1.0; beyond that the control only saturates every channel |
@@ -327,6 +328,9 @@ pixlay-render image     --photo <file>
 pixlay-render text      --project <file.pixlay>
 pixlay-render templates [--aspect <ratio>] [--json]
 pixlay-render init      --template <name> --out <file.pixlay>
+pixlay-render hit       --project <file.pixlay> --at <x>,<y> [--json]
+pixlay-render hit       --template <name> --at <x>,<y> [--json]
+pixlay-render save      --project <file.pixlay> --out <file.pixlay> [--json]
 ```
 
 | Item | Contract |
@@ -349,6 +353,19 @@ pixlay-render init      --template <name> --out <file.pixlay>
 | `probe` | samples and outputs numbers (in-slot photo color, out-of-slot white background, shared-edge blended pixels, three-color convex combination residual), exit code 2 when the verdict is not passed |
 | `text` | one row per layer: the **resolved** `content` (tokens substituted exactly as `render` substitutes them), `mode`, `size_rel`, `rotation_deg`, the `source_slot` when it names one, and for a free layer `position` / `anchor` or for a tiled one `step` / `tiles` (the grid `tiled_grid` answers). It decodes only the slots a layer names, once each, and writes nothing. Without it, "{date} is filled from EXIF" could only be checked by rendering and reading pixels back |
 | `image` | one file's decode facts: `mime`, `width`, `height`, `depth` (8 or 16), `aspect`, `exif_bytes`, `date` (EXIF `DateTimeOriginal`, empty when absent). It is how "HEIC decodes" and "orientation 6 is applied" are visible without rendering a project. `--out`/`--dpi`/etc. are usage errors: it decodes at the file's own size and writes nothing |
+
+**S6.5's two subcommands** turn the interaction layer's questions into the machine surface (`AGENTS.md`: nothing may be possible only in the GUI). `hit` answers about geometry without decoding a byte; `save` is the one command that writes a document that already holds a user's work.
+
+| Item | `hit` | `save` |
+|---|---|---|
+| shape | `template`, `version`, `slots`, `at`, `hit` and `slot` — `slot = <n>` when the point is in a slot, `slot = none` with `hit = false` when it is in a gutter or off the canvas | `template`, `version`, `aspect`, `cells`, `text`, `bytes` (the file that was written) |
+| source | `--project` (the document's **embedded** geometry, which is what makes a saved project's hit region stable) or `--template` (this build's library), exclusively | `--project`, required |
+| `--at <x>,<y>` | normalized canvas coordinates, both components in `0..=1` (the limit table). The same space `probe` prints its slot sample points in, so a probe row feeds straight back in | — |
+| `--out` | — | required, `.pixlay`, and **replaced** if it exists: that is what saving is, and `init` is the command that refuses to overwrite. The write is atomic (`File::create` a dotfile in the target's directory, `sync_all`, `rename`), so a crash leaves either the old file or the new one |
+| relative sources | not resolved at all: a project whose photos have moved still answers | rewritten when `--out` lands in another directory, so the copy still finds the photos of the project it was copied from; an absolute source is left as it stands |
+| no slot / no file | exit **0**: "no slot owns this point" is an answer, like `templates --aspect 7:5` reporting `count = 0` | a missing `--project`, a refused version or a write failure is exit **2** with stdout empty, and nothing is written |
+
+**Command history has no subcommand.** `History`/`Command` live in `pixlay-core` and the GUI is their only caller: there is no CLI editing session for a verb to act on, and the observable that matters — the pixels after undoing everything — is a *test* (`pixlay-render/tests/history.rs`, `pixlay-cli/tests/history.rs`), which measures it more directly than a verb could. What the CLI does carry is the write path (`save`) those two share.
 
 **S2's two subcommands report the template library and create a project.** They add a data source, not a new failure mode:
 
@@ -399,8 +416,6 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
 - curves / levels / masking / brushes; all of them in `AGENTS.md`'s "Directions not to improve" → "Not doing"
 - multi-page / multi-canvas projects
 - **version migration** for `.pixlay` (not written; higher refused, lower refused too, see "Version policy")
-- **writing an edited `.pixlay`** (S6.5 owns saving a document the user changed, atomic tmp+rename included). `init` writes a *new* file
-  and refuses to overwrite an existing one, which is a creation, not a save: it never touches a document that already holds the user's work
 - MCP server, REPL / watch, natural-language arguments, reading defaults from a config file
 
 ## 7. Implemented later but the shape is already frozen
@@ -410,7 +425,7 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
 | clamp math | **S3, landed** | `CropTransform::fit(slot, canvas_aspect, photo_aspect) -> CropFit { transform, rotation_limited }`, applied by `draw`; the fit is idempotent and never exceeds `MAX_ZOOM` |
 | template generator | **S2, landed** | `pixlay_core::templates` (`generator` recipes + the committed `frozen` data) and the `templates` / `init` subcommands; see §3 and §5 |
 | the image pipeline | **S4, landed** | `pixlay-imaging`: `Source::decode`, `resample`, `LinearRgb16::apply`, `slot_bitmap`/`slot_bitmaps`, `probe`; the buffer ladder and the colour decisions are §4.1 |
-| command history / hit testing / project writing | S6.5 | not in the S1 contract; `CollageDoc` is their state carrier |
+| command history / hit testing / project writing | **S6.5, landed** | `pixlay-core`: `Command` (one edit: source, framing, grade, filter, text layers, the `{date}` fallback, the canvas) and `History` (snapshot undo/redo; `apply` is all-or-nothing and the document has no mutable accessor), `Template::slot_at(point)` for hit testing, `CollageDoc::save` / `Project::save` / `Project::save_as` for writing a document. The CLI's `hit` and `save` are the machine surface of the first and the last; the command history is a test surface only, on purpose (§5) |
 | text rendering | **S5, landed** | `pixlay_render::text`: one Pango layout per layer, drawn by `draw`; token resolution is `TextLayer::resolve` in `pixlay-core`, the tile grid is `pixlay_core::tiled_grid`; see §1 "Text layers" |
 | encoding and metadata | **S6, landed** | `pixlay_imaging::encode`: one pass per format writing pixels, resolution, sampling and the ICC profile (`icc`), for PNG / JPEG / TIFF; the CLI's `--long-edge` / `--chroma` and the per-format rules are §5, the profile is §4.1 |
 

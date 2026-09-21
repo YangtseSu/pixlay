@@ -146,25 +146,91 @@ impl CollageDoc {
         })?;
         Self::from_json(&json)
     }
+
+    /// Writes the document to `path`, atomically (S6.5).
+    ///
+    /// The JSON goes to a temporary file *in the same directory* — `rename` is
+    /// only atomic within one filesystem — is flushed to disk, and is then
+    /// renamed over `path`. A crash, a full disk or a kill in the middle
+    /// therefore leaves either the previous file or the new one, never half of
+    /// either; this is the one place a `.pixlay` the user changed is written
+    /// (docs/CONTRACT.md §6).
+    ///
+    /// The document is validated first: a file this build writes has to be a file
+    /// this build can read back, and `validate` is the only thing that knows.
+    pub fn save(&self, path: &Path) -> Result<(), CoreError> {
+        self.validate()?;
+        let json = self.to_json()?;
+        write_atomic(path, json.as_bytes())
+    }
 }
 
-/// A `.pixlay` that has been read, parsed and validated, plus the directory its
-/// relative paths resolve against.
+/// The directory a project file's relative `source` paths resolve against: the
+/// file's own directory, or the current directory when it has none (`x.pixlay`
+/// names a file in `.`).
+fn project_dir(path: &Path) -> &Path {
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+}
+
+/// Writes `bytes` to `path` through a temporary file and a rename.
+///
+/// Errors name `path`, the file the caller asked for; the temporary file is an
+/// implementation detail, and a message that named it would send the user looking
+/// for something they never asked to write. A failed write removes it.
+fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), CoreError> {
+    use std::io::Write as _;
+
+    let dir = project_dir(path);
+    let name = path
+        .file_name()
+        .unwrap_or_else(|| std::ffi::OsStr::new("project"));
+    // Unique per process, and a dotfile inside the target's own directory: two
+    // saves cannot collide, and the rename cannot land on another filesystem.
+    // Assembled as an `OsString` so a path that is not valid UTF-8 stays exact.
+    let mut temp_name = std::ffi::OsString::from(".");
+    temp_name.push(name);
+    temp_name.push(format!(".{}.tmp", std::process::id()));
+    let temp = dir.join(temp_name);
+    let failed = |source: std::io::Error| CoreError::Io {
+        path: path.to_path_buf(),
+        source,
+    };
+
+    let mut file = std::fs::File::create(&temp).map_err(failed)?;
+    // `sync_all` before the rename: without it a crash can leave the new name
+    // pointing at a file whose bytes never reached the disk, which is the one way
+    // an atomic rename can still lose a document.
+    let written = file.write_all(bytes).and_then(|()| file.sync_all());
+    drop(file);
+    if let Err(source) = written {
+        let _ = std::fs::remove_file(&temp);
+        return Err(failed(source));
+    }
+    std::fs::rename(&temp, path).map_err(|source| {
+        // The old file is untouched; only the temporary one is litter.
+        let _ = std::fs::remove_file(&temp);
+        failed(source)
+    })
+}
+
+/// A `.pixlay` that has been read, parsed and validated, plus where it came from.
 #[derive(Clone, Debug)]
 pub struct Project {
     doc: CollageDoc,
+    path: PathBuf,
     dir: PathBuf,
 }
 
 impl Project {
     pub fn load(path: &Path) -> Result<Self, CoreError> {
         let doc = CollageDoc::load(path)?;
-        let dir = path
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-            .unwrap_or_else(|| Path::new("."))
-            .to_path_buf();
-        Ok(Self { doc, dir })
+        Ok(Self {
+            doc,
+            path: path.to_path_buf(),
+            dir: project_dir(path).to_path_buf(),
+        })
     }
 
     pub fn doc(&self) -> &CollageDoc {
@@ -173,6 +239,37 @@ impl Project {
 
     pub fn dir(&self) -> &Path {
         &self.dir
+    }
+
+    /// The file this project was read from.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Writes the document back to the file it was read from, atomically.
+    ///
+    /// Nothing is rebased: the relative `source` paths were resolved against that
+    /// same directory, so the document is already expressed in the right terms —
+    /// which is also why save → load → save is byte-identical.
+    pub fn save(&self) -> Result<(), CoreError> {
+        self.doc.save(&self.path)
+    }
+
+    /// Writes this project to `path`: the same document, for a copy.
+    ///
+    /// A relative `source` is relative to the *project file*, so a copy in
+    /// another directory would otherwise quietly point at nothing. Every relative
+    /// source is therefore rebased onto the new directory; an absolute source is
+    /// left alone, as the contract accepts it as it stands. The rebase is part of
+    /// writing the copy and does not change this project.
+    pub fn save_as(&self, path: &Path) -> Result<(), CoreError> {
+        let dir = project_dir(path);
+        if dir == self.dir {
+            return self.doc.save(path);
+        }
+        let mut doc = self.doc.clone();
+        rebase_sources(&mut doc, &self.dir, dir);
+        doc.save(path)
     }
 
     /// Resolves every cell's source path against the project directory.
@@ -199,4 +296,63 @@ impl Project {
         }
         Ok(resolved)
     }
+}
+
+/// Rewrites every relative `source` so it means the same file when the document
+/// is read from `to_dir` instead of `from_dir`.
+///
+/// Lexical, and deliberately so: the filesystem resolves `..` against the
+/// directory it is standing in, so a purely lexical answer is the same path, and
+/// nothing here needs the filesystem — a project can be copied while its photos
+/// are on a drive that is not mounted. A path whose `..` components cancel stays
+/// correct for the same reason.
+fn rebase_sources(doc: &mut CollageDoc, from_dir: &Path, to_dir: &Path) {
+    // Both are absolutized with `std::path::absolute` (lexical: no symlink
+    // resolution, no filesystem access) because a relative answer needs a common
+    // root to walk up from. Without one — no current directory — the paths are
+    // left exactly as they are, which is at worst a copy that needs its photos
+    // moved in beside it.
+    let (Ok(from), Ok(to)) = (std::path::absolute(from_dir), std::path::absolute(to_dir)) else {
+        return;
+    };
+    for cell in &mut doc.cells {
+        let Some(source) = cell.source.as_deref() else {
+            continue;
+        };
+        if source.is_absolute() {
+            continue;
+        }
+        if let Some(relative) = relative_path(&to, &from.join(source)) {
+            cell.source = Some(relative);
+        }
+    }
+}
+
+/// `target` expressed relative to the directory `from`.
+///
+/// `None` when the two share no root, which two absolute paths cannot. The
+/// components of both sides come from [`Path::components`], so `.` and repeated
+/// separators are already gone and `..` is compared literally — the same thing the
+/// filesystem does with it.
+fn relative_path(from: &Path, target: &Path) -> Option<PathBuf> {
+    let from: Vec<_> = from.components().collect();
+    let target: Vec<_> = target.components().collect();
+    let common = from.iter().zip(&target).take_while(|(a, b)| a == b).count();
+    if common == 0 {
+        return None;
+    }
+    let mut relative = PathBuf::new();
+    for _ in &from[common..] {
+        relative.push("..");
+    }
+    for component in &target[common..] {
+        relative.push(component.as_os_str());
+    }
+    Some(if relative.as_os_str().is_empty() {
+        // The target *is* the directory being described; `.` is the path that
+        // means that.
+        PathBuf::from(".")
+    } else {
+        relative
+    })
 }

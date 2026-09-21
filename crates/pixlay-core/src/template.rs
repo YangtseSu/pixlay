@@ -96,6 +96,34 @@ impl Template {
         Ok(())
     }
 
+    /// The slot a normalized canvas point falls in, or `None` when it falls in
+    /// none of them (S6.5: point → slot hit testing).
+    ///
+    /// The question is about the *slot's geometry*, so it takes a point and not a
+    /// document: a photo's framing — its zoom, its pan, its rotation — moves the
+    /// picture inside the slot and can never move the slot, which is why nothing
+    /// here looks at a [`Cell`](crate::Cell). The GUI asks this on every press and
+    /// every drag; the CLI exposes it as `hit`.
+    ///
+    /// The test is the outline's own even-odd containment, which is exact for the
+    /// irregular slot the library ships (an L shape) and for any simple polygon,
+    /// not a bounding box: an L-shaped slot's notch belongs to its neighbour, and
+    /// the answer for a point one pixel outside a shared edge is that neighbour.
+    /// The matrix's cut templates tile the canvas, so exactly one slot answers
+    /// there; the gutter template leaves its gutter to `None`, as does any point
+    /// outside the canvas.
+    ///
+    /// A point exactly on a boundary is unspecified, the same way it is for
+    /// [`Polygon::contains`]: the answer is deterministic for a given point, but
+    /// which of the two slots it lands in is that function's business and not
+    /// something a caller should rely on. Nothing in the product needs it —
+    /// a press is a pixel, and the hit tests keep a band away from boundaries.
+    pub fn slot_at(&self, point: Point) -> Option<usize> {
+        self.slots
+            .iter()
+            .position(|slot| slot.outline.contains(point))
+    }
+
     /// Pairs of slots whose outlines share a stretch of boundary, with the
     /// shared segment itself.
     ///

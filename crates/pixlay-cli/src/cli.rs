@@ -15,8 +15,8 @@ use pixlay_imaging::{Chroma, Export, Format, Rgb8View, SlotBitmap, icc};
 use pixlay_render::Images;
 
 use crate::args::{
-    self, Command, ImageArgs, InitArgs, ProbeArgs, RenderArgs, Size, Source, TemplatesArgs,
-    TextArgs, USAGE,
+    self, Command, HitArgs, ImageArgs, InitArgs, ProbeArgs, RenderArgs, SaveArgs, Size, Source,
+    TemplatesArgs, TextArgs, USAGE,
 };
 use crate::report::Report;
 use crate::stats;
@@ -52,7 +52,90 @@ pub fn run(argv: &[OsString]) -> Result<u8, Failure> {
         Command::Text(args) => text(args),
         Command::Templates(args) => list_templates(args),
         Command::Init(args) => init_project(args),
+        Command::Hit(args) => hit(args),
+        Command::Save(args) => save_project(args),
     }
+}
+
+/// `hit`: which slot a normalized canvas point falls in (S6.5).
+///
+/// The GUI's most basic question, and the one it asks on every press and drag. It
+/// is a geometry question and nothing else: no photo is decoded, no pixel is
+/// touched, and a project whose photos have moved still answers. The point is in
+/// normalized canvas coordinates — the same space `probe` prints its slot sample
+/// points in — so a caller can feed a `probe` row straight back in.
+///
+/// "No slot" is an *answer*, not a failure: `grid-4-2x2g` has a gutter and every
+/// template has an outside, exactly like `templates --aspect 7:5` reporting
+/// `count = 0`. So the exit code stays 0 and `slot = none` says why.
+fn hit(args: HitArgs) -> Result<u8, Failure> {
+    let template = match &args.source {
+        // A project carries its own geometry, which is the point of embedding it:
+        // the hit test follows the document, not whatever this build's library
+        // holds under the same name today.
+        Source::Project(path) => Project::load(path)
+            .map_err(|error| Failure::Failed(error.to_string()))?
+            .doc()
+            .template
+            .clone(),
+        Source::Template(name) => pixlay_core::templates::get(name).ok_or_else(|| {
+            Failure::Usage(format!(
+                "unknown template {name}; this build knows: {}",
+                pixlay_core::templates::names().join(", ")
+            ))
+        })?,
+    };
+
+    let mut report = Report::new();
+    report.text("status", "ok");
+    report.text("command", "hit");
+    report.text("template", template.name.clone());
+    report.int("version", i64::from(template.version));
+    report.int("slots", template.slots.len() as i64);
+    report.text("at", format!("{:.4},{:.4}", args.at.x, args.at.y));
+    match template.slot_at(args.at) {
+        Some(slot) => {
+            report.bool("hit", true);
+            report.int("slot", slot as i64);
+        }
+        None => {
+            report.bool("hit", false);
+            report.text("slot", "none");
+        }
+    }
+    emit(&report, args.json);
+    Ok(EXIT_SUCCESS)
+}
+
+/// `save`: read a project and write it out, atomically (S6.5).
+///
+/// This is the machine surface of "the user changed the document": the GUI saves
+/// through the same `Project::save_as`, and the CLI's copy is how that path is
+/// exercised without a window. The document is validated on the way in, so a file
+/// this build cannot open is never rewritten, and the write goes through a
+/// temporary file and a rename, so a failure leaves the previous file intact.
+fn save_project(args: SaveArgs) -> Result<u8, Failure> {
+    let project =
+        Project::load(&args.project).map_err(|error| Failure::Failed(error.to_string()))?;
+    project
+        .save_as(&args.out)
+        .map_err(|error| Failure::Failed(error.to_string()))?;
+    let bytes = std::fs::metadata(&args.out)
+        .map_err(|error| Failure::Failed(format!("{}: {error}", args.out.display())))?
+        .len();
+
+    let doc = project.doc();
+    let mut report = Report::new();
+    report.text("status", "ok");
+    report.text("command", "save");
+    report.text("template", doc.template.name.clone());
+    report.int("version", i64::from(doc.template.version));
+    report.text("aspect", ratio_label(doc.template.aspect));
+    report.int("cells", doc.cells.len() as i64);
+    report.int("text", doc.text.len() as i64);
+    report.int("bytes", bytes as i64);
+    emit(&report, args.json);
+    Ok(EXIT_SUCCESS)
 }
 
 /// `templates`: the library, optionally filtered to one canvas shape.

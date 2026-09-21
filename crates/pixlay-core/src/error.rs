@@ -74,6 +74,18 @@ pub enum CoreError {
     #[error("dpi {dpi} is outside {min}..={max}")]
     DpiOutOfRange { dpi: u32, min: u32, max: u32 },
 
+    /// A command named a slot the template does not have. The command history
+    /// reports this instead of panicking: a GUI that loses its selection while a
+    /// background command lands is a caller bug, not a reason to abort.
+    #[error("slot {slot} does not exist; the template has {slots} slots")]
+    NoSuchSlot { slot: usize, slots: usize },
+
+    /// A command named a text layer the document does not have. `index` equal to
+    /// the layer count is a valid *insert* position (it appends), so this only
+    /// fires past the end.
+    #[error("text layer {index} does not exist; the document has {layers} text layers")]
+    NoSuchTextLayer { index: usize, layers: usize },
+
     #[error("canvas would be {pixels} pixels; the limit is {max}")]
     CanvasTooLarge { pixels: u64, max: u64 },
 

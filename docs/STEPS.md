@@ -16,8 +16,8 @@ The first sentence for a new session:
 
 Legend: ✅ done · 🚧 in progress · ⏸ blocked (waiting on a human decision or external input) · ⬜ not started
 
-**Current progress: S6 — ✅ done (2026-09-21, no unfinished work; the two human gates it inherits — S4's downsampling quality and S5's kinsoku and punctuation squeezing — were ruled on 2026-09-21 and both pass, so no gate is open any more until S7's own)**
-**Next action: start S6.5 (command history / project IO / hit testing), which is windowless and gate-free. The boundary list's session ended with the S5+S6 pair, and this session was that pair (S5 as its task, then S6); S7 opens a new session of its own, as the boundary list says.**
+**Current progress: S6.5 — ✅ done (2026-09-21, no unfinished work; it is windowless and gate-free, so it closes with its own Result and tests and nothing waits on a human)**
+**Next action: start S7 (the GTK shell and interaction), in a new session. The boundary list's session ended with the S5+S6 pair and this session took S6.5, which adds no gate of its own; S7 opens a session of its own because it is the last window step and ends with the three-minute main path, which only a human can walk.**
 
 | Step | Status | Date | What it delivers |
 |---|---|---|---|
@@ -28,11 +28,12 @@ Legend: ✅ done · 🚧 in progress · ⏸ blocked (waiting on a human decision
 | S4 · Image pipeline | ✅ done | 2026-09-21 | `pixlay-imaging`: the sandboxed glycin decoder (HEIC included), EXIF orientation applied to the pixels, a 16-bit linear Lanczos3 resample of the region each slot shows, per-slot grading and the global filter, the buffer ladder, and the probe moved down from the CLI |
 | S5 · Text layers | ✅ done | 2026-09-21 | Canvas-level text in `pixlay-render` with Pango: free placement and tiled watermark through one mechanism, `{date}`/`{filename}`/`{index}` from the slot's photo, kinsoku by Pango and punctuation squeezing through the font's `halt`; `text` added to the CLI and the probe refuses text documents |
 | S6 · Export | ✅ done | 2026-09-21 | Physical size + DPI and long-edge-pixels modes, pixels and metadata written in one pass: `pixlay-imaging::encode` (PNG/JPEG/TIFF) + `icc`, `--long-edge` / `--chroma`, `dpi_for` |
-| S6.5 · Command history / project IO / hit testing | ⬜ not started | — | `Command` + undo stack, `.pixlay` save/load with atomic write, point → slot hit testing |
+| S6.5 · Command history / project IO / hit testing | ✅ done | 2026-09-21 | `Command` + snapshot undo/redo, atomic `.pixlay` save with relative-path rebasing, `Template::slot_at` hit testing; `hit` and `save` added to the CLI |
 | S7 · GTK shell and interaction | ⬜ not started | — | The window: the three-minute main path, keyboard and HIG conformance, i18n wiring |
 | S8 · Packaging | ⬜ not started | — | `PKGBUILD`, desktop file, icons, metainfo, translations; installable from AUR |
 
 **How a status is marked.** The status row above, the marker on the step's own heading, and the "Current progress" line are three renderings of the same claim and must always agree; changing one is part of closing the step. A step becomes ✅ only when its gate ruling is on disk — the five parts listed in `AGENTS.md` "Session and persistence discipline" (ruling block + status row + the gate entry under "Where humans must step in" + `docs/CONTRACT.md` + commit), with nothing missing. A step that is waiting on a human answer is ⏸, not 🚧.
+A step whose "Human" line says **none** has no ruling to write: it closes with its **Result** subsection (criteria → landing point → measured, plus the decisions it made), the status row, the "Current progress" line, whatever shape it changed synchronized into `docs/CONTRACT.md`, and the commit — so S2, S3 and S6.5 close this way and not through the gate list.
 
 ## Splitting principles
 
@@ -1017,7 +1018,7 @@ The `AGENTS.md` verification render, eight photos and one `{date}` layer at 300 
 5. **`--quality` was not added.** The criteria ask for chroma subsampling, not for a quality knob,
    and a flag nobody tests is a flag that breaks quietly; quality is 90 at one place in the code.
 
-## S6.5 · Command history / project IO / hit testing (still windowless) — ⬜ not started
+## S6.5 · Command history / project IO / hit testing (still windowless) — ✅ done (2026-09-21)
 
 Added by the 2026-09-20 review.
 
@@ -1034,6 +1035,76 @@ yet they are the parts of the GUI most likely to go wrong; putting them into S7 
   - hit-test sweep (each template × each slot's centroid × 1px outside each slot's boundary), with results matching the analytic geometry solution
 - **Not doing**: no UI event binding, no gestures.
 - **Human**: none.
+
+### S6.5 result (2026-09-21)
+
+`[all criteria are in the tests in the repository; the numbers below are the release binary's output on this machine unless a test is named]`
+
+The exit criteria, item by item:
+
+| Criterion | Landing point | Measured |
+|---|---|---|
+| undo back to the initial state is pixel-identical; redo is isomorphic | `pixlay-render/tests/history.rs` (bitmaps in, only `draw`), `pixlay-cli/tests/history.rs` (the whole pipeline: decode → resample → grade → filter → `draw`, committed photos), `pixlay-core/tests/history.rs` (the document itself) | a **5-command walk** at `draw`'s boundary (6 renders) and a **6-command walk** through the pipeline (7 renders), each rendering **every state** it passes through: undo reproduces **0 differing pixels** for every state, redo reproduces every state in order, and a mixed undo/undo/redo/undo/redo/redo walk lands on the pixels of the document the stacks describe. Every state is required to *differ* from the one before it, so a command that changed nothing cannot let the walk pass vacuously. The document-level test runs **every one of the nine command kinds** and asserts document equality after undoing to the start and redoing to the end (12 commands, 13 states, compared as JSON bytes as well as by `PartialEq`) |
+| save → load → save is byte-identical | `pixlay-core/tests/project.rs::save_load_save_is_byte_identical`, `save_as_beside_the_original_is_a_plain_copy`; `pixlay-cli/tests/cli.rs::save_writes_the_project_that_was_read` | two generations through `Project::save` and through the CLI are the same bytes as the first write; a copy beside the original is byte-identical; saving in place replaces the file with the same bytes; no `*.tmp` survives any of it (the directory is scanned, not assumed) |
+| a missing file / a bad version gives a clear error and a non-zero exit code | `pixlay-core/tests/project.rs::a_missing_project_and_a_newer_version_report_clearly`; `pixlay-cli/tests/cli.rs::save_reports_a_missing_project_and_a_newer_version` | exit **2**, stdout empty, stderr naming the missing path (`…/absent.pixlay: No such file or directory`) or the policy (`document version 2 is newer than the supported version 1`), and **nothing written** — the `--out` path still does not exist afterwards |
+| hit-test sweep: every template × every slot's centroid × 1 px outside every boundary, against the analytic answer | `pixlay-core/tests/hit.rs` | **12 templates, 64 slots, 258 edges × 9 samples**: 2,322 points one pixel *inside* a boundary (each must be that slot) and 2,322 one pixel *outside* it. Of the outside points **1,143** land in the neighbouring slot, **72** in a gutter and **1,107** past the canvas border — the three answers the criterion is about, each asserted to be non-empty so a sweep that stopped reaching one fails. The oracle is an independent **winding-number** containment (the implementation is even-odd), and every point is also checked against the structural fact that a cut template's slots tile the canvas exactly. **0 disagreements**, and 64/64 slots contain their own area centroid |
+| hit testing including rotation and irregular slots | `pixlay-core/tests/hit.rs::a_rotated_slot_is_hit_exactly` | the library ships no rotated slot, so the test builds one: **7 angles** (0°, 15°, 30°, 45°, 90°, −22.5°, 40°), each sweeping a 61x61 grid against the analytic inverse-rotation oracle and keeping the 1,513–1,537 interior and 1,960–2,080 exterior samples that are more than ~5 px from an edge (closer ones are rounding-level ties), plus every corner sampled 1 px inward along the diagonal. **0 disagreements.** The irregular slot is the library's own L (`mosaic-8-s14` slot 6), and a point in its notch answers slot 7 — the case a bounding-box hit test gets wrong |
+| the hit test agrees with what the renderer painted | `pixlay-render/tests/hit.rs` | `draw`'s output is compared pixel by pixel: **153,029 of 154,360 pixels (99.13%)** of the smoke template come out *exactly* a slot colour, and every one of them hits its own slot; **179,776 of 206,116 (87.22%)** for the gutter template, the remainder being its white cross and the antialiased edges. Both at 0° and at 30° of framing rotation, with identical partitions — a rotated *photo* does not move a slot. Each slot is sampled (21,590–45,404 pixels) |
+
+**What the step added to the machine surface** (S1's CLI rules all hold: `--json`, stdout purity, exit 1/2, byte-identical under `C` / `zh_CN.UTF-8` / `de_DE.UTF-8`):
+
+| Command | Measured |
+|---|---|
+| `hit --template mosaic-8-s14 --at 0.2,0.2` | `slot = 0`, exit 0 — geometry only: no photo is decoded and a project whose photos have moved still answers |
+| `hit --template grid-4-2x2g --at 0.5,0.5` | `hit = false`, `slot = none`, exit 0 — "no slot owns this point" is an answer, not a failure |
+| `save --project a.pixlay --out b.pixlay` | `bytes = 5030`, exit 0; `cmp a.pixlay b.pixlay` → identical. Two directories down the same project stores `../../photos/p.png` and resolves to the same file as the original |
+| the `AGENTS.md` verification render (unchanged by this step) | 14043×10532, **ms 6189**, **encode_ms 1175**, **`peak_rss_mb` 1641**, **9,216,300 bytes** — byte-for-byte the file S6 measured, so nothing here touched the rendering path |
+
+### S6.5 · decisions this step made
+
+1. **The command vocabulary is one thing per command, and the two tempting extras are not in it.** There is no `SetTemplate`
+   (choosing a template is how a document *starts*, not an edit to one: it changes the slot count and every cell) and `SetSource`
+   does **not** reset the crop — `CropTransform::zoom` is absolute precisely so that swapping a photo keeps the area the user framed
+   (contract §1), and a command that quietly re-framed would undo that decision. `SetGrade` and `SetFilter` are separate commands
+   even though they are the same arithmetic, because they are two different user actions and one gesture is one command.
+2. **Snapshots are structural, not a convention.** `History` holds documents and has no mutable accessor, and `apply` writes into a
+   copy that becomes current only after `validate` passes — so an edit that would break a limit (a zoom past `MAX_ZOOM`, a canvas
+   that no longer matches the template, a text layer naming a slot that does not exist) is refused and leaves **both the document and
+   both stacks** untouched. That is what makes "any operation sequence" a real statement: every state in the stacks is a state the
+   document actually had. The cost is a `CollageDoc` clone per command (~4–5 KB for a shipped template) and is accepted knowingly.
+3. **Hit testing is geometry, and its input is a point, not a document.** `Template::slot_at` never looks at a cell, because nothing a
+   crop can do moves a slot — the "including rotation" half of the criterion is therefore about a rotated *slot* (measured on a
+   synthetic template, since the library ships none), and the render-level test pins the same fact from the other side (a photo
+   rotated 30° still fills exactly its own slot's pixels). Boundary points stay unspecified, exactly as `Polygon::contains` already
+   said; the sweeps keep 1 px away and the GUI's press is a pixel.
+4. **Two CLI verbs, and a deliberate absence.** `hit` and `save` cover the interaction layer's two questions that are *not* a
+   document edit; the command history gets no verb, because there is no CLI editing session for one to act on and the observable that
+   matters (the pixels after undoing everything) is measured by tests that are stricter than a verb would be. `AGENTS.md`'s
+   "nothing may be possible only in the GUI" is about capabilities, and every capability here — a hit test, a save — has a verb.
+5. **`save` overwrites; `init` is the command that refuses.** A save that refused to replace the file it was pointed at would be a
+   command nobody could use for its purpose, and the two are visibly different verbs with different promises (contract §5).
+6. **A copy rewrites its relative photo paths.** `save_as` rebases every relative `source` onto the new directory, because a copy that
+   pointed at nothing is silent data loss and because the GUI's "save as" needs it. The arithmetic is lexical
+   (`std::path::absolute` + `Path::components`), so a copy can be written with the photos on an unmounted drive, and `..` is left as
+   the filesystem resolves it — the test copies a project whose cell is spelled `../top.png` and checks that both files resolve to the
+   same path. A save to the *same* directory rewrites nothing, which is what keeps "save, load, save" byte-identical.
+7. **`write_atomic` fsyncs and names the target.** `File::create` a dotfile beside the target, `write_all`, `sync_all`, `rename` — the
+   sync is what stops a rename from publishing a file whose bytes never reached the disk. An error names the file the caller asked for
+   rather than the temporary one, since nobody asked for the latter; a failed write removes it.
+8. **`--at` is refused outside `0..=1`.** The canvas *is* the unit square, so a point outside it is a caller that mis-scaled something,
+   not a hit test with an unusual answer — the same reasoning as "a flag that is silently dropped looks honored" (S1).
+9. **A defect found on the way and fixed: `--help` printed the `TEXT OPTIONS` block twice.** It was an editing accident in S5 that no
+   test could see, because the usage text is only asserted to contain `USAGE:`. The subcommand summary now lists each verb once and
+   `hit` / `save` with it.
+
+### S6.5 · deviations from and additions to the review additions
+
+- S6.5 was added by the 2026-09-20 review with no review additions of its own, so there is nothing to deviate from. Two things the
+  step's own Work line did not name and this session added, both because the alternative was a silent lie: `save`'s **path rebasing**
+  (see decision 6 — without it the command would write copies that point at nothing) and the **`hit` / `save` verbs** (decision 4;
+  the step says the logic must be testable without a window, and the CLI is where "testable" is visible to a machine).
+- S3's review additions had suggested merging hit testing into S3; S3's decisions kept it here (S3 decision 4), and nothing in this
+  session needed that to be revisited.
 
 ## S7 · GTK shell and interaction — ⬜ not started
 

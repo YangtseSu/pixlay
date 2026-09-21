@@ -28,6 +28,7 @@ mod doc;
 mod error;
 mod geometry;
 mod grade;
+mod history;
 mod template;
 mod text;
 
@@ -46,6 +47,7 @@ pub use geometry::{EPSILON, Point, Polygon, Rect};
 pub use grade::{
     FilterPreset, GRADE_DELTA_RANGE, GRADE_FACTOR_RANGE, GRADE_SATURATION_RANGE, Grade,
 };
+pub use history::{Command, History};
 pub use template::{AREA_TOLERANCE, SharedEdge, Slot, Template};
 pub use text::{
     Anchor, Rgba8, TextFallback, TextLayer, TextMode, TextToken, TextTokenUse, TextValues,
