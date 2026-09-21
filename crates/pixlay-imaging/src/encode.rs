@@ -44,8 +44,8 @@ use thiserror::Error;
 use crate::Rgb8View;
 use crate::icc;
 
-/// JPEG quality, as a percentage. 90 is what every measurement in `docs/STEPS.md`
-/// was taken at (S0 through S5), so exports stay comparable with that baseline.
+/// JPEG quality, as a percentage. 90 is fixed rather than a flag
+/// (`docs/CONTRACT.md` §5), which is what keeps every measurement in §8 comparable.
 pub const JPEG_QUALITY: u8 = 90;
 
 /// The resolution JFIF can hold: 16 bits of pixels per inch.

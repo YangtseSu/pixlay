@@ -291,7 +291,7 @@ fn every_slot_count_from_two_to_ten_is_covered() {
 
 #[test]
 fn the_matrix_is_grouped_by_aspect_ratio() {
-    // `docs/STEPS.md` (S2 review): the library is grouped by aspect ratio, because
+    // `docs/CONTRACT.md` §3: the library is grouped by aspect ratio, because
     // a canvas and a template only fit each other when their ratios agree. A
     // portrait and a landscape variant of the same layout must be separate
     // entries, not one entry that gets stretched.

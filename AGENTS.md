@@ -58,6 +58,10 @@ Measurement rules that go with it:
   compositing and encoding reported separately.
 - Measuring encoder performance requires **non-flat** content: flat color blocks skew A0 PNG size
   and time by 78× and 4.6× respectively.
+- Every threshold constant in the code carries its **source inline** — the measured value and its date —
+  or cites `docs/CONTRACT.md`. **`docs/2026-09-20-STEPS.md` and `docs/completed/` are the process record and are
+  never cited from code**: they are scheduled for deletion once S0–S8 are done, so a comment that points
+  at them is a comment that stops resolving on the day the work finishes.
 
 ## Language conventions
 
@@ -89,7 +93,7 @@ Measurement rules that go with it:
 
 ## Commit discipline
 
-- **Commit once per completed step** (finishing one step in `docs/STEPS.md` produces at least one
+- **Commit once per completed step** (finishing one step in `docs/2026-09-20-STEPS.md` produces at least one
   commit). Do not batch several steps into one commit.
 - **Pushing requires the user's explicit permission first.** Without it, commit only and never
   push: do not `git push` on your own initiative and do not change remote configuration.
@@ -105,11 +109,30 @@ Measurement rules that go with it:
 - **"Done" means the progress line is rewritten and committed** (see "Session and persistence
   discipline"), not that the code is written and the tests are green.
 
+## Step discipline
+
+How `docs/2026-09-20-STEPS.md` splits the work, and the cases in which a step has to end a session. The steps
+themselves are in that file; this is the rule that produced them.
+
+1. Every step must have a **machine-checkable** exit. A "step" with no checkable exit is not a step.
+2. First do the one thing that can overturn the whole choice of technology (S0).
+3. Freeze the contract first, then scale up (S1).
+4. **Put the GUI last (S7)** — S0–S6 all complete in a windowless, screenshot-free fast loop.
+5. **Session boundaries line up with "gates", not with step counts.** Finishing a step does not require a new session, but these three cases **must** stop:
+   the step ends with a **human criterion or a human decision** (S0's Cairo keep-or-drop, S1's contract review, each step's visual quality, S7's three-minute main path);
+   the step produces an **irreversible contract or frozen data** (S1's `CollageDoc` shape, S2's `templateVersion`, S4's decoding backend
+   deciding S8's `depends`); the step **may overturn an earlier choice of technology**.
+   *Rationale: within one session, the model treats its own unwritten draft as an established premise and keeps building on it; a contract review is only meaningful
+   when executed by a session that did not write that draft.*
+   *Precondition: a boundary holds only if the **conclusion is already on disk** (the threshold constants in the tests + the measured numbers in this file + the "Current progress" line).
+   A conclusion that is not on disk means switching session equals measuring it again.*
+   By this rule the natural boundaries are `S0 ┊ S1 ┊ S2+S3 ┊ S4 ┊ S5+S6 ┊ S7 ┊ S8` (six sessions, not nine).
+
 ## Session and persistence discipline
 
 **A conversation is not storage.** Sessions get truncated, cleared or deleted; a conclusion that
 exists only in the conversation never happened. A new session reads files, not someone else's
-transcript, and the "Current progress" line in `docs/STEPS.md` is the **only authority**.
+transcript, and the "Current progress" line in `docs/2026-09-20-STEPS.md` is the **only authority**.
 
 - **A step is complete when the "Current progress" line is rewritten and committed.** Green tests
   and good numbers are necessary, not sufficient.
@@ -125,17 +148,17 @@ transcript, and the "Current progress" line in `docs/STEPS.md` is the **only aut
   *Reference shape: S0's `Ruling (2026-09-20, human): Cairo stays` plus the progress line
   `S0 — done and ruled on`.*
 - **Closing a gate takes five parts; missing one means it is not done**:
-  1. the ruling block written into that step's "Result" subsection in `docs/STEPS.md`;
+  1. the ruling block written into that step's "Result" subsection in `docs/2026-09-20-STEPS.md`;
   2. the "Current progress" line rewritten to "done and passed \_\_\_ → next X";
   3. the matching entry under "Where humans must step in" marked as passed or removed;
   4. any shape the ruling changed synchronized into `docs/CONTRACT.md`;
   5. commit.
 - **Writing it down is not a prerequisite of the next step; it is the other half of this ruling.**
   After a ruling, do not continue into the next step in the same session: a gate's next action is a
-  new session (see `docs/STEPS.md`, splitting principle 5).
+  new session (`AGENTS.md`, "Step discipline", principle 5).
 - **Never reconstruct a record from memory.** If a conclusion rests on a number or ruling that only
   ever appeared in conversation and is not in the files, re-measure it or ask the human;
-  reconstructing it from memory is exactly the failure splitting principle 5 guards against
+  reconstructing it from memory is exactly the failure "Step discipline" principle 5 guards against
   "treating an unwritten draft as an established premise".
 - **Self-check before the session ends**: are this round's conclusions (rulings, thresholds,
   measured numbers) all in the files, and is `git status` clean?
@@ -263,7 +286,7 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
     multi-select batch operations); that page itself states that "when editing is the primary
     interaction there should be no separate edit mode", which points the same way as "no mode
     switching" — **not** a deviation.
-- Whatever can be machine-checked lives only in S7's tests (see `docs/STEPS.md`); the visual part
+- Whatever can be machine-checked lives only in S7's tests (see `docs/2026-09-20-STEPS.md`); the visual part
   goes item by item through `docs/HIG-REVIEW.md`.
 
 ## Directions not to "improve"
@@ -305,7 +328,7 @@ only, diagnostics go to stderr, exit codes are fixed, identical input yields ide
 **Nothing may be possible only in the GUI and not in the CLI.**
 *Rationale: the model cannot see windows and can only read the CLI's stdout, and "looks right" is
 not a criterion — a visual conclusion must become a number (a probe) in the CLI. Contract details
-(subcommands, fields, exit codes) live in the tests and `docs/STEPS.md` and are not repeated here.*
+(subcommands, fields, exit codes) live in the tests and `docs/2026-09-20-STEPS.md` and are not repeated here.*
 
 ## Invariants that must hold
 
@@ -325,7 +348,7 @@ not a criterion — a visual conclusion must become a number (a probe) in the CL
   formal criterion is the in-repo probe, not a one-off script): 185 ms for 2 slots and 551 ms for
   10, peak `VmHWM` 941 MB compositing and 1340 MB including encoding (budget 2.5 GB), PNG and JPEG
   both emit 9933×14043, and the white-base / seam / text criteria are all green. Numbers in
-  `docs/STEPS.md` under "S0 results".
+  `docs/completed/2026-09-20-STEPS-done.md` under "S0 result".
   **Ruling (2026-09-20): Cairo stays** — "do not replace Cairo with GPU rendering" remains in force.
 - glycin in a non-Flatpak environment: **settled by measurement (S4, 2026-09-21) — the sandboxed
   path is what gets used.** `glycin` 4.0.0 decodes PNG/JPEG/HEIC/AVIF in 11–110 ms per 2400x1600
@@ -336,7 +359,7 @@ not a criterion — a visual conclusion must become a number (a probe) in the CL
   no AVIF (those live in the external `glycin-heif` loader), and its in-process frames hang under a
   plain async executor — they complete only while a glib `MainContext` is being iterated, which
   `pixlay-imaging::driver` therefore provides on one private thread. Numbers and reasoning in
-  `docs/STEPS.md` "S4 · decisions" 1 and `docs/CONTRACT.md` §4.1.
+  `docs/completed/2026-09-20-STEPS-done.md` "S4 · decisions" 1 and `docs/CONTRACT.md` §4.1.
 - Pango's CJK line-breaking and punctuation squeezing: **settled by measurement (S5, 2026-09-21)**.
   Kinsoku is Pango's own and is correct — over four CJK paragraphs at six widths, no line starts
   with `、。，．：；？！）”` and none ends with `（“`, and `他他他说。他` at a four-em width breaks
@@ -394,7 +417,7 @@ policy: track the latest": latest stable only, no upper pin.
 | `pangocairo` 0.22.9 | `pixlay-render` | Canvas-level text: a `pango::Layout` drawn through `pangocairo` is the only way shaped text reaches a cairo context. The family is the system's `sans-serif`; the tests pin the committed subset under `crates/pixlay-cli/tests/fixtures/fonts/` with `FONTCONFIG_FILE` | Pulls `pango` + `pango-sys` alongside the `cairo`/`glib` S4 already had, and Arch's `pango` 1.58.2 is in the GTK stack S7 links anyway |
 
 |`gtk4` 0.11.5 + `libadwaita` 0.9.2|`pixlay`|The shell: the window, the rows, the utility pane and the dialogs. The `gtk_v4_10` / `v1_8` feature levels are the lowest that carry `GtkFileDialog` and `GtkColorDialogButton` (4.10 dropped the deprecated chooser dialogs) and `AdwDialog` / `AdwToastOverlay` / `AdwShortcutsDialog`|System gtk4 4.24 / libadwaita 1.10 through pkg-config; GTK already depends on cairo, pango and gdk-pixbuf, so the download set grows by the bindings alone. Linked by `pixlay` only — the other four crates must not name it|
-|`gettext-rs` 0.8.0 (`gettext-system`)|`pixlay`|i18n, as `docs/STEPS.md` decided before S7: the same gettext toolchain GTK and libadwaita use for their own copy, so `.po`, the `.desktop` file and AppStream metainfo (S8) all go through one pipeline. `po/POTFILES` and `po/pixlay.pot` are committed|Tiny; `gettext-sys` links the system `libintl` rather than building a private copy. Only `pixlay` depends on it, which is what the language conventions require|
+|`gettext-rs` 0.8.0 (`gettext-system`)|`pixlay`|i18n, as `docs/2026-09-20-STEPS.md` decided before S7: the same gettext toolchain GTK and libadwaita use for their own copy, so `.po`, the `.desktop` file and AppStream metainfo (S8) all go through one pipeline. `po/POTFILES` and `po/pixlay.pot` are committed|Tiny; `gettext-sys` links the system `libintl` rather than building a private copy. Only `pixlay` depends on it, which is what the language conventions require|
 
 `pangocairo` was a temporary S0 spike dependency, left with the spike (and with the spike's use of
 `cairo-rs/png`), and came back in S5 — registered in the table above, where it says what it is for now.

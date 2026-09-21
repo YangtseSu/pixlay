@@ -2,7 +2,7 @@
 //!
 //! S5's text layers substitute `{date}`, and the contract fixes the semantics: the
 //! value of EXIF `DateTimeOriginal` **verbatim, with no timezone conversion**
-//! (`docs/STEPS.md`, "Open decisions → B. Confirmed"). That is why this module
+//! (`docs/CONTRACT.md` §1, "Text layers"). That is why this module
 //! returns a `String` and not a date type: parsing it would mean choosing a
 //! timezone, and the ruling is that there is no choice to make.
 //!

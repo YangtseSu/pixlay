@@ -13,9 +13,9 @@
 use pixlay_core::templates;
 use pixlay_core::{CLAMP_ZOOM_LIMIT, CropTransform, MAX_ZOOM, Point, Polygon, Slot};
 
-/// Tolerance for "the photo covers the slot" (docs/STEPS.md, S3 review: "the
-/// epsilon for 'covers the entire slot' is given a number, normalized 1e-6
-/// suggested, or ≤0.5px at 300dpi").
+/// Tolerance for "the photo covers the slot" (the contract names it: "the epsilon
+/// for 'covers the entire slot' is given a number, 1e-6 normalized, or ≤0.5 px at
+/// 300 dpi", `docs/CONTRACT.md` §2).
 ///
 /// 1e-6 of a canvas edge is 0.014 px on A0's long edge at 300 dpi, far under the
 /// suggested 0.5 px, while the clamp's own arithmetic is exact to ~1e-15 — so

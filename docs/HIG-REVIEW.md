@@ -6,7 +6,7 @@ clearly which chapters **have already been read page by page** and which have no
 
 - Spec: <https://developer.gnome.org/hig/> (no version number, **not frozen**; cite URLs and section names)
 - The most recent page-by-page read of this file: **2026-09-21 (S7)**. At the start of every UI step (S7, S8), re-read the relevant chapters before updating this file.
-- As soon as a chapter is read, write that chapter's criteria into the table above: whatever can be computed goes into tests (`docs/STEPS.md`, "S7 · GNOME HIG additions"),
+- As soon as a chapter is read, write that chapter's criteria into the table above: whatever can be computed goes into the tests (`crates/pixlay/tests/hig.rs`),
   whatever can only be looked at goes into "section 2". **Do not let it pile up** — HIG changes, and letting it pile up is the same as re-reading it next time.
 
 ## 1. Read chapters -> criteria
@@ -40,7 +40,7 @@ the canvas is **content** and the interface is **styling**, and the two must not
 4. **Screen reader**: every control is read out, the accessible name is accurate and short; it stays operable with the monitor off.
 5. **Touch / on-screen keyboard (OSK)**: text-layer content and the export path can be typed entirely with the OSK.
 6. **S7 additions**:
-   - the "three-minute main path": the scripted step list below, timed by hand (`docs/STEPS.md`, "S7 · the one visual criterion");
+   - the "three-minute main path": the scripted step list below, timed by hand;
    - the copy: is any label wrapped, truncated or unclear, and does a squeezed row read as intended? (The strings themselves are checked mechanically; the look is not.)
 
 ### S7's scripted step list (the three-minute walk)

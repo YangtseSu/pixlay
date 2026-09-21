@@ -104,7 +104,7 @@ pub fn probe_bitmaps(
 
 /// Largest residual, in levels, of a blended seam pixel fitted as a convex
 /// combination of white and the two slot colors. Measured 0.2 in S0 (see
-/// `docs/STEPS.md`); a blend with a third color or a filtering smear exceeds it.
+/// `docs/CONTRACT.md` §5); a blend with a third color or a filtering smear exceeds it.
 const MAX_BLEND_RESIDUAL: f64 = 3.0;
 
 /// Widest run of blended pixels allowed across a seam, in pixels. Measured 1 in

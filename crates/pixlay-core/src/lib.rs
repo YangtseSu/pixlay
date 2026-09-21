@@ -109,7 +109,7 @@ pub const MAX_ROTATION_DEG: f64 = 45.0;
 
 /// Multiple of the upright covering zoom above which [`CropTransform::fit`]
 /// reduces the requested rotation angle instead of magnifying the photo further
-/// (docs/STEPS.md, "Open decisions → B. Confirmed": elongated-slot clamp degradation).
+/// (`docs/CONTRACT.md` §2, the clamp-degradation row).
 ///
 /// The reference is the *upright floor*: the zoom the slot's shape and the
 /// photo's aspect demand with the photo centred and unrotated. Measured that way

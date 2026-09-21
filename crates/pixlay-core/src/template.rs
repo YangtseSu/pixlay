@@ -36,7 +36,7 @@ pub struct Template {
     /// Geometry version of this template.
     pub version: u32,
     /// Aspect ratio (`width / height`) the geometry was authored for. The
-    /// template matrix is grouped by aspect ratio (docs/STEPS.md).
+    /// template matrix is grouped by aspect ratio (`docs/CONTRACT.md` §3).
     pub aspect: f64,
     /// Slots in template order. Slot identity is the index: cells, photos and
     /// hit tests all speak in terms of it.

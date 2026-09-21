@@ -144,7 +144,7 @@ impl CropTransform {
 /// The stored transform is a request; what gets drawn is the fit ([`fit`]).
 /// Below the zoom limit a sliver-shaped slot is covered by magnifying the photo,
 /// and past it the requested rotation angle is reduced instead of magnifying
-/// further (docs/STEPS.md, "Open decisions → B. Confirmed": elongated-slot clamp degradation). The GUI needs to know which of the two
+/// further (`docs/CONTRACT.md` §2, the clamp-degradation row). The GUI needs to know which of the two
 /// happened so it can say so; the renderer only needs `transform`.
 ///
 /// [`fit`]: CropTransform::fit

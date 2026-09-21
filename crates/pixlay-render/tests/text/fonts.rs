@@ -34,8 +34,8 @@ fn font_dir() -> PathBuf {
 ///
 /// `expected` is the number of measurements the child must have executed: without
 /// it a filter that matches nothing (a rename, a typo) would make this harness pass
-/// while measuring nothing, which is exactly the vacuous pass `docs/STEPS.md`
-/// hunts for.
+/// while measuring nothing, which is the one failure a measurement harness must not
+/// have.
 pub fn run_pinned(filter: &str, expected: usize) {
     let font = font_dir().join(FONT_FILE);
     assert!(

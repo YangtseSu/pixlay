@@ -1,6 +1,6 @@
 //! Regenerates `crates/pixlay-core/src/templates/frozen.rs`.
 //!
-//! A committed bin, not a `build.rs` (`docs/STEPS.md`, S2 review): the frozen
+//! A committed bin, not a `build.rs` (`docs/CONTRACT.md` §3): the frozen
 //! geometry is an interface — a document embeds a copy of it, so changing it
 //! changes the layout of saved projects — and that change has to be a reviewed
 //! commit rather than something a build rewrites silently.

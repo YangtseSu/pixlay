@@ -102,7 +102,7 @@ pub fn get(name: &str) -> Option<Template> {
 /// Templates whose declared aspect ratio matches `aspect` within
 /// [`ASPECT_TOLERANCE`], the same tolerance `CollageDoc::validate` applies.
 ///
-/// This is the picker's query (`docs/STEPS.md`, S2): a canvas and a template only
+/// This is the picker's query (`docs/CONTRACT.md` §3): a canvas and a template only
 /// fit each other when their ratios agree, and the canvas is what the user picks
 /// first.
 pub fn of_aspect(aspect: f64) -> Vec<Template> {

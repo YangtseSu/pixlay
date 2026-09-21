@@ -1,10 +1,10 @@
 //! gettext wiring: the one place a user-visible string becomes a translated one.
 //!
-//! The mechanism was decided before S7 (`docs/STEPS.md`, "S7 · review
-//! additions"): gettext, domain `pixlay`, source language English, `.pot` +
-//! `po/POTFILES` committed with the repository, and the dependency only in this
-//! crate — `pixlay-core` / `-imaging` / `-render` / `-cli` keep English error
-//! text that the GUI attaches as it is (`AGENTS.md`, "Language conventions").
+//! The mechanism is the contract's (`docs/CONTRACT.md` §9, "The window"): gettext,
+//! domain `pixlay`, source language English, `.pot` + `po/POTFILES` committed with
+//! the repository, and the dependency only in this crate — the other four keep
+//! English error text that the GUI attaches as it is (`AGENTS.md`, "Language
+//! conventions").
 //!
 //! Two properties this module is responsible for:
 //!

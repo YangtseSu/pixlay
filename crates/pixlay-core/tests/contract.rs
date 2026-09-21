@@ -253,7 +253,7 @@ fn wrong_slot_area_is_rejected() {
 
 #[test]
 fn canvas_limits_and_rounding() {
-    // A4 at 300 dpi is the reference number in docs/STEPS.md.
+    // A4 at 300 dpi is the rounding reference in docs/CONTRACT.md §2.
     let a4 = CanvasSpec::A4_PORTRAIT.pixel_size(300).expect("A4@300dpi");
     assert_eq!((a4.width, a4.height), (2480, 3508));
     assert_eq!(

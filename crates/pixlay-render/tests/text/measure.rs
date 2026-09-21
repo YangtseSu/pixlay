@@ -1,4 +1,4 @@
-//! The text measurements (`docs/STEPS.md` S5).
+//! The text measurements (`docs/CONTRACT.md` §1, "Text layers").
 //!
 //! Every test here is `#[ignore]`d and runs only in the pinned child — see
 //! `fonts.rs` for why the font has to be a process property. `MEASUREMENTS` is the

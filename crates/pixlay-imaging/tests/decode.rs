@@ -35,8 +35,8 @@ fn rmse(a: &[u8], b: &[u8]) -> f64 {
 #[test]
 fn heic_decodes_at_its_own_depth() {
     // S4's backend decision was made on this format: the sandboxed loader decodes
-    // HEIC and AVIF, and the in-process one covers neither (docs/STEPS.md, "S4 ·
-    // decisions"). This is the criterion as a test.
+    // HEIC and AVIF, and the in-process one covers neither (`docs/CONTRACT.md` §4.1).
+    // This is the criterion as a test.
     let source = Source::decode(&fixture("photo.heic")).expect("HEIC decodes");
     assert_eq!(source.mime(), "image/heif");
     assert_eq!((source.width(), source.height()), (800, 600));

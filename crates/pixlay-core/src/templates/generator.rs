@@ -1,6 +1,6 @@
 //! The template generator: lattice recipes in, frozen geometry out.
 //!
-//! Why a generator at all (`docs/STEPS.md`, S2): the library's geometry has to be
+//! Why a generator at all (`docs/CONTRACT.md` §3): the library's geometry has to be
 //! reproducible and reviewable, and its invariants — zero overlap, no interior
 //! hole, a cut template's areas summing to exactly 1.0 — have to be *decidable*
 //! rather than eyeballed. Three decisions make that possible.
@@ -85,7 +85,7 @@ const R_2_3: f64 = 2.0 / 3.0;
 /// The whole library, in slot-count order.
 ///
 /// The matrix has to cover every slot count from `MIN_SLOTS` to `MAX_SLOTS`
-/// (`docs/STEPS.md`, S2 exit criteria) and be grouped by aspect ratio, so the
+/// (`docs/CONTRACT.md` §3) and be grouped by aspect ratio, so the
 /// recipes read as: which counts, on which canvas shapes. Every aspect ratio in
 /// the list is one a printed canvas uses (1:1, 4:3, 3:2, 16:9) or its portrait
 /// counterpart (2:3).

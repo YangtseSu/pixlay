@@ -21,7 +21,7 @@
 //!   tests pin the environment with `FONTCONFIG_FILE` instead.
 //! * **Line breaking is Pango's**, which is the product's answer for CJK: it
 //!   implements the Unicode line-breaking rules, so no line starts with `。`, `，`,
-//!   `）”` and no line ends with `（` (kinsoku, `docs/STEPS.md` S5).
+//!   `）”` and no line ends with `（` (`docs/CONTRACT.md` §1, "Text layers").
 //! * **Punctuation squeezing is ours**, through the font's `halt` feature — see
 //!   [`compressed_ranges`].
 

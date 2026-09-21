@@ -15,7 +15,7 @@ workspace = true
 [dependencies]
 pixlay-core = { path = "../pixlay-core" }
 thiserror = "2.0"
-# Decoding backend (S4 measurement in docs/STEPS.md): the `glycin` facade, which
+# Decoding backend (`docs/CONTRACT.md` §4.1): the `glycin` facade, which
 # on Linux is the sandboxed loader process. It is the only backend measured that
 # decodes HEIC and AVIF; `glycin-builtin` covers neither, and its in-process
 # frames hang unless they are driven from a glib main context.

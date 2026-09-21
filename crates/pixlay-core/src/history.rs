@@ -1,7 +1,8 @@
 //! Command history: the document only ever changes through a named command.
 //!
-//! S6.5 (`docs/STEPS.md`). Two decisions from "Open decisions → B. Confirmed"
-//! shape this module, and both are structural rather than comments:
+//! S6.5 (`docs/CONTRACT.md` §7). Two of the contract's decisions — one gesture is one
+//! command (§9) and a snapshot is a whole document (§7) — shape this module, and both
+//! are structural rather than comments:
 //!
 //! * **One gesture = one command, committed when the drag ends.** A command is a
 //!   whole edit, not a sample of one: the GUI applies it once, when the user lets
