@@ -1,0 +1,11 @@
+crates/pixlay/src/a11y.rs
+crates/pixlay/src/app.rs
+crates/pixlay/src/canvas.rs
+crates/pixlay/src/decode.rs
+crates/pixlay/src/export.rs
+crates/pixlay/src/i18n.rs
+crates/pixlay/src/lib.rs
+crates/pixlay/src/main.rs
+crates/pixlay/src/sidebar.rs
+crates/pixlay/src/state.rs
+crates/pixlay/src/window.rs

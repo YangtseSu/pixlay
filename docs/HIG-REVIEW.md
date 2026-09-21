@@ -5,22 +5,28 @@ every HIG section into the three tiers "machine-checkable criteria / visual crit
 clearly which chapters **have already been read page by page** and which have not.
 
 - Spec: <https://developer.gnome.org/hig/> (no version number, **not frozen**; cite URLs and section names)
-- The most recent page-by-page read of this file: **2026-09-20**. At the start of every UI step (S7, S8), re-read the relevant chapters before updating this file.
+- The most recent page-by-page read of this file: **2026-09-21 (S7)**. At the start of every UI step (S7, S8), re-read the relevant chapters before updating this file.
 - As soon as a chapter is read, write that chapter's criteria into the table above: whatever can be computed goes into tests (`docs/STEPS.md`, "S7 · GNOME HIG additions"),
   whatever can only be looked at goes into "section 2". **Do not let it pile up** — HIG changes, and letting it pile up is the same as re-reading it next time.
 
 ## 1. Read chapters -> criteria
 
+Chapters read page by page for S7: `reference/keyboard`, `guidelines/adaptive`, `guidelines/ui-styling`,
+`guidelines/accessibility`, `guidelines/writing-style`, `patterns/containers/utility-panes`, `patterns/feedback`
+(index). The rest of `patterns/containers` and `patterns/feedback` are still only their index pages (section 4).
+
 | HIG chapter | Landing point | Criteria |
 |---|---|---|
-| `index` (platform definition: GTK4 + libadwaita) | `AGENTS.md` | GUI only in the `pixlay` crate; no other crate pulls in GTK |
-| `guidelines/ui-styling` | `AGENTS.md` + S7 tests | style classes / CSS variables only, hard-coded colors and spacing forbidden; follow the system dark mode; starts under both styles; **canvas pixels do not change with the style** |
-| `guidelines/accessibility` | S7 tests + "section 2" of this file | every interactive control has an accessible name (machine-checkable); high contrast / large text / keyboard-only / screen reader / OSK (visual inspection) |
-| `guidelines/keyboard` | S7 tests | every action has a keyboard path; the Tab order covers every control |
-| `reference/keyboard` | S7 tests | the accelerator table ⊇ the required set, ∩ the system-reserved set = ∅; do not bind `Alt+*` / `Super+*` |
-| `patterns/containers` (windows / header-bars / popovers / utility-panes / boxed-lists / grid-views / list-column-views) | S7 design | use libadwaita containers; once this step has chosen them, backfill the containers actually used into this table |
-| `patterns/feedback` (toasts / banners / dialogs / placeholders / spinners / progress-bars / tooltips / notifications) | S7 design | reversible short feedback goes through `AdwToast`; destructive operations go through a dialog; empty states go through `AdwStatusPage`; progress goes through a progress bar rather than a modal |
-| `patterns/containers/selection-mode` | **Not applicable** | there are no collection views and no multi-select batch operations; that page itself states that "when editing is the primary interaction there should be no separate edit mode", which points the same way as "do not add mode switching" |
+| `index` (platform definition: GTK4 + libadwaita) | `AGENTS.md`, `crates/pixlay/Cargo.toml` | GUI only in the `pixlay` crate; no other crate pulls in GTK — `cargo tree` shows gtk4 under `pixlay` alone, and `pixlay-core`/`-imaging`/`-render`/`-cli` must not name it |
+| `guidelines/ui-styling` | `window.rs` (libadwaita containers and rows only), `canvas.rs`, test `tests/hig.rs::check_colour_schemes` | no hard-coded colours anywhere in the shell: the canvas overlays are drawn with the widget's own theme colour (`Widget::color()`), everything else is a libadwaita style class or a stock widget. The app follows the system style (`AdwStyleManager` untouched), starts under both forced schemes, and **the canvas pixels are byte-identical under both** (asserted) |
+| `guidelines/accessibility` | test `tests/hig.rs::check_accessible_names` + "section 2" of this file | every interactive control has an accessible name — set explicitly, or derived by GTK from the control's own label; the check walks the widget tree and accepts both, since GTK names a `GtkButton` from its `GtkLabel`. High contrast / large text / screen reader / OSK are visual steps (section 2) |
+| `guidelines/keyboard` | `app.rs` (`ACCELERATORS`), `canvas.rs` (arrow keys, `+`/`-`, `0`, `Enter`, `Delete`), test `tests/hig.rs::check_shortcuts` | every action has a keyboard path: the actions the table binds are checked against `GtkApplication::accels_for_action`, and every other action is on a focusable control. The canvas is focusable and pans, zooms, resets, chooses a photo and clears a slot from the keyboard |
+| `reference/keyboard` | same test | the required set for this product (`Ctrl+Q`, `Ctrl+W`, `Ctrl+O`, `Ctrl+S`, `Shift+Ctrl+S`, `Ctrl+Z`, `Shift+Ctrl+Z`, `Ctrl+?`, `Ctrl+N`, `F9`) is present, and nothing binds the system's own combinations (`Alt+*`, `Super+*`, `Ctrl+Alt+*`) — both asserted against the one table the dialog and the bindings share |
+| `guidelines/adaptive` | `window.rs` (the shell), test `tests/hig.rs::check_adaptive_minimum` | `AdwOverlaySplitView` overlays the utility pane on the canvas when the window is too narrow; at the minimum window size the sheet is still drawn in full inside the canvas and the pane is still allocated — asserted |
+| `guidelines/writing-style` | every string in `crates/pixlay/src`, `po/pixlay.pot` | header capitalization on buttons, menu items and tooltips; sentence capitalization on row, slider and combo labels; an ellipsis exactly where the action asks for more input (`Open…`, `Save as…`, `Choose photo…`); no `i.e.`/`e.g.`; no pronouns; no trailing periods outside explanatory body text. The wording itself is a visual step (section 2), and whether a string missed its `gettext` call is only checkable by eye (the extractor cannot see what nobody wrapped) |
+| `patterns/containers/utility-panes` | `sidebar.rs`, `window.rs` | the editing controls live in a utility pane (`AdwOverlaySplitView`), toggled with `F9` so it can be hidden while looking at the collage, and it overlays rather than squeezes the canvas when narrow |
+| `patterns/feedback` (index) | `window.rs`, `export.rs` | reversible feedback goes through `AdwToast` ("Saved …", "Exported …", a failed decode); the missing-photo case is an `AdwBanner` with a button that selects the slot; export progress is a `GtkProgressBar` in the bottom bar, never a modal dialog; the one dialog is the unsaved-changes confirmation on close |
+| `patterns/containers/selection-mode` | **Not applicable** | there are no collection views and no multi-select batch operations; the canvas selects one slot because editing is the primary interaction, which is what that page itself recommends |
 
 ## 2. Visual steps
 
@@ -33,8 +39,23 @@ the canvas is **content** and the interface is **styling**, and the two must not
    `F10` opens the menu, `Esc` closes overlays, `Tab` covers every control.
 4. **Screen reader**: every control is read out, the accessible name is accurate and short; it stays operable with the monitor off.
 5. **Touch / on-screen keyboard (OSK)**: text-layer content and the export path can be typed entirely with the OSK.
-6. **S7 additions**: the "three-minute main path" timing (a scripted step list + timing, see `docs/STEPS.md`) and copy wording
-   (`guidelines/writing-style`'s sentence case, no jargon, no honorifics; omitted wrapping is not a machine-checkable criterion).
+6. **S7 additions**:
+   - the "three-minute main path": the scripted step list below, timed by hand (`docs/STEPS.md`, "S7 · the one visual criterion");
+   - the copy: is any label wrapped, truncated or unclear, and does a squeezed row read as intended? (The strings themselves are checked mechanically; the look is not.)
+
+### S7's scripted step list (the three-minute walk)
+
+Run the app (`cargo run --release -p pixlay`, or the installed `pixlay` after S8) and time the whole list:
+
+1. *Pick a template*: choose the sheet size (A4), then a layout in the Template list — one click, no dialog.
+2. *Place photos*: drop two to five photos on the canvas (or select a slot and press `Ctrl+I`), once each.
+3. *Adjust framing*: select a slot, drag inside it to move the photo, scroll to zoom, drag the Straighten slider to line the horizon up against the guides, then press `Ctrl+0` if it needs to go back.
+4. *Export*: press `Export` (the path is asked for once), and the progress bar in the bottom bar runs to the toast with the file's name and size.
+
+What is already machine-checked, and therefore not what this walk is for: the path works at all
+(`crates/pixlay/tests/mainpath.rs` walks exactly this list in the same calls the widgets make), the copy is English
+under any locale, the shortcuts are bound, and the canvas matches the CLI's render. **What only a person can judge**
+is whether the walk is short, whether the framing gestures feel right, and whether the copy reads well.
 
 ## 3. Deliberate deviations (the same one as in `AGENTS.md`, do not fix)
 
@@ -46,11 +67,11 @@ the canvas is **content** and the interface is **styling**, and the two must not
 | Large-text mode acting on canvas text layers | Not applied | preview and export must be from the same source, pixel by pixel; text layers are document content |
 | access keys (`Alt+` mnemonics) | Not doing | this application has no menu bar |
 
-## 4. Chapters not yet read page by page (read them and backfill section 1 when S7 / S8 start)
+## 4. Chapters not yet read page by page (read them and backfill section 1 when S8 starts)
 
 - `principles`, `resources`
-- `guidelines`: `app-naming` (S8), `app-icons` (S8), `ui-icons` (S7), `writing-style` (S7),
-  `typography` (S7), `navigation` (S7), `pointer-touch` (S7), `adaptive` (S7)
+- `guidelines`: `app-naming` (S8), `app-icons` (S8), `ui-icons`, `typography`, `navigation`, `pointer-touch`
 - `patterns/nav`, `patterns/controls/*`
-- the **per-page details** of `patterns/containers/*` and `patterns/feedback/*` (this table currently uses only their index pages)
+- the **per-page details** of `patterns/containers/*` (only `utility-panes` has been read so far) and of
+  `patterns/feedback/*` (only the index has been read)
 - the UI colors under `reference/`

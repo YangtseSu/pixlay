@@ -42,7 +42,9 @@ image to judge. `mosaic-8-s14` has been valid since S1 and, since S2, is emitted
 generator (`pixlay-core/src/templates/generator.rs`) under the same name and the same
 `templateVersion`; `--stats` makes each round's ruler machine-readable. `pixlay-render templates`
 lists what this build ships, and `pixlay-render init --template <name> --out x.pixlay` writes a
-project to start from.
+project to start from. Since S7 `cargo test` also builds the GUI; its tests need a display and re-run
+themselves under `xvfb-run` where there is none (pinning `GTK_IM_MODULE=gtk-im-context-simple`, because
+GTK's ibus module recurses without a session bus), so the entry still works on a build box.
 
 Measurement rules that go with it:
 
@@ -231,8 +233,11 @@ HIG has no version number and is **not frozen**; cite URLs and section names, an
 every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
 
 - **Widgets**: use libadwaita containers and widgets by default (`AdwApplicationWindow` /
-  `AdwToolbarView` / `AdwHeaderBar` / `AdwToast` / `AdwStatusPage` / `AdwAboutDialog` and so on; S7
-  decides the exact set). A custom-drawn widget is the exception and needs a stated reason.
+  `AdwToolbarView` / `AdwHeaderBar` / `AdwToast` / `AdwStatusPage` / `AdwAboutDialog` and so on). S7
+  landed the shell as `AdwApplicationWindow` + `AdwToolbarView` + `AdwHeaderBar` + `AdwToastOverlay` +
+  `AdwBanner` + `AdwOverlaySplitView` + `AdwPreferencesPage`, with one custom-drawn widget — the
+  canvas, whose stated reason is that it draws the document itself. A custom-drawn widget is the
+  exception and needs a stated reason.
 - **Styling**: use only libadwaita style classes and CSS variables; hard-coded colors and spacing
   are forbidden (they break dark mode and high contrast). App styling **follows the system**
   (`AdwStyleManager` stays at its default; never force light or dark), and v1 ships no per-app style
@@ -240,7 +245,9 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
   is content, not styling (see "Hard constraints").
 - **Keyboard**: standard shortcuts per HIG `reference/keyboard`; `Alt+*`, `Super+*` and
   system-reserved combinations are forbidden; the main path must be walkable with the keyboard
-  alone, and every action needs a keyboard path.
+  alone, and every action needs a keyboard path. Since S7 the table is data —
+  `crates/pixlay/src/app.rs::ACCELERATORS`, which the bindings, the shortcuts dialog and the HIG test
+  all read — and `po/` holds the extractable strings.
 - **Accessibility**: every interactive control needs an accessible name (HIG
   `guidelines/accessibility`).
 - **Copy**: follow HIG `guidelines/writing-style` (sentence case, no jargon, no honorifics); the
@@ -386,5 +393,9 @@ policy: track the latest": latest stable only, no upper pin.
 | `glib` 0.22 / `gio` 0.22 | `pixlay-imaging` | The decode is driven on a private `MainContext`: a glycin frame request only completes while one is iterated (measured: every frame hung under a plain executor until glycin's own 60 s limit). `glib`'s `futures` feature provides `MainContext::block_on`; `gio::File` is glycin's own input type | Already in the tree with `glycin`; named here because the API is used directly |
 | `pangocairo` 0.22.9 | `pixlay-render` | Canvas-level text: a `pango::Layout` drawn through `pangocairo` is the only way shaped text reaches a cairo context. The family is the system's `sans-serif`; the tests pin the committed subset under `crates/pixlay-cli/tests/fixtures/fonts/` with `FONTCONFIG_FILE` | Pulls `pango` + `pango-sys` alongside the `cairo`/`glib` S4 already had, and Arch's `pango` 1.58.2 is in the GTK stack S7 links anyway |
 
+|`gtk4` 0.11.5 + `libadwaita` 0.9.2|`pixlay`|The shell: the window, the rows, the utility pane and the dialogs. The `gtk_v4_10` / `v1_8` feature levels are the lowest that carry `GtkFileDialog` and `GtkColorDialogButton` (4.10 dropped the deprecated chooser dialogs) and `AdwDialog` / `AdwToastOverlay` / `AdwShortcutsDialog`|System gtk4 4.24 / libadwaita 1.10 through pkg-config; GTK already depends on cairo, pango and gdk-pixbuf, so the download set grows by the bindings alone. Linked by `pixlay` only — the other four crates must not name it|
+|`gettext-rs` 0.8.0 (`gettext-system`)|`pixlay`|i18n, as `docs/STEPS.md` decided before S7: the same gettext toolchain GTK and libadwaita use for their own copy, so `.po`, the `.desktop` file and AppStream metainfo (S8) all go through one pipeline. `po/POTFILES` and `po/pixlay.pot` are committed|Tiny; `gettext-sys` links the system `libintl` rather than building a private copy. Only `pixlay` depends on it, which is what the language conventions require|
+
 `pangocairo` was a temporary S0 spike dependency, left with the spike (and with the spike's use of
 `cairo-rs/png`), and came back in S5 — registered in the table above, where it says what it is for now.
+`gtk4` + `libadwaita` + `gettext-rs` were added by S7, the first step that has a window at all.

@@ -89,6 +89,12 @@ fn sequence() -> Vec<Command> {
         Command::SetFilter {
             filter: FilterPreset::None,
         },
+        // Last, because it resizes the cells: the commands before it stay valid,
+        // and the walk still visits one state per command kind.
+        Command::SetTemplate {
+            template: templates::get("mosaic-5-hero").expect("registered"),
+            canvas: CanvasSpec::with_ratio(4.0 / 3.0, 297.0),
+        },
     ]
 }
 
@@ -420,4 +426,85 @@ fn a_history_refuses_a_document_that_is_not_valid() {
         History::new(broken),
         Err(CoreError::CellCount { cells: 7, slots: 8 })
     ));
+}
+
+#[test]
+fn a_template_change_keeps_the_photos_it_can_and_never_leaves_a_dangling_slot() {
+    // S7's command. The template picker is why it exists: a user who has placed
+    // photos must be able to try another layout without starting over, so the
+    // cells that still exist keep what they hold, and a text layer that named a
+    // slot the new template does not have keeps its text and loses only the
+    // reference (the alternative — dropping the layer — deletes a user's
+    // watermark, and keeping the index would make the document invalid).
+    let mut history = History::new(document()).expect("a valid document");
+    for (slot, name) in [(0usize, "photos/a.jpg"), (4, "photos/b.png")] {
+        history
+            .apply(Command::SetSource {
+                slot,
+                source: Some(PathBuf::from(name)),
+            })
+            .expect("applies");
+    }
+    history
+        .apply(Command::SetCrop {
+            slot: 0,
+            crop: CropTransform {
+                zoom: 1.6,
+                offset: (0.1, 0.0),
+                rotation_deg: -8.0,
+            },
+        })
+        .expect("applies");
+    // Two layers: one naming a slot that survives, one naming a slot that does not.
+    history
+        .apply(Command::InsertText {
+            index: 0,
+            layer: caption("first", Some(4)),
+        })
+        .expect("applies");
+    history
+        .apply(Command::InsertText {
+            index: 1,
+            layer: caption("second", Some(7)),
+        })
+        .expect("applies");
+
+    // `mosaic-5-hero` is 4:3 like the canvas, with five slots.
+    let template = templates::get("mosaic-5-hero").expect("registered");
+    let canvas = CanvasSpec::with_ratio(template.aspect, 297.0);
+    history
+        .apply(Command::SetTemplate {
+            template: template.clone(),
+            canvas,
+        })
+        .expect("applies");
+
+    let doc = history.doc();
+    assert_eq!(doc.template, template);
+    assert_eq!(doc.canvas, canvas);
+    assert_eq!(doc.cells.len(), 5, "one cell per slot");
+    assert_eq!(
+        doc.cells[0].source,
+        Some(PathBuf::from("photos/a.jpg")),
+        "the cells that still exist keep their photos"
+    );
+    assert_eq!(doc.cells[0].crop.zoom, 1.6, "and their framing");
+    assert_eq!(doc.cells[4].source, Some(PathBuf::from("photos/b.png")));
+    assert_eq!(
+        doc.text[0].source_slot,
+        Some(4),
+        "a layer whose slot survives keeps it"
+    );
+    assert_eq!(
+        doc.text[1].source_slot, None,
+        "a layer whose slot is gone keeps its text and loses the reference"
+    );
+    assert_eq!(doc.text[1].content, "second");
+    doc.validate().expect("the result is a valid document");
+
+    // And it is one undo step, like every other command.
+    assert_eq!(history.undo_depth(), 6);
+    assert!(history.undo());
+    assert_eq!(history.doc().cells.len(), 8);
+    assert_eq!(history.doc().text[1].source_slot, Some(7));
 }

@@ -9,5 +9,33 @@ authors.workspace = true
 repository.workspace = true
 publish = false
 
+[lib]
+name = "pixlay"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pixlay"
+path = "src/main.rs"
+
 [lints]
 workspace = true
+
+[dependencies]
+pixlay-core = { path = "../pixlay-core" }
+pixlay-imaging = { path = "../pixlay-imaging" }
+pixlay-render = { path = "../pixlay-render" }
+# GTK4 + libadwaita: the shell. `gtk/v4_10` is the level `GtkFileDialog` and
+# `GtkColorDialogButton` need (4.10 dropped the deprecated chooser dialogs);
+# `v1_7` is the level the widgets this window is built from need — `AdwDialog`
+# and `AdwAlertDialog` 1.5, `AdwToastOverlay` 1.7, `AdwToolbarView` and
+# `AdwOverlaySplitView` 1.4. Each is far below what Arch ships (gtk4 4.24,
+# libadwaita 1.10), per the "track the latest" policy.
+gtk4 = { version = "0.11.5", features = ["v4_10"] }
+libadwaita = { version = "0.9.2", features = ["v1_8", "gtk_v4_10"] }
+# i18n: gettext, the same toolchain GTK and libadwaita use for their own copy, so
+# `.po` files, `.desktop` and AppStream metainfo (S8) all go through one pipeline.
+# `gettext-system` links the system libintl rather than building a private copy.
+gettext-rs = { version = "0.8.0", features = ["gettext-system"] }
+
+[dev-dependencies]
+pixlay-cli = { path = "../pixlay-cli" }

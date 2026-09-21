@@ -28,6 +28,7 @@ use crate::crop::CropTransform;
 use crate::doc::CollageDoc;
 use crate::error::CoreError;
 use crate::grade::{FilterPreset, Grade};
+use crate::template::Template;
 use crate::text::{TextFallback, TextLayer};
 
 /// One edit to a document.
@@ -78,6 +79,30 @@ pub enum Command {
     RemoveText {
         index: usize,
     },
+    /// Replace the document's template geometry and its canvas in one step (S7).
+    ///
+    /// A template change is not a relayout of the same document: it changes the
+    /// slot count, so it resizes `cells` and can invalidate a text layer's
+    /// `sourceSlot`. The two halves travel together because a canvas and a
+    /// template must agree on their aspect ratio ([`CollageDoc::validate`]), so a
+    /// caller that sent them separately would have to pass through an invalid
+    /// document between the two commands.
+    ///
+    /// Retention: the first `min(old, new)` cells keep their photos, framing and
+    /// grades — a template with more slots appends empty ones, a smaller one
+    /// drops the tail — and a layer naming a slot the new template does not have
+    /// loses its `sourceSlot` (it keeps its text; the tokens that need a photo
+    /// then resolve against the document's fallback, contract §1). Nothing else
+    /// about a layer changes, and the whole command is one undo step.
+    ///
+    /// S6.5 deliberately had no such command ("choosing a template is how a
+    /// document starts"); S7's template picker is what it is for, because a user
+    /// who has placed photos must be able to try another layout without starting
+    /// over.
+    SetTemplate {
+        template: Template,
+        canvas: CanvasSpec,
+    },
     /// Replace the document's `{date}` fallback, which is what a text layer reads
     /// when the slot's photo carries no EXIF date (docs/CONTRACT.md §1).
     SetTextFallback {
@@ -92,6 +117,20 @@ pub enum Command {
 }
 
 impl Command {
+    /// The document this command would produce, without touching a [`History`].
+    ///
+    /// The GUI draws a gesture while it is happening (S7): a drag sends the whole
+    /// command on every motion event, and what is on screen has to be its result
+    /// without the history recording forty states. Written as "apply to a copy,
+    /// then validate", which is the same rule [`History::apply`] enforces, so a
+    /// preview cannot show a document the history would refuse.
+    pub fn applied_to(&self, doc: &CollageDoc) -> Result<CollageDoc, CoreError> {
+        let mut next = doc.clone();
+        self.apply(&mut next)?;
+        next.validate()?;
+        Ok(next)
+    }
+
     /// Applies the command to `doc`, which is left *unvalidated*.
     ///
     /// Private on purpose: [`History::apply`] is the validating entry point, and
@@ -137,6 +176,24 @@ impl Command {
                     });
                 }
                 doc.text.remove(*index);
+            }
+            Self::SetTemplate { template, canvas } => {
+                doc.template = template.clone();
+                doc.canvas = *canvas;
+                // One cell per slot, in template order: `resize` keeps the cells
+                // that still exist (with their photos, framing and grades) and
+                // appends defaults for new slots.
+                let slots = template.slots.len();
+                doc.cells.resize(slots, crate::Cell::default());
+                // A layer that named a slot the new template does not have keeps
+                // its text and loses the reference: dropping the layer would
+                // silently delete a user's watermark, and leaving the index would
+                // make the document invalid.
+                for layer in &mut doc.text {
+                    if layer.source_slot.is_some_and(|slot| slot >= slots) {
+                        layer.source_slot = None;
+                    }
+                }
             }
             Self::SetTextFallback { fallback } => doc.text_fallback = fallback.clone(),
             Self::SetCanvas { canvas } => doc.canvas = *canvas,
@@ -208,9 +265,7 @@ impl History {
     /// the top of the undo stack. An error therefore leaves the document and both
     /// stacks exactly as they were.
     pub fn apply(&mut self, command: Command) -> Result<(), CoreError> {
-        let mut next = self.doc.clone();
-        command.apply(&mut next)?;
-        next.validate()?;
+        let next = command.applied_to(&self.doc)?;
         self.undo.push(std::mem::replace(&mut self.doc, next));
         // The redo stack is a path, and applying a command after an undo forks
         // it: what was undone is no longer reachable from here.

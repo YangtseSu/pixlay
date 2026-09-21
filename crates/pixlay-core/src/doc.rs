@@ -224,6 +224,23 @@ pub struct Project {
 }
 
 impl Project {
+    /// A project around a document that has not come from a file yet (S7).
+    ///
+    /// The GUI edits a document in memory and only then decides where it lives;
+    /// this is what lets it use [`Project::save_as`] — and with it the relative
+    /// `source` rebasing — instead of writing the file itself. The document is
+    /// validated, so a project cannot exist around a document this build would
+    /// refuse to load.
+    pub fn new(doc: CollageDoc, path: impl Into<PathBuf>) -> Result<Self, CoreError> {
+        doc.validate()?;
+        let path = path.into();
+        Ok(Self {
+            doc,
+            dir: project_dir(&path).to_path_buf(),
+            path,
+        })
+    }
+
     pub fn load(path: &Path) -> Result<Self, CoreError> {
         let doc = CollageDoc::load(path)?;
         Ok(Self {

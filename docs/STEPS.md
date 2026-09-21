@@ -16,8 +16,8 @@ The first sentence for a new session:
 
 Legend: ✅ done · 🚧 in progress · ⏸ blocked (waiting on a human decision or external input) · ⬜ not started
 
-**Current progress: S6.5 — ✅ done (2026-09-21, no unfinished work; it is windowless and gate-free, so it closes with its own Result and tests and nothing waits on a human)**
-**Next action: start S7 (the GTK shell and interaction), in a new session. The boundary list's session ended with the S5+S6 pair and this session took S6.5, which adds no gate of its own; S7 opens a session of its own because it is the last window step and ends with the three-minute main path, which only a human can walk.**
+**Current progress: S7 — ⏸ implemented and machine-verified (2026-09-21); the window, the utility pane, the gestures, i18n and the background export are in place and all four GUI test binaries are green, but the step's own gate is the human walk of the main path, which has not happened yet**
+**Next action: a human walks "pick a template → place photos → adjust framing → export" by hand (`cargo run --release -p pixlay`, the scripted step list is in `docs/HIG-REVIEW.md` section 2) and rules on it; that ruling — the ruling block, the status row, the gate row in "Where humans must step in" and `docs/CONTRACT.md` — closes S7. S8 (packaging) starts in a new session after it.**
 
 | Step | Status | Date | What it delivers |
 |---|---|---|---|
@@ -29,7 +29,7 @@ Legend: ✅ done · 🚧 in progress · ⏸ blocked (waiting on a human decision
 | S5 · Text layers | ✅ done | 2026-09-21 | Canvas-level text in `pixlay-render` with Pango: free placement and tiled watermark through one mechanism, `{date}`/`{filename}`/`{index}` from the slot's photo, kinsoku by Pango and punctuation squeezing through the font's `halt`; `text` added to the CLI and the probe refuses text documents |
 | S6 · Export | ✅ done | 2026-09-21 | Physical size + DPI and long-edge-pixels modes, pixels and metadata written in one pass: `pixlay-imaging::encode` (PNG/JPEG/TIFF) + `icc`, `--long-edge` / `--chroma`, `dpi_for` |
 | S6.5 · Command history / project IO / hit testing | ✅ done | 2026-09-21 | `Command` + snapshot undo/redo, atomic `.pixlay` save with relative-path rebasing, `Template::slot_at` hit testing; `hit` and `save` added to the CLI |
-| S7 · GTK shell and interaction | ⬜ not started | — | The window: the three-minute main path, keyboard and HIG conformance, i18n wiring |
+| S7 · GTK shell and interaction | ⏸ waiting on the human walk | 2026-09-21 | The window: the three-minute main path, keyboard and HIG conformance, i18n wiring — implemented and machine-verified, the walk is what is missing |
 | S8 · Packaging | ⬜ not started | — | `PKGBUILD`, desktop file, icons, metainfo, translations; installable from AUR |
 
 **How a status is marked.** The status row above, the marker on the step's own heading, and the "Current progress" line are three renderings of the same claim and must always agree; changing one is part of closing the step. A step becomes ✅ only when its gate ruling is on disk — the five parts listed in `AGENTS.md` "Session and persistence discipline" (ruling block + status row + the gate entry under "Where humans must step in" + `docs/CONTRACT.md` + commit), with nothing missing. A step that is waiting on a human answer is ⏸, not 🚧.
@@ -61,6 +61,7 @@ Wherever the original criteria said "visual / readable / three minutes", they we
 | After S1 | Review the contract. This is the only place a human must confirm — if the contract is wrong, the seven steps after it are all wasted, and the model itself cannot see that "this contract will not be enough later". Before reviewing, first read "Open decisions": every entry in those tables changes the contract's shape | ✅ passed (2026-09-21, human): **contract v1 passes**, defects fixed per the review (see S1's ruling) |
 | After S4 | Look at the downsampling: is a 4000 px photo in a 400 px slot free of aliasing and mush? The numbers are on disk (RMSE 1.41 against ImageMagick's Lanczos, a 16x separation from one-sample-per-texel on the zone plate), the preview is `/var/tmp/verify-preview.png`, and S4's exit criteria call this the one human criterion of the step | ✅ passed (2026-09-21, human): **the downsampling passes** — the resampler stays as built, and the optional permanent threshold was declined (see "S4 · ruling") |
 | After S5 | Look at the text: do CJK line breaks and squeezed punctuation read right? The preview is `/var/tmp/pixlay-s5/text-preview.png` (the fixture `crates/pixlay-cli/tests/fixtures/text.pixlay`: a wrapped caption with `：“`, `。”` and a break inside a sentence, a `{date}` line, and a tiled watermark), the numbers are in "S5 · the one visual criterion", and S5's exit criteria call this the one human criterion of the step | ✅ passed (2026-09-21, human): **the text passes** — kinsoku stays Pango's and squeezing stays `halt`; line-end trimming stays a non-goal (see "S5 · ruling") |
+| After S7 | Walk the three-minute main path by hand and read the copy: is "pick a template → place photos → adjust framing → export" short enough, do the framing gestures and the straightening guides feel right, and does any label wrap or read badly? The script is in `docs/HIG-REVIEW.md` section 2, the machine-side numbers are in "S7 · measured", and the window the tests draw is `/var/tmp/pixlay-s7/window.png` | ⏸ waiting (2026-09-21): the implementation is complete and machine-verified; the walk itself has not been made |
 
 **The gate's closing action** is in `AGENTS.md` "Session and persistence discipline": a ruling block + the status row + this table's entry + `docs/CONTRACT.md` + commit,
 and it is not done if one of the five is missing.
@@ -1106,7 +1107,7 @@ The exit criteria, item by item:
 - S3's review additions had suggested merging hit testing into S3; S3's decisions kept it here (S3 decision 4), and nothing in this
   session needed that to be revisited.
 
-## S7 · GTK shell and interaction — ⬜ not started
+## S7 · GTK shell and interaction — ⏸ implemented, waiting on the human walk (2026-09-21)
 
 **This is where windows appear for the first time.** The layer underneath has been locked down by S1–S6, so problems from this step can only be in the GUI.
 
@@ -1163,6 +1164,144 @@ A "GNOME HIG" section has been added to `AGENTS.md`; only the checkable subset g
   not hardcoded a second time).
 - **Visual inspection**: go through `docs/HIG-REVIEW.md` item by item (high contrast, large text, keyboard-only, screen reader, touch and OSK, spacing and hierarchy,
   animation feel); the wording of HIG `guidelines/writing-style` also goes only through that checklist.
+
+### S7 result (2026-09-21)
+
+`[all criteria are in the tests in the repository; the numbers below are the release binary's output on this machine unless a test is named]`
+
+The exit criteria, item by item:
+
+| Criterion | Landing point | Measured |
+|---|---|---|
+| "pick a template → place photos → adjust framing → export" can be walked end to end | `pixlay/tests/mainpath.rs` (the same calls the widgets make), `pixlay/src/window.rs` (the widgets themselves) | the machine walk — template `grid-4-2x2`, four photos (one through the chooser's path, three dropped on the canvas), a zoom, a straighten and a pan, a JPEG and a PNG export, then save and reopen in a second window — is **12.9 s** including every decode and both exports. The *human* criterion (is it short, does it feel right) is the gate below |
+| with `LANG` unset, `C` or unknown the interface is English and starts up | `pixlay/tests/hig.rs::check_language` (three child processes, one per locale) + `pixlay/src/i18n.rs` | each of the three locales starts the window and finds the English source strings on screen ("Export", "Sheet size", "Template"); the locale itself is set by `gtk::init()` — measured: `gettext` returns the msgid before it and the translated string after — so this crate needs no `unsafe` `setlocale` |
+| `po/POTFILES` == `crates/pixlay/src/**/*.rs`, and the `.pot` is committed | `pixlay/tests/i18n.rs` | the two sets are equal (**11** files), and the committed `po/pixlay.pot` carries exactly the msgids a fresh `xgettext --language=Rust` finds: **118** of them, five tagged `rust-format`. A third check proves the wiring works at all: a `.mo` written into a locale directory is used (`"Export the collage"` → the test's synthetic translation) and a string it does not carry falls back to English |
+| normal under Wayland, no blocking UI | `pixlay/src/decode.rs`, `pixlay/src/export.rs`, `pixlay/src/window.rs` (`start_export`), `mainpath.rs` | decoding and encoding run on threads of their own and hand plain data back through `MainContext::invoke`; the export call returns in **under 500 ms** (asserted) while the render continues on the export thread, and the progress bar reports it. The real app runs for as long as it is left alone under the session's Wayland with nothing on stderr |
+| what the window renders is pixel-identical to `pixlay-cli render` at the same canvas size | `pixlay/tests/canvas.rs` | a five-photo document with a rotated slot and a `{date}` caption, rendered at 640x480 by the widget (snapshotted through a real render node) and by `pixlay-render`, which wrote a file that `pixlay-imaging` then decoded: **RMSE 0.0077** over 307,200 pixels against the threshold 6 (the same comparison at 900x675 measured 0.0036) |
+| the machine-checkable HIG subset is all green | `pixlay/tests/hig.rs` | shortcuts: the required set (`Ctrl+Q/W/O/S`, `Shift+Ctrl+S`, `Ctrl+Z`, `Shift+Ctrl+Z`, `Ctrl+?`, `Ctrl+N`, `F9`) is bound and nothing uses `Alt+*` / `Super+*` / `Ctrl+Alt+*`; accessible names on every interactive control; every action has a keyboard path; at the minimum size (480x360) the sheet is still drawn in full and the pane is still allocated; the app starts under both colour schemes and the canvas is **byte-identical** under them (RMSE 0.0); the about dialog's icon and version come from `APP_ID` and the crate's metadata |
+
+**What was built, in one line each.**
+
+- `crates/pixlay/src/state.rs`: the document as the window holds it — `History` (S6.5), the project
+  path, "dirty", resolving each cell's `source` against the project directory, and the **pending
+  gesture** that makes "one gesture = one command" true for a drag.
+- `crates/pixlay/src/canvas.rs`: the drawing area. It paints through `pixlay_render::draw` into the
+  widget's own context, adds only the selection outline and the straightening guides, and carries
+  the gestures (press/double-click, drag to pan, wheel to zoom, `Ctrl`+wheel to straighten, file
+  drop, and the keyboard: arrows, `+`/`-`, `0`, `Enter`, `Delete`).
+- `crates/pixlay/src/sidebar.rs`: the utility pane (`AdwOverlaySplitView`, `F9`), a sheet-size and
+  template chooser, the photo and framing rows, colour, the text-layer editor and the export form,
+  all through the command vocabulary.
+- `crates/pixlay/src/decode.rs` / `export.rs`: the two background workers, with latest-wins
+  coalescing, per-slot reuse of the previous result, and progress.
+- `crates/pixlay/src/window.rs`: `EditorWindow`, the one place that knows the document — the header
+  bar, the missing-photo banner, the toasts, the close confirmation and every action's effect.
+- `crates/pixlay/src/app.rs`: the application, its actions, the accelerator table and the two dialogs
+  HIG asks for; `crates/pixlay/src/i18n.rs` + `po/`: gettext.
+- `pixlay-core`: `Command::SetTemplate` and `Command::applied_to` (the live gesture), `Project::new`
+  (a project around a document that has not come from a file).
+
+### S7 · decisions this step made
+
+1. **`SetTemplate` is a command after all.** S6.5 decided "choosing a template is how a document
+   starts, not an edit to one", which is true of the *document* but not of the *window*: a user who
+   has placed five photos and wants a different layout must not have to start over, and the main
+   path begins with picking a template. The command carries the canvas as well, because a canvas and
+   a template have to agree on their aspect ratio and two commands would pass through an invalid
+   document in between. Retention is stated and tested: the cells that still exist keep their photos,
+   framing and grades, and a text layer naming a slot that no longer exists keeps its text and loses
+   only the reference.
+2. **The sheet size is a length, not a paper format.** A template's geometry is authored for one
+   aspect ratio and `validate` refuses a canvas that disagrees, so "A4 / A3 / A0" are long edges and
+   the *shape* comes from the selected template (`CanvasSpec::with_ratio`). Offering a literal
+   297x210 mm A4 would mean offering a canvas no template in the library fits.
+3. **A gesture is pending, not committed.** The canvas sends the whole command on every motion event;
+   `Editor::begin` applies it to a copy for the canvas to draw and `Editor::commit` turns the last
+   one into the single undo step. `Command::applied_to` is the core-side half of that. A slider has
+   no "drag ended" signal, so a gesture also commits when its value has been quiet for 250 ms.
+4. **Gestures edit the *fit*, not the stored request.** The fit is what the user is looking at
+   (S3: "a crop is a request; what is drawn is its fit"), so dragging a photo by a hundred pixels
+   moves it by a hundred pixels whatever zoom the document stores — and because the gesture stores
+   the fitted transform, the pan clamp cannot leave a dead zone the user has to drag back out of.
+5. **The preview grid belongs to the widget.** Bitmaps are decoded and resampled for the largest
+   canvas-aspect grid that fits the canvas pane, so at rest the canvas only blits (scale 1.0). A
+   widget that has just been resized draws its previous grid with a uniform *preview* scale until
+   the new decode lands: that is `Target::scale`, a scale of the whole canvas, and never a photo
+   stretched inside its slot.
+6. **Two threads, two jobs, one rule.** The decoding worker keeps its previous result and rebuilds
+   only the slots whose cell, source, grid, template or filter changed, so reframing one photo of
+   eight does not re-decode eight; requests are coalesced latest-wins, so a drag costs one decode at
+   a time. The export worker reports progress. Both hand plain data back through
+   `MainContext::invoke`, since a GTK object may not leave the main thread.
+7. **The canvas overlays use the theme's own colour.** `Widget::color()` is what the selection
+   outline and the guides are drawn with, because a hard-coded grey would be unreadable in high
+   contrast mode, and the sheet itself is white *content* in either style — which the test pins by
+   asking for byte-identical canvas pixels under both forced colour schemes.
+8. **An accessible name is set on every control, and the check accepts GTK's own derivation.** The
+   `gtk_test_accessible_*` property is only set when the app sets it — a `GtkButton` carrying a
+   `GtkLabel` has no explicit label property — so the check is "explicit, or derived from the
+   control's own text". That is how HIG `guidelines/accessibility` describes it ("GTK provides
+   default accessible descriptions") and it lets GTK's own internals (the button `AdwBanner`
+   creates) pass without pretending they are ours.
+9. **The headless path needed one environment variable, and it was found the hard
+   way.** Re-running a GUI test under `xvfb-run` crashed with a stack overflow until
+   the child was given `GTK_IM_MODULE=gtk-im-context-simple`: without a session bus
+   there is no ibus to reach, and GTK's `im-ibus` module **recurses into itself**
+   trying (the backtrace alternates `libim-ibus.so` with `g_type_create_instance`,
+   and a 64 MiB stack does not survive it). This is the path S8's chroot `check()`
+   will use, so it is pinned in `tests/support/mod.rs` together with
+   `NO_AT_BRIDGE=1`.
+10. **The GUI tests are one test per binary.** GTK lives on one thread and libtest runs a binary's
+   tests in parallel threads, so `tests/hig.rs`, `canvas.rs`, `mainpath.rs` and `i18n.rs` each hold
+   exactly one `#[test]`, and each starts by making sure it has a display — re-running itself under
+   `xvfb-run` when the session has none, rather than skipping silently.
+
+### S7 · deviations from and additions to the review additions
+
+1. **`SetTemplate` is new** (decision 1): the review additions assumed the template picker could only
+   start a document, and the window needs to change one.
+2. **The export form lives in the pane, not in a dialog.** The review asked for "export in the
+   background + progress feedback"; a dialog in front of the main path's last step is one more thing
+   to dismiss, so the settings are rows in the utility pane, the header's Export button uses them,
+   and the progress is a bar in the bottom bar.
+3. **The i18n dependency is `gettext-rs` 0.8** with the `gettext-system` feature (the system
+   libintl, not a private copy), registered in `AGENTS.md`.
+4. **`--language=Rust` for extraction is confirmed by measurement in the repository itself**: the
+   `rust-format` tag appears on the five msgids that carry `{}` placeholders, and the i18n test
+   compares the committed `.pot` with a fresh extraction on every run instead of trusting the
+   command that produced it once.
+5. **`xgettext` is now a test-time dependency** (one test binary), which is consistent with S8's
+   plan to run `msgfmt --check` in `check()`; a machine without gettext-tools fails the check with
+   the command it needs, rather than passing quietly.
+
+### S7 · measured (2026-09-21, `--release`, this machine)
+
+| Item | Value |
+|---|---|
+| the window against the CLI, 640x480, five photos + a rotated slot + a `{date}` caption | **RMSE 0.0077** over 307,200 pixels (threshold 6); the same at 900x675: 0.0036 |
+| the canvas under both colour schemes | RMSE **0.0** (byte-identical) |
+| the machine's walk of the main path | **12.6 s** end to end: template → four photos → zoom/straighten/pan → JPEG (`--long-edge 600`, 600x600 for that square template) and PNG (150 dpi) → save → reopen in a second window → the missing-photo case (**2.2 s** of it) |
+| a photo that is not there | the slot is reported (`missing_photos`), the window's notice says a photo is missing, its bitmap drops out of the three that remain, and an export is **refused** rather than written — asserted in `tests/mainpath.rs`, which is what makes the contract's "a missing photo is visible, not silent" a claim with a test |
+| the export call | returns in **< 500 ms** while the render continues on the worker (asserted), progress reported in the bottom bar |
+| the GUI test binaries | `hig` 3.5 s, `canvas` 4.2 s, `mainpath` 14.2 s, `i18n` 0.1 s |
+| the same four with no display at all (`env -u DISPLAY -u WAYLAND_DISPLAY -u XDG_RUNTIME_DIR cargo test`) | all green: each re-runs itself under `xvfb-run`, and the whole workspace suite reports **39** passing test binaries and no failures |
+| the strings | 11 files in `po/POTFILES`, **118** msgids, 5 `rust-format` |
+| the real app | `target/debug/pixlay` runs under the session's Wayland indefinitely with nothing on stderr (a 6 s probe ended only because of the timeout) |
+| visual inspection | `/var/tmp/pixlay-s7/window.png` — the window at the end of the machine walk: header bar (pane toggle, title, undo/redo/save/menu/Export), the pane's Canvas/Template/Photo/Framing rows, and the collage with the selected slot outlined |
+
+### S7 · the one visual criterion
+
+**The human walks the main path and reads the copy**, and both are specified as a script in
+`docs/HIG-REVIEW.md` section 2 (the scripted step list, and the HIG accessibility checklist: high
+contrast, large text, keyboard-only, screen reader, touch/OSK). What the machine already answers:
+the path works and takes 12.6 s end to end, the copy is English under any locale, the shortcuts are
+bound, the canvas matches the CLI, and the window looks like `window.png`. What only a person can
+judge is whether the walk feels short, whether the framing gestures and the straightening guides
+feel right, and whether the copy reads well.
+
+**Status: implemented, machine-verified, and waiting for the walk (2026-09-21) — the ruling is not
+written yet, so S7 is ⏸, not ✅.** The gate's five parts (ruling block, status row, the entry under
+"Where humans must step in", `docs/CONTRACT.md`, commit) close it in the session that walks it.
 
 ## S8 · Packaging — ⬜ not started
 

@@ -425,7 +425,7 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
 | clamp math | **S3, landed** | `CropTransform::fit(slot, canvas_aspect, photo_aspect) -> CropFit { transform, rotation_limited }`, applied by `draw`; the fit is idempotent and never exceeds `MAX_ZOOM` |
 | template generator | **S2, landed** | `pixlay_core::templates` (`generator` recipes + the committed `frozen` data) and the `templates` / `init` subcommands; see §3 and §5 |
 | the image pipeline | **S4, landed** | `pixlay-imaging`: `Source::decode`, `resample`, `LinearRgb16::apply`, `slot_bitmap`/`slot_bitmaps`, `probe`; the buffer ladder and the colour decisions are §4.1 |
-| command history / hit testing / project writing | **S6.5, landed** | `pixlay-core`: `Command` (one edit: source, framing, grade, filter, text layers, the `{date}` fallback, the canvas) and `History` (snapshot undo/redo; `apply` is all-or-nothing and the document has no mutable accessor), `Template::slot_at(point)` for hit testing, `CollageDoc::save` / `Project::save` / `Project::save_as` for writing a document. The CLI's `hit` and `save` are the machine surface of the first and the last; the command history is a test surface only, on purpose (§5) |
+| command history / hit testing / project writing | **S6.5, landed**; `SetTemplate` added by **S7** | `pixlay-core`: `Command` (one edit: source, framing, grade, filter, text layers, the `{date}` fallback, the template and its canvas — `SetTemplate` carries both because a canvas and a template must agree on their aspect ratio — and the canvas alone) and `History` (snapshot undo/redo; `apply` is all-or-nothing and the document has no mutable accessor), `Template::slot_at(point)` for hit testing, `CollageDoc::save` / `Project::save` / `Project::save_as` for writing a document. The CLI's `hit` and `save` are the machine surface of the first and the last; the command history is a test surface only, on purpose (§5) |
 | text rendering | **S5, landed** | `pixlay_render::text`: one Pango layout per layer, drawn by `draw`; token resolution is `TextLayer::resolve` in `pixlay-core`, the tile grid is `pixlay_core::tiled_grid`; see §1 "Text layers" |
 | encoding and metadata | **S6, landed** | `pixlay_imaging::encode`: one pass per format writing pixels, resolution, sampling and the ICC profile (`icc`), for PNG / JPEG / TIFF; the CLI's `--long-edge` / `--chroma` and the per-format rules are §5, the profile is §4.1 |
 
@@ -486,4 +486,59 @@ eight photos and one `{date}` layer on a 14043x10532 A0 sheet, per format:
 | what the tools report | PNG: `Resolution: 118.11x118.11 PixelsPerCentimeter`; JPEG: `300x300 PixelsPerInch`, `jpeg:sampling-factor: 1x1,1x1,1x1` (and `2x2,1x1,1x1` for `--chroma 420`); TIFF: `300x300 PixelsPerInch` and `ICC Profile: <present>, 664 bytes` (the `914.4, 914.4 pixels/inch` reading is the encoder test's fractional-resolution case; checked with `identify -verbose` and `tiffinfo`) |
 | visual inspection | `/var/tmp/pixlay-s6/preview.png`: the same eight slots as S5, the concave slot continuous, the photos' own white blocks where the fixtures have them, the `{date}` caption reading `2019:07:14 10:32:00`, no white inside any slot |
 
+### S7 (2026-09-21, `--release`, this machine)
+
+| Item | Value |
+|---|---|
+| the window against the CLI (`tests/canvas.rs`) | five photos, one rotated slot and a `{date}` caption at a 640x480 grid: **RMSE 0.0077** over 307,200 pixels (threshold 6). The same comparison at 900x675 measured 0.0036 |
+| the canvas under both colour schemes (`tests/hig.rs`) | **byte-identical** (RMSE 0.0), so the sheet is content and not styling |
+| the machine's walk of the main path (`tests/mainpath.rs`) | template → four photos (one chosen, three dropped) → zoom/straighten/pan → JPEG and PNG export → save and reopen → the missing-photo case: **12.6 s** including two windows, four decodes at two sizes, both exports and the 2.2 s missing-photo half; the JPEG at `--long-edge 600` is 600x600 for that square template |
+| a missing photo | the slot is reported, the window notices it, its bitmap drops out and the export is refused (asserted) — the contract's "visible, not silent" is a claim with a test |
+| the real app | `target/debug/pixlay` runs under the session's Wayland for as long as it is left alone, with nothing on stderr; the window the tests draw is `/var/tmp/pixlay-s7/window.png` |
+| the strings | `po/POTFILES` = the crate's 11 source files; `xgettext --language=Rust` finds **118** msgids, five of them tagged `rust-format` |
+| the layout | utility pane 380 px maximum beside the canvas; at the minimum window size (480x360) the sheet is still drawn in full and the pane is still allocated (asserted) |
+| a display, or none | the four GUI test binaries are one test each and run on the session's display; with none they re-run themselves under `xvfb-run` (pinning `GTK_IM_MODULE=gtk-im-context-simple` and `NO_AT_BRIDGE=1`, because GTK's `im-ibus` module recurses without a session bus), and the whole suite is green headlessly |
+
 Every threshold constant in the tests annotates this source, so a change in the numbers can be discovered.
+
+## 9. The window (S7)
+
+The GUI is the fifth consumer of the same document, and what it adds is interaction. Its
+contract is what a caller can rely on without looking at a widget:
+
+- **One document at a time**, edited only through `Command` (`History` in `pixlay-core`): the
+  window has no second edit path, and **one gesture is one command**, committed when the
+  gesture ends. A gesture is *pending* while it happens (`Editor::begin`), so the canvas shows
+  the drag without the undo stack recording forty states; a slider, which has no end signal,
+  commits when its value has been quiet for 250 ms.
+- **One renderer.** The canvas paints the document with `pixlay_render::draw` into the widget's
+  own cairo context — the same call the CLI and the export make. Measured: what the window
+  draws and what `pixlay-render render` writes differ by an RMSE of **0.0077** over 307,200
+  pixels of a five-photo document (threshold 6), which is glyph antialiasing and the 1 px
+  framing rect, not a divergence.
+- **The preview grid is the widget's.** The bitmaps are decoded and resampled for the largest
+  canvas-aspect grid that fits the canvas pane (`canvas::preferred_grid`), and while a
+  just-resized widget waits for its new bitmaps the previous grid is drawn with a uniform
+  preview scale — a scale of the whole canvas, in the sense `Target::scale` already has it,
+  replaced as soon as the decode lands.
+- **Background work, one thread each.** Decoding (`decode.rs`) and exporting (`export.rs`) run
+  on their own threads and hand plain data back through `MainContext::invoke`, because a GTK
+  object may not leave the main thread. Decode requests are coalesced (latest wins) so a drag
+  costs one decode at a time, and the worker keeps the previous result and re-decodes only the
+  slots whose cell, source, grid, template or filter changed. An export reports progress, which
+  the window shows in a progress bar rather than a modal.
+- **The accelerator table is data** (`crates/pixlay/src/app.rs::ACCELERATORS`): the bindings, the
+  shortcuts dialog and the HIG test all read it, so they cannot drift. No binding uses
+  `Alt+*`, `Super+*` or `Ctrl+Alt+*`.
+- **Everything user-visible goes through gettext**, domain `pixlay`, source language English
+  (`i18n.rs`); `po/POTFILES` lists this crate's sources, `po/pixlay.pot` is committed, and with
+  no catalog — a missing, `C` or unknown locale — the msgs come back as the English source
+  strings. The locale itself is set by `gtk::init()` (measured: `gettext` returns the msgid
+  before it and the translated string after), so no `unsafe` `setlocale` call exists.
+- **A missing photo is visible, not silent**: the cell renders white, an `AdwBanner` says how
+  many photos are missing and its button selects the first of them, and an export refuses
+  (as the CLI does) instead of writing a hole.
+
+What the window does *not* do, by decision: no second renderer, no second document model, no
+mode switching, no per-window state that a saved project does not carry, and no translation
+files (S8 adds the language packs).
