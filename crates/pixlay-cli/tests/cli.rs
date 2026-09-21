@@ -1197,12 +1197,29 @@ fn templates_lists_the_library_and_filters_by_aspect() {
     assert_eq!(field(&none, "count"), "0");
     assert!(stdout(&none).contains("status = ok"));
 
-    // Same input, same bytes, and `--json` is the same data.
+    // Same input, same bytes, and `--json` is the same data: the group the filter
+    // returns is the library's own 4:3 group, in library order. The expectation is
+    // read from `templates` rather than written as a literal, so adding a layout
+    // does not invalidate this test (S10 added four 4:3 ones).
     assert_eq!(stdout(&all), stdout(&run(&["templates"])));
+    let group: Vec<&str> = templates::names()
+        .into_iter()
+        .filter(|name| templates::get(name).is_some_and(|template| template.aspect == 4.0 / 3.0))
+        .collect();
+    assert!(
+        group.contains(&"mosaic-8-s14"),
+        "the smoke template's own group: {group:?}"
+    );
     let json = run(&["templates", "--aspect", "4:3", "--json"]);
     let value: serde_json::Value = serde_json::from_str(&stdout(&json)).expect("valid JSON");
-    assert_eq!(value["count"], 3);
-    assert_eq!(value["template.2.name"], "mosaic-8-s14");
+    assert_eq!(value["count"], group.len());
+    for (index, name) in group.iter().enumerate() {
+        assert_eq!(
+            value[format!("template.{index}.name").as_str()],
+            *name,
+            "the JSON group drifted from the library"
+        );
+    }
 
     // Out-of-range and malformed ratios are usage errors with an empty stdout.
     for bad in ["0", "20", "4:0", "x:y", "", "4:3:2"] {

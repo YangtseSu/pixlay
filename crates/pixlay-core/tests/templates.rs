@@ -22,7 +22,7 @@
 use std::process::Command;
 
 use pixlay_core::templates::{SMOKE_TEMPLATE, TEMPLATE_VERSION, generator};
-use pixlay_core::{MAX_SLOTS, MIN_SLOTS, Point, Template, templates};
+use pixlay_core::{MAX_PHOTOS, MAX_SLOTS, MIN_PHOTOS, MIN_SLOTS, Point, Template, templates};
 
 /// Points sampled per axis when rasterizing a template. 512 per axis is 262144
 /// samples: a multiple of the 32-cell lattice, so the coverage verdict is exact,
@@ -290,6 +290,40 @@ fn every_slot_count_from_two_to_ten_is_covered() {
 }
 
 #[test]
+fn every_count_the_picker_offers_carries_three_layouts_in_two_aspect_families() {
+    // S10's exit criterion (ruling 10): the gallery of S14 has to give a person a
+    // choice, so every photo count the picker can produce carries at least three
+    // layouts, spread over at least two aspect families. The range is the
+    // *selection's* own pair of constants — a picker cannot ask for a count it
+    // refuses to select — and its ceiling is 9 rather than the library's
+    // `MAX_SLOTS` of 10 because ten photos is a count the product does not offer
+    // (ruling 3); the coverage test above is the one that still holds 10 to a
+    // layout.
+    let templates = templates_under_test();
+    let mut histogram = Vec::new();
+    for count in MIN_PHOTOS..=MAX_PHOTOS {
+        let layouts: Vec<&Template> = templates
+            .iter()
+            .filter(|template| template.slots.len() == count)
+            .collect();
+        let mut aspects: Vec<f64> = layouts.iter().map(|template| template.aspect).collect();
+        aspects.sort_by(f64::total_cmp);
+        aspects.dedup();
+        histogram.push((count, layouts.len(), aspects.len()));
+    }
+    // The histogram as (photos, layouts, aspect families). One assertion over it,
+    // so a failure reports the shape of the whole library rather than one row, and
+    // a reader can check the same numbers against `pixlay-render templates`.
+    assert!(
+        histogram
+            .iter()
+            .all(|&(_, layouts, families)| layouts >= 3 && families >= 2),
+        "every count from {MIN_PHOTOS} to {MAX_PHOTOS} needs at least three layouts in at least two \
+         aspect families; the histogram is {histogram:?}"
+    );
+}
+
+#[test]
 fn the_matrix_is_grouped_by_aspect_ratio() {
     // `docs/CONTRACT.md` §3: the library is grouped by aspect ratio, because
     // a canvas and a template only fit each other when their ratios agree. A
@@ -404,6 +438,72 @@ fn the_smoke_template_is_frozen_by_name_and_version() {
         .filter(|slot| slot.outline.points.len() > 4)
         .count();
     assert_eq!(irregular, 1, "exactly one slot is irregular");
+}
+
+/// The templates that had shipped before S10, each with [`fingerprint`] of its
+/// geometry. S10 could add layouts but not move one, and these are how that lasts.
+#[rustfmt::skip]
+const SHIPPED_BEFORE_S10: [(&str, u64); 12] = [
+    ("strip-2-1x2", 8542848068752417087),
+    ("strip-2-2x1", 12797188679629256609),
+    ("strip-3-3x1", 1976477295676291470),
+    ("grid-4-2x2", 13096350302310297877),
+    ("grid-4-2x2g", 17389504763641419960),
+    ("strip-4-4x1", 5175934212029319384),
+    ("mosaic-5-hero", 16738324239986222256),
+    ("grid-6-3x2", 12565181570727305131),
+    ("mosaic-7-t4b3", 18222112623581619225),
+    ("mosaic-8-s14", 1804114584250607058),
+    ("grid-9-3x3", 14137598548244331905),
+    ("strip-10-10x1", 11821882746657861092),
+];
+
+/// FNV-1a 64 over the source the generator emits for one template, from its table
+/// row on (the file's prose header is not geometry and is not hashed).
+///
+/// Written out rather than taken from `std` because `DefaultHasher`'s algorithm
+/// is not a stable interface, and a fingerprint that changed with the toolchain
+/// would fail for the wrong reason (`AGENTS.md`: `cargo test` must not depend on a
+/// toolchain version). The emitted floats use `{:?}`, which is the shortest
+/// representation that reads back exactly — the same property `frozen.rs` itself
+/// relies on.
+fn fingerprint(template: &Template) -> u64 {
+    let source = generator::emit_source(std::slice::from_ref(template));
+    let body = &source[source
+        .find("    Frozen {")
+        .expect("the emitter writes one table row per template")..];
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in body.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+#[test]
+fn templates_that_shipped_before_s10_keep_their_geometry() {
+    // `AGENTS.md`: a template that ships keeps its name, its version and its
+    // geometry forever, because a document embeds a copy of the geometry and a
+    // saved project's layout *is* that copy. Regenerating `frozen.rs` cannot check
+    // this: editing an old recipe and regenerating moves both sides together. So
+    // the geometry of the templates that had already shipped when the gallery was
+    // filled in is written down here, and a mismatch is a project-compatibility
+    // break rather than a diff to accept.
+    let templates = templates_under_test();
+    for (name, expected) in SHIPPED_BEFORE_S10 {
+        let template = templates
+            .iter()
+            .find(|template| template.name == name)
+            .unwrap_or_else(|| panic!("{name} left the library"));
+        let actual = fingerprint(template);
+        assert_eq!(
+            actual,
+            expected,
+            "{name}: the geometry of a template that shipped before S10 moved, which changes the \
+             layout of every project built on it. Its geometry is now:\n{}",
+            generator::emit_source(std::slice::from_ref(template))
+        );
+    }
 }
 
 #[test]

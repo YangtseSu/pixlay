@@ -191,13 +191,23 @@ limit that is not in this table is a contract gap.
   "the areas sum to exactly 1.0" is an equality, not a tolerance. The coverage check in the tests depends on it too: `512` samples per axis
   is a multiple of `32` and the samples sit at cell centers, so no sample lands on an edge and none can miss a feature.
 - **The matrix is grouped by aspect ratio**, because a canvas and a template only fit each other when their ratios agree (see the limit table).
-  The families are `strip-<slots>-<cols>x<rows>` (one band), `grid-<slots>-<cols>x<rows>` (a rectangular tiling, `g` = with a gutter) and
+  The families are `strip-<slots>-<cols>x<rows>` (one band), `grid-<slots>-<cols>x<rows>` (a rectangular tiling) and
   `mosaic-<slots>-<variant>` (mixed splits or a non-rectangular slot) — plus the frozen `mosaic-8-s14`, whose name, `version`, aspect,
   slot order and coordinates are unchanged by S2 (S1's hand-written geometry is now produced by the generator instead of written out).
+  A `g` suffix marks a **gutter** in either family (`grid-4-2x2g`, `strip-2-2x1g`): the panes stop short of each other, so the template
+  does not tile its canvas and its areas sum to less than 1.0.
 - **Geometry version and document version are separate**: `template.version` follows the template family, `docVersion` follows the format.
 - **The canvas aspect ratio must agree with what the template declares** (tolerance 1e-6): the geometry is normalized, and declaring a canvas with a different ratio silently
   stretches the template, while this error is invisible no matter which layer you look at it from.
 - **The library covers every slot count from 2 to 10**, at least one template each; the CLI's `templates` reports the matrix and filters it by aspect ratio.
+- **The picker's range is deeper than one layout** (S10, ruling 10): every count from 2 to 9 carries **at least three
+  layouts, in at least two aspect families** — 27 templates and 152 slots in all, which `pixlay-render templates` reports
+  and `crates/pixlay-core/tests/templates.rs` asserts as a histogram over `MIN_PHOTOS..=MAX_PHOTOS`. Ten keeps the single
+  template S2 shipped, because no picker reaches it (ruling 3).
+- **A shipped name keeps its geometry and its `templateVersion` forever**: S10 added 15 layouts and moved none, and that is a
+  test as well as a regeneration diff — `crates/pixlay-core/tests/templates.rs` pins a fingerprint of the geometry every
+  template that had shipped before S10 still has, because the determinism test alone cannot see a recipe edit that was
+  regenerated with it.
 
 ## 4. Rendering: `draw(doc, images, target)`
 
@@ -558,6 +568,58 @@ eight photos and one `{date}` layer on a 14043x10532 A0 sheet, per format:
 
 That is the picker's budget number S12 is decided against: a 256 px preview of a 1 MP photo costs
 ~50 ms and 20 MB in this build, which is the cost a gesture step must not pay per frame.
+
+### S10 (2026-09-22, `--release`, this machine)
+
+The gallery's raw material: 15 new layouts, and not one shipped layout moved. The counts are what
+`pixlay-render templates` reports; the histogram is (photos → layouts, aspect families).
+
+| Item | Value |
+|---|---|
+| the library | **27 templates, 152 slots** (S9: 12 and 64), `count = 27`, exit 0 |
+| the histogram, 2..=9 | 2 → **3**/3 · 3 → **3**/3 · 4 → **4**/3 · 5 → **3**/3 · 6 → **4**/4 · 7 → **3**/3 · 8 → **3**/3 · 9 → **3**/3 — no count below three layouts, none in a single aspect family |
+| ten | `strip-10-10x1` alone, unchanged and never offered: the picker's ceiling is 9 (ruling 3) |
+| the S2 invariants over the grown library | 262,144 samples per template: **0 overlapping pairs**; **0 uncovered samples** in the 25 cut templates; the two guttered ones (`grid-4-2x2g`, `strip-2-2x1g`) leave an uncovered region a flood fill from the border reaches (**0 sealed samples**); every cut template's declared areas sum to **exactly 1.0** |
+| the shipped geometry | `frozen.rs` **16,795 bytes**; the regeneration diff is **193 insertions, 0 deletions**, so every byte a project built before S10 embeds is still there |
+| the same fact as a test | `templates_that_shipped_before_s10_keep_their_geometry`: FNV-1a against the emitted source of all 12 pre-S10 templates; verified to fail by moving `strip-2-1x2`'s split by one lattice cell and regenerating |
+| the new layouts render | 15/15 `init --photo` then `render --long-edge 800` exit 0, **135,986–282,539 bytes** each on the fixture photos, and the contact sheet of all 15 is `/var/tmp/pixlay-s10/s10-layouts.png` |
+| the `AGENTS.md` verification render, unchanged by this step | 14043x10532, **ms 7232** + **`encode_ms` 2132**, **`peak_rss_mb` 1638**, 9,221,906 bytes, `text = 1`, `occupied = 8` — the same document S9 rendered, since `verify.pixlay` carries its own geometry |
+| the test suite | `cargo test` green; the sweeps that walk the whole library got 88 slots longer (hit test 152 slots, layout region sweep 152 × framings, framing sweep 27 templates) |
+
+**Ruling (2026-09-22, human): keep all 15 layouts.** The visual gate after S10 was answered against the
+contact sheet rendered with the fixture photos (`/var/tmp/pixlay-s10/s10-layouts.png`), so the library of
+§3 stands as measured, nothing was dropped and nothing reworked; the numbers above are its basis, and the
+plan's next step is S11.
+
+**Decisions this step made** (all of them additions to a frozen artifact, so each one is a name that can
+never be edited again):
+
+- **The histogram is asserted over `MIN_PHOTOS..=MAX_PHOTOS`, not over a literal 2..=9.** The range is the
+  selection's own pair of constants, so a change to the picker's cap moves the assertion with it instead of
+  leaving a gap behind. Ten keeps the one template it had: it is the library's `MAX_SLOTS`, not a count the
+  product offers, and its coverage is S2's criterion, which still holds it.
+- **The shipped geometry is pinned by a fingerprint, not by the regeneration diff alone.** The determinism
+  test cannot catch "edit an old recipe, regenerate, commit": both sides move together. The fingerprint table
+  (`SHIPPED_BEFORE_S10`, FNV-1a over the emitted source, written out rather than `DefaultHasher` because a
+  hash algorithm that changes with the toolchain would fail for the wrong reason) is what makes the rule
+  *a shipped name keeps its geometry forever* machine-checked, and the failure message prints the whole
+  emitted geometry so a reviewer sees which vertex moved.
+- **The gutter idiom extended to a strip** (`strip-2-2x1g`, 1/16 of the canvas, top border to bottom). It
+  gives the second gutter *shape* a hit test has to answer for — `grid-4-2x2g`'s cross reaches the border in
+  four directions, this one in two — and it is the layout two photos with a visible frame between them is.
+  The `g` suffix is therefore documented for both families, and the hit test now checks both.
+- **A second portrait layout, and four new aspect groups.** `strip-3-1x3` (2:3) and `grid-6-2x3` (2:3) are
+  the portrait counterparts of layouts that only existed landscape: a portrait canvas with three or six
+  photos had one candidate and now has three. Every new layout was placed in a family the count did not have
+  yet where one was missing, which is why every count 2..=9 ends up with three or more aspects rather than
+  the required two.
+- **The new layouts are equal-sized where a dyadic lattice allows it and deliberately uneven otherwise**
+  (`strip-5-5x1` is 3/16 × four plus 4/16, `strip-9-9x1` is six 2/16 panes then 1/16, 1/16, 2/16): an odd
+  number of equal columns is not representable on a power-of-two lattice, and `strip-10-10x1` had already set
+  the pattern. The alternative — a /64 lattice for the strips — would have multiplied the ladder's smallest
+  cells for no visible gain.
+- **No new dependency, no `Cargo.lock` change** (`cargo update --workspace` locked 0 packages), and no change
+  to any document, limit or CLI shape: S10 is data, plus the assertion that keeps the data's growth honest.
 
 Every threshold constant in the tests annotates this source, so a change in the numbers can be discovered.
 

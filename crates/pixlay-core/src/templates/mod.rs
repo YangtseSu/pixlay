@@ -25,9 +25,15 @@
 //!
 //! * `strip-<slots>-<cols>x<rows>` — one band: a single row or a single column.
 //! * `grid-<slots>-<cols>x<rows>` — a rectangular tiling that repeats the same
-//!   splits in both directions. A `g` suffix is the same grid with a gutter, so
-//!   the slots do not tile the canvas and their areas sum to less than 1.0.
+//!   splits in both directions.
 //! * `mosaic-<slots>-<variant>` — mixed splits or a slot that is not a rectangle.
+//!
+//! A `g` suffix marks a **gutter** — a strip or a grid whose panes stop short of
+//! each other, so the slots do not tile the canvas and their areas sum to less
+//! than 1.0 (`grid-4-2x2g`, `strip-2-2x1g`). Since S10 the picker's range carries
+//! at least three layouts for every photo count from 2 to 9, in at least two
+//! aspect families; ten ships the one template it always shipped, because no
+//! picker reaches it (ruling 3).
 //!
 //! `mosaic-8-s14` predates the scheme: it is the template S1 froze and the name
 //! `AGENTS.md`'s verification command uses, so its name, version, aspect, slot

@@ -89,6 +89,14 @@ const R_2_3: f64 = 2.0 / 3.0;
 /// recipes read as: which counts, on which canvas shapes. Every aspect ratio in
 /// the list is one a printed canvas uses (1:1, 4:3, 3:2, 16:9) or its portrait
 /// counterpart (2:3).
+///
+/// Since S10 the picker's range — 2..=9 photos, ruling 3 — carries **at least
+/// three layouts per count, in at least two aspect families**, because a gallery
+/// that offers one candidate is not a choice
+/// (`docs/2026-09-22-STEPS.md`, S10; asserted by
+/// `crates/pixlay-core/tests/templates.rs`). Ten still ships exactly the one
+/// template it shipped with: no picker reaches it, and its layout is frozen data
+/// like every other member's.
 static RECIPES: &[Recipe] = &[
     // Two rows on a portrait canvas. The simplest layout there is, and the
     // portrait counterpart of `strip-2-2x1`: the picker offers one or the other
@@ -108,6 +116,18 @@ static RECIPES: &[Recipe] = &[
         grid: 16,
         slots: &[rect(0, 0, 8, 16), rect(8, 0, 16, 16)],
     },
+    // The same pair on a square canvas, with a binder's gutter between the panes:
+    // they stop a 1/16 canvas width short of each other, so this is the one
+    // *strip* that does not tile its canvas and its areas sum to less than 1.0.
+    // The gutter runs from the top border to the bottom one, so it is a gutter and
+    // not an interior hole — the argument `grid-4-2x2g`'s cross makes, rotated.
+    Recipe {
+        name: "strip-2-2x1g",
+        version: 1,
+        aspect: R_1_1,
+        grid: 32,
+        slots: &[rect(0, 0, 15, 32), rect(17, 0, 32, 32)],
+    },
     // Three columns, unequal: 5/16, 6/16, 5/16. Unequal spans are what makes a
     // strip a layout rather than a repeated pane.
     Recipe {
@@ -116,6 +136,25 @@ static RECIPES: &[Recipe] = &[
         aspect: R_16_9,
         grid: 16,
         slots: &[rect(0, 0, 5, 16), rect(5, 0, 11, 16), rect(11, 0, 16, 16)],
+    },
+    // The portrait counterpart of `strip-3-3x1`: three rows, the same unequal
+    // 5/16, 6/16, 5/16 spans. Before it a portrait canvas offered no three-photo
+    // layout at all.
+    Recipe {
+        name: "strip-3-1x3",
+        version: 1,
+        aspect: R_2_3,
+        grid: 16,
+        slots: &[rect(0, 0, 16, 5), rect(0, 5, 16, 11), rect(0, 11, 16, 16)],
+    },
+    // A hero panel down the left half with two stacked panels beside it: three
+    // photos of two sizes, which is what the `hero` family means.
+    Recipe {
+        name: "mosaic-3-hero",
+        version: 1,
+        aspect: R_4_3,
+        grid: 16,
+        slots: &[rect(0, 0, 8, 16), rect(8, 0, 16, 8), rect(8, 8, 16, 16)],
     },
     // The plain 2x2 grid: four equal rectangles.
     Recipe {
@@ -161,6 +200,21 @@ static RECIPES: &[Recipe] = &[
             rect(12, 0, 16, 16),
         ],
     },
+    // The hero idea one size up: the left half is one panel, the right half three
+    // stacked ones. Count 4 had a plain grid, a guttered grid and a strip — all of
+    // them equal panes; this is its first layout with panels of two sizes.
+    Recipe {
+        name: "mosaic-4-hero",
+        version: 1,
+        aspect: R_4_3,
+        grid: 16,
+        slots: &[
+            rect(0, 0, 8, 16),
+            rect(8, 0, 16, 5),
+            rect(8, 5, 16, 11),
+            rect(8, 11, 16, 16),
+        ],
+    },
     // A hero panel down the left half with four stacked panels beside it. Every
     // slot is a rectangle, but the splits of the two halves differ, so this is
     // a mixed layout rather than a grid.
@@ -175,6 +229,37 @@ static RECIPES: &[Recipe] = &[
             rect(8, 4, 16, 8),
             rect(8, 8, 16, 12),
             rect(8, 12, 16, 16),
+        ],
+    },
+    // Five columns on a wide canvas. A five-way equal split is not a dyadic
+    // rational, so a strip of five always has one pane of another size; here the
+    // last pane is 4/16 and the other four are 3/16.
+    Recipe {
+        name: "strip-5-5x1",
+        version: 1,
+        aspect: R_16_9,
+        grid: 16,
+        slots: &[
+            rect(0, 0, 3, 16),
+            rect(3, 0, 6, 16),
+            rect(6, 0, 9, 16),
+            rect(9, 0, 12, 16),
+            rect(12, 0, 16, 16),
+        ],
+    },
+    // A top band of three over a bottom band of two, splitting at different
+    // points: five photos as a feature row above a pair.
+    Recipe {
+        name: "mosaic-5-t3b2",
+        version: 1,
+        aspect: R_3_2,
+        grid: 16,
+        slots: &[
+            rect(0, 0, 5, 8),
+            rect(5, 0, 11, 8),
+            rect(11, 0, 16, 8),
+            rect(0, 8, 8, 16),
+            rect(8, 8, 16, 16),
         ],
     },
     // 3x2, unequal columns (5/16, 6/16, 5/16) and equal rows.
@@ -192,6 +277,53 @@ static RECIPES: &[Recipe] = &[
             rect(11, 8, 16, 16),
         ],
     },
+    // Six as a hero pair: the left half is two stacked panels, the right half four.
+    Recipe {
+        name: "mosaic-6-hero",
+        version: 1,
+        aspect: R_4_3,
+        grid: 16,
+        slots: &[
+            rect(0, 0, 8, 8),
+            rect(0, 8, 8, 16),
+            rect(8, 0, 16, 4),
+            rect(8, 4, 16, 8),
+            rect(8, 8, 16, 12),
+            rect(8, 12, 16, 16),
+        ],
+    },
+    // Six columns on a wide canvas: the two outer panes 2/16, the four middle
+    // ones 3/16.
+    Recipe {
+        name: "strip-6-6x1",
+        version: 1,
+        aspect: R_16_9,
+        grid: 16,
+        slots: &[
+            rect(0, 0, 2, 16),
+            rect(2, 0, 5, 16),
+            rect(5, 0, 8, 16),
+            rect(8, 0, 11, 16),
+            rect(11, 0, 14, 16),
+            rect(14, 0, 16, 16),
+        ],
+    },
+    // The `grid-6-3x2` tiling turned on its side for a portrait canvas: two
+    // columns of equal width, three rows spanning 6/16, 5/16, 5/16.
+    Recipe {
+        name: "grid-6-2x3",
+        version: 1,
+        aspect: R_2_3,
+        grid: 16,
+        slots: &[
+            rect(0, 0, 8, 6),
+            rect(8, 0, 16, 6),
+            rect(0, 6, 8, 11),
+            rect(8, 6, 16, 11),
+            rect(0, 11, 8, 16),
+            rect(8, 11, 16, 16),
+        ],
+    },
     // A top band of four over a bottom band of three: the two bands split at
     // different points, which is the second thing `mosaic` covers.
     Recipe {
@@ -206,6 +338,41 @@ static RECIPES: &[Recipe] = &[
             rect(12, 0, 16, 8),
             rect(0, 8, 5, 16),
             rect(5, 8, 11, 16),
+            rect(11, 8, 16, 16),
+        ],
+    },
+    // Seven columns on a wide canvas: five 2/16 panes and two 3/16 ones, placed so
+    // that no two wide panes are adjacent.
+    Recipe {
+        name: "strip-7-7x1",
+        version: 1,
+        aspect: R_16_9,
+        grid: 16,
+        slots: &[
+            rect(0, 0, 2, 16),
+            rect(2, 0, 5, 16),
+            rect(5, 0, 7, 16),
+            rect(7, 0, 10, 16),
+            rect(10, 0, 12, 16),
+            rect(12, 0, 14, 16),
+            rect(14, 0, 16, 16),
+        ],
+    },
+    // Seven as a three-column mosaic: the 5/16 left column is three panels, the
+    // 6/16 middle and the 5/16 right are two each, so the two rows of the middle
+    // and right columns read as one band across the layout.
+    Recipe {
+        name: "mosaic-7-hero",
+        version: 1,
+        aspect: R_1_1,
+        grid: 16,
+        slots: &[
+            rect(0, 0, 5, 6),
+            rect(0, 6, 5, 11),
+            rect(0, 11, 5, 16),
+            rect(5, 0, 11, 8),
+            rect(5, 8, 11, 16),
+            rect(11, 0, 16, 8),
             rect(11, 8, 16, 16),
         ],
     },
@@ -231,6 +398,42 @@ static RECIPES: &[Recipe] = &[
             rect(6, 5, 8, 8),
         ],
     },
+    // Eight equal columns on a wide canvas: 2/16 each, the only way eight panes fit
+    // a 16-cell lattice exactly. The panorama counterpart of `grid-8-4x2`.
+    Recipe {
+        name: "strip-8-8x1",
+        version: 1,
+        aspect: R_16_9,
+        grid: 16,
+        slots: &[
+            rect(0, 0, 2, 16),
+            rect(2, 0, 4, 16),
+            rect(4, 0, 6, 16),
+            rect(6, 0, 8, 16),
+            rect(8, 0, 10, 16),
+            rect(10, 0, 12, 16),
+            rect(12, 0, 14, 16),
+            rect(14, 0, 16, 16),
+        ],
+    },
+    // 4x2, all eight panes equal: the plain eight-photo grid, and the reference
+    // the concave smoke template is not.
+    Recipe {
+        name: "grid-8-4x2",
+        version: 1,
+        aspect: R_3_2,
+        grid: 16,
+        slots: &[
+            rect(0, 0, 4, 8),
+            rect(4, 0, 8, 8),
+            rect(8, 0, 12, 8),
+            rect(12, 0, 16, 8),
+            rect(0, 8, 4, 16),
+            rect(4, 8, 8, 16),
+            rect(8, 8, 12, 16),
+            rect(12, 8, 16, 16),
+        ],
+    },
     // 3x3, unequal columns and rows (6/16, 5/16, 5/16 each way).
     Recipe {
         name: "grid-9-3x3",
@@ -247,6 +450,45 @@ static RECIPES: &[Recipe] = &[
             rect(0, 11, 6, 16),
             rect(6, 11, 11, 16),
             rect(11, 11, 16, 16),
+        ],
+    },
+    // Nine columns on a wide canvas: six 2/16 panes, then 1/16, 1/16, 2/16 — the
+    // same way `strip-10-10x1` splits its odd middle panes.
+    Recipe {
+        name: "strip-9-9x1",
+        version: 1,
+        aspect: R_16_9,
+        grid: 16,
+        slots: &[
+            rect(0, 0, 2, 16),
+            rect(2, 0, 4, 16),
+            rect(4, 0, 6, 16),
+            rect(6, 0, 8, 16),
+            rect(8, 0, 10, 16),
+            rect(10, 0, 12, 16),
+            rect(12, 0, 13, 16),
+            rect(13, 0, 14, 16),
+            rect(14, 0, 16, 16),
+        ],
+    },
+    // Nine as one hero panel with a 2x4 block of small ones beside it: the two
+    // halves split differently, which is what makes it a mosaic rather than a
+    // grid.
+    Recipe {
+        name: "mosaic-9-hero",
+        version: 1,
+        aspect: R_4_3,
+        grid: 16,
+        slots: &[
+            rect(0, 0, 8, 16),
+            rect(8, 0, 12, 4),
+            rect(12, 0, 16, 4),
+            rect(8, 4, 12, 8),
+            rect(12, 4, 16, 8),
+            rect(8, 8, 12, 12),
+            rect(12, 8, 16, 12),
+            rect(8, 12, 12, 16),
+            rect(12, 12, 16, 16),
         ],
     },
     // Ten columns. A ten-way vertical split cannot be equal on a dyadic

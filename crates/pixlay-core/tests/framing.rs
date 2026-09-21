@@ -185,8 +185,8 @@ fn every_framing_covers_its_slot() {
         }
     }
 
-    // The sweep is only evidence if it actually reaches the branches: 12
-    // templates and 63 slots of the shipped library.
+    // The sweep is only evidence if it actually reaches the branches: 27
+    // templates and 152 slots of the shipped library.
     assert!(checked > 10_000, "the sweep must actually sweep: {checked}");
     assert!(limited > 0, "no framing in the sweep hit the degradation");
     assert!(panned > 0, "no framing in the sweep hit the pan clamp");

@@ -183,7 +183,9 @@ fn every_slot_contains_its_own_centroid() {
             inside += 1;
         }
     }
-    assert_eq!(slots, 64, "the library's slot count changed");
+    // A canary, not a derived number: if a template left the library the sweep
+    // would cover less and still pass. S10 grew it from 64 slots to 152.
+    assert_eq!(slots, 152, "the library's slot count changed");
     assert_eq!(inside, slots);
 }
 
@@ -267,7 +269,10 @@ fn a_point_one_pixel_from_a_boundary_matches_the_analytic_answer() {
         }
     }
 
-    assert_eq!(slots, 64, "the library's slot count changed");
+    assert_eq!(
+        slots, 152,
+        "the library's slot count changed (S10 grew it from 64)"
+    );
     assert!(
         inner > 2_000,
         "the sweep measured only {inner} interior samples"
@@ -289,9 +294,9 @@ fn a_point_one_pixel_from_a_boundary_matches_the_analytic_answer() {
 
 #[test]
 fn a_gutter_belongs_to_no_slot() {
-    // The only shipped template that does not tile its canvas: a 1/16 gutter
-    // between the four cells, which reaches the border. Its middle is the one
-    // place where "no slot" is the right answer on an otherwise covered canvas.
+    // The two shipped templates that do not tile their canvas, and their gutters
+    // are the two shapes one can have: a cross that reaches the border in all four
+    // directions, and a band that reaches it top and bottom.
     let template = templates::get("grid-4-2x2g").expect("registered");
     assert_eq!(
         template.slot_at(Point::new(0.5, 0.5)),
@@ -328,6 +333,21 @@ fn a_gutter_belongs_to_no_slot() {
     // Outside the canvas is outside every slot, gutter or not.
     assert_eq!(template.slot_at(Point::new(1.01, 0.5)), None);
     assert_eq!(template.slot_at(Point::new(-0.01, 0.5)), None);
+
+    // The pair's gutter (S10) is the other shape: a full-height band between the
+    // two panes, so `slot_at` has to answer `None` along a whole line.
+    let pair = templates::get("strip-2-2x1g").expect("registered");
+    for y in [0.05, 0.2, 0.5, 0.8, 0.95] {
+        assert_eq!(
+            pair.slot_at(Point::new(0.5, y)),
+            None,
+            "the pair's gutter is not a slot at y={y}"
+        );
+    }
+    assert_eq!(pair.slot_at(Point::new(0.3, 0.5)), Some(0));
+    assert_eq!(pair.slot_at(Point::new(0.7, 0.5)), Some(1));
+    assert_eq!(pair.slot_at(Point::new(1.01, 0.5)), None);
+    assert_eq!(pair.slot_at(Point::new(-0.01, 0.5)), None);
 }
 
 #[test]
