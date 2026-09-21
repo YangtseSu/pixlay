@@ -6,6 +6,19 @@ The implementation is authoritative, and this file is its guide; when the two di
 
 The contract is **frozen at S1** and every step after it is built on top of it (`AGENTS.md`, "Step discipline", principle 3).
 
+> **What the ruling of 2026-09-22 changes in this file.** The shapes land in the plan's S11; until that step
+> lands, the implementation here is still the old one and the tests remain the tie-breaker.
+> - the **±45° cap on a cell's rotation is removed** — the angle is free and the clamp never reduces it, so
+>   `CLAMP_ZOOM_LIMIT`, `CropFit::rotation_limited` and §2's "clamp degradation threshold" row go with it;
+> - **flip and quarter turns are not product capabilities**, so the geometry stage is `crop → arbitrary rotation`;
+> - the canvas backdrop stops being hard-coded white: it becomes `frame.color`, which **defaults to white**, so
+>   every project written before the field renders byte-identically;
+> - `CollageDoc` gains `frame: { gapRel, radiusRel, color }`, and the fit's coverage reference becomes the
+>   **inset (visible) rectangle** rather than the slot polygon.
+>
+> The rest of the contract is untouched. The rulings themselves are in `docs/2026-09-22-UX-DIRECTION.md` §6,
+> and the steps that carry them out are in `docs/2026-09-22-STEPS.md` (S11 in particular).
+
 ---
 
 ## 1. `CollageDoc`: the single serialization shape
@@ -66,18 +79,19 @@ Conventions:
   an absolute path is accepted as it stands. A missing file → an explicit error, not a skip.
 - `crop.zoom` is **absolute zoom** (displayed width / slot width), not "a multiple of fill":
   when the photo is swapped the baseline does not move and the framing does not jump focus.
-- `rotationDeg` is capped at ±45°, and every component of `crop.offset` has |offset| ≤ 1 (past that no clamp can get the coverage back).
+- `rotationDeg` accepts **any finite angle** and is normalized to `(-180, 180]` — the ±45° cap was removed on
+  2026-09-22 and the validation is widened by S11 — and every component of `crop.offset` has |offset| ≤ 1 (past that no clamp can get the coverage back).
 - **Direction convention**: both `rotationDeg` and a text layer's `rotationDeg` are positive **clockwise on screen** (the canvas y axis points down,
   cairo's `rotate` in that space is clockwise, and the renderer passes it through as-is).
 - **A crop is a request; what gets drawn is its fit** (`CropTransform::fit`, S3). The canvas and the slot never grow, so the
-  fit has exactly three levers: `zoom` is raised to the value that covers the slot with the photo centred (a larger request
-  is kept as it is), `offset` is pulled back along the line to the slot centre until the photo covers again — a pan stops at
-  the frame edge rather than being paid for with magnification — and `rotationDeg` is kept while the zoom it needs stays
-  within `CLAMP_ZOOM_LIMIT` times the upright covering zoom, otherwise the widest angle that fits is used and
-  `CropFit::rotation_limited` reports it. The fit is **idempotent**, so clamping on an edit and again in `draw` costs nothing
-  and the second pass reports nothing. `draw` applies the fit, so no document this build accepts can render an uncovered
-  slot; the fit's own boundary is a slot so extreme that covering it needs more than `MAX_ZOOM`, which gets the cap (and is
-  what a decoder's memory budget, S4, limits from the other side).
+  fit has exactly three levers: `zoom` is raised to the value that covers the visible cell with the photo centred (a larger
+  request is kept as it is), `offset` is pulled back along the line to the slot centre until the photo covers again — a pan
+  stops at the frame edge rather than being paid for with magnification — and `rotationDeg` is kept **exactly as asked**:
+  since 2026-09-22 the angle is free and the fit never reduces it, so `CLAMP_ZOOM_LIMIT` and
+  `CropFit::rotation_limited` are gone (S11). The fit is **idempotent**, so clamping on an edit and again in `draw` costs
+  nothing and the second pass reports nothing. `draw` applies the fit, so no document this build accepts can render an
+  uncovered cell; the fit's own boundary is a slot so extreme that covering it needs more than `MAX_ZOOM`, which gets the
+  cap (and is what a decoder's memory budget, S4, limits from the other side).
 - **A cell's colour is its own**: `grade` is three numbers applied in linear light
   (see §4), and `filter` is one preset name applied to every cell after its own
   grade. Both were added by S4 with `serde` defaults, so a project written before
@@ -139,7 +153,7 @@ changed the document shape.
 | canvas edge length | ≤ 2000 mm | larger than any output device |
 | template aspect ratio | 0.1..=10.0 | a template outside this range is not a collage layout; it also bounds what a canvas can be matched to |
 | slot outline | ≥ 3 vertices, finite, every vertex inside `[0,1]`, area > 0 | a polygon with no interior is not a slot |
-| framing rotation | ±45° (clockwise is positive, canvas y points down) | `AGENTS.md` |
+| framing rotation | ~~±45°~~ **any finite angle, normalized to `(-180, 180]`** (the cap was removed on 2026-09-22; S11 widens the validation). Clockwise is positive, canvas y points down | the 2026-09-22 ruling, `AGENTS.md` |
 | framing zoom | `0 < zoom ≤ 1000` | the upper bound is necessary: zoom determines the size of the decoded bitmap, and without an upper bound it overflows. S4's decoder sets a limit **separately by memory budget**; the two layers each mind their own. The fit raises the drawn zoom to the covering value and never lowers a larger request |
 | crop offset | every component \|offset\| ≤ 1 (slot widths / heights) | beyond half a slot the photo centre leaves the slot, and no clamp can cover it again. The fit reduces it further whenever the requested pan would uncover the slot |
 | canvas vs template aspect ratio | difference ≤ 1e-6, otherwise a hard error | the two are each annotated independently, normalized coordinates carry no aspect ratio themselves; the GUI's template selector groups by aspect ratio and lists only the matching ones |
@@ -155,7 +169,7 @@ changed the document shape.
 | grade `saturation` | 0.0..=4.0 | 0 is greyscale, 1 leaves the pixel alone |
 | grade `delta` (`Δ`, warmth) | -1.0..=1.0 | `r *= 1 + delta`, `b *= 1 - delta`; past 1 the mapping is no longer monotone |
 | decoded source | ≤ 120 MP and ≤ 20000 px per edge, 20 s | `MAX_DECODE_PIXELS` / `MAX_DECODE_EDGE` / `DECODE_TIMEOUT` in `pixlay-imaging`. A source is RGBA at its own depth, so 120 MP is 480 MB as 8-bit and 960 MB as 16-bit; the area cap is checked between the loader's header and its pixels, so a decompression bomb costs nothing |
-| clamp degradation threshold | when the zoom the **requested rotation** needs exceeds `CLAMP_ZOOM_LIMIT` = **1.5 times the upright covering zoom**, the angle is reduced to the widest one that fits (`CLAMP_ZOOM_LIMIT` in `pixlay-core`) | this row is the rule; it was decided in S3 (`docs/completed/2026-09-20-STEPS-done.md`), and the reference is the upright floor, not an absolute zoom: a ten-column strip needs 6x upright for a 4:3 photo and rotating it needs *less*, so it is never degraded. Measured kept angles, matching photo and 45° asked (2026-09-21): 45° (unlimited) at 1:1, 34.0° at 6:5, 27.3° at 4:3, 22.6° at 3:2, 18.0° at 16:9, 11.2° at 8:3, mirrored for portrait slots |
+| clamp degradation threshold | ~~when the zoom the **requested rotation** needs exceeds `CLAMP_ZOOM_LIMIT` = **1.5 times the upright covering zoom**, the angle is reduced to the widest one that fits~~ — **superseded 2026-09-22: the angle is free and is never reduced, so this row's rule and `CLAMP_ZOOM_LIMIT` are removed by S11, which measures the covering zoom as a function of the angle for every slot shape** | the S3 row as it was decided (`docs/completed/2026-09-20-STEPS-done.md`): its reference was the upright floor, not an absolute zoom, and a ten-column strip needs 6x upright for a 4:3 photo, so a narrow slot was never degraded. Measured kept angles, matching photo and 45° asked (2026-09-21): 45° (unlimited) at 1:1, 34.0° at 6:5, 27.3° at 4:3, 22.6° at 3:2, 18.0° at 16:9, 11.2° at 8:3, mirrored for portrait slots. Kept as the record of what the cap did |
 
 Every entry above is enforced with a typed error, never a panic, and each is covered by
 `crates/pixlay-core/tests/contract.rs` or `crates/pixlay-cli/tests/cli.rs`. An implementation
@@ -204,7 +218,8 @@ Images                            // slot → Bitmap; absent = that cell is left
   contract-legal request and still render covered. S4's decoder sizes its bitmap from the same fit — the fit's zoom *is* the
   display size — because sizing from the stored request instead would leave the canvas resampling, which it must never do
   (measured in S3: a request 11.6x below the fitted zoom smeared one texel's transparent edge about 6 px into the slot).
-- Composite onto an **opaque white background**; the output is never transparent.
+- Composite onto an **opaque backdrop, white by default** (`frame.color`, added by the 2026-09-22 ruling and
+  landing in S11); the output is never transparent.
 - **Band rendering**: `Band::out_rows()` partitions on **output pixels** (`first = total * index / count`),
   so at any `scale` the band sizes sum to exactly the whole image. It previously partitioned by canvas rows, rounding each band on its own,
   and at 72dpi/scale=0.3 three bands totaled 759 rows while the whole image was 758 rows — `round` is not additive, and this could only be fixed this way.
@@ -290,8 +305,8 @@ time` follows from the same table: `N` concurrent slots need
 `N × source + Σ bitmaps + output ≤ budget`.
 
 **One exception, and why it stays: the framing rotation.** `AGENTS.md`'s sentence
-also names "rotation interpolation", and the framing rotation (≤ ±45°, from
-`CropTransform`) is still applied by `draw` itself, as S3 built it. The reason is
+also names "rotation interpolation", and the framing rotation (any angle since
+2026-09-22, from `CropTransform`) is still applied by `draw` itself, as S3 built it. The reason is
 what the bitmap *is*: it already arrives at exactly the size it is displayed at, so
 Cairo's affine is a rotation at 1:1, not the downscaling the constraint is about —
 and S3 measured that the placement is what makes "a crop is a request; what is drawn
@@ -409,7 +424,11 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
 - rich text: no bold/italic runs, no alignment paragraph, no tables or columns, and no
   text box of the user's own size (the canvas width is the box)
 - nested groups / layer trees / blend modes
-- framing rotation beyond ±45°; **rotation only crops edges, it never grows the canvas**
+- ~~framing rotation beyond ±45°~~ — **removed 2026-09-22: the angle is free**, so the cap and the
+  angle-degradation rule that went with it are gone (S11); **rotation only crops edges, it never grows the canvas**
+- **flipping or mirroring a cell, in any form**: 2026-09-22's ruling — the per-cell capabilities are
+  zoom, move and rotation by any angle. (Loupe has mirror icons and glycin has a `Mirror` operation;
+  neither is a reason to add one.)
 - CMYK JPEG and per-slot colour spaces. **Not** the source ICC: v1 honours it — the
   decoder converts a profiled file to sRGB (measured within 0.03 levels of
   ImageMagick's own conversion, and 15.4 levels away from ignoring the profile), and
@@ -424,7 +443,7 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
 
 | Item | Lands in | Shape |
 |---|---|---|
-| clamp math | **S3, landed** | `CropTransform::fit(slot, canvas_aspect, photo_aspect) -> CropFit { transform, rotation_limited }`, applied by `draw`; the fit is idempotent and never exceeds `MAX_ZOOM` |
+| clamp math | **S3, landed**; its angle-reduction half retired by the **2026-09-22 ruling**, landing in **S11** | `CropTransform::fit(slot, canvas_aspect, photo_aspect) -> CropFit { transform, rotation_limited }` (S11 removes `rotation_limited`: the angle is never reduced and the coverage reference becomes the inset visible rectangle), applied by `draw`; the fit is idempotent and never exceeds `MAX_ZOOM` |
 | template generator | **S2, landed** | `pixlay_core::templates` (`generator` recipes + the committed `frozen` data) and the `templates` / `init` subcommands; see §3 and §5 |
 | the image pipeline | **S4, landed** | `pixlay-imaging`: `Source::decode`, `resample`, `LinearRgb16::apply`, `slot_bitmap`/`slot_bitmaps`, `probe`; the buffer ladder and the colour decisions are §4.1 |
 | command history / hit testing / project writing | **S6.5, landed**; `SetTemplate` added by **S7** | `pixlay-core`: `Command` (one edit: source, framing, grade, filter, text layers, the `{date}` fallback, the template and its canvas — `SetTemplate` carries both because a canvas and a template must agree on their aspect ratio — and the canvas alone) and `History` (snapshot undo/redo; `apply` is all-or-nothing and the document has no mutable accessor; the GUI commits **one command per gesture**, §9), `Template::slot_at(point)` for hit testing, `CollageDoc::save` / `Project::save` / `Project::save_as` for writing a document. The CLI's `hit` and `save` are the machine surface of the first and the last; the command history is a test surface only, on purpose (§5) |
@@ -503,10 +522,17 @@ eight photos and one `{date}` layer on a 14043x10532 A0 sheet, per format:
 
 Every threshold constant in the tests annotates this source, so a change in the numbers can be discovered.
 
-## 9. The window (S7)
+## 9. The window (S7), and the stages added after it
 
 The GUI is the fifth consumer of the same document, and what it adds is interaction. Its
 contract is what a caller can rely on without looking at a widget:
+
+**Since the 2026-09-22 ruling the window is a sequence of stages** (`docs/2026-09-22-STEPS.md`,
+S13–S15): a picker (`AdwNavigationView`'s root page — a `GtkGridView` library, an ordered selection
+tray, a zoomable preview of the focused photo), a layout stage, and then the editor of S7. The
+invariants above are unchanged by the sequence: still one document, one renderer, one gesture per
+command. The library and the gallery are **not** renderers of the document — a candidate thumbnail is
+`render_rgb8_sized` of the same drawn document at a smaller size, and S14's criteria hold it to that.
 
 - **One document at a time**, edited only through `Command` (`History` in `pixlay-core`): the
   window has no second edit path, and **one gesture is one command**, committed when the
@@ -542,5 +568,6 @@ contract is what a caller can rely on without looking at a widget:
   (as the CLI does) instead of writing a hole.
 
 What the window does *not* do, by decision: no second renderer, no second document model, no
-mode switching, no per-window state that a saved project does not carry, and no translation
-files (S8 adds the language packs).
+**parallel** modes over one document (a sequential creation flow is not a mode — 2026-09-22's ruling),
+no per-window state that a saved project does not carry, and no translation
+files (S16 adds the language packs).

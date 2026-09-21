@@ -6,7 +6,8 @@ The closed steps' record, beside the open half of the plan:
 |---|---|
 | [2026-09-20-STEPS-done.md](2026-09-20-STEPS-done.md) | the pages of S0 … S6.5 of the plan that began on 2026-09-20, moved **verbatim** out of `docs/2026-09-20-STEPS.md` on 2026-09-21; then their status rows, the human gates they passed, and the plan's decision tables |
 | [measurements.md](measurements.md) | the numbers S0–S6 were judged against ("Measured baseline") |
-| [`../2026-09-20-STEPS.md`](../2026-09-20-STEPS.md) | **not here**: the open half of the plan (S7, S8), which is what a session reads first |
+| [`../2026-09-22-STEPS.md`](../2026-09-22-STEPS.md) | **not here**: the live plan (the one a session reads first), whose steps continue the S-numbering this file ends at |
+| [`../archive/2026-09-20-STEPS.md`](../archive/2026-09-20-STEPS.md) | **not here either**: the plan of 2026-09-20 as it stood when it was retired on 2026-09-22 (its open half, S7 and S8). S7's implementation survives into the live plan; its human walk is void |
 
 | Step | Closed | Its gate |
 |---|---|---|

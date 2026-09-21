@@ -1,8 +1,11 @@
 # Direction review (2026-09-22): the picker-first UX, and which codebase to build it on
 
-**Status: proposal, awaiting the human ruling.** This file amends nothing by itself: `AGENTS.md`,
-`docs/2026-09-20-STEPS.md` and its "Current progress" line change only when the ruling below is given,
-and then in the same turn (`AGENTS.md`, "Session and persistence discipline").
+**Status: ruled on 2026-09-22, and now the plan's review of record.** The human ruled on all nine
+decisions of §6 and on the seven rule rows of §3 in the same day; the rulings are recorded in §6 below
+and carried into the live plan, [`2026-09-22-STEPS.md`](2026-09-22-STEPS.md), which is the authority from
+here on. The plan of 2026-09-20 is retired to [`docs/archive/`](archive/) (its open half S7/S8; S7's human
+walk is void, S8 is the new plan's last step). The standing `AGENTS.md` clauses this review contradicted
+were rewritten clause by clause the same day — §3 below says which, and how.
 
 The human described the target flow in conversation on 2026-09-22:
 
@@ -77,6 +80,11 @@ re-earn S1–S6.5 before it could draw the first collage.
 
 ## 3. Locked rules this direction contradicts — each one needs a ruling
 
+**All seven rows were ruled on 2026-09-22 and the recommendation column is what is now in `AGENTS.md`**
+(the seventh row — "nothing may be possible only in the GUI" — was never in dispute and stayed). One row
+was resolved differently from its recommendation: row 6's cap is **2–9 in the picker**, with the 10-slot
+template kept in the library where only the CLI and project files reach it.
+
 | # | Rule (where) | What the target flow does | Recommendation |
 |---|---|---|---|
 | 1 | Scope criterion: "the shortest main path … does it make the main path longer? If so, cut it" (`AGENTS.md`) | adds a picker stage and a layout stage before editing | Amend: redefine the path as `open → pick 2–9 photos → pick a layout → adjust → export`. The common case *loses* a step (photos land in selection order, so per-slot placement by hand disappears); the two new stages are the price of not starting from an empty document |
@@ -92,10 +100,11 @@ re-earn S1–S6.5 before it could draw the first collage.
 Primary sources, checked 2026-09-22 (Google's collage help article, one URL per platform; Xiaomi's own
 MIUI-13 and Xiaomi-12 user guides; Xiaomi's HyperOS FAQs):
 
-- **The 2–9 range belongs to neither product.** Google Photos caps at **6** on Android/iOS ("Select up to 6
-  photos") and **9** only on the desktop web; Xiaomi's own guides say **"Select 1 to 6 photos"**. The 2–9
-  claims circulating in Chinese aggregator posts are unreliable. So 2–9 is a **deliberate deviation** here —
-  fine, but it should be recorded as one.
+- **The 2–9 range.** Google Photos caps at **6** on Android/iOS ("Select up to 6 photos") and **9** on the
+  desktop web. Xiaomi's own MIUI-era manuals say **"Select 1 to 6 photos"** — but **the human ruled on
+  2026-09-22 that the current Xiaomi gallery allows nine**, and the human's word is the ruling: those
+  manuals are wrong or outdated for it. Either way 2–9 is the product's own decision, taken deliberately
+  rather than copied.
 - **Live-preview layouts rendered from the user's own photos is real, and Google Photos is the product that
   does it** ("To preview your photos in different grids, at the bottom, swipe through the templates"). This is
   the target flow's single most distinctive stage, and it is exactly what `render::draw` gives cheaply.
@@ -113,12 +122,18 @@ MIUI-13 and Xiaomi-12 user guides; Xiaomi's HyperOS FAQs):
   Photos' collage editor. In `pixlay` the aspect is a property of the template, and the CLI already filters the
   library by it (`templates --aspect`).
 
-## 5. Proposed roadmap
+## 5. The roadmap (ruled; now S9–S16 in the live plan)
+
+The R-numbers below became **S9 … S16** of [`2026-09-22-STEPS.md`](2026-09-22-STEPS.md), where the exits
+are stated and where progress is tracked; this section stays as the reasoning. Two changes against what
+was proposed here: S12 is new (ruling 1's measurement step), and the flip/quarter-turn work in R3 is gone
+(ruling 11 also removed the ±45° rotation cap). R0's rulings are in §6 and in `AGENTS.md`.
 
 Ordering follows `AGENTS.md` principle 4 — engine and CLI first, the window last — because the windowless loop
 is where the numbers are cheap. **Packaging (S8) moves to the end**, because its human criterion ("the installed
-package walks the main path") is defined on the path this direction redefines. On the ruling, R1–R6 become
-S9–S14 in `docs/2026-09-20-STEPS.md`, and S7's pending walk merges into R6.
+package walks the main path") is defined on the path this direction redefines. As ruled, R1–R6 became S9–S15
+(with the new S12) in [`2026-09-22-STEPS.md`](2026-09-22-STEPS.md), S8 became its last step (S16), and S7's
+pending walk is void rather than merged.
 
 ### R0 · Rulings (human; nothing to code)
 
@@ -245,16 +260,32 @@ S9–S14 in `docs/2026-09-20-STEPS.md`, and S7's pending walk merges into R6.
 - **Human**: the three-minute walk of the *new* path, and the copy.
 - **After it**: S8 packaging, with `check()` on the new flow.
 
-## 6. Decisions to rule on
+## 6. The rulings (2026-09-22, human)
 
-| # | Decision | Recommendation |
+Every decision this review raised, and what the human ruled. The plan that follows from them is
+[`2026-09-22-STEPS.md`](2026-09-22-STEPS.md) (steps S9–S16); the rule clauses were rewritten in
+`AGENTS.md` the same day.
+
+| # | Decision | Ruling |
 |---|---|---|
-| D1 | Direction: extend `pixlay` or fork Loupe | **extend `pixlay`** (§1) |
-| D2 | What "browse photos" means | a grid picker with a fit-to-window preview (R4); Loupe-style zoom/pan browsing is a separate product and would reopen D1 |
-| D3 | The seven rule rows of §3 | amend as recommended: scope criterion, mode-switching wording, phone-style wording, opaque-white-with-default-backdrop, the HIG `selection-mode` row, the CLI-first rule (unchanged) |
-| D4 | The selection cap | 2–9 as asked; note that `strip-10-10x1` then has no GUI path, or delete that recipe |
-| D5 | Where the library comes from | `XDG_PICTURES_DIR` by default + a folder chooser; the last folder is kept for the session; no config file |
-| D6 | Photo-count semantics on add/remove | LIFO as asked ("remove drops the last"), with the count as a first-class value driving the layout filter |
-| D7 | S7's pending walk | do not walk the old path now; its gate merges into R6, where the new path is walked once |
-| D8 | S8 packaging order | after R6, because its criterion is "the installed package walks the main path" |
-| D9 | The floating buttons' ergonomics (unverified in either reference) | real `GtkButton`s in a `GtkFixed` over the canvas, one row above the selected slot; revisit after the walk |
+| D1 | Direction: extend `pixlay` or fork Loupe | **Extend `pixlay`** — as recommended in §1. Loupe is a design reference only |
+| D2 | What "browse photos" means | **Grid + a large preview that can zoom and pan** — one step further than recommended (§2 ruled that zoom/pan browsing *is* wanted; the product stays a collage, so no fullscreen or flip-through) |
+| D3 | The seven rule rows of §3 | **All amended**, clause by clause, in `AGENTS.md` and `docs/HIG-REVIEW.md` — the new design wins wherever the two conflicted |
+| D4 | The selection cap | **2–9.** `strip-10-10x1` keeps its place in the library and never appears in the picker |
+| D5 | Where the library comes from | **`XDG_PICTURES_DIR` + a folder chooser**, no configuration file |
+| D6 | Photo-count semantics on add/remove | **LIFO, plus per-cell remove/replace** — the batch control is first-in-first-out's opposite (the last photo goes, and comes back), and a single cell can also be cleared or replaced |
+| D7 | S7's pending walk | **Void**, as recommended: the path it walks is not the product's path any more. The walk happens once, on the new path, in S15 |
+| D8 | S8 packaging order | **Last**, as recommended — it packs the product that exists |
+| D9 | The floating buttons' ergonomics | **Real GTK buttons in a `GtkOverlay` + `GtkFixed`** over the canvas, so the HIG checks cover them |
+
+Two further rulings that the questions did not cover and that change the contract:
+
+- **No mirroring and no quarter turns.** Verbatim: *"不要翻转了。只要任意角度旋转和移动和缩放。旋转上限取消。"*
+  So the per-cell capabilities are **zoom, move, rotate by any angle** — and the ±45° cap, together with
+  the `CLAMP_ZOOM_LIMIT`/`rotation_limited` machinery that existed to reduce an over-asking angle, is
+  **removed** (S11). Flip is added to `AGENTS.md`'s "not doing" list.
+- **The Xiaomi gallery allows nine photos.** The human's word overrides the guides this review's web
+  check found ("Select 1 to 6 photos" in Xiaomi's own MIUI-era manuals, §4): those guides are wrong or
+  outdated for the current gallery. The 2–9 range stands as the product's own decision either way, and
+  the parts of §4 that remain load-bearing are Google Photos' *live-preview templates* pattern and the
+  observation that flip and floating per-cell buttons come from neither reference product.

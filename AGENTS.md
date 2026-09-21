@@ -1,15 +1,20 @@
 # Pixlay
 
-A Linux-native collage tool. 2–10 images; regular and irregular templates; per-slot framing
-(pan / zoom / straightening by ±45° rotation); per-slot color grading plus a one-click global
-filter; canvas-level text layers (free placement, with a tiled watermark as one of their modes,
-supporting `{date}` and other EXIF-driven fields); export of high-resolution finished images
-(physical size + DPI, or a specified long edge in pixels).
+A Linux-native collage tool. Pick 2–9 photos, pick a layout, adjust, export. Regular and irregular
+templates; per-slot framing (pan / zoom / rotation by any angle); per-slot color grading plus a
+one-click global filter; a canvas frame (gap / corner radius / colour); canvas-level text layers (free
+placement, with a tiled watermark as one of their modes, supporting `{date}` and other EXIF-driven
+fields); export of high-resolution finished images (physical size + DPI, or a specified long edge in
+pixels).
 GPL-3.0-or-later · Rust · GTK4 + libadwaita shell · Cairo canvas · target platform Arch/AUR.
 
-**Scope criterion: the shortest main path.** "Pick a template → place photos → adjust framing →
+**Scope criterion: the shortest main path.** "Open → pick 2–9 photos → pick a layout → adjust →
 export" must take under three minutes. Before adding any feature, ask: does it make the main path
 longer? If so, cut it.
+*Ruled 2026-09-22: the path was re-routed from "pick a template first" to "pick photos first". The
+new order is one step shorter in the common case, because the photos land in the cells in selection
+order instead of being dropped in one at a time; the two stages it adds are the price of not starting
+from an empty sheet (`docs/2026-09-22-UX-DIRECTION.md`).*
 
 **Locked identifiers**
 
@@ -59,9 +64,12 @@ Measurement rules that go with it:
 - Measuring encoder performance requires **non-flat** content: flat color blocks skew A0 PNG size
   and time by 78× and 4.6× respectively.
 - Every threshold constant in the code carries its **source inline** — the measured value and its date —
-  or cites `docs/CONTRACT.md`. **`docs/2026-09-20-STEPS.md` and `docs/completed/` are the process record and are
-  never cited from code**: they are scheduled for deletion once S0–S8 are done, so a comment that points
-  at them is a comment that stops resolving on the day the work finishes.
+  or cites `docs/CONTRACT.md`. **The plan (`docs/2026-09-22-STEPS.md`), `docs/archive/` and
+  `docs/completed/` are the process record and are never cited from code**: they are scheduled for
+  deletion or archival once their work is done, so a comment that points at them is a comment that stops
+  resolving on the day that happens. **S-numbers are the exception and stay citable** — they are how the
+  code says which step built a thing ("since S6 the encoder is …"), and the numbering continues across
+  plans rather than restarting.
 
 ## Language conventions
 
@@ -93,7 +101,7 @@ Measurement rules that go with it:
 
 ## Commit discipline
 
-- **Commit once per completed step** (finishing one step in `docs/2026-09-20-STEPS.md` produces at least one
+- **Commit once per completed step** (finishing one step in `docs/2026-09-22-STEPS.md` produces at least one
   commit). Do not batch several steps into one commit.
 - **Pushing requires the user's explicit permission first.** Without it, commit only and never
   push: do not `git push` on your own initiative and do not change remote configuration.
@@ -111,7 +119,7 @@ Measurement rules that go with it:
 
 ## Step discipline
 
-How `docs/2026-09-20-STEPS.md` splits the work, and the cases in which a step has to end a session. The steps
+How `docs/2026-09-22-STEPS.md` splits the work, and the cases in which a step has to end a session. The steps
 themselves are in that file; this is the rule that produced them.
 
 1. Every step must have a **machine-checkable** exit. A "step" with no checkable exit is not a step.
@@ -127,12 +135,14 @@ themselves are in that file; this is the rule that produced them.
    *Precondition: a boundary holds only if the **conclusion is already on disk** (the threshold constants in the tests + the measured numbers in this file + the "Current progress" line).
    A conclusion that is not on disk means switching session equals measuring it again.*
    By this rule the natural boundaries are `S0 ┊ S1 ┊ S2+S3 ┊ S4 ┊ S5+S6 ┊ S7 ┊ S8` (six sessions, not nine).
+   *That line belongs to the retired plan of 2026-09-20 and is kept as the example that produced the rule;
+   the plan of 2026-09-22 states its own boundaries in its own file.*
 
 ## Session and persistence discipline
 
 **A conversation is not storage.** Sessions get truncated, cleared or deleted; a conclusion that
 exists only in the conversation never happened. A new session reads files, not someone else's
-transcript, and the "Current progress" line in `docs/2026-09-20-STEPS.md` is the **only authority**.
+transcript, and the "Current progress" line in `docs/2026-09-22-STEPS.md` is the **only authority**.
 
 - **A step is complete when the "Current progress" line is rewritten and committed.** Green tests
   and good numbers are necessary, not sufficient.
@@ -148,7 +158,7 @@ transcript, and the "Current progress" line in `docs/2026-09-20-STEPS.md` is the
   *Reference shape: S0's `Ruling (2026-09-20, human): Cairo stays` plus the progress line
   `S0 — done and ruled on`.*
 - **Closing a gate takes five parts; missing one means it is not done**:
-  1. the ruling block written into that step's "Result" subsection in `docs/2026-09-20-STEPS.md`;
+  1. the ruling block written into that step's "Result" subsection in `docs/2026-09-22-STEPS.md`;
   2. the "Current progress" line rewritten to "done and passed \_\_\_ → next X";
   3. the matching entry under "Where humans must step in" marked as passed or removed;
   4. any shape the ruling changed synchronized into `docs/CONTRACT.md`;
@@ -217,15 +227,21 @@ at `Cargo.lock` diffs during review.
   each written while the pixels go out, never by a second pass over the finished file. The DPI/ICC
   rounding rules and the per-format field list are in `docs/CONTRACT.md` §5.
 - **The evaluation order is frozen** and must not be reordered:
-  `decode + color normalization → geometry (crop / flip / 90° / arbitrary rotation) → per-slot
+  `decode + color normalization → geometry (crop / arbitrary rotation) → per-slot
   grading → global filter → slot compositing → canvas decoration → text layers → output transform`
   *Rationale: operations that change the coordinate system must run first, and content layers
   positioned relative to the canvas must run last. Counterexample: add a watermark and then rotate —
   the watermark rotates too and gets blurred by interpolation.*
-- **Composite onto opaque white.** Source alpha and any canvas or in-slot area not covered by a
-  photo are always flattened to white; an export is never transparent.
+  *Ruled 2026-09-22: flip and quarter turns left the product, so the geometry stage is
+  `crop → arbitrary rotation`; and "canvas decoration" is what the frame (gap / corner radius /
+  colour) is drawn in — after the slots, before the text (`docs/CONTRACT.md` §4).*
+- **Composite onto an opaque backdrop, white by default.** Source alpha is always flattened, so an
+  export is never transparent; whatever a photo does not cover — the frame's gaps, a rounded corner,
+  an empty slot — shows the document's own `frame.color`, which defaults to white.
   *Rationale: the product is a photo collage, preview and export must be pixel-identical, and a
-  transparent export would open a second encoding branch.*
+  transparent export would open a second encoding branch. Ruled 2026-09-22: the backdrop colour became
+  a document field so a frame's border could be coloured; "white by default" is what keeps every
+  project written before that field byte-identical, and opacity stays absolute.*
 - **Source images are read-only.** Every edit is a parameter, not a pixel overwrite. Under no
   circumstances may a user's source file be written back.
 - **Resampling must happen in the correct color space**: `sRGB → linear → process → sRGB`.
@@ -239,10 +255,16 @@ at `Cargo.lock` diffs during review.
   Framing state uses **absolute zoom** (displayed width / canvas width), not "a multiple of fill".
   *Rationale: the latter makes the framing jump when the user swaps a photo, because the "fill"
   baseline moves with the image's aspect ratio.*
-- **Rotation crops edges only; it never grows the canvas.** After a rotation angle or slot geometry
-  change the clamp **must be recomputed** so the slot stays filled.
+- **Rotation crops edges only; it never grows the canvas.** After a rotation angle, a frame or a slot
+  geometry change the clamp **must be recomputed** so the visible cell stays filled. **The angle is
+  free**: it has no cap, and the clamp never reduces it — the zoom is raised to whatever covering that
+  exact angle needs (ruled 2026-09-22, which retired S3's ±45° cap and with it the
+  `CLAMP_ZOOM_LIMIT` angle-reduction rule and `CropFit::rotation_limited`).
   *Rationale: collage slot sizes are fixed by the template, and this cuts the most troublesome
-  branch of a general-purpose editor: growing the canvas.*
+  branch of a general-purpose editor: growing the canvas. The cap existed to keep the zoom modest,
+  not because coverage was impossible: the required covering zoom is bounded for every slot shape
+  (its worst case is a diagonal), and a slot's bitmap is sized by the slot rather than by the zoom —
+  S11 measures both before and after.*
 - **GTK types do not implement `Send`/`Sync`.** Background decoding and scaling must return to the
   main thread through a channel; a GTK object must never be held across threads.
 - **`ui` must not touch pixels directly.**
@@ -260,12 +282,16 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
   landed the shell as `AdwApplicationWindow` + `AdwToolbarView` + `AdwHeaderBar` + `AdwToastOverlay` +
   `AdwBanner` + `AdwOverlaySplitView` + `AdwPreferencesPage`, with one custom-drawn widget — the
   canvas, whose stated reason is that it draws the document itself. A custom-drawn widget is the
-  exception and needs a stated reason.
+  exception and needs a stated reason. The plan of 2026-09-22 adds `AdwNavigationView` (the picker
+  stage pushing the editor), a `GtkGridView` + `GtkMultiSelection` library, a `GtkPicture` preview and
+  a `GtkOverlay` + `GtkFixed` of per-cell buttons over the canvas — none of them custom-drawn, so the
+  shell keeps exactly one.
 - **Styling**: use only libadwaita style classes and CSS variables; hard-coded colors and spacing
   are forbidden (they break dark mode and high contrast). App styling **follows the system**
   (`AdwStyleManager` stays at its default; never force light or dark), and v1 ships no per-app style
-  switch. The canvas and the export are **always opaque white, independent of the UI theme** — white
-  is content, not styling (see "Hard constraints").
+  switch. The canvas and the export are **always opaque and independent of the UI theme** — the
+  backdrop is document content (white unless the document's own frame says otherwise), not styling
+  (see "Hard constraints").
 - **Keyboard**: standard shortcuts per HIG `reference/keyboard`; `Alt+*`, `Super+*` and
   system-reserved combinations are forbidden; the main path must be walkable with the keyboard
   alone, and every action needs a keyboard path. Since S7 the table is data —
@@ -276,17 +302,23 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
 - **Copy**: follow HIG `guidelines/writing-style` (sentence case, no jargon, no honorifics); the
   mechanism is still the i18n of "Language conventions" and is not repeated here.
 - **Deliberate deviations (do not fix, not bugs)**:
-  - no GNOME Shell search provider, no notification workflow, no phone-style layout — the same
-    discipline as the "not doing" list;
+  - no GNOME Shell search provider, no notification workflow — the same discipline as the "not doing"
+    list;
   - no per-app style preference (light / dark / system): it would lengthen the main path, and
     "follow the system" already covers how users express "I want dark";
   - large-text mode **must not** scale canvas text layers: that is document content, and preview and
     export must stay pixel-identical;
-  - HIG `patterns/containers/selection-mode` **does not apply** (no collection views, no
-    multi-select batch operations); that page itself states that "when editing is the primary
-    interaction there should be no separate edit mode", which points the same way as "no mode
-    switching" — **not** a deviation.
-- Whatever can be machine-checked lives only in S7's tests (see `docs/2026-09-20-STEPS.md`); the visual part
+  - **the phone's chrome, not its capability** (ruled 2026-09-22, replacing "no phone-style layout"):
+    the picker-first flow came from mobile galleries, but its capability is built with desktop idioms
+    — a `GtkGridView` with selection mode and a header-bar Next button, not a tap-and-hold bottom
+    sheet. The ordered tray along the bottom stays because it is where selection *order* is visible and
+    re-orderable, and order is cell order: that is a desktop need, not a copied control.
+- HIG `patterns/containers/selection-mode` **applies from the picker stage on**: the picker *is* a
+  collection view with multi-select batch operations, so the row in `docs/HIG-REVIEW.md` was flipped
+  from "not applicable" when that became true. On the canvas the page's own advice still holds — "when
+  editing is the primary interaction there should be no separate edit mode" — and the canvas keeps no
+  mode of its own.
+- Whatever can be machine-checked lives only in the GUI's tests (see `docs/2026-09-22-STEPS.md`); the visual part
   goes item by item through `docs/HIG-REVIEW.md`.
 
 ## Directions not to "improve"
@@ -300,11 +332,15 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
   the undo stack are written by hand; **this is a known cost, not an oversight.**
 - **Do not default to mozjpeg.** The default is libjpeg-turbo 4:4:4; mozjpeg is optional only.
   *Measured on A1/69.7 MP: 4590 ms / 6.79 MB vs 475 ms / 8.50 MB — 9.7× the time for 20% less size.*
-- **Do not add mode switching** (edit mode / collage mode). The user's mental model is always "I am
-  making a collage"; editing is a property of the currently selected slot.
-  *(HIG's `selection-mode` does not apply, and its own advice points the same way — see "GNOME HIG".)*
+- **Do not add parallel modes over one document** (edit mode / collage mode). The user's mental model
+  is always "I am making a collage"; editing is a property of the currently selected slot.
+  *Ruled 2026-09-22, replacing the flat "do not add mode switching": what is forbidden is two
+  **parallel** modes over one document. The **sequential** creation flow the product now has (pick
+  photos → pick a layout → compose) is a multi-step task, which HIG itself shapes as a navigable
+  sequence (`AdwNavigationView` push/pop with Back) rather than as two modes to know about.*
 - **Not doing**: beauty retouching, levels / curves, online geocoding, RAW, brush marking, a
-  single-image retouch mode.
+  single-image retouch mode, **and flipping or mirroring a cell in any form** — ruled 2026-09-22: the
+  per-cell capabilities are zoom, move and rotation by any angle.
   *Rationale: levels / curves is a professional control that needs a full ICC pipeline and is opaque
   to the target user; geocoding carries API quotas, identity requirements and privacy costs, and a
   hand-typed place name replaces it; the rest is unrelated to the core value of a collage.*
@@ -328,7 +364,7 @@ only, diagnostics go to stderr, exit codes are fixed, identical input yields ide
 **Nothing may be possible only in the GUI and not in the CLI.**
 *Rationale: the model cannot see windows and can only read the CLI's stdout, and "looks right" is
 not a criterion — a visual conclusion must become a number (a probe) in the CLI. Contract details
-(subcommands, fields, exit codes) live in the tests and `docs/2026-09-20-STEPS.md` and are not repeated here.*
+(subcommands, fields, exit codes) live in the tests and `docs/2026-09-22-STEPS.md` and are not repeated here.*
 
 ## Invariants that must hold
 
@@ -377,13 +413,15 @@ not a criterion — a visual conclusion must become a number (a probe) in the CL
   vertices, which is exact for a concave slot too (a rectangle contains a polygon iff it contains its
   vertices), so no sliver is allowed and none is measured (28,800 framings against a 1e-6 tolerance,
   the worst sample 2.2e-16 past the photo's edge).
-- **Framing clamp (S3, 2026-09-21): decided and implemented.** The framing zoom floor for very
-  elongated slots is not made unbounded by rotation: `CLAMP_ZOOM_LIMIT = 1.5` is a multiple of the
-  *upright covering zoom* (measured: a ten-column strip needs 6.0× with a 4:3 photo), and past it the
-  clamp reduces the requested rotation angle to the widest that fits instead of magnifying further.
-  A narrow slot is therefore never degraded for being narrow — rotating one costs *less* than leaving
-  it upright (5.19× against 6.0×, measured) — while a matched 4:3 slot keeps 27.3° of the 45° asked
-  for. The rule, the per-aspect angle table and the pan-clamp decision are in `docs/CONTRACT.md` §1/§2.
+- **Framing clamp (S3, 2026-09-21): superseded on 2026-09-22.** S3 ruled that past
+  `CLAMP_ZOOM_LIMIT = 1.5` times the *upright covering zoom*, the clamp reduces the requested rotation
+  angle to the widest one that fits instead of magnifying further (measured then: a ten-column strip
+  needs 6.0× with a 4:3 photo, and a matched 4:3 slot kept 27.3° of the 45° asked for).
+  **Ruled 2026-09-22: the angle is free and is never reduced**, so `CLAMP_ZOOM_LIMIT` and
+  `CropFit::rotation_limited` are removed by S11, which measures the covering zoom as a function of the
+  angle for every slot shape and re-runs the coverage sweep with no cap. The pan-clamp decision stands;
+  the per-aspect angle table does not, because there are no kept angles left to table. The numbers above
+  stay here as the S3 record.
 - Seam behavior re-measured (2026-09-20): blended pixels on shared edges / seam length ≈ 1.08,
   **identical** at A0 and at 1/5 size → the blend width is one physical pixel and independent of
   output resolution, with no strong bleeding. **Remaining question: this 1 px seam is visible in a
@@ -417,7 +455,7 @@ policy: track the latest": latest stable only, no upper pin.
 | `pangocairo` 0.22.9 | `pixlay-render` | Canvas-level text: a `pango::Layout` drawn through `pangocairo` is the only way shaped text reaches a cairo context. The family is the system's `sans-serif`; the tests pin the committed subset under `crates/pixlay-cli/tests/fixtures/fonts/` with `FONTCONFIG_FILE` | Pulls `pango` + `pango-sys` alongside the `cairo`/`glib` S4 already had, and Arch's `pango` 1.58.2 is in the GTK stack S7 links anyway |
 
 |`gtk4` 0.11.5 + `libadwaita` 0.9.2|`pixlay`|The shell: the window, the rows, the utility pane and the dialogs. The `gtk_v4_10` / `v1_8` feature levels are the lowest that carry `GtkFileDialog` and `GtkColorDialogButton` (4.10 dropped the deprecated chooser dialogs) and `AdwDialog` / `AdwToastOverlay` / `AdwShortcutsDialog`|System gtk4 4.24 / libadwaita 1.10 through pkg-config; GTK already depends on cairo, pango and gdk-pixbuf, so the download set grows by the bindings alone. Linked by `pixlay` only — the other four crates must not name it|
-|`gettext-rs` 0.8.0 (`gettext-system`)|`pixlay`|i18n, as `docs/2026-09-20-STEPS.md` decided before S7: the same gettext toolchain GTK and libadwaita use for their own copy, so `.po`, the `.desktop` file and AppStream metainfo (S8) all go through one pipeline. `po/POTFILES` and `po/pixlay.pot` are committed|Tiny; `gettext-sys` links the system `libintl` rather than building a private copy. Only `pixlay` depends on it, which is what the language conventions require|
+|`gettext-rs` 0.8.0 (`gettext-system`)|`pixlay`|i18n, as the plan of 2026-09-20 decided before S7 (`docs/archive/2026-09-20-STEPS.md`): the same gettext toolchain GTK and libadwaita use for their own copy, so `.po`, the `.desktop` file and AppStream metainfo (S16) all go through one pipeline. `po/POTFILES` and `po/pixlay.pot` are committed|Tiny; `gettext-sys` links the system `libintl` rather than building a private copy. Only `pixlay` depends on it, which is what the language conventions require|
 
 `pangocairo` was a temporary S0 spike dependency, left with the spike (and with the spike's use of
 `cairo-rs/png`), and came back in S5 — registered in the table above, where it says what it is for now.
