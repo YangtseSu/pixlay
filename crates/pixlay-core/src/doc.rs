@@ -5,8 +5,9 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::canvas::CanvasSpec;
-use crate::crop::CropTransform;
+use crate::crop::{CropFit, CropTransform};
 use crate::error::CoreError;
+use crate::frame::Frame;
 use crate::grade::{FilterPreset, Grade};
 use crate::template::Template;
 use crate::text::{TextFallback, TextLayer};
@@ -64,6 +65,14 @@ pub struct CollageDoc {
     pub filter: FilterPreset,
     #[serde(default)]
     pub text_fallback: TextFallback,
+    /// The canvas frame (S11): the gap between cells, their corner radius, and the
+    /// colour the canvas is painted with where no photo covers it.
+    ///
+    /// No gap, square corners and white are the defaults, so a project written
+    /// before this field existed renders byte-identically and `DOC_VERSION` did
+    /// not move for it.
+    #[serde(default)]
+    pub frame: Frame,
 }
 
 impl CollageDoc {
@@ -78,6 +87,7 @@ impl CollageDoc {
             text: Vec::new(),
             filter: FilterPreset::None,
             text_fallback: TextFallback::default(),
+            frame: Frame::default(),
         }
     }
 
@@ -119,6 +129,20 @@ impl CollageDoc {
                 slots: self.template.slots.len(),
             });
         }
+        // The frame is checked against the geometry it decorates, slot by slot: a
+        // gap that leaves a cell with nothing visible is not a document this build
+        // can render, and the error has to name which cell. The check is the same
+        // `Frame::covering` the clamp takes its reference from, so "validates" and
+        // "has a region to cover" cannot mean two different things.
+        self.frame.validate()?;
+        for (slot, geometry) in self.template.slots.iter().enumerate() {
+            if self.frame.covering(geometry, canvas_aspect).is_none() {
+                return Err(CoreError::InvalidSlot {
+                    slot,
+                    reason: "the frame's gap leaves this slot with no visible area",
+                });
+            }
+        }
         for cell in &self.cells {
             cell.crop.validate()?;
             cell.grade.validate()?;
@@ -129,10 +153,91 @@ impl CollageDoc {
         Ok(())
     }
 
+    /// Reads a document, wrapping every cell's rotation into `(-180, 180]` on the
+    /// way in.
+    ///
+    /// Normalizing here rather than in `validate` is what makes it invisible to a
+    /// caller: a file may say any finite angle, and what this build holds — and
+    /// writes back — is the equivalent angle inside the range. Every angle the old
+    /// ±45° cap allowed is already inside it, so a project written before
+    /// 2026-09-22 loads unchanged.
     pub fn from_json(json: &str) -> Result<Self, CoreError> {
-        let doc: Self = serde_json::from_str(json)?;
+        let mut doc: Self = serde_json::from_str(json)?;
+        doc.normalize();
         doc.validate()?;
         Ok(doc)
+    }
+
+    /// Wraps every cell's rotation into `(-180, 180]` (`CropTransform::normalized`).
+    ///
+    /// Idempotent, and a cell whose rotation is already inside the range is left
+    /// bit-identical — which is what leaves the JSON of an old project unchanged.
+    pub fn normalize(&mut self) {
+        for cell in &mut self.cells {
+            cell.crop = cell.crop.normalized();
+        }
+    }
+
+    /// The framing a cell is drawn with: the stored request fitted to the region
+    /// the document's frame leaves visible in that slot.
+    ///
+    /// This is the one place the frame and the clamp meet, so a caller cannot
+    /// forget one of the two: `render`, `pixlay-imaging`'s bitmaps and the GUI all
+    /// ask this question, and all of them get the same answer about the same cell.
+    /// `canvas_aspect` and `photo_aspect` are [`CropTransform::fit`]'s own two, and
+    /// `canvas_aspect` is also what the frame's inset is measured in.
+    ///
+    /// `Err` when there is no framing to compute: no such cell, no such slot, or a
+    /// frame whose gap empties the cell — which `validate` refuses, so only a
+    /// document mutated in memory reaches it.
+    pub fn fitted_crop(
+        &self,
+        slot: usize,
+        canvas_aspect: f64,
+        photo_aspect: f64,
+    ) -> Result<CropFit, CoreError> {
+        let crop = self
+            .cells
+            .get(slot)
+            .ok_or(CoreError::NoSuchSlot {
+                slot,
+                slots: self.cells.len(),
+            })?
+            .crop;
+        self.fit_crop(slot, crop, canvas_aspect, photo_aspect)
+    }
+
+    /// The fit of `crop` for `slot` — the same reference [`fitted_crop`] uses, for
+    /// a request the caller is holding rather than one the document stores.
+    ///
+    /// This is what a gesture needs: it is editing the *fit* the user is looking at
+    /// (S7), so it must clamp its own candidate numbers against the same cell the
+    /// canvas is drawing, frame included.
+    ///
+    /// [`fitted_crop`]: Self::fitted_crop
+    pub fn fit_crop(
+        &self,
+        slot: usize,
+        crop: CropTransform,
+        canvas_aspect: f64,
+        photo_aspect: f64,
+    ) -> Result<CropFit, CoreError> {
+        let geometry = self
+            .template
+            .slots
+            .get(slot)
+            .ok_or(CoreError::InvalidSlot {
+                slot,
+                reason: "the template has no such slot",
+            })?;
+        let covering =
+            self.frame
+                .covering(geometry, canvas_aspect)
+                .ok_or(CoreError::InvalidSlot {
+                    slot,
+                    reason: "the frame's gap leaves this slot with no visible area",
+                })?;
+        Ok(crop.fit(geometry, &covering, canvas_aspect, photo_aspect))
     }
 
     pub fn to_json(&self) -> Result<String, CoreError> {

@@ -148,10 +148,36 @@ fn help_and_version_succeed_on_stdout() {
         "--dir",
         "--recursive",
         "--px",
+        "--slot",
+        "--rotate",
+        "--zoom",
+        "--offset",
+        "--clear",
+        "--gap",
+        "--radius",
+        "--border-color",
         "--json",
         "--stats",
     ] {
         assert!(stdout(&help).contains(flag), "{flag} missing from --help");
+    }
+    for subcommand in [
+        "render",
+        "probe",
+        "image",
+        "scan",
+        "thumb",
+        "text",
+        "templates",
+        "init",
+        "edit",
+        "hit",
+        "save",
+    ] {
+        assert!(
+            stdout(&help).contains(&format!("pixlay-render {subcommand}")),
+            "{subcommand} missing from --help"
+        );
     }
     for exit in ["0  success", "1  usage error", "2  project"] {
         assert!(stdout(&help).contains(exit), "{exit} missing from --help");
@@ -529,7 +555,7 @@ fn probe_reports_numbers_the_renderer_can_be_judged_by() {
     assert_eq!(field(&output, "status"), "ok");
     assert_eq!(field(&output, "slots"), "2");
     assert_eq!(field(&output, "occupied"), "1");
-    assert_eq!(field(&output, "bg_non_white"), "0");
+    assert_eq!(field(&output, "bg_off_backdrop"), "0");
     // A probe that sampled nothing would pass vacuously: the two-slot project
     // leaves a margin around both slots.
     assert!(
@@ -557,7 +583,7 @@ fn probe_reports_numbers_the_renderer_can_be_judged_by() {
     assert_eq!(field(&output, "occupied"), "2");
     assert_eq!(field(&output, "slot.1.match"), "true");
     assert_eq!(field(&output, "slot.1.expected"), "30,160,60");
-    assert_eq!(field(&output, "bg_non_white"), "0");
+    assert_eq!(field(&output, "bg_off_backdrop"), "0");
     // Walked end to end: the walker keeps a guard band at both ends where the
     // seam meets a corner, so the row count is the seam length minus 4.
     let rows: i64 = field(&output, "seam.0.rows").parse().unwrap();
@@ -2162,6 +2188,673 @@ fn hit_and_save_keep_the_usage_and_locale_rules() {
     assert!(
         failure.iter().all(|stderr| stderr == &failure[0]),
         "hit's failure message changed under a locale"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---------------------------------------------------------------------------
+// S11: the free rotation, and the frame
+// ---------------------------------------------------------------------------
+
+/// A two-cell project with real photos, so `edit` has a photo aspect to fit against.
+fn framing_project(dir: &Path, name: &str) -> PathBuf {
+    let photos = dir.join("photos");
+    std::fs::create_dir_all(&photos).expect("create photos");
+    std::fs::write(
+        photos.join("wide.jpg"),
+        include_bytes!("fixtures/photos/landscape.jpg"),
+    )
+    .expect("write photo");
+    std::fs::write(
+        photos.join("tall.jpg"),
+        include_bytes!("fixtures/photos/portrait.jpg"),
+    )
+    .expect("write photo");
+    let project = dir.join(name);
+    let output = run(&[
+        "init",
+        "--template",
+        "strip-2-2x1",
+        "--photo",
+        photos.join("wide.jpg").to_str().expect("utf-8"),
+        "--photo",
+        photos.join("tall.jpg").to_str().expect("utf-8"),
+        "--out",
+        project.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert!(project.is_file());
+    project
+}
+
+/// One cell's crop as the file now holds it.
+fn stored_crop(project: &Path, slot: usize) -> CropTransform {
+    CollageDoc::load(project)
+        .unwrap_or_else(|error| panic!("{}: {error}", project.display()))
+        .cells[slot]
+        .crop
+}
+
+#[test]
+fn edit_stores_the_fit_of_what_was_asked_for() {
+    // A crop is a request; what gets drawn is what covers the cell. `edit` is the
+    // command that writes a framing, so it writes the *fit*: the file says what the
+    // renderer will draw, and a rotation is stored with the zoom it needs.
+    let dir = out_dir("edit-fit");
+    let project = framing_project(&dir, "a.pixlay");
+    let out = dir.join("b.pixlay");
+    let path = project.to_str().expect("utf-8 path");
+    let output = run(&[
+        "edit",
+        "--project",
+        path,
+        "--slot",
+        "0",
+        "--rotate",
+        "25",
+        "--zoom",
+        "3.5",
+        "--offset",
+        "0.2,0",
+        "--out",
+        out.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert!(stderr(&output).is_empty());
+    assert_eq!(field(&output, "command"), "edit");
+    assert_eq!(field(&output, "template"), "strip-2-2x1");
+    assert_eq!(field(&output, "cells"), "2");
+    assert_eq!(field(&output, "photos"), "2");
+    assert_eq!(field(&output, "slot"), "0");
+    assert_eq!(field(&output, "occupied"), "true");
+    assert_eq!(field(&output, "gap"), "0.000000");
+    assert_eq!(field(&output, "radius"), "0.000000");
+    assert_eq!(field(&output, "border"), "255,255,255");
+    assert_eq!(field(&output, "rotation_deg"), "25.000000");
+
+    let crop = stored_crop(&out, 0);
+    // The angle is kept exactly — and this cell is the worst case for that: a
+    // portrait slot with a landscape photo, where the *upright* floor alone is
+    // 2.37x and 25 degrees asks for 2.90x.
+    assert_eq!(crop.rotation_deg, 25.0);
+    // A request above the floor is kept as it stands, never pulled back to it.
+    assert_eq!(crop.zoom, 3.5, "the user's own zoom must survive");
+    // And the pan survives as given: at 3.5x the photo has the room for it. The
+    // clamp only acts where it has to — `edit_is_idempotent_on_the_fit` asks for a
+    // pan that does not fit and gets pulled back.
+    assert_eq!(crop.offset, (0.2, 0.0));
+    let reported = field(&output, "zoom").parse::<f64>().expect("a number");
+    assert!(
+        (crop.zoom - reported).abs() <= 1e-6,
+        "the report says {reported}, the file says {}",
+        crop.zoom
+    );
+    assert_eq!(stored_crop(&out, 1), CropTransform::IDENTITY);
+
+    // The written file renders: a document that says one thing and draws another
+    // would be the failure this test exists for.
+    let image = dir.join("out.png");
+    let render = run(&[
+        "render",
+        "--project",
+        out.to_str().expect("utf-8"),
+        "--dpi",
+        "72",
+        "--out",
+        image.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&render), 0, "{}", stderr(&render));
+    assert_eq!(field(&render, "occupied"), "2");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn edit_is_idempotent_on_the_fit() {
+    // The property S3 established for the clamp, re-asserted through the new entry
+    // point: fitting a fit returns it bit for bit, so the same edit twice writes the
+    // same bytes. A second pass that moved the numbers would make every re-run of a
+    // tool a new revision of the user's project.
+    let dir = out_dir("edit-idempotent");
+    let project = framing_project(&dir, "a.pixlay");
+    let once = dir.join("once.pixlay");
+    let twice = dir.join("twice.pixlay");
+    let edit = |from: &Path, to: &Path, extra: &[&str]| {
+        let mut args = vec![
+            "edit".to_string(),
+            "--project".to_string(),
+            from.display().to_string(),
+            "--out".to_string(),
+            to.display().to_string(),
+        ];
+        args.extend(extra.iter().map(|s| s.to_string()));
+        let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+        let output = run(&borrowed);
+        assert_eq!(code(&output), 0, "{extra:?}: {}", stderr(&output));
+    };
+
+    // A rotation that has to be paid for, a pan that has to be clamped, and a zoom
+    // below the floor: every lever the clamp owns.
+    let framing = [
+        "--slot", "1", "--rotate", "137.5", "--zoom", "0.4", "--offset", "-0.9,0.9",
+    ];
+    edit(&project, &once, &framing);
+    edit(&once, &twice, &framing);
+    assert_eq!(
+        std::fs::read(&once).expect("read"),
+        std::fs::read(&twice).expect("read"),
+        "the second edit moved the framing"
+    );
+    // And the numbers really are the fit's: the pan was clamped, the zoom raised.
+    let crop = stored_crop(&once, 1);
+    assert_eq!(crop.rotation_deg, 137.5);
+    assert!(crop.zoom >= 0.4, "the fit raised the zoom: {}", crop.zoom);
+    assert_ne!(
+        crop.offset,
+        (-0.9, 0.9),
+        "a pan this far out cannot survive, so the fit had to move it"
+    );
+    assert!(crop.offset.0.abs() <= 0.9 && crop.offset.1.abs() <= 0.9);
+
+    // The same for a frame: setting the same frame twice is the same document.
+    let framed = dir.join("framed.pixlay");
+    let framed_again = dir.join("framed-again.pixlay");
+    let frame = [
+        "--gap",
+        "0.03",
+        "--radius",
+        "0.04",
+        "--border-color",
+        "10,20,30",
+    ];
+    edit(&project, &framed, &frame);
+    edit(&framed, &framed_again, &frame);
+    assert_eq!(
+        std::fs::read(&framed).expect("read"),
+        std::fs::read(&framed_again).expect("read")
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn edit_wraps_a_free_rotation_into_one_turn() {
+    // A dial does not accumulate turns: any finite angle is accepted, and what the
+    // document stores is the equivalent one in `(-180, 180]`, so a project never
+    // says 450 degrees.
+    let dir = out_dir("edit-wrap");
+    let project = framing_project(&dir, "a.pixlay");
+    let path = project.to_str().expect("utf-8 path");
+
+    for (given, expected) in [
+        ("450", 90.0),
+        ("-450", -90.0),
+        ("180", 180.0),
+        ("-180", 180.0),
+        ("181", -179.0),
+        ("-179.9", -179.9),
+    ] {
+        let out = dir.join("wrapped.pixlay");
+        let _ = std::fs::remove_file(&out);
+        let output = run(&[
+            "edit",
+            "--project",
+            path,
+            "--slot",
+            "0",
+            "--rotate",
+            given,
+            "--out",
+            out.to_str().expect("utf-8"),
+        ]);
+        assert_eq!(code(&output), 0, "{given}: {}", stderr(&output));
+        assert_eq!(
+            stored_crop(&out, 0).rotation_deg,
+            expected,
+            "{given} degrees"
+        );
+    }
+
+    // A project that says a far-out angle is wrapped when it is loaded, so a load →
+    // save round trip normalizes it without touching the picture (the angle is
+    // periodic, and `fit` uses its sine and cosine).
+    let json = std::fs::read_to_string(&project).expect("read");
+    let poked = dir.join("poked.pixlay");
+    std::fs::write(
+        &poked,
+        json.replace("\"rotationDeg\": 0.0", "\"rotationDeg\": 730.5"),
+    )
+    .expect("write");
+    let poked_doc = CollageDoc::load(&poked).expect("730.5 degrees loads");
+    assert_eq!(
+        poked_doc.cells[0].crop.rotation_deg, 10.5,
+        "loading wraps the angle, so the document never holds 730.5"
+    );
+    let out = dir.join("normalized.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        poked.to_str().expect("utf-8"),
+        "--gap",
+        "0.01",
+        "--out",
+        out.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let doc = CollageDoc::load(&out).expect("loads");
+    for cell in &doc.cells {
+        assert_eq!(cell.crop.rotation_deg, 10.5, "730.5 wraps to 10.5");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn edit_clears_a_cell_and_keeps_the_others() {
+    let dir = out_dir("edit-clear");
+    let project = framing_project(&dir, "a.pixlay");
+    let out = dir.join("cleared.pixlay");
+    let before = CollageDoc::load(&project).expect("loads");
+    let output = run(&[
+        "edit",
+        "--project",
+        project.to_str().expect("utf-8"),
+        "--slot",
+        "0",
+        "--clear",
+        "--out",
+        out.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "occupied"), "false");
+    assert_eq!(field(&output, "photos"), "1");
+    let after = CollageDoc::load(&out).expect("loads");
+    assert_eq!(
+        after.cells[0],
+        Cell::default(),
+        "the cell is empty and reset"
+    );
+    assert_eq!(
+        after.cells[1].source, before.cells[1].source,
+        "the other cell is untouched"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn edit_stores_the_frame_and_render_overrides_it() {
+    // `edit` writes the frame into the document; `render`'s flags are a render-time
+    // override that leaves the file alone. Both have to be visible in the report,
+    // because "which frame did that render use" is not answerable from the pixels
+    // without counting them.
+    let dir = out_dir("frame");
+    let project = framing_project(&dir, "a.pixlay");
+    let path = project.to_str().expect("utf-8 path");
+    let stored = dir.join("framed.pixlay");
+
+    let output = run(&[
+        "edit",
+        "--project",
+        path,
+        "--gap",
+        "0.02",
+        "--radius",
+        "0.03",
+        "--border-color",
+        "12,200,240",
+        "--out",
+        stored.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "gap"), "0.020000");
+    assert_eq!(field(&output, "radius"), "0.030000");
+    assert_eq!(field(&output, "border"), "12,200,240");
+
+    let doc = CollageDoc::load(&stored).expect("loads");
+    assert_eq!(doc.frame.gap_rel, 0.02);
+    assert_eq!(doc.frame.radius_rel, 0.03);
+    assert_eq!(
+        doc.frame.color,
+        pixlay_core::Rgba8 {
+            r: 12,
+            g: 200,
+            b: 240,
+            a: 255
+        }
+    );
+    // Nothing else moved: the frame is a document field, not a relayout.
+    assert_eq!(doc.template.name, "strip-2-2x1");
+    assert_eq!(doc.cells.len(), 2);
+
+    // A render of the stored frame: the report agrees, and the canvas border is the
+    // frame's colour (the same claim `pixlay-render`'s own frame tests measure).
+    let png = dir.join("framed.png");
+    let render = run(&[
+        "render",
+        "--project",
+        stored.to_str().expect("utf-8"),
+        "--dpi",
+        "72",
+        "--out",
+        png.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&render), 0, "{}", stderr(&render));
+    assert_eq!(field(&render, "gap"), "0.020000");
+    assert_eq!(field(&render, "border"), "12,200,240");
+    let image = image::open(&png).expect("a readable PNG").to_rgb8();
+    assert_eq!(image.get_pixel(1, 1).0, [12, 200, 240], "the corner");
+
+    // `render --gap` overrides for that render only: the project on disk keeps the
+    // frame `edit` wrote (and an unnamed flag keeps the document's own value).
+    let over = dir.join("over.png");
+    let render = run(&[
+        "render",
+        "--project",
+        stored.to_str().expect("utf-8"),
+        "--dpi",
+        "72",
+        "--gap",
+        "0.06",
+        "--out",
+        over.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&render), 0, "{}", stderr(&render));
+    assert_eq!(field(&render, "gap"), "0.060000");
+    assert_eq!(
+        field(&render, "radius"),
+        "0.030000",
+        "the radius was not named"
+    );
+    assert_eq!(field(&render, "border"), "12,200,240");
+    assert_eq!(
+        CollageDoc::load(&stored).expect("loads").frame.gap_rel,
+        0.02,
+        "the override reached the file"
+    );
+
+    // A gap that empties a cell is refused where it is asked for, naming the cell:
+    // the same check `validate` makes, reached through the command line.
+    let broken = run(&[
+        "render",
+        "--project",
+        stored.to_str().expect("utf-8"),
+        "--dpi",
+        "72",
+        "--gap",
+        "0.99",
+        "--out",
+        dir.join("broken.png").to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&broken), 2, "{}", stderr(&broken));
+    assert!(stdout(&broken).is_empty());
+    assert!(stderr(&broken).contains("slot 0"), "{}", stderr(&broken));
+    assert!(!dir.join("broken.png").exists(), "nothing was written");
+
+    // The radius is clamped, not refused: 1.0 is the largest a document may ask for
+    // and it rounds the cell into a stadium.
+    let stadium = dir.join("stadium.png");
+    let render = run(&[
+        "render",
+        "--project",
+        stored.to_str().expect("utf-8"),
+        "--dpi",
+        "72",
+        "--radius",
+        "1",
+        "--out",
+        stadium.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&render), 0, "{}", stderr(&render));
+    assert_eq!(field(&render, "radius"), "1.000000");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `edit` and the frame flags keep the S1 rules: flags that belong elsewhere are
+/// refused, and no locale changes a byte of either stream.
+#[test]
+fn edit_keeps_the_usage_and_locale_rules() {
+    let dir = out_dir("edit-usage");
+    let project = framing_project(&dir, "u.pixlay");
+    let path = project.to_str().expect("utf-8 path");
+    let out = dir.join("out.pixlay");
+    let out_path = out.to_str().expect("utf-8 path").to_string();
+
+    for args in [
+        // Nothing to change.
+        vec!["edit", "--project", path, "--out", &out_path],
+        // A framing flag without a cell.
+        vec![
+            "edit",
+            "--project",
+            path,
+            "--out",
+            &out_path,
+            "--rotate",
+            "10",
+        ],
+        vec![
+            "edit",
+            "--project",
+            path,
+            "--out",
+            &out_path,
+            "--zoom",
+            "1.2",
+            "--clear",
+        ],
+        // Clearing and framing at once.
+        vec![
+            "edit",
+            "--project",
+            path,
+            "--out",
+            &out_path,
+            "--slot",
+            "0",
+            "--clear",
+            "--rotate",
+            "10",
+        ],
+        // Out of range: a cell that does not exist, a zoom of zero, a gap past the
+        // canvas, a channel past 255, a pan past the cell.
+        vec![
+            "edit",
+            "--project",
+            path,
+            "--out",
+            &out_path,
+            "--slot",
+            "7",
+            "--rotate",
+            "10",
+        ],
+        vec![
+            "edit",
+            "--project",
+            path,
+            "--out",
+            &out_path,
+            "--slot",
+            "0",
+            "--zoom",
+            "0",
+        ],
+        vec!["edit", "--project", path, "--out", &out_path, "--gap", "2"],
+        vec![
+            "edit",
+            "--project",
+            path,
+            "--out",
+            &out_path,
+            "--border-color",
+            "300,0,0",
+        ],
+        vec![
+            "edit",
+            "--project",
+            path,
+            "--out",
+            &out_path,
+            "--border-color",
+            "1,2",
+        ],
+        vec![
+            "edit",
+            "--project",
+            path,
+            "--out",
+            &out_path,
+            "--slot",
+            "0",
+            "--offset",
+            "2,0",
+        ],
+        vec![
+            "edit",
+            "--project",
+            path,
+            "--out",
+            &out_path,
+            "--slot",
+            "0",
+            "--rotate",
+            "nan",
+        ],
+        // Missing what it needs.
+        vec!["edit"],
+        vec!["edit", "--project", path],
+        vec!["edit", "--out", &out_path, "--gap", "0.01"],
+        vec![
+            "edit",
+            "--project",
+            path,
+            "--out",
+            "out.json",
+            "--gap",
+            "0.01",
+        ],
+        // Flags that belong elsewhere.
+        vec![
+            "edit",
+            "--project",
+            path,
+            "--out",
+            &out_path,
+            "--gap",
+            "0.01",
+            "--dpi",
+            "72",
+        ],
+        vec![
+            "edit",
+            "--project",
+            path,
+            "--out",
+            &out_path,
+            "--gap",
+            "0.01",
+            "--photo",
+            "p.png",
+        ],
+        vec![
+            "edit",
+            "--project",
+            path,
+            "--out",
+            &out_path,
+            "--gap",
+            "0.01",
+            "--stats",
+        ],
+        vec![
+            "render",
+            "--template",
+            "strip-2-2x1",
+            "--dpi",
+            "72",
+            "--out",
+            "x.png",
+            "--slot",
+            "0",
+        ],
+        vec!["probe", "--project", path, "--gap", "0.01"],
+        vec![
+            "save",
+            "--project",
+            path,
+            "--out",
+            &out_path,
+            "--radius",
+            "0.1",
+        ],
+        vec![
+            "init",
+            "--template",
+            "strip-2-2x1",
+            "--out",
+            &out_path,
+            "--clear",
+        ],
+    ] {
+        let output = run(&args);
+        assert_eq!(code(&output), 1, "{args:?}: {}", stderr(&output));
+        assert!(stdout(&output).is_empty(), "{args:?} wrote to stdout");
+        assert!(!stderr(&output).is_empty(), "{args:?} said nothing");
+    }
+    assert!(!out.exists(), "a refused edit wrote a file");
+
+    // Byte-identical under any locale, on the success and the failure branch.
+    let mut success = Vec::new();
+    let mut failure = Vec::new();
+    for (lang, all) in [
+        ("C", "C"),
+        ("zh_CN.UTF-8", "zh_CN.UTF-8"),
+        ("de_DE.UTF-8", "de_DE.UTF-8"),
+    ] {
+        let copy = dir.join("locale.pixlay");
+        let _ = std::fs::remove_file(&copy);
+        let edited = run_in(
+            &[
+                "edit",
+                "--project",
+                path,
+                "--slot",
+                "1",
+                "--rotate",
+                "-33.5",
+                "--gap",
+                "0.02",
+                "--out",
+                copy.to_str().expect("utf-8"),
+                "--json",
+            ],
+            None,
+            Some((lang, all)),
+        );
+        assert_eq!(code(&edited), 0, "{lang}: {}", stderr(&edited));
+        success.push(edited.stdout.clone());
+
+        let broken = run_in(
+            &[
+                "edit",
+                "--project",
+                "absent.pixlay",
+                "--out",
+                "x.pixlay",
+                "--gap",
+                "0.01",
+            ],
+            Some(&dir),
+            Some((lang, all)),
+        );
+        assert_eq!(code(&broken), 2);
+        assert!(stdout(&broken).is_empty());
+        failure.push(broken.stderr.clone());
+    }
+    assert!(
+        success.iter().all(|stdout| stdout == &success[0]),
+        "edit changed under a locale"
+    );
+    assert!(
+        failure.iter().all(|stderr| stderr == &failure[0]),
+        "edit's failure message changed under a locale"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

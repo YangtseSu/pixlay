@@ -171,15 +171,16 @@ impl Sidebar {
             }
         });
 
-        let rotation_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, -45.0, 45.0, 0.5);
+        let rotation_scale =
+            gtk::Scale::with_range(gtk::Orientation::Horizontal, -180.0, 180.0, 0.5);
         rotation_scale.set_digits(1);
         rotation_scale.set_draw_value(true);
         rotation_scale.set_hexpand(true);
         rotation_scale.set_size_request(160, -1);
         a11y::label(&rotation_scale, &gettext("Straighten"));
         rotation_scale.update_property(&[
-            gtk::accessible::Property::ValueMin(-45.0),
-            gtk::accessible::Property::ValueMax(45.0),
+            gtk::accessible::Property::ValueMin(-180.0),
+            gtk::accessible::Property::ValueMax(180.0),
         ]);
         let rotation_row = adw::ActionRow::builder()
             .title(gettext("Straighten"))

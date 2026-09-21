@@ -2,29 +2,19 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::MAX_ZOOM;
 use crate::canvas::PixelSize;
 use crate::error::CoreError;
 use crate::geometry::{Point, Polygon, Rect};
 use crate::template::Slot;
-use crate::{CLAMP_ZOOM_LIMIT, MAX_ROTATION_DEG, MAX_ZOOM};
 
-/// Halvings used by the two one-dimensional searches of [`CropTransform::fit`].
+/// Halvings used by the one-dimensional search of [`CropTransform::fit`].
 ///
 /// 60 halvings take a bracket below `2^-60` of its width, past `f64`'s
 /// resolution at these magnitudes; a fixed count keeps the clamp's cost a
 /// number rather than a convergence criterion, so the same document always fits
 /// to the same bits.
 const BISECTION_STEPS: u32 = 60;
-
-/// Angles scanned between "upright" and the requested angle before the bracket
-/// is bisected.
-///
-/// The required zoom is **not** monotone in the angle: a slot much narrower than
-/// it is tall (the ten-column strip needs 7.5x upright with a 4:3 photo) needs a
-/// *smaller* photo at 45 degrees than at 0, so "a wider angle always needs more
-/// zoom" is false and a plain bisection would give up early. The scan finds the
-/// widest angle that fits; the bisection then refines inside that bracket.
-const ANGLE_SCAN_STEPS: u32 = 256;
 
 /// How one photo is framed inside one slot.
 ///
@@ -51,11 +41,12 @@ pub struct CropTransform {
     /// canvas has y pointing down, and cairo's `rotate` is clockwise in that
     /// space; the renderer passes this value through unchanged).
     ///
-    /// Rotation only crops edges — the canvas and the slot never grow, so
-    /// covering the slot at an angle costs magnification. [`CropTransform::fit`]
-    /// honours this angle while that magnification stays within
-    /// [`CLAMP_ZOOM_LIMIT`] times the upright floor, and otherwise keeps the
-    /// widest angle that does ([`CropFit::rotation_limited`]).
+    /// Rotation only crops edges — the canvas and the slot never grow, so covering
+    /// the slot at an angle costs magnification. **The angle is free**: any finite
+    /// value is accepted, the fit never reduces it, and it is magnified to whatever
+    /// covering that exact angle needs. A finite value is normalized to
+    /// `(-180, 180]` by [`normalized`](Self::normalized), which every load and every
+    /// edit applies, so a dial cannot accumulate turns in a project file.
     pub rotation_deg: f64,
 }
 
@@ -127,54 +118,84 @@ impl CropTransform {
                 });
             }
         }
-        if !self.rotation_deg.is_finite() || self.rotation_deg.abs() > MAX_ROTATION_DEG {
-            return Err(CoreError::OutOfRange {
+        if !self.rotation_deg.is_finite() {
+            // No range: since 2026-09-22 the angle is free, so this is a *domain*
+            // check (a number that arithmetic can be done on) rather than a bound,
+            // and `NotFinite` is the error that says so without naming a range the
+            // value is not being compared against.
+            return Err(CoreError::NotFinite {
                 what: "crop rotation (degrees)",
                 value: self.rotation_deg,
-                min: -MAX_ROTATION_DEG,
-                max: MAX_ROTATION_DEG,
             });
         }
         Ok(())
     }
+
+    /// The same framing with the rotation wrapped into `(-180, 180]`.
+    ///
+    /// A dial has no reason to accumulate turns: 450 degrees and 90 degrees draw
+    /// the same picture, and a project that said 450 would be a file whose numbers
+    /// are not the framing. The wrap is idempotent, so applying it at every edit
+    /// and again when a document is loaded cannot drift — and it is applied on the
+    /// way *in*, so a project written by a build with the old ±45° cap (every value
+    /// of which is inside the range) loads unchanged.
+    ///
+    /// A rotation that is not finite is returned as it is: a document that says
+    /// `NaN` is refused by [`validate`](Self::validate), and an error message that
+    /// quotes back something other than what the file said is a worse message.
+    pub fn normalized(self) -> Self {
+        if !self.rotation_deg.is_finite() {
+            return self;
+        }
+        // `rem_euclid` gives `[0, 360)`, so shifting by half a turn gives `(-180,
+        // 180]` as soon as the one value it excludes — exactly `-180` — is moved
+        // to the `180` it equals. `-0.0` is left alone: it is inside the range and
+        // it compares equal to `0.0`.
+        let wrapped = (self.rotation_deg + 180.0).rem_euclid(360.0) - 180.0;
+        let rotation_deg = if wrapped == -180.0 { 180.0 } else { wrapped };
+        Self {
+            rotation_deg,
+            ..self
+        }
+    }
 }
 
-/// Outcome of clamping a requested transform against a slot's geometry.
+/// Outcome of clamping a requested transform against a cell's visible region.
 ///
 /// The stored transform is a request; what gets drawn is the fit ([`fit`]).
-/// Below the zoom limit a sliver-shaped slot is covered by magnifying the photo,
-/// and past it the requested rotation angle is reduced instead of magnifying
-/// further (`docs/CONTRACT.md` §2, the clamp-degradation row). The GUI needs to know which of the two
-/// happened so it can say so; the renderer only needs `transform`.
+/// Since 2026-09-22 there is exactly one lever pair left — the zoom is raised to
+/// the value that covers, and the pan is pulled back into it — so this is the
+/// drawn transform and nothing else.
 ///
 /// [`fit`]: CropTransform::fit
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CropFit {
     /// The transform that actually gets drawn.
     pub transform: CropTransform,
-    /// True when *this* call had to reduce the requested rotation angle.
-    ///
-    /// It describes the call, not the transform: fitting an already-fitted
-    /// transform returns the same transform and reports `false`, so a caller
-    /// that clamps on every edit does not report a limitation it did not apply.
-    pub rotation_limited: bool,
 }
 
 impl CropTransform {
-    /// The framing that actually gets drawn: this request fitted to a slot.
+    /// The framing that actually gets drawn: this request fitted to `covering`.
     ///
-    /// A request is what the user asked for, a fit is what covers the slot. The
-    /// canvas and the slot never grow, so the only levers are the three fields,
-    /// and each of them has exactly one:
+    /// A request is what the user asked for, a fit is what covers the cell. The
+    /// canvas and the cell never grow, so the levers are the three fields, and each
+    /// of them has exactly one:
     ///
-    /// * `zoom` is raised to the value that covers the slot with the photo
-    ///   centred, and a larger request is kept as it is;
-    /// * `offset` is pulled back along the line to the slot centre until the
-    ///   photo covers again — a pan must stop at the frame edge rather than be
-    ///   paid for with more magnification, or dragging a photo would zoom it;
-    /// * `rotation_deg` is honoured while the zoom it needs stays within
-    ///   [`CLAMP_ZOOM_LIMIT`] times that upright floor, and is otherwise reduced
-    ///   to the widest angle that does (`CropFit::rotation_limited`).
+    /// * `zoom` is raised to the value that covers the photo centred at **exactly
+    ///   the requested angle**, and a larger request is kept as it is;
+    /// * `offset` is pulled back along the line to the cell centre until the photo
+    ///   covers again — a pan must stop at the frame edge rather than be paid for
+    ///   with more magnification, or dragging a photo would zoom it;
+    /// * `rotation_deg` is **never touched**: the angle is free (ruled 2026-09-22),
+    ///   and the zoom is what pays for it. The ±45° cap and the
+    ///   `CLAMP_ZOOM_LIMIT` rule that reduced an over-asking angle are gone, so the
+    ///   fit returns the requested angle bit for bit.
+    ///
+    /// `covering` is the region the photo has to cover — the cell's visible
+    /// geometry, which the document's frame narrows (`Frame::covering`); passing
+    /// `&slot.outline` is the unframed case. `slot` is still what defines the
+    /// *scale*: `zoom` means displayed photo width over the slot's bounding-box
+    /// width, whatever the frame cut away.
     ///
     /// `canvas_aspect` is the aspect ratio of the space the slot's normalized
     /// geometry is stretched onto, `photo_aspect` the source bitmap's
@@ -186,46 +207,34 @@ impl CropTransform {
     /// edit and again at the render boundary cannot drift.
     ///
     /// Two boundaries the guarantee cannot cross, both reported rather than
-    /// hidden: a request that is not four finite numbers, a degenerate slot or a
-    /// non-finite aspect (no framing to fit against) returns the request
+    /// hidden: a request that is not four finite numbers, a degenerate `covering`
+    /// or a non-finite aspect (no framing to fit against) returns the request
     /// untouched, and a slot so extreme that covering it needs more than
     /// [`MAX_ZOOM`] gets the cap instead of coverage.
-    pub fn fit(&self, slot: &Slot, canvas_aspect: f64, photo_aspect: f64) -> CropFit {
-        let untouched = CropFit {
-            transform: *self,
-            rotation_limited: false,
-        };
+    pub fn fit(
+        &self,
+        slot: &Slot,
+        covering: &Polygon,
+        canvas_aspect: f64,
+        photo_aspect: f64,
+    ) -> CropFit {
+        let untouched = CropFit { transform: *self };
         if !self.is_finite() {
             return untouched;
         }
-        let Some(frame) = Frame::new(slot, canvas_aspect, photo_aspect) else {
+        let Some(frame) = Frame::new(slot, covering, canvas_aspect, photo_aspect) else {
             return untouched;
         };
-        // The zoom the slot's shape and the photo's aspect demand with the photo
-        // centred and upright. It is the "1x" the degradation limit is relative
-        // to, and it never depends on the offset or the angle, so a slot that is
-        // inherently narrow is not degraded for that reason alone.
-        let floor = frame.required_zoom(0.0, frame.centre);
-        let affordable =
-            |angle| frame.required_zoom(angle, frame.centre) <= CLAMP_ZOOM_LIMIT * floor;
-        let mut rotation_limited = false;
-        let rotation_deg = if affordable(self.rotation_deg) {
-            self.rotation_deg
-        } else {
-            rotation_limited = true;
-            frame.widest_rotation(self.rotation_deg, CLAMP_ZOOM_LIMIT * floor)
-        };
         let zoom = frame
-            .required_zoom(rotation_deg, frame.centre)
+            .required_zoom(self.rotation_deg, frame.centre)
             .max(self.zoom)
             .min(MAX_ZOOM);
         CropFit {
             transform: Self {
                 zoom,
-                offset: frame.clamp_offset(self.offset, rotation_deg, zoom),
-                rotation_deg,
+                offset: frame.clamp_offset(self.offset, self.rotation_deg, zoom),
+                rotation_deg: self.rotation_deg,
             },
-            rotation_limited,
         }
     }
 }
@@ -277,6 +286,13 @@ impl CropTransform {
     /// outside the boundary it writes, and the clip edge itself is antialiased,
     /// so a bitmap cut exactly at the boundary would show transparent slivers
     /// inside the slot. The caller passes a constant with its source.
+    ///
+    /// The document's frame is deliberately **not** subtracted from this box (S11):
+    /// a frame can only ever *narrow* what a cell shows, so the outline's own
+    /// bounding box is a superset of the visible region — holding it always holds
+    /// enough, and the memory the ladder promises is still bounded by the slot's own
+    /// bbox (`AGENTS.md`). Tightening it to the inset would save a little bit of
+    /// bitmap and cost every caller a second geometry path.
     pub fn display_region(
         &self,
         slot: &Slot,
@@ -332,16 +348,22 @@ impl CropTransform {
     }
 }
 
-/// A slot and a photo as the clamp sees them: in canvas-height units, i.e. a
-/// space where the canvas is `canvas_aspect` wide and `1.0` high.
+/// A slot and the region a photo must cover, as the clamp sees them: in
+/// canvas-height units, i.e. a space where the canvas is `canvas_aspect` wide and
+/// `1.0` high.
 ///
 /// Normalized coordinates carry no aspect ratio, so a slot occupying `0.5 x 1.0`
 /// of a 4:3 canvas is not the shape the same numbers describe on a square one.
 /// This is the smallest space in which the framing is aspect-correct, and it is
 /// the renderer's space divided by the canvas height: every quantity the clamp
 /// produces is a ratio, so the two agree.
+///
+/// The *scale* comes from the slot's bounding box and the *coverage* from
+/// `covering`, which may be smaller (`docs/CONTRACT.md` §1: `zoom` is displayed
+/// width over slot width, so a frame that crops the cell must not silently change
+/// what a stored zoom means).
 struct Frame<'a> {
-    outline: &'a Polygon,
+    covering: &'a Polygon,
     canvas_aspect: f64,
     photo_aspect: f64,
     /// Slot width in canvas-height units.
@@ -353,10 +375,16 @@ struct Frame<'a> {
 }
 
 impl<'a> Frame<'a> {
-    /// `None` when there is no shape to fit against: a degenerate outline, or an
-    /// aspect that is not a positive finite number.
-    fn new(slot: &'a Slot, canvas_aspect: f64, photo_aspect: f64) -> Option<Self> {
-        if slot.outline.points.len() < Polygon::MIN_VERTICES {
+    /// `None` when there is no shape to fit against: an outline to cover with
+    /// fewer than three vertices, a degenerate slot, or an aspect that is not a
+    /// positive finite number.
+    fn new(
+        slot: &Slot,
+        covering: &'a Polygon,
+        canvas_aspect: f64,
+        photo_aspect: f64,
+    ) -> Option<Self> {
+        if covering.points.len() < Polygon::MIN_VERTICES {
             return None;
         }
         if !canvas_aspect.is_finite() || canvas_aspect <= 0.0 {
@@ -371,7 +399,7 @@ impl<'a> Frame<'a> {
             return None;
         }
         Some(Self {
-            outline: &slot.outline,
+            covering,
             canvas_aspect,
             photo_aspect,
             width,
@@ -389,7 +417,7 @@ impl<'a> Frame<'a> {
     }
 
     /// The smallest zoom at which the photo, rotated by `rotation_deg` about
-    /// `centre`, covers the whole outline.
+    /// `centre`, covers the whole region.
     ///
     /// A rectangle that contains every vertex contains the convex hull and hence
     /// the polygon, and a polygon inside a rectangle must have all its vertices
@@ -397,10 +425,14 @@ impl<'a> Frame<'a> {
     /// library ships as much as for rectangles. The photo's half width is
     /// `zoom * slot_width / 2` and its half height is that divided by the photo
     /// aspect, which gives the two bounds below.
+    ///
+    /// The zoom is what pays for
+    /// the angle, and its cost is bounded for every slot shape (`docs/CONTRACT.md`
+    /// §8 measures it).
     fn required_zoom(&self, rotation_deg: f64, centre: Point) -> f64 {
         let (sin, cos) = rotation_deg.to_radians().sin_cos();
         let (mut half_width, mut half_height) = (0.0f64, 0.0f64);
-        for point in &self.outline.points {
+        for point in &self.covering.points {
             // The photo is rotated clockwise on screen, so a canvas point is
             // rotated the other way to be expressed in the photo's own frame.
             let dx = point.x * self.canvas_aspect - centre.x;
@@ -413,34 +445,6 @@ impl<'a> Frame<'a> {
 
     fn covers(&self, rotation_deg: f64, centre: Point, zoom: f64) -> bool {
         self.required_zoom(rotation_deg, centre) <= zoom
-    }
-
-    /// The widest angle between upright and `rotation_deg` (same sign) whose
-    /// required zoom stays within `limit`.
-    ///
-    /// Upright, and any angle on the way to it, is within the limit: the limit is
-    /// at least the upright floor by construction, and the caller only asks when
-    /// the requested angle is not.
-    fn widest_rotation(&self, rotation_deg: f64, limit: f64) -> f64 {
-        let (sign, magnitude) = (rotation_deg.signum(), rotation_deg.abs());
-        let sample = |step: u32| sign * magnitude * f64::from(step) / f64::from(ANGLE_SCAN_STEPS);
-        let mut step = ANGLE_SCAN_STEPS;
-        while step > 0 && !self.covers(sample(step), self.centre, limit) {
-            step -= 1;
-        }
-        // The scan stopped on the first angle that fits; the sample one step out
-        // is the angle it rejected, and the crossing lies between them.
-        let mut low = sample(step);
-        let mut high = sample(step + 1);
-        for _ in 0..BISECTION_STEPS {
-            let mid = 0.5 * (low + high);
-            if self.covers(mid, self.centre, limit) {
-                low = mid;
-            } else {
-                high = mid;
-            }
-        }
-        low
     }
 
     /// The largest part of `offset` that still covers at `rotation_deg` and

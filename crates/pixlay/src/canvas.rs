@@ -433,10 +433,13 @@ fn add_scroll(area: &gtk::DrawingArea, window: &EditorWindow) {
                 .contains(gdk::ModifierType::CONTROL_MASK);
             let next = if control {
                 let step = if up { 1.0 } else { -1.0 };
+                // The angle is free (S11): no cap, and the value is wrapped into
+                // (-180, 180] so a long spin cannot walk the number away.
                 CropTransform {
-                    rotation_deg: (crop.rotation_deg + step).clamp(-45.0, 45.0),
+                    rotation_deg: (crop.rotation_deg + step),
                     ..crop
                 }
+                .normalized()
             } else {
                 let factor = if up { 1.06 } else { 1.0 / 1.06 };
                 CropTransform {

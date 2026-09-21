@@ -208,6 +208,70 @@ impl Polygon {
         (0..n).map(move |i| (self.points[i], self.points[(i + 1) % n]))
     }
 
+    /// The part of this polygon inside `rect`, as a closed polygon.
+    ///
+    /// Sutherland–Hodgman against the rectangle's four half-planes: the clip
+    /// region is convex, so the result is exactly the intersection's vertex list
+    /// and the test "the photo covers this region" stays a vertex test. A polygon
+    /// already inside `rect` comes back **unchanged**, vertex for vertex — which
+    /// is what keeps the unframed fit the same arithmetic it was before the frame
+    /// existed (S11).
+    ///
+    /// The result can be empty, or have fewer than [`Polygon::MIN_VERTICES`]
+    /// vertices, when the polygon does not reach into the rectangle: a caller
+    /// that needs a region with an interior checks `area()`.
+    pub fn clipped_to(&self, rect: Rect) -> Self {
+        let mut points = self.points.clone();
+        for side in 0..4 {
+            if points.is_empty() {
+                break;
+            }
+            // `vertical` picks the coordinate, `bound` is where the half-plane
+            // starts and `above` says which side of it is inside.
+            let (vertical, bound, above) = match side {
+                0 => (true, rect.x0, true),
+                1 => (true, rect.x1, false),
+                2 => (false, rect.y0, true),
+                _ => (false, rect.y1, false),
+            };
+            let coordinate = |p: Point| if vertical { p.x } else { p.y };
+            let inside = |p: Point| {
+                if above {
+                    coordinate(p) >= bound
+                } else {
+                    coordinate(p) <= bound
+                }
+            };
+            // The clipped coordinate is `bound` itself rather than the
+            // interpolation's value, so a vertex that lands on the edge is
+            // exactly on it.
+            let crossing = |a: Point, b: Point| {
+                let t = (bound - coordinate(a)) / (coordinate(b) - coordinate(a));
+                if vertical {
+                    Point::new(bound, a.y + t * (b.y - a.y))
+                } else {
+                    Point::new(a.x + t * (b.x - a.x), bound)
+                }
+            };
+            let previous = points;
+            let mut next = Vec::with_capacity(previous.len() + 4);
+            for (index, current) in previous.iter().copied().enumerate() {
+                let prior = previous[(index + previous.len() - 1) % previous.len()];
+                match (inside(prior), inside(current)) {
+                    (true, true) => next.push(current),
+                    (true, false) => next.push(crossing(prior, current)),
+                    (false, true) => {
+                        next.push(crossing(prior, current));
+                        next.push(current);
+                    }
+                    (false, false) => {}
+                }
+            }
+            points = next;
+        }
+        Self { points }
+    }
+
     /// Distance from `p` to the nearest edge, in normalized units.
     pub fn distance_to_boundary(&self, p: Point) -> f64 {
         self.edges()

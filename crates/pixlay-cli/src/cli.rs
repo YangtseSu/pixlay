@@ -15,8 +15,8 @@ use pixlay_imaging::{Chroma, Export, Format, Rgb8View, SlotBitmap, icc};
 use pixlay_render::Images;
 
 use crate::args::{
-    self, Command, HitArgs, ImageArgs, InitArgs, ProbeArgs, RenderArgs, SaveArgs, ScanArgs, Size,
-    Source, TemplatesArgs, TextArgs, ThumbArgs, USAGE,
+    self, Command, EditArgs, HitArgs, ImageArgs, InitArgs, ProbeArgs, RenderArgs, SaveArgs,
+    ScanArgs, Size, Source, TemplatesArgs, TextArgs, ThumbArgs, USAGE,
 };
 use crate::report::Report;
 use crate::stats;
@@ -54,6 +54,7 @@ pub fn run(argv: &[OsString]) -> Result<u8, Failure> {
         Command::Text(args) => text(args),
         Command::Templates(args) => list_templates(args),
         Command::Init(args) => init_project(args),
+        Command::Edit(args) => edit_project(args),
         Command::Hit(args) => hit(args),
         Command::Save(args) => save_project(args),
     }
@@ -135,6 +136,116 @@ fn save_project(args: SaveArgs) -> Result<u8, Failure> {
     report.text("aspect", ratio_label(doc.template.aspect));
     report.int("cells", doc.cells.len() as i64);
     report.int("text", doc.text.len() as i64);
+    report.int("bytes", bytes as i64);
+    emit(&report, args.json);
+    Ok(EXIT_SUCCESS)
+}
+
+/// `edit`: change one cell's framing and/or the document's frame, and write the
+/// document back (S11).
+///
+/// This is the machine surface of what S15's compose stage does by hand — the
+/// rotation, zoom and pan of a cell, and the frame's three fields — because
+/// `AGENTS.md` allows nothing that only the GUI can do. Two properties make it
+/// usable as a tool rather than as a second editor:
+///
+/// * **the stored crop is the fit** of what was asked for. A crop is a request and
+///   what gets drawn is what covers it, so storing the request would leave a
+///   document whose numbers are not the picture; storing the fit makes the written
+///   file say what it draws. A cell with no photo has nothing to fit against (the
+///   clamp is defined against a photo's aspect) and keeps the numbers as given.
+/// * **it is idempotent.** Fitting a fit returns it bit for bit, so `edit` applied
+///   twice to the same project writes the same bytes — which is the property S3
+///   established for the clamp, re-asserted through the new entry point.
+///
+/// The write goes through [`Project::save_as`], the same call `save` makes, so a
+/// copy that lands in another directory has its relative photo paths rebased.
+fn edit_project(args: EditArgs) -> Result<u8, Failure> {
+    let project =
+        Project::load(&args.project).map_err(|error| Failure::Failed(error.to_string()))?;
+    let sources = project
+        .sources()
+        .map_err(|error| Failure::Failed(error.to_string()))?;
+    let mut doc = project.doc().clone();
+    args.frame.apply(&mut doc.frame);
+
+    if let Some(slot) = args.slot {
+        if slot >= doc.cells.len() {
+            return Err(Failure::Usage(format!(
+                "--slot {slot} does not exist; the template has {} slots",
+                doc.cells.len()
+            )));
+        }
+        if args.clear {
+            doc.cells[slot] = pixlay_core::Cell::default();
+        } else {
+            let request = doc.cells[slot].crop.normalized();
+            let request = pixlay_core::CropTransform {
+                zoom: args.zoom.unwrap_or(request.zoom),
+                offset: args.offset.unwrap_or(request.offset),
+                rotation_deg: args.rotate.unwrap_or(request.rotation_deg),
+            }
+            .normalized();
+            doc.cells[slot].crop = match sources.get(slot).and_then(Option::as_ref) {
+                // The fit is taken in the document's own space — the canvas aspect,
+                // not a preview grid's — because this is the number that gets
+                // written. It is the *edited* request that is fitted, not the crop
+                // the document already had: `fit_crop` is the same reference
+                // `draw` will use.
+                Some(photo) => {
+                    let source = pixlay_imaging::Source::decode(photo)
+                        .map_err(|error| Failure::Failed(error.to_string()))?;
+                    doc.fit_crop(slot, request, doc.canvas.aspect(), source.aspect())
+                        .map_err(|error| Failure::Failed(error.to_string()))?
+                        .transform
+                }
+                // Nothing to cover: the request is stored as it stands, and the fit
+                // is applied when the cell gets a photo (`draw` recomputes it).
+                None => request,
+            };
+        }
+    }
+
+    // Validating before writing is what keeps a bug in the library from shipping as
+    // an unloadable file, and it is what refuses a gap that empties a cell.
+    let edited =
+        Project::new(doc, &args.project).map_err(|error| Failure::Failed(error.to_string()))?;
+    edited
+        .save_as(&args.out)
+        .map_err(|error| Failure::Failed(error.to_string()))?;
+    let bytes = std::fs::metadata(&args.out)
+        .map_err(|error| Failure::Failed(format!("{}: {error}", args.out.display())))?
+        .len();
+
+    let doc = edited.doc();
+    let mut report = Report::new();
+    report.text("status", "ok");
+    report.text("command", "edit");
+    report.text("template", doc.template.name.clone());
+    report.int("version", i64::from(doc.template.version));
+    report.int("cells", doc.cells.len() as i64);
+    report.int(
+        "photos",
+        doc.cells
+            .iter()
+            .filter(|cell| cell.source.is_some())
+            .count() as i64,
+    );
+    report.float("gap", doc.frame.gap_rel);
+    report.float("radius", doc.frame.radius_rel);
+    let border = doc.frame.color;
+    report.text("border", rgb([border.r, border.g, border.b]));
+    if let Some(slot) = args.slot {
+        let cell = &doc.cells[slot];
+        report.int("slot", slot as i64);
+        report.bool("occupied", cell.source.is_some());
+        report.float("zoom", cell.crop.zoom);
+        report.text(
+            "offset",
+            format!("{:.4},{:.4}", cell.crop.offset.0, cell.crop.offset.1),
+        );
+        report.float("rotation_deg", cell.crop.rotation_deg);
+    }
     report.int("bytes", bytes as i64);
     emit(&report, args.json);
     Ok(EXIT_SUCCESS)
@@ -333,7 +444,7 @@ fn render(args: RenderArgs) -> Result<u8, Failure> {
 
     // Load the document first: a broken project must fail before anything is
     // rendered, and its message must name the path that is wrong.
-    let (doc, sources) = match &args.source {
+    let (mut doc, sources) = match &args.source {
         Source::Project(path) => {
             let project =
                 Project::load(path).map_err(|error| Failure::Failed(error.to_string()))?;
@@ -352,6 +463,11 @@ fn render(args: RenderArgs) -> Result<u8, Failure> {
             (pixlay_core::templates::document(&template), Vec::new())
         }
     };
+    // The frame flags are an override for this render, applied before the document
+    // is validated: a gap that leaves a cell with nothing visible is a failure of
+    // *this* run, and the error names the cell. Nothing is written back — `edit` is
+    // the command that stores a frame.
+    args.frame.apply(&mut doc.frame);
     doc.validate()
         .map_err(|error| Failure::Failed(error.to_string()))?;
 
@@ -438,6 +554,13 @@ fn render(args: RenderArgs) -> Result<u8, Failure> {
     report.int("cells", doc.cells.len() as i64);
     report.int("occupied", images.len() as i64);
     report.int("text", doc.text.len() as i64);
+    // The frame the render used, always: with `--gap`/`--radius`/`--border-color`
+    // it is this run's override, otherwise the document's own, and a caller that
+    // cannot see which of the two it got cannot measure a frame.
+    report.float("gap", doc.frame.gap_rel);
+    report.float("radius", doc.frame.radius_rel);
+    let border = doc.frame.color;
+    report.text("border", rgb([border.r, border.g, border.b]));
     report.int("out_w", i64::from(image.width));
     report.int("out_h", i64::from(image.height));
     report.int("bytes", bytes as i64);
@@ -920,7 +1043,7 @@ fn probe(args: ProbeArgs) -> Result<u8, Failure> {
     report.int("out_w", i64::from(result.width));
     report.int("out_h", i64::from(result.height));
     report.int("bg_samples", result.background.samples as i64);
-    report.int("bg_non_white", result.background.non_white as i64);
+    report.int("bg_off_backdrop", result.background.off_backdrop as i64);
     for interior in &result.interiors {
         let prefix = report.row("slot", interior.slot);
         report.text(

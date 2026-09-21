@@ -51,9 +51,12 @@ pub enum Command {
         slot: usize,
         source: Option<PathBuf>,
     },
-    /// Replace one cell's framing. The request is stored as asked; what gets
-    /// drawn is its fit (`CropTransform::fit`), which `draw` recomputes, so a
-    /// request that would leave the slot uncovered is still a legal document.
+    /// Replace one cell's framing. The request is stored as asked — with the one
+    /// normalization a dial needs: a finite `rotation_deg` is wrapped into
+    /// `(-180, 180]`, so a long spin cannot accumulate turns in the document. What
+    /// gets drawn is the request's fit (`CropTransform::fit`), which `draw`
+    /// recomputes, so a request that would leave the cell uncovered is still a legal
+    /// document.
     SetCrop {
         slot: usize,
         crop: CropTransform,
@@ -144,7 +147,7 @@ impl Command {
                 cell_mut(doc, *slot)?.source = source.clone();
             }
             Self::SetCrop { slot, crop } => {
-                cell_mut(doc, *slot)?.crop = *crop;
+                cell_mut(doc, *slot)?.crop = crop.normalized();
             }
             Self::SetGrade { slot, grade } => {
                 cell_mut(doc, *slot)?.grade = *grade;

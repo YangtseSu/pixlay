@@ -558,14 +558,14 @@ impl EditorWindow {
     /// move it by ten pixels whatever zoom the document happens to ask for.
     pub fn fitted_crop(&self, slot: usize) -> Option<CropTransform> {
         let doc = self.document();
-        let cell = doc.cells.get(slot)?;
         let (grid, images) = self.images();
         let aspect = images.get(slot).map(|bitmap| bitmap.aspect())?;
-        Some(
-            cell.crop
-                .fit(&doc.template.slots[slot], grid.aspect(), aspect)
-                .transform,
-        )
+        // The document's own fit, so the frame's gap (S11) is part of what the user
+        // is looking at: a gesture starts from the picture on screen, not from a
+        // request the canvas is not drawing.
+        doc.fitted_crop(slot, grid.aspect(), aspect)
+            .ok()
+            .map(|fit| fit.transform)
     }
 
     // ---- edits ------------------------------------------------------------
@@ -603,16 +603,15 @@ impl EditorWindow {
     fn fit_for(&self, slot: usize, crop: CropTransform) -> CropTransform {
         let doc = self.document();
         let (grid, images) = self.images();
-        let Some(cell) = doc.cells.get(slot) else {
-            return crop;
-        };
         let Some(aspect) = images.get(slot).map(|bitmap| bitmap.aspect()) else {
-            return cell.crop;
+            return doc.cells.get(slot).map(|cell| cell.crop).unwrap_or(crop);
         };
-        match doc.template.slots.get(slot) {
-            Some(geometry) => crop.fit(geometry, grid.aspect(), aspect).transform,
-            None => crop,
-        }
+        // The same reference the renderer clamps against, for the gesture's own
+        // numbers: the canvas and the gesture cannot disagree about what covers the
+        // cell, frame included.
+        doc.fit_crop(slot, crop, grid.aspect(), aspect)
+            .map(|fit| fit.transform)
+            .unwrap_or(crop)
     }
 
     fn live(&self, command: Command) {

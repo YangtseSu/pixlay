@@ -12,8 +12,10 @@
 //!   layout of a saved project cannot change under it.
 //! * Documents carry `docVersion`; a file written by a newer version is rejected
 //!   instead of guessed at or downgraded.
-//! * Limits (slot count, dpi, canvas pixels, rotation) are enforced by
-//!   [`CollageDoc::validate`] and reported as typed errors, never as panics.
+//! * Limits (slot count, dpi, canvas pixels, zoom, the frame's two lengths) are
+//!   enforced by [`CollageDoc::validate`] and reported as typed errors, never as
+//!   panics. Rotation is *not* one of them: since 2026-09-22 any finite angle is
+//!   legal and every finite angle is normalized into `(-180, 180]`.
 //! * Framing state is absolute ([`CropTransform::zoom`] is displayed width over
 //!   slot width), so swapping a photo does not move the visible area, and what is
 //!   drawn is the *fit* of the stored request ([`CropTransform::fit`]), so a
@@ -26,6 +28,7 @@ mod canvas;
 mod crop;
 mod doc;
 mod error;
+mod frame;
 mod geometry;
 mod grade;
 mod history;
@@ -44,6 +47,7 @@ pub use canvas::{CanvasSpec, MAX_CANVAS_MM, MM_PER_INCH, PixelSize};
 pub use crop::{CropFit, CropTransform, DisplayRegion};
 pub use doc::{Cell, CollageDoc, Project, relative_to};
 pub use error::CoreError;
+pub use frame::{Frame, MAX_FRAME_REL};
 pub use geometry::{EPSILON, Point, Polygon, Rect};
 pub use grade::{
     FilterPreset, GRADE_DELTA_RANGE, GRADE_FACTOR_RANGE, GRADE_SATURATION_RANGE, Grade,
@@ -104,27 +108,8 @@ pub const MAX_CANVAS_PIXELS: u64 = 200_000_000;
 /// bound or the dimension arithmetic overflows: measured before this constant
 /// existed, `zoom = 1e5` aborted the process on a failed 30-petabyte allocation
 /// and `zoom = 1e308` wrapped the bitmap width to `i32::MIN`. 1000x is far beyond
-/// any real framing.
+/// any real framing — and beyond what the free rotation asks for: the worst
+/// covering zoom over every shipped slot, angle and photo aspect measures **21.73**
+/// (`docs/CONTRACT.md` §8, S11: a 2.4:1 photo in `strip-9-9x1`'s 1/16-wide pane),
+/// 46 times below the cap.
 pub const MAX_ZOOM: f64 = 1000.0;
-
-/// Largest framing rotation, in degrees. Rotation only crops edges, so beyond
-/// this a slot would need absurd magnification to stay covered.
-pub const MAX_ROTATION_DEG: f64 = 45.0;
-
-/// Multiple of the upright covering zoom above which [`CropTransform::fit`]
-/// reduces the requested rotation angle instead of magnifying the photo further
-/// (`docs/CONTRACT.md` §2, the clamp-degradation row).
-///
-/// The reference is the *upright floor*: the zoom the slot's shape and the
-/// photo's aspect demand with the photo centred and unrotated. Measured that way
-/// a slot which is inherently narrow — the ten-column strip needs 6x for a 4:3
-/// photo — is not degraded for that reason alone, and rotating such a slot costs
-/// *less* than leaving it upright. What is refused is rotation that magnifies
-/// without bound: covering a slot of physical aspect `r` with a matching photo
-/// needs `r*sin(t) + cos(t)` at angle `t`, so the widest angle this limit keeps is
-/// the one where that reaches 1.5 — measured (2026-09-21, matching photo, 45
-/// degrees requested) 45 degrees kept for a square slot, 34.0 for 6:5, 27.3 for
-/// 4:3, 22.6 for 3:2, 18.0 for 16:9, 11.2 for 8:3, and the same angles mirrored
-/// for slots taller than they are wide. Raising this constant is what widens that
-/// range; the photo is magnified by exactly as much as the angle it keeps needs.
-pub const CLAMP_ZOOM_LIMIT: f64 = 1.5;

@@ -117,7 +117,9 @@ fn images(doc: &CollageDoc, canvas: PixelSize, photo_aspect: &dyn Fn(usize) -> f
     let mut images = Images::new();
     for (index, slot) in doc.template.slots.iter().enumerate() {
         let aspect = photo_aspect(index);
-        let fit = doc.cells[index].crop.fit(slot, canvas.aspect(), aspect);
+        let fit = doc
+            .fitted_crop(index, canvas.aspect(), aspect)
+            .expect("the document fits its own cells");
         let bbox = slot.outline.bbox();
         let displayed = fit.transform.zoom * bbox.width() * f64::from(canvas.width);
         let width = displayed.ceil() as i32 + 1;
@@ -234,9 +236,9 @@ fn a_rotation_the_document_asks_for_is_clamped_into_coverage() {
             offset: (0.0, 0.0),
             rotation_deg: 13.0,
         };
-        let fit = doc.cells[index]
-            .crop
-            .fit(&doc.template.slots[index], canvas_aspect, aspect);
+        let fit = doc
+            .fitted_crop(index, canvas_aspect, aspect)
+            .expect("the document fits its own cells");
         assert!(
             fit.transform.zoom > 1.0,
             "slot {index}: the request alone already covers, so this proves nothing"
@@ -272,8 +274,9 @@ fn a_document_that_is_already_fitted_renders_identically() {
     for index in 0..fitted.cells.len() {
         let aspect = images.get(index).expect("bitmap").aspect();
         let crop = requested.cells[index].crop;
-        fitted.cells[index].crop = crop
-            .fit(&requested.template.slots[index], canvas_aspect, aspect)
+        fitted.cells[index].crop = requested
+            .fit_crop(index, crop, canvas_aspect, aspect)
+            .expect("the document fits its own cells")
             .transform;
     }
 

@@ -6,18 +6,19 @@ The implementation is authoritative, and this file is its guide; when the two di
 
 The contract is **frozen at S1** and every step after it is built on top of it (`AGENTS.md`, "Step discipline", principle 3).
 
-> **What the ruling of 2026-09-22 changes in this file.** The shapes land in the plan's S11; until that step
-> lands, the implementation here is still the old one and the tests remain the tie-breaker.
+> **What the ruling of 2026-09-22 changes in this file.** The shapes landed in the plan's S11
+> (2026-09-22), so everything below is the implementation this build has.
 > - the **±45° cap on a cell's rotation is removed** — the angle is free and the clamp never reduces it, so
->   `CLAMP_ZOOM_LIMIT`, `CropFit::rotation_limited` and §2's "clamp degradation threshold" row go with it;
+>   `CLAMP_ZOOM_LIMIT`, `CropFit::rotation_limited` and §2's "clamp degradation threshold" row are gone;
 > - **flip and quarter turns are not product capabilities**, so the geometry stage is `crop → arbitrary rotation`;
 > - the canvas backdrop stops being hard-coded white: it becomes `frame.color`, which **defaults to white**, so
->   every project written before the field renders byte-identically;
+>   every project written before the field renders byte-identically (measured: the S1 golden image at RMSE
+>   **0.0**, and the S5 `verify.pixlay` render byte-identical — §8, "S11");
 > - `CollageDoc` gains `frame: { gapRel, radiusRel, color }`, and the fit's coverage reference becomes the
->   **inset (visible) rectangle** rather than the slot polygon.
+>   **visible rectangle** rather than the slot polygon.
 >
 > The rest of the contract is untouched. The rulings themselves are in `docs/2026-09-22-UX-DIRECTION.md` §6,
-> and the steps that carry them out are in `docs/2026-09-22-STEPS.md` (S11 in particular).
+> and the steps that carried them out are in `docs/2026-09-22-STEPS.md` (S11 in particular).
 
 ---
 
@@ -55,7 +56,8 @@ The contract is **frozen at S1** and every step after it is built on top of it (
 > the two slots give a cut template whose areas sum to exactly 1.0, the canvas is exactly
 > 4:3 to match `template.aspect`, and the text layer draws — with `{date}` resolving to what
 > the slot's photo says, or to `textFallback` when it says nothing (see "Text layers"
-> below). Its photos are the project's own, as any project's are.
+> below). Its photos are the project's own, as any project's are. It has no `frame` key,
+> which is the S11 default: no gap, square corners, a white canvas.
 
 **Version policy** (S1 review ruling, 2026-09-20: **breaking changes allowed, but no migrations written**).
 
@@ -84,14 +86,27 @@ Conventions:
 - **Direction convention**: both `rotationDeg` and a text layer's `rotationDeg` are positive **clockwise on screen** (the canvas y axis points down,
   cairo's `rotate` in that space is clockwise, and the renderer passes it through as-is).
 - **A crop is a request; what gets drawn is its fit** (`CropTransform::fit`, S3). The canvas and the slot never grow, so the
-  fit has exactly three levers: `zoom` is raised to the value that covers the visible cell with the photo centred (a larger
-  request is kept as it is), `offset` is pulled back along the line to the slot centre until the photo covers again — a pan
-  stops at the frame edge rather than being paid for with magnification — and `rotationDeg` is kept **exactly as asked**:
+  fit has exactly two levers: `zoom` is raised to the value that covers the visible cell with the photo centred (a larger
+  request is kept as it is), and `offset` is pulled back along the line to the slot centre until the photo covers again — a
+  pan stops at the frame edge rather than being paid for with magnification. `rotationDeg` is kept **exactly as asked**:
   since 2026-09-22 the angle is free and the fit never reduces it, so `CLAMP_ZOOM_LIMIT` and
-  `CropFit::rotation_limited` are gone (S11). The fit is **idempotent**, so clamping on an edit and again in `draw` costs
-  nothing and the second pass reports nothing. `draw` applies the fit, so no document this build accepts can render an
-  uncovered cell; the fit's own boundary is a slot so extreme that covering it needs more than `MAX_ZOOM`, which gets the
-  cap (and is what a decoder's memory budget, S4, limits from the other side).
+  `CropFit::rotation_limited` are gone (S11) and `CropFit` is the drawn transform alone. The fit is **idempotent**, so
+  clamping on an edit and again in `draw` costs nothing. `draw` applies the fit, so no document this build accepts can
+  render an uncovered cell; the fit's own boundary is a slot so extreme that covering it needs more than `MAX_ZOOM`, which
+  gets the cap (and is what a decoder's memory budget, S4, limits from the other side). Measured, the free angle's worst
+  case over the whole library and every photo aspect is **21.7x** — 46x below the cap (§8, "S11").
+- **The frame is the canvas decoration** (`CollageDoc::frame`, S11): `gapRel`, `radiusRel` and `color`, all
+  with defaults that are what the renderer painted before the field existed (no gap, no radius, white), so
+  a project written earlier renders byte-identically. Both lengths are **fractions of the canvas height**,
+  like a text layer's `sizeRel`: a gap takes half of itself off every side of every cell (two neighbours are
+  then `gapRel` apart, and the clip shows the backdrop in between), and a radius is clamped to half the
+  smaller side of the cell's inset rectangle so a large request rounds the corners into a stadium. The
+  clamp's coverage reference is the cell's **visible region**: the outline clipped to the inset rectangle,
+  which is that rectangle exactly for the rectangular slots the library is made of. It does *not* subtract
+  the rounded corners — a rounded rectangle's exact support needs circular arcs and the reference stays a
+  polygon, so the corner costs a little more zoom than it strictly needs (bounded by the radius, and zero at
+  `radiusRel = 0`). The clip is `outline ∩ rounded_rect(inset)`, so a corner shows the backdrop rather than a
+  stretched photo.
 - **A cell's colour is its own**: `grade` is three numbers applied in linear light
   (see §4), and `filter` is one preset name applied to every cell after its own
   grade. Both were added by S4 with `serde` defaults, so a project written before
@@ -158,6 +173,8 @@ changed the document shape.
 | crop offset | every component \|offset\| ≤ 1 (slot widths / heights) | beyond half a slot the photo centre leaves the slot, and no clamp can cover it again. The fit reduces it further whenever the requested pan would uncover the slot |
 | canvas vs template aspect ratio | difference ≤ 1e-6, otherwise a hard error | the two are each annotated independently, normalized coordinates carry no aspect ratio themselves; the GUI's template selector groups by aspect ratio and lists only the matching ones |
 | text font size | 0 < `sizeRel` ≤ 1.0 (fraction of canvas height) | — |
+| frame gap / radius | both finite, `0 ≤ value ≤ 1.0` (`MAX_FRAME_REL`, fraction of canvas height) | the bound is a typo bound, not a design one: a length past the whole canvas height is not a frame around anything. A gap *inside* the range can still empty a small cell, and that is refused per slot by `CollageDoc::validate`, naming the slot |
+| frame colour alpha | exactly `255` | the backdrop is painted, not blended: a translucent one would make the exported pixel depend on the surface behind it, which is exactly what "preview and export are the same picture" and "an export is never transparent" forbid |
 | text position (free mode) | both components inside `[0,1]` | a free layer is placed in normalized canvas coordinates, so anything outside is off the canvas by definition |
 | tiled step | both components > 0, finite | step 0 or a negative value makes the tiling loop forever; there is no upper bound |
 | tiles per text layer | ≤ 10,000 (`TextLayer::MAX_TILES`) | a step is unbounded from above and therefore unbounded *downward*: `1e-9` is a billion by a billion tiles. A 1/100 step is already a 101x101 grid = 10,201 tiles and is refused when the document loads, so the cap is where a person's watermark stops being a watermark. `pixlay_core::tiled_grid` answers the count; the renderer asks the same function and never hangs on an in-memory document either |
@@ -169,7 +186,7 @@ changed the document shape.
 | grade `saturation` | 0.0..=4.0 | 0 is greyscale, 1 leaves the pixel alone |
 | grade `delta` (`Δ`, warmth) | -1.0..=1.0 | `r *= 1 + delta`, `b *= 1 - delta`; past 1 the mapping is no longer monotone |
 | decoded source | ≤ 120 MP and ≤ 20000 px per edge, 20 s | `MAX_DECODE_PIXELS` / `MAX_DECODE_EDGE` / `DECODE_TIMEOUT` in `pixlay-imaging`. A source is RGBA at its own depth, so 120 MP is 480 MB as 8-bit and 960 MB as 16-bit; the area cap is checked between the loader's header and its pixels, so a decompression bomb costs nothing |
-| clamp degradation threshold | ~~when the zoom the **requested rotation** needs exceeds `CLAMP_ZOOM_LIMIT` = **1.5 times the upright covering zoom**, the angle is reduced to the widest one that fits~~ — **superseded 2026-09-22: the angle is free and is never reduced, so this row's rule and `CLAMP_ZOOM_LIMIT` are removed by S11, which measures the covering zoom as a function of the angle for every slot shape** | the S3 row as it was decided (`docs/completed/2026-09-20-STEPS-done.md`): its reference was the upright floor, not an absolute zoom, and a ten-column strip needs 6x upright for a 4:3 photo, so a narrow slot was never degraded. Measured kept angles, matching photo and 45° asked (2026-09-21): 45° (unlimited) at 1:1, 34.0° at 6:5, 27.3° at 4:3, 22.6° at 3:2, 18.0° at 16:9, 11.2° at 8:3, mirrored for portrait slots. Kept as the record of what the cap did |
+| clamp degradation threshold | ~~when the zoom the **requested rotation** needs exceeds `CLAMP_ZOOM_LIMIT` = **1.5 times the upright covering zoom**, the angle is reduced to the widest one that fits~~ — **removed by S11 (2026-09-22): the angle is free and is never reduced, so the rule and the constant are gone; the zoom pays for the angle, and its worst case over the whole library is 21.7x against a cap of 1000x (§8)** | the S3 row as it was decided (`docs/completed/2026-09-20-STEPS-done.md`): its reference was the upright floor, not an absolute zoom, and a ten-column strip needs 6x upright for a 4:3 photo, so a narrow slot was never degraded. Measured kept angles, matching photo and 45° asked (2026-09-21): 45° (unlimited) at 1:1, 34.0° at 6:5, 27.3° at 4:3, 22.6° at 3:2, 18.0° at 16:9, 11.2° at 8:3, mirrored for portrait slots. Kept as the record of what the cap did |
 
 Every entry above is enforced with a typed error, never a panic, and each is covered by
 `crates/pixlay-core/tests/contract.rs` or `crates/pixlay-cli/tests/cli.rs`. An implementation
@@ -223,13 +240,23 @@ Images                            // slot → Bitmap; absent = that cell is left
 ```
 
 - **Cairo only blits and clips**: the bitmaps coming in are already decoded, downsampled, rotated and graded (`pixlay-imaging`, S4).
-- **The crop is fitted before it is drawn** (`CropTransform::fit`, S3): the slot's outline, the aspect of the space being drawn
-  into and the bitmap's aspect go in, and the transform that comes out is what is painted. A document may therefore store any
-  contract-legal request and still render covered. S4's decoder sizes its bitmap from the same fit — the fit's zoom *is* the
-  display size — because sizing from the stored request instead would leave the canvas resampling, which it must never do
-  (measured in S3: a request 11.6x below the fitted zoom smeared one texel's transparent edge about 6 px into the slot).
-- Composite onto an **opaque backdrop, white by default** (`frame.color`, added by the 2026-09-22 ruling and
-  landing in S11); the output is never transparent.
+- **The crop is fitted before it is drawn** (`CropTransform::fit`, S3): the cell's visible geometry, the aspect of the
+  space being drawn into and the bitmap's aspect go in, and the transform that comes out is what is painted. A document
+  may therefore store any contract-legal request and still render covered. S4's decoder sizes its bitmap from the same fit
+  — the fit's zoom *is* the display size — because sizing from the stored request instead would leave the canvas
+  resampling, which it must never do (measured in S3: a request 11.6x below the fitted zoom smeared one texel's
+  transparent edge about 6 px into the slot).
+- **The canvas decoration stage is the frame** (S11), and it is two halves of the same field:
+  - **the backdrop** is the first thing `draw` paints — `frame.color`, white by default — so everything a photo does
+    not reach (the gaps, a rounded corner, an empty cell, the canvas border) is that colour. It is painted with
+    `Operator::Source`, not blended, so the output is opaque whatever the surface held before.
+  - **the clip** is `outline ∩ rounded_rect(inset)` per cell: the outline first, then the inset rectangle with its
+    corners rounded, which cairo intersects with the current clip. A corner therefore shows the backdrop instead of a
+    stretched photo. An identity frame (`gapRel == 0`, `radiusRel == 0`) adds **no** second clip — clipping to a
+    superset of the outline would be clipping to something let through — which is what keeps a project written before
+    S11 pixel-identical: measured, the S1 golden image is **RMSE 0.0** against the committed PNG, and the S5
+    `verify.pixlay` render is byte-identical (§8, "S11").
+- Composite onto an **opaque backdrop, white by default** (`frame.color`): the output is never transparent.
 - **Band rendering**: `Band::out_rows()` partitions on **output pixels** (`first = total * index / count`),
   so at any `scale` the band sizes sum to exactly the whole image. It previously partitioned by canvas rows, rounding each band on its own,
   and at 72dpi/scale=0.3 three bands totaled 759 rows while the whole image was 758 rows — `round` is not additive, and this could only be fixed this way.
@@ -347,6 +374,7 @@ pixels.
 pixlay-render render    --project <file.pixlay> --dpi <n> --out <file>
 pixlay-render render    --project <file.pixlay> --long-edge <px> --out <file>
 pixlay-render render    --project <file.pixlay> --dpi <n> --chroma 444|422|420 --out <file>
+pixlay-render render    --project <file.pixlay> --gap <rel> --radius <rel> --border-color <r,g,b> --out <file>
 pixlay-render render    --template <name> --dpi <n> --out <file>   # no project, no photos
 pixlay-render probe     --project <file.pixlay>
 pixlay-render image     --photo <file>
@@ -355,6 +383,8 @@ pixlay-render thumb     --photo <file> --px <n> --out <file>
 pixlay-render text      --project <file.pixlay>
 pixlay-render templates [--aspect <ratio>] [--json]
 pixlay-render init      --template <name> --out <file.pixlay> [--photo <p>...]
+pixlay-render edit      --project <file.pixlay> --out <file.pixlay> --slot <i> --rotate <deg> --zoom <z> --offset <x>,<y> --clear
+pixlay-render edit      --project <file.pixlay> --out <file.pixlay> --gap <rel> --radius <rel> --border-color <r,g,b>
 pixlay-render hit       --project <file.pixlay> --at <x>,<y> [--json]
 pixlay-render hit       --template <name> --at <x>,<y> [--json]
 pixlay-render save      --project <file.pixlay> --out <file.pixlay> [--json]
@@ -379,7 +409,7 @@ comparable, and `--quality` was deliberately not added — a knob nobody tests b
 | `--preview-px n` | n pixels on the long edge; the same `draw`, only `scale` changes. The **bitmaps are sized for the preview too** (S4): decoding and resampling a full A0 and letting Cairo shrink it would cost the export's time and memory for a thumbnail, and would do the shrinking with Cairo's filter instead of the pipeline's |
 | `render`'s report | carries `text` (how many text layers the document has) next to `cells` and `occupied`, so "the layers reached the renderer" is visible without reading pixels. In physical-size mode `dpi` is an **integer** — the resolution that was asked for and written; in pixel mode it is a **decimal**, the one the grid works out to, next to `long_edge`. A JPEG report carries `chroma` as well |
 | `--stats` | appends `{ms, encode_ms, peak_rss_mb, icc}`; `render` emits all four, `probe` emits no `encode_ms` (it does not encode). `icc` is the description of the profile the written file carries (`sRGB IEC61966-2.1`); a command that writes no file reports `none`. The measurement rules are below |
-| `probe` | samples and outputs numbers (in-slot photo color, out-of-slot white background, shared-edge blended pixels, three-color convex combination residual), exit code 2 when the verdict is not passed |
+| `probe` | samples and outputs numbers (in-slot photo color, out-of-slot backdrop, shared-edge blended pixels, three-color convex combination residual), exit code 2 when the verdict is not passed. The background field is `bg_off_backdrop` — "off the document's backdrop colour", which is `frame.color` and white unless the document says otherwise (S11; it was `bg_non_white` while the backdrop was hard-coded) |
 | `text` | one row per layer: the **resolved** `content` (tokens substituted exactly as `render` substitutes them), `mode`, `size_rel`, `rotation_deg`, the `source_slot` when it names one, and for a free layer `position` / `anchor` or for a tiled one `step` / `tiles` (the grid `tiled_grid` answers). It decodes only the slots a layer names, once each, and writes nothing. Without it, "{date} is filled from EXIF" could only be checked by rendering and reading pixels back |
 | `image` | one file's decode facts: `mime`, `width`, `height`, `depth` (8 or 16), `aspect`, `exif_bytes`, `date` (EXIF `DateTimeOriginal`, empty when absent). It is how "HEIC decodes" and "orientation 6 is applied" are visible without rendering a project. `--out`/`--dpi`/etc. are usage errors: it decodes at the file's own size and writes nothing |
 
@@ -394,7 +424,7 @@ comparable, and `--quality` was deliberately not added — a knob nobody tests b
 | relative sources | not resolved at all: a project whose photos have moved still answers | rewritten when `--out` lands in another directory, so the copy still finds the photos of the project it was copied from; an absolute source is left as it stands |
 | no slot / no file | exit **0**: "no slot owns this point" is an answer, like `templates --aspect 7:5` reporting `count = 0` | a missing `--project`, a refused version or a write failure is exit **2** with stdout empty, and nothing is written |
 
-**Command history has no subcommand.** `History`/`Command` live in `pixlay-core` and the GUI is their only caller: there is no CLI editing session for a verb to act on, and the observable that matters — the pixels after undoing everything — is a *test* (`pixlay-render/tests/history.rs`, `pixlay-cli/tests/history.rs`), which measures it more directly than a verb could. What the CLI does carry is the write path (`save`) those two share.
+**Command history has no subcommand.** `History`/`Command` live in `pixlay-core` and the GUI is their only caller: there is no CLI *session* — no undo stack, no interactive editing — and the observable that matters — the pixels after undoing everything — is a *test* (`pixlay-render/tests/history.rs`, `pixlay-cli/tests/history.rs`), which measures it more directly than a verb could. What the CLI carries is the write path (`save`, and `edit` for the framing) those two share: one document in, one document out, no state between runs.
 
 **S2's two subcommands report the template library and create a project.** They add a data source, not a new failure mode:
 
@@ -428,6 +458,26 @@ comparable, and `--quality` was deliberately not added — a knob nobody tests b
 | paths | a **photo that is not there** is a failure (exit 2, the path named) — the same rule a project that points at a deleted file follows. Each stored `source` is relative to the project file when the two share a root (`pixlay_core::relative_to`, the function `Project::save_as` rebases with) and absolute otherwise, so a project whose photos sit beside it can be moved |
 | the policy itself | `pixlay_core::selection`: `Selection` (ordered photos, the 2..=9 clamp, `layouts()` = the templates with that many slots), `remove_last` / `Removed::restore` (the LIFO batch rule: the last **occupied** cell, because a per-cell clear leaves holes, and the cell comes back in its own slot with its framing and grade). Pure functions, no filesystem |
 
+**S11 added one subcommand (`edit`) and three shared flags**, because the free rotation and the frame are things a *person*
+does and a machine has to be able to do too (`AGENTS.md`: nothing may be possible only in the GUI). The flags are the same
+three on both commands, and the difference between them is scope:
+
+| Item | Rule |
+|---|---|
+| `--gap <rel>` / `--radius <rel>` | fractions of the canvas height, `0..=1` (exit 1 outside). On `render` they override the document **for that render only** — the file is not touched — and on `edit` they are written into the document |
+| `--border-color <r,g,b>` | three channels `0..=255`, stored opaque (the frame's alpha rule is §2). The report prints it back the same way |
+| what `render` reports | `gap`, `radius` and `border` always, so "which frame did that render use" is answerable without counting pixels — the document's own values, unless a flag overrode one |
+| `edit --slot <i>` | the cell the framing flags apply to; `--rotate`/`--zoom`/`--offset`/`--clear` without it are exit 1 **naming the flag**, because taking them as "the frame, then" would drop them silently. `--slot` past the last cell is exit 1 naming the count |
+| `--rotate <deg>` | any finite angle, clockwise on screen, stored wrapped into `(-180, 180]` (so a dial cannot accumulate turns in a file). Exit 1 for a non-finite one |
+| `--zoom <z>` | `0 < z ≤ 1000` (exit 1 outside) |
+| `--offset <x>,<y>` | cell widths and heights from the cell's centre, each within `-1..=1` (exit 1 outside). A **comma pair**, the surface's own convention for a pair (`--at`), where the plan's sketch wrote two arguments |
+| `--clear` | empties the cell: no photo, framing and grade back to their defaults. Exclusive with the framing flags (exit 1) |
+| what `edit` stores | **the fit** of what was asked for, not the request: a crop is a request and what is drawn is what covers it, so the written file says what it draws. A cell with no photo has no photo aspect to fit against and keeps the numbers as given |
+| idempotence | fitting a fit returns it bit for bit, so `edit` applied twice to the same project writes the same bytes — asserted on a rotation that has to be paid for *and* a pan that has to be clamped. A frame is likewise idempotent |
+| writing | through `Project::save_as`, the same call `save` makes: atomic, and relative photo paths are rebased when the copy lands in another directory. `--out` may be `--project` (edit in place) |
+| what `edit` reports | `template`, `version`, `cells`, `photos`, the frame's three fields, `bytes`, and — when `--slot` was given — `slot`, `occupied`, `zoom`, `offset`, `rotation_deg` |
+| no `--photo`, no `--dpi` | an edit changes a cell's framing and the document's frame; which photos and how big an export are other commands' questions |
+
 Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wall clock, with compositing and encoding reported separately.
 
 `probe`'s threshold constants (the sources are commented in the code):
@@ -438,7 +488,7 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
 | seam blend cap | ≤ 2 px/row, at most 2 px wide | S0 measured 1.08 px/row, at most 1 px wide |
 | three-color convex combination residual cap | 3.0/255 | S0 measured 0.20/255; at 300dpi with eight slots the measured worst was 0.63 |
 
-`probe` uses **flat** content (one color per slot): only when the color blocks are flat can the blended pixels on a seam be distinguished from the content. The in-slot sample point for a geometry is
+`probe` uses **flat** content (one color per slot): only when the color blocks are flat can the blended pixels on a seam be distinguished from the content. The three layers its residual model fits are the **document's own backdrop** (`frame.color`) and the two slot colors, so a colored frame does not turn a legitimate blend into a "foreign" pixel (S11). The in-slot sample point for a geometry is
 "the point farthest from the boundary" (a coarse grid search + successive refinement), so the bounding-box center of an L-shaped slot is not misused.
 
 ## 6. v1 non-goals (must be listed explicitly, otherwise "it won't be enough later" is invisible to everyone)
@@ -476,7 +526,8 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
 
 | Item | Lands in | Shape |
 |---|---|---|
-| clamp math | **S3, landed**; its angle-reduction half retired by the **2026-09-22 ruling**, landing in **S11** | `CropTransform::fit(slot, canvas_aspect, photo_aspect) -> CropFit { transform, rotation_limited }` (S11 removes `rotation_limited`: the angle is never reduced and the coverage reference becomes the inset visible rectangle), applied by `draw`; the fit is idempotent and never exceeds `MAX_ZOOM` |
+| clamp math | **S3, landed**; the angle-reduction half retired and the visible-region reference landed in **S11 (2026-09-22)** | `CropTransform::fit(slot, covering, canvas_aspect, photo_aspect) -> CropFit { transform }`: the angle is never reduced and the coverage reference is the cell's visible region (`Frame::covering`), applied by `draw`; the fit is idempotent and never exceeds `MAX_ZOOM`. `CollageDoc::fitted_crop` / `fit_crop` are the two entry points that pair the frame with the clamp |
+| canvas decoration (the frame) | **S11, landed** | `CollageDoc::frame`: `Frame { gapRel, radiusRel, color }`, plus `Frame::covering` / `Frame::clip` and the backdrop + clip stage in `draw`; the CLI's `render --gap/--radius/--border-color` (render-time) and `edit` (§5). Measured cost at A0: none — the frame is a clip path and a fill (§8, "S11") |
 | template generator | **S2, landed** | `pixlay_core::templates` (`generator` recipes + the committed `frozen` data) and the `templates` / `init` subcommands; see §3 and §5 |
 | the image pipeline | **S4, landed** | `pixlay-imaging`: `Source::decode`, `resample`, `LinearRgb16::apply`, `slot_bitmap`/`slot_bitmaps`, `probe`; the buffer ladder and the colour decisions are §4.1 |
 | command history / hit testing / project writing | **S6.5, landed**; `SetTemplate` added by **S7** | `pixlay-core`: `Command` (one edit: source, framing, grade, filter, text layers, the `{date}` fallback, the template and its canvas — `SetTemplate` carries both because a canvas and a template must agree on their aspect ratio — and the canvas alone) and `History` (snapshot undo/redo; `apply` is all-or-nothing and the document has no mutable accessor; the GUI commits **one command per gesture**, §9), `Template::slot_at(point)` for hit testing, `CollageDoc::save` / `Project::save` / `Project::save_as` for writing a document. The CLI's `hit` and `save` are the machine surface of the first and the last; the command history is a test surface only, on purpose (§5) |
@@ -621,6 +672,59 @@ never be edited again):
 - **No new dependency, no `Cargo.lock` change** (`cargo update --workspace` locked 0 packages), and no change
   to any document, limit or CLI shape: S10 is data, plus the assertion that keeps the data's growth honest.
 
+### S11 (2026-09-22, `--release`, this machine)
+
+Two changes were measured against the build before them, and neither costs anything:
+
+| Item | Value |
+|---|---|
+| byte-identity, the S1 golden image (rectangle slots, angles 12°/0°) | **RMSE 0.0** against the committed `tests/golden/draw-v1.png` — the same 0.0 S1 measured, so the backdrop fill and the (skipped) frame clip moved no pixel |
+| byte-identity, the S5 verification document (`verify.pixlay`: eight photos **including the concave slot**, one `{date}` layer) | the rendered JPEG is **byte-identical**: md5 `b28abd09648280185c95002b5f49f4f4` before and after — same for the *regenerated* fixture, which now carries an explicit `frame` block, so "the default frame renders as the absent field did" is a measured claim and not an argument |
+| the `AGENTS.md` verification render, new build | 14043x10532, **ms 6704/6854** + `encode_ms` 2009/2128, **`peak_rss_mb` 1638–1640**, 9,221,906 bytes, `gap = 0.000000`, `radius = 0.000000`, `border = 255,255,255`, `text = 1`, `occupied = 8` — inside the S10 spread of 7232/1638 for the same document |
+| the covering zoom, as a function of the angle | over **all 152 shipped slots, every whole degree 0..=180 and six photo aspects**, the worst covering zoom is **21.73** (a 2.4:1 photo in `strip-9-9x1`'s 1/16-wide pane at 6 degrees, whose *upright* floor is already 21.6). Per photo aspect: 0.5 → 9.06, 0.8 → 9.06, 1 → 9.06, 4:3 → **12.07**, 1.5 → 13.58, 2.4 → 21.73. `MAX_ZOOM` is 1000, so the cap is 46x above the worst angle — the free angle never reaches the bound that exists for the bitmap arithmetic (`pixlay-core/tests/framing.rs` prints this table) |
+| the free angle's cost, exactly (a 4:3 slot with a matching photo) | 1.0x upright, **1.396x at 20°**, **1.886x at 45°**, 1.333x at 90° — the closed form `r·sin t + cos t`, asserted to 1e-9 |
+| A0 at the worst angle (`strip-10-10x1`, ten 1600x1200 photos, 300 dpi, 14043x7899) | upright: **ms 5067** + encode 1574, **`peak_rss_mb` 1189**, 8,481,685 bytes. Every cell at **6 degrees** (the worst angle, zoom 6.11x on the 2/16 panes and 12.07x on the 1/16 ones): **ms 8583** + encode 1642, **`peak_rss_mb` 1451**, 8,463,260 bytes. The extra 262 MB is the rotation's own cost, not the zoom's: a rotated cell's bitmap is the *axis-aligned* box of the rotated cell, about 22% larger at 6°, while the zoom itself resamples a smaller source region into the same output. Against S4's 1182 MB for the same shape upright, and `AGENTS.md`'s 2.5 GB budget, the free angle fits |
+| the frame at A0 (the same document at 6 degrees, `--gap 0.02 --radius 0.03 --border-color 240,240,235`) | **ms 8418** + encode 1574, **`peak_rss_mb` 1450**, 8,187,135 bytes: a fill plus one more clip path per cell, inside the run-to-run spread of the unframed render |
+| the frame's pixels (300 dpi, two half-canvas cells) | the gap's stripe measures the requested width to ±2 px over `gapRel` 0.01/0.02/0.04/0.08 (42 px at 0.04); the rounded corner's exactly-backdrop pixels are **0 at radius 0** and rise monotonically to **4,831** at radius 0.08 (a 85 px radius, whose four corners are 6,202 px of which the rest is arc antialiasing); a coloured backdrop is the requested colour **to the byte** in every one of them, with `white = 0` over the whole sheet |
+| `edit` | stores the fit: a 25° request on a portrait cell with a landscape photo writes `rotationDeg = 25` with the zoom the angle needs, and the same edit twice writes **byte-identical** files (also with a frame, and with a pan that has to be clamped); a request above the floor keeps the user's zoom exactly (`3.5` stays `3.5`) |
+| the test suite | `cargo test`: the core framing sweep is 125,400 framings (11 angles across the whole circle, 5 offsets, 5 photo aspects, 3 zooms, all 27 templates) plus a 36,480-framing framed sweep; the render crate adds `tests/frame.rs` (five pixel probes) |
+
+**Decisions this step made** (recorded here because each one is a shape later steps build on):
+
+- **The coverage reference is the outline *clipped* to the inset rectangle, not the inset rectangle itself.**
+  For every rectangular slot — all of them but `mosaic-8-s14`'s L — the two are the same polygon, so the
+  measured behaviour of the gap is exactly what the plan described. They differ for the L: taking the
+  bounding box literally would have magnified its photo by up to 4.5% at near-diagonal angles, and the plan's
+  own exit criterion says a document with no frame renders byte-identically. `Polygon::clipped_to` is
+  Sutherland–Hodgman against the rectangle (exact, since the clip region is convex) and it returns a polygon
+  that is already inside unchanged *bit for bit*, which is what makes the unframed fit S3's own arithmetic.
+- **A rounded corner is not subtracted from that reference.** The visible region is a rounded rectangle whose
+  exact support needs circular arcs; the reference stays a polygon, so the corner asks for slightly more zoom
+  than it strictly needs — bounded by the radius, exactly zero at `radiusRel = 0`. The alternative was
+  polygon-approximating the arcs, which would make the fit's numbers depend on a segment count.
+- **The rotation is normalized on the way in and on every edit, not inside `validate`.** `validate` is
+  `&self`, so it cannot wrap; `from_json` and `Command::SetCrop` / `edit` do, and `validate` then only checks
+  that the angle is finite. The new `CoreError::NotFinite` exists for exactly that check: a domain
+  (`NaN` is not a number to compute with) is not a range, and an `OutOfRange` message would have named a
+  bound the value was never compared against.
+- **The frame's colour must be opaque.** `Rgba8` carries an alpha channel because the text layers need one, and
+  a translucent backdrop would make the exported pixel depend on the surface behind it — which is the one
+  thing "preview and export are the same picture" cannot survive. It is refused at load rather than silently
+  forced to 255.
+- **`render`'s frame flags are a render-time override and `edit` is the writer.** Both spellings are the same
+  three flags; the scope is the difference, and the report always prints the frame that was used, so "which
+  frame did that render use" needs no pixel counting. `edit` is also what the round-trip criterion needed: a
+  document's frame must be writable without a window.
+- **`edit` stores the fit, and only where a photo exists to fit against.** Storage that described the picture
+  was worth more than storage that repeated the request — and it is what makes `edit` idempotent, which is the
+  property the plan asked to be re-asserted through the new entry point. An empty cell has no aspect to cover
+  and keeps its numbers; `draw` fits it when it gets a photo.
+- **`--offset` is a comma pair** (`--offset 0.2,-0.3`), not the two arguments the plan's sketch wrote: `--at`
+  already established the convention for a pair on this surface, and a second spelling of "a point" would be
+  one more thing to remember.
+- **No new dependency, no `Cargo.lock` change** (`cargo update --workspace` locked 0 packages). The frame's
+  rounded corners are cairo arcs and the new geometry is 40 lines of clipping in `pixlay-core`.
+
 Every threshold constant in the tests annotates this source, so a change in the numbers can be discovered.
 
 ## 9. The window (S7), and the stages added after it
@@ -640,6 +744,11 @@ command. The library and the gallery are **not** renderers of the document — a
   gesture ends. A gesture is *pending* while it happens (`Editor::begin`), so the canvas shows
   the drag without the undo stack recording forty states; a slider, which has no end signal,
   commits when its value has been quiet for 250 ms.
+- **The rotation control is free-angle** (S11): the straightening slider spans `-180..=180` and
+  the wheel/keyboard step wraps the angle into that range, because the document accepts any
+  finite angle and never reduces it. A gesture fits its own candidate numbers against the same
+  visible region the canvas is drawing (`CollageDoc::fit_crop`), so what the user sees while
+  dragging is what the renderer will paint.
 - **One renderer.** The canvas paints the document with `pixlay_render::draw` into the widget's
   own cairo context — the same call the CLI and the export make. Measured: what the window
   draws and what `pixlay-render render` writes differ by an RMSE of **0.0077** over 307,200

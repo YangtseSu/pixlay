@@ -194,11 +194,13 @@ fn a_command_that_would_break_the_contract_changes_nothing() {
             },
         ),
         (
-            "a rotation past 45 degrees",
+            // The ±45° cap is gone (2026-09-22), so what a rotation can fail on is
+            // its domain: a number no arithmetic can be done on.
+            "a rotation that is not a number",
             Command::SetCrop {
                 slot: 0,
                 crop: CropTransform {
-                    rotation_deg: 60.0,
+                    rotation_deg: f64::NAN,
                     ..CropTransform::IDENTITY
                 },
             },
@@ -416,6 +418,29 @@ fn a_framing_request_is_stored_as_asked() {
         })
         .expect("applies");
     assert_eq!(history.doc().cells[1].crop, request);
+
+    // The one thing that *is* applied to a request: a finite angle is wrapped into
+    // `(-180, 180]`, because a gesture that spins does not spin the numbers with it
+    // (S11). Every angle the old ±45° cap allowed is inside the range, so nothing a
+    // document could hold before moves.
+    for (given, stored) in [
+        (450.0, 90.0),
+        (-180.0, 180.0),
+        (-400.0, -40.0),
+        (12.0, 12.0),
+    ] {
+        history
+            .apply(Command::SetCrop {
+                slot: 1,
+                crop: CropTransform {
+                    rotation_deg: given,
+                    ..request
+                },
+            })
+            .expect("applies");
+        assert_eq!(history.doc().cells[1].crop.rotation_deg, stored, "{given}");
+        assert_eq!(history.doc().cells[1].crop.zoom, request.zoom, "{given}");
+    }
 }
 
 #[test]

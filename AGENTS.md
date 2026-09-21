@@ -259,12 +259,24 @@ at `Cargo.lock` diffs during review.
   geometry change the clamp **must be recomputed** so the visible cell stays filled. **The angle is
   free**: it has no cap, and the clamp never reduces it — the zoom is raised to whatever covering that
   exact angle needs (ruled 2026-09-22, which retired S3's ±45° cap and with it the
-  `CLAMP_ZOOM_LIMIT` angle-reduction rule and `CropFit::rotation_limited`).
+  `CLAMP_ZOOM_LIMIT` angle-reduction rule and `CropFit::rotation_limited`; S11 removed all three and
+  measured what replaced them: over the whole library, every whole degree and six photo aspects the
+  worst covering zoom is **21.7×**, 46× below the `MAX_ZOOM` bound).
   *Rationale: collage slot sizes are fixed by the template, and this cuts the most troublesome
   branch of a general-purpose editor: growing the canvas. The cap existed to keep the zoom modest,
   not because coverage was impossible: the required covering zoom is bounded for every slot shape
   (its worst case is a diagonal), and a slot's bitmap is sized by the slot rather than by the zoom —
-  S11 measures both before and after.*
+  measured (S11): every cell at the worst angle in an A0 ten-slot strip costs +22% of peak RSS
+  (1189 → 1451 MB), and that is the *rotation's* own cost — a rotated cell's bitmap is the
+  axis-aligned box of the rotated cell — not the zoom's, which resamples a smaller source region
+  into the same output.*
+- **The canvas frame is a document field, and the backdrop is painted, not blended.** `frame{gapRel,
+  radiusRel, color}` defaults to no gap, square corners and white, so a project written before S11 renders
+  byte-identically (measured: the S1 golden image at RMSE 0.0 and the S5 verification render byte-identical —
+  `docs/CONTRACT.md` §8). The visible area of a cell is `outline ∩ rounded_rect(inset)`, the clamp's reference
+  is the outline clipped to that inset rectangle, and a rounded corner is *not* subtracted from it — the
+  reference stays a polygon rather than approximating arcs, which costs a little magnification bounded by the
+  radius and exactly nothing at `radiusRel = 0`.
 - **GTK types do not implement `Send`/`Sync`.** Background decoding and scaling must return to the
   main thread through a channel; a GTK object must never be held across threads.
 - **`ui` must not touch pixels directly.**
@@ -370,7 +382,8 @@ not a criterion — a visual conclusion must become a number (a probe) in the CL
 
 - templates: zero overlap between slots; no interior hole in their union; a cut template's areas sum
   to exactly 1.0
-- framing: for any (rotation, zoom, offset) combination, the clamped photo covers the entire slot
+- framing: for any (rotation, zoom, offset) combination, the clamped photo covers the entire visible
+  cell — the slot, narrowed by the document's frame (`docs/CONTRACT.md` §1)
 - grading identity: with `factor=1`, `s=1`, `Δ=0` the output is **pixel-identical** to the input
 - render consistency: the same composition at `2N` and `N`, downsampled, stays below the RMSE
   threshold (measured 2.62/255; threshold 6)
@@ -413,15 +426,16 @@ not a criterion — a visual conclusion must become a number (a probe) in the CL
   vertices, which is exact for a concave slot too (a rectangle contains a polygon iff it contains its
   vertices), so no sliver is allowed and none is measured (28,800 framings against a 1e-6 tolerance,
   the worst sample 2.2e-16 past the photo's edge).
-- **Framing clamp (S3, 2026-09-21): superseded on 2026-09-22.** S3 ruled that past
+- **Framing clamp (S3, 2026-09-21): superseded and replaced on 2026-09-22 (S11).** S3 ruled that past
   `CLAMP_ZOOM_LIMIT = 1.5` times the *upright covering zoom*, the clamp reduces the requested rotation
   angle to the widest one that fits instead of magnifying further (measured then: a ten-column strip
   needs 6.0× with a 4:3 photo, and a matched 4:3 slot kept 27.3° of the 45° asked for).
-  **Ruled 2026-09-22: the angle is free and is never reduced**, so `CLAMP_ZOOM_LIMIT` and
-  `CropFit::rotation_limited` are removed by S11, which measures the covering zoom as a function of the
-  angle for every slot shape and re-runs the coverage sweep with no cap. The pan-clamp decision stands;
-  the per-aspect angle table does not, because there are no kept angles left to table. The numbers above
-  stay here as the S3 record.
+  **Ruled 2026-09-22: the angle is free and is never reduced**, and S11 removed `CLAMP_ZOOM_LIMIT`,
+  `CropFit::rotation_limited` and `widest_rotation`, re-ran the coverage sweep with no cap, and measured the
+  covering zoom as a function of the angle for every slot shape: the worst is **21.7×** (a 2.4:1 photo in a
+  1/16-wide pane at 6°; 12.07× for the same pane with a 4:3 photo), against `MAX_ZOOM` = 1000. The pan-clamp
+  decision stands. The per-aspect angle table is gone with the cap, because there are no kept angles left to
+  table; the numbers above stay as the S3 record.
 - Seam behavior re-measured (2026-09-20): blended pixels on shared edges / seam length ≈ 1.08,
   **identical** at A0 and at 1/5 size → the blend width is one physical pixel and independent of
   output resolution, with no strong bleeding. **Remaining question: this 1 px seam is visible in a

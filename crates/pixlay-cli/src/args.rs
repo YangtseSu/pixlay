@@ -13,7 +13,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use pixlay_core::{MAX_DPI, MAX_LONG_EDGE_PX, MIN_DPI, Point};
+use pixlay_core::{Frame, MAX_DPI, MAX_LONG_EDGE_PX, MIN_DPI, Point, Rgba8};
 use pixlay_imaging::Chroma;
 
 use crate::cli::Failure;
@@ -68,6 +68,7 @@ USAGE:
     pixlay-render text   --project <file.pixlay> [--json]
     pixlay-render templates [--aspect <ratio>] [--json]
     pixlay-render init --template <name> --out <file.pixlay> [--photo <p>...] [--json]
+    pixlay-render edit   --project <file.pixlay> --out <file.pixlay> [EDIT OPTIONS] [--json]
     pixlay-render hit    --project <file.pixlay> --at <x>,<y> [--json]
     pixlay-render hit    --template <name> --at <x>,<y> [--json]
     pixlay-render save   --project <file.pixlay> --out <file.pixlay> [--json]
@@ -92,6 +93,22 @@ RENDER OPTIONS:
                         the bitmaps are sized for it, so a preview does not pay
                         for the export). Exclusive with --long-edge, which sizes
                         the export itself.
+
+FRAME OPTIONS (render, edit):
+    --gap <rel>         The gap between cells, as a fraction of the canvas
+                        height, 0..=1. Half of it comes off every side of every
+                        cell, so two cells that share an edge are this far apart.
+                        `render` applies this to the render only; `edit` stores
+                        it in the document. Default is the document's own.
+    --radius <rel>      Corner radius of a cell, as a fraction of the canvas
+                        height, 0..=1, clamped to half the smaller side of the
+                        cell. 0 is a square corner.
+    --border-color <r,g,b>
+                        The colour of the canvas itself, 0..=255 per channel, as
+                        the backdrop of the gaps, of a rounded corner and of an
+                        empty cell. The alpha of a stored colour is always 255:
+                        the backdrop is painted, not blended, so an export is
+                        never transparent and a preview is the same picture.
 
 PROBE OPTIONS:
     --project <file>    Project to probe. Required.
@@ -166,6 +183,29 @@ INIT OPTIONS:
                         absolute otherwise, and a photo that is not there is
                         refused rather than written into the project.
 
+EDIT OPTIONS:
+    --project <file>    Project to read. Required.
+    --out <file>        Project to write, .pixlay. Required. An existing file is
+                        replaced, atomically, exactly as `save` does; relative
+                        photo paths are rebased when the copy lands elsewhere.
+    --slot <i>          The cell the framing flags below apply to. Without it
+                        they are refused: every other flag is about the whole
+                        document.
+    --rotate <deg>      Set the cell's rotation to any finite angle, clockwise
+                        on screen. It is stored wrapped into -180..=180 and is
+                        never reduced by the clamp; the zoom is raised to
+                        whatever covering that exact angle needs.
+    --zoom <z>          Set the cell's zoom, 0 < z <= 1000, as displayed photo
+                        width over the cell's width.
+    --offset <x>,<y>    Set the photo's centre, from -1 to 1 cell widths and
+                        heights away from the cell's centre.
+    --clear             Empty the cell: no photo, and its framing and grade back
+                        to their defaults. Exclusive with the framing flags.
+    The stored `crop` is the *fit* of what was asked for (a crop is a request;
+    what is drawn is what covers), so `edit` applied twice to the same project
+    writes the same bytes. A cell with no photo has nothing to fit against and
+    keeps the numbers as given; the fit returns when the cell gets a photo.
+
 COMMON OPTIONS:
     --json              Print one JSON object instead of key = value lines.
     --stats             Add measured fields: ms, peak_rss_mb, icc. `render`
@@ -195,6 +235,7 @@ pub enum Command {
     Text(TextArgs),
     Templates(TemplatesArgs),
     Init(InitArgs),
+    Edit(EditArgs),
     Hit(HitArgs),
     Save(SaveArgs),
     Help,
@@ -215,7 +256,58 @@ pub struct RenderArgs {
     pub size: Size,
     pub preview_px: Option<i32>,
     pub chroma: Chroma,
+    /// Frame overrides for this render only: the document is not changed, and
+    /// nothing is written back to it (`edit` is the command that stores a frame).
+    pub frame: FrameArgs,
     pub stats: bool,
+    pub json: bool,
+}
+
+/// The frame flags, as a command line carries them: each is `Some` only when the
+/// caller asked for it, so "not given" and "given the value the document already
+/// has" stay different things.
+#[derive(Default)]
+pub struct FrameArgs {
+    pub gap: Option<f64>,
+    pub radius: Option<f64>,
+    pub border: Option<Rgba8>,
+}
+
+impl FrameArgs {
+    /// Whether any of the three was given.
+    pub fn any(&self) -> bool {
+        self.gap.is_some() || self.radius.is_some() || self.border.is_some()
+    }
+
+    /// Applies the given ones to `frame`, leaving the others as the document had
+    /// them.
+    pub fn apply(&self, frame: &mut Frame) {
+        if let Some(gap) = self.gap {
+            frame.gap_rel = gap;
+        }
+        if let Some(radius) = self.radius {
+            frame.radius_rel = radius;
+        }
+        if let Some(border) = self.border {
+            frame.color = border;
+        }
+    }
+}
+
+/// `edit`: the framing of one cell, and the document's frame.
+pub struct EditArgs {
+    pub project: PathBuf,
+    pub out: PathBuf,
+    /// The cell the framing flags apply to. `None` edits the frame alone, which is
+    /// what makes `--rotate` without `--slot` a usage error rather than a silent
+    /// no-op.
+    pub slot: Option<usize>,
+    pub rotate: Option<f64>,
+    pub zoom: Option<f64>,
+    pub offset: Option<(f64, f64)>,
+    /// Empty the cell: no photo, default framing, default grade.
+    pub clear: bool,
+    pub frame: FrameArgs,
     pub json: bool,
 }
 
@@ -314,8 +406,23 @@ struct Flags {
     dir: Option<PathBuf>,
     recursive: bool,
     px: Option<u32>,
+    gap: Option<f64>,
+    radius: Option<f64>,
+    border: Option<Rgba8>,
+    slot: Option<usize>,
+    rotate: Option<f64>,
+    zoom: Option<f64>,
+    offset: Option<(f64, f64)>,
+    clear: bool,
     stats: bool,
     json: bool,
+}
+
+impl Flags {
+    /// Whether any of the three frame flags was given.
+    fn frame_any(&self) -> bool {
+        self.gap.is_some() || self.radius.is_some() || self.border.is_some()
+    }
 }
 
 /// The first flag a subcommand does not accept, with the reason to quote back.
@@ -332,6 +439,9 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
             "long-edge",
             "chroma",
             "preview-px",
+            "gap",
+            "radius",
+            "border-color",
             "stats",
         ],
         "probe" => &["project", "dpi", "stats"],
@@ -341,11 +451,23 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
         "text" => &["project"],
         "templates" => &["aspect"],
         "init" => &["template", "out", "photo"],
+        "edit" => &[
+            "project",
+            "out",
+            "slot",
+            "rotate",
+            "zoom",
+            "offset",
+            "clear",
+            "gap",
+            "radius",
+            "border-color",
+        ],
         "hit" => &["project", "template", "at"],
         "save" => &["project", "out"],
         _ => &[],
     };
-    let present: [(&'static str, bool); 14] = [
+    let present: [(&'static str, bool); 22] = [
         ("project", flags.project.is_some()),
         ("template", flags.template.is_some()),
         ("out", flags.out.is_some()),
@@ -359,6 +481,14 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
         ("dir", flags.dir.is_some()),
         ("recursive", flags.recursive),
         ("px", flags.px.is_some()),
+        ("gap", flags.gap.is_some()),
+        ("radius", flags.radius.is_some()),
+        ("border-color", flags.border.is_some()),
+        ("slot", flags.slot.is_some()),
+        ("rotate", flags.rotate.is_some()),
+        ("zoom", flags.zoom.is_some()),
+        ("offset", flags.offset.is_some()),
+        ("clear", flags.clear),
         ("stats", flags.stats),
     ];
     present
@@ -412,6 +542,13 @@ fn reason(name: &str, flag: &str) -> &'static str {
         (_, "dir") => "only `scan` lists a directory",
         (_, "recursive") => "only `scan` descends into subdirectories",
         (_, "px") => "only `thumb` sizes a preview",
+        (
+            "probe" | "image" | "scan" | "thumb" | "text" | "templates" | "init" | "hit" | "save",
+            "gap" | "radius" | "border-color",
+        ) => "only `render` and `edit` take the frame",
+        (_, "slot" | "rotate" | "zoom" | "offset" | "clear") => {
+            "only `edit` changes one cell's framing"
+        }
         ("hit", _) => "hit reads a layout and answers about one point in it",
         ("save", _) => "save reads a project and writes a project",
         ("templates", _) => "templates only lists the library",
@@ -431,8 +568,8 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
         .to_str()
         .ok_or_else(|| Failure::Usage("subcommand must be valid UTF-8".to_string()))?;
     let subcommand = match head {
-        "render" | "probe" | "image" | "text" | "templates" | "init" | "hit" | "save" | "scan"
-        | "thumb" => head,
+        "render" | "probe" | "image" | "text" | "templates" | "init" | "edit" | "hit" | "save"
+        | "scan" | "thumb" => head,
         "--help" | "-h" | "help" => return Ok(Command::Help),
         "--version" | "-V" | "version" => return Ok(Command::Version),
         other if other.starts_with('-') => {
@@ -557,6 +694,57 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                 let aspect = parse_aspect(&raw)?;
                 set_once(&mut flags.aspect, aspect, "aspect")?;
             }
+            "gap" => {
+                let gap = float(&value("gap")?, "gap")?;
+                if !(0.0..=pixlay_core::MAX_FRAME_REL).contains(&gap) {
+                    return Err(Failure::Usage(format!(
+                        "--gap {gap} is outside 0..={}",
+                        pixlay_core::MAX_FRAME_REL
+                    )));
+                }
+                set_once(&mut flags.gap, gap, "gap")?;
+            }
+            "radius" => {
+                let radius = float(&value("radius")?, "radius")?;
+                if !(0.0..=pixlay_core::MAX_FRAME_REL).contains(&radius) {
+                    return Err(Failure::Usage(format!(
+                        "--radius {radius} is outside 0..={}",
+                        pixlay_core::MAX_FRAME_REL
+                    )));
+                }
+                set_once(&mut flags.radius, radius, "radius")?;
+            }
+            "border-color" => {
+                let color = parse_color(&value("border-color")?)?;
+                set_once(&mut flags.border, color, "border-color")?;
+            }
+            "slot" => {
+                let raw = number(&value("slot")?, "slot")?;
+                let slot = usize::try_from(raw).map_err(|_| {
+                    Failure::Usage(format!("--slot must be a cell index, got {raw}"))
+                })?;
+                set_once(&mut flags.slot, slot, "slot")?;
+            }
+            "rotate" => {
+                let rotate = float(&value("rotate")?, "rotate")?;
+                set_once(&mut flags.rotate, rotate, "rotate")?;
+            }
+            "zoom" => {
+                let zoom = float(&value("zoom")?, "zoom")?;
+                if !(f64::MIN_POSITIVE..=pixlay_core::MAX_ZOOM).contains(&zoom) {
+                    return Err(Failure::Usage(format!(
+                        "--zoom {zoom} is outside 0..={}",
+                        pixlay_core::MAX_ZOOM
+                    )));
+                }
+                set_once(&mut flags.zoom, zoom, "zoom")?;
+            }
+            "offset" => {
+                let raw = value("offset")?;
+                let offset = parse_offset(&raw)?;
+                set_once(&mut flags.offset, offset, "offset")?;
+            }
+            "clear" => flags.clear = true,
             "at" => {
                 let raw = value("at")?;
                 let point = parse_point(&raw)?;
@@ -671,6 +859,60 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                 json: flags.json,
             }))
         }
+        "edit" => {
+            // A framing flag without a cell to apply it to has nothing to edit, and
+            // taking it as "the frame, then" would be a silent drop (the rule
+            // `--dpi` on `templates` follows). The checks come before the moves so
+            // the message is about the command line, not about a consumed flag.
+            let framing = flags.rotate.is_some()
+                || flags.zoom.is_some()
+                || flags.offset.is_some()
+                || flags.clear;
+            if framing && flags.slot.is_none() {
+                return Err(Failure::Usage(
+                    "--rotate/--zoom/--offset/--clear need --slot <i>: they are about one cell"
+                        .to_string(),
+                ));
+            }
+            if flags.clear
+                && (flags.rotate.is_some() || flags.zoom.is_some() || flags.offset.is_some())
+            {
+                return Err(Failure::Usage(
+                    "--clear empties the cell; it and the framing flags are mutually exclusive"
+                        .to_string(),
+                ));
+            }
+            if !framing && !flags.frame_any() {
+                return Err(Failure::Usage(
+                    "edit needs something to change: --slot with a framing flag, or --gap/--radius/--border-color"
+                        .to_string(),
+                ));
+            }
+            let project = flags
+                .project
+                .take()
+                .ok_or_else(|| Failure::Usage("edit needs --project <file.pixlay>".to_string()))?;
+            let out = flags
+                .out
+                .take()
+                .ok_or_else(|| Failure::Usage("edit needs --out <file.pixlay>".to_string()))?;
+            require_project_extension(&out)?;
+            Ok(Command::Edit(EditArgs {
+                project,
+                out,
+                slot: flags.slot,
+                rotate: flags.rotate,
+                zoom: flags.zoom,
+                offset: flags.offset,
+                clear: flags.clear,
+                frame: FrameArgs {
+                    gap: flags.gap,
+                    radius: flags.radius,
+                    border: flags.border,
+                },
+                json: flags.json,
+            }))
+        }
         _ => {
             let source = source_of("render", &flags)?;
             let out = flags
@@ -698,6 +940,11 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                 size,
                 preview_px: flags.preview_px,
                 chroma: flags.chroma.unwrap_or_default(),
+                frame: FrameArgs {
+                    gap: flags.gap,
+                    radius: flags.radius,
+                    border: flags.border,
+                },
                 stats: flags.stats,
                 json: flags.json,
             }))
@@ -761,6 +1008,87 @@ fn parse_point(value: &OsString) -> Result<Point, Failure> {
     let x = component("x", parsed.0)?;
     let y = component("y", parsed.1)?;
     Ok(Point::new(x, y))
+}
+
+/// Parses a photo offset in cell widths and heights: `x,y`, two comma-separated
+/// numbers.
+///
+/// The comma is the surface's own convention for a pair (`--at`), so a caller that
+/// has read one flag has read both. The range is [`CropTransform`]'s own: past half
+/// a cell the photo's centre leaves the cell and no clamp can cover it again, so the
+/// components are bounded by 1 here and by `validate` on the way into a document.
+///
+/// [`CropTransform`]: pixlay_core::CropTransform
+fn parse_offset(value: &OsString) -> Result<(f64, f64), Failure> {
+    let text = value
+        .to_str()
+        .ok_or_else(|| Failure::Usage("--offset must be valid UTF-8".to_string()))?;
+    let parsed = text
+        .split_once(',')
+        .ok_or_else(|| Failure::Usage(format!("--offset must be x,y, got {text}")))?;
+    let component = |what: &str, raw: &str| -> Result<f64, Failure> {
+        let value = raw
+            .trim()
+            .parse::<f64>()
+            .map_err(|_| Failure::Usage(format!("--offset {what} must be a number, got {raw}")))?;
+        if !value.is_finite() || value.abs() > 1.0 {
+            return Err(Failure::Usage(format!(
+                "--offset {what} {value} is outside -1..=1: the offset is in cell widths and heights"
+            )));
+        }
+        Ok(value)
+    };
+    Ok((component("x", parsed.0)?, component("y", parsed.1)?))
+}
+
+/// Parses `r,g,b`, each 0..=255, as an opaque [`Rgba8`].
+///
+/// Opaque because the backdrop is painted rather than blended (see the frame's
+/// documentation): a translucent canvas would make a preview depend on what is
+/// behind the widget, which is exactly what the export cannot know.
+fn parse_color(value: &OsString) -> Result<Rgba8, Failure> {
+    let text = value
+        .to_str()
+        .ok_or_else(|| Failure::Usage("--border-color must be valid UTF-8".to_string()))?;
+    let parts: Vec<&str> = text.split(',').collect();
+    let [r, g, b] = parts.as_slice() else {
+        return Err(Failure::Usage(format!(
+            "--border-color must be r,g,b, got {text}"
+        )));
+    };
+    let channel = |what: &str, raw: &str| -> Result<u8, Failure> {
+        let value: u32 = raw.trim().parse().map_err(|_| {
+            Failure::Usage(format!("--border-color {what} must be 0..=255, got {raw}"))
+        })?;
+        u8::try_from(value).map_err(|_| {
+            Failure::Usage(format!("--border-color {what} {value} is outside 0..=255"))
+        })
+    };
+    Ok(Rgba8::rgb(
+        channel("red", r)?,
+        channel("green", g)?,
+        channel("blue", b)?,
+    ))
+}
+
+/// A finite floating-point flag value.
+///
+/// `NaN` and the infinities are refused here rather than carried into the document:
+/// the message names the flag, and there is nothing a caller can do with a
+/// non-finite framing that it could not do with a finite one.
+fn float(value: &OsString, name: &str) -> Result<f64, Failure> {
+    let text = value
+        .to_str()
+        .ok_or_else(|| Failure::Usage(format!("--{name} must be a number")))?;
+    let parsed = text
+        .parse::<f64>()
+        .map_err(|_| Failure::Usage(format!("--{name} must be a number, got {text}")))?;
+    if !parsed.is_finite() {
+        return Err(Failure::Usage(format!(
+            "--{name} must be a finite number, got {text}"
+        )));
+    }
+    Ok(parsed)
 }
 
 /// Parses an aspect ratio: `W:H` with positive numbers, or a bare decimal.

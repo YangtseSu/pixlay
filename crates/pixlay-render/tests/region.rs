@@ -95,7 +95,9 @@ fn render_pair(
     let canvas = canvas_px(doc);
     let photo_aspect = 4.0 / 3.0;
     let bbox = doc.template.slots[slot].outline.bbox();
-    let fit = framing.fit(&doc.template.slots[slot], canvas.aspect(), photo_aspect);
+    let fit = doc
+        .fit_crop(slot, framing, canvas.aspect(), photo_aspect)
+        .expect("the document fits its own cells");
     let region = fit.transform.display_region(
         &doc.template.slots[slot],
         canvas,

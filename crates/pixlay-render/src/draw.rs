@@ -10,7 +10,7 @@
 //! white base, so an export is never transparent.
 
 use cairo::{Context, Extend, Filter, Format, ImageSurface, Matrix, Operator, SurfacePattern};
-use pixlay_core::{CollageDoc, CropTransform, PixelSize, Polygon, Slot};
+use pixlay_core::{CollageDoc, CropTransform, Frame, PixelSize, Polygon, Slot};
 
 use crate::bitmap::{Bitmap, Images};
 use crate::error::RenderError;
@@ -101,28 +101,43 @@ pub fn draw(doc: &CollageDoc, images: &Images, target: &Target) -> Result<(), Re
     ctx.scale(target.scale, target.scale);
     ctx.translate(0.0, -first_row);
 
-    // Opaque white base: the export never has alpha, and everything a photo does
-    // not cover stays white.
+    // The backdrop: the frame's colour, white unless the document says otherwise
+    // (S11). It is painted, not blended, so the export never has alpha and
+    // everything a photo does not cover — the frame's gap, a rounded corner, an
+    // empty cell — shows this colour.
     ctx.set_operator(Operator::Source);
-    ctx.set_source_rgb(1.0, 1.0, 1.0);
+    let backdrop = doc.frame.color;
+    ctx.set_source_rgb(
+        f64::from(backdrop.r) / 255.0,
+        f64::from(backdrop.g) / 255.0,
+        f64::from(backdrop.b) / 255.0,
+    );
     ctx.paint()?;
     ctx.set_operator(Operator::Over);
 
-    for (index, cell) in doc.cells.iter().enumerate() {
+    let canvas_aspect = target.canvas_px.aspect();
+    for index in 0..doc.cells.len() {
         let Some(bitmap) = images.get(index) else {
             continue;
         };
         let Some(slot) = doc.template.slots.get(index) else {
             continue;
         };
-        // The stored crop is a request; what gets drawn is its fit (S3). The fit
-        // is taken in the space this placement uses (the output canvas pixels,
-        // whose aspect is the rounded one), so "covers the slot" is exact for the
-        // arithmetic below and not only for the document's millimetres.
-        let fit = cell
-            .crop
-            .fit(slot, target.canvas_px.aspect(), bitmap.aspect());
-        draw_slot(ctx, index, slot, bitmap, &fit.transform, target.canvas_px)?;
+        // The stored crop is a request; what gets drawn is its fit (S3), against
+        // the region the document's frame leaves visible (S11). The fit is taken in
+        // the space this placement uses (the output canvas pixels, whose aspect is
+        // the rounded one), so "covers the cell" is exact for the arithmetic below
+        // and not only for the document's millimetres.
+        let fit = doc.fitted_crop(index, canvas_aspect, bitmap.aspect())?;
+        draw_slot(
+            ctx,
+            index,
+            slot,
+            bitmap,
+            &fit.transform,
+            target.canvas_px,
+            &doc.frame,
+        )?;
     }
 
     // Text last: it is a canvas-level content layer, so it covers the cells and a
@@ -133,12 +148,19 @@ pub fn draw(doc: &CollageDoc, images: &Images, target: &Target) -> Result<(), Re
     Ok(())
 }
 
-/// Clip to the slot outline, then place the bitmap inside it.
+/// Clip to the cell, then place the bitmap inside it.
 ///
 /// `crop` is already fitted ([`CropTransform::fit`]): its zoom is at least the
-/// one that covers the slot, its rotation is one the zoom can afford, and its
-/// offset keeps the photo over the slot. The photo's displayed width is
-/// `crop.zoom * slot_width` — the absolute zoom the document stores.
+/// one that covers the visible region and its offset keeps the photo over it. The
+/// photo's displayed width is `crop.zoom * slot_width` — the absolute zoom the
+/// document stores, measured against the slot's own bounding box.
+///
+/// The clip is `outline ∩ rounded_rect(inset)`: the outline first, then the
+/// frame's inset rectangle with its corners rounded, which cairo intersects with
+/// whatever clip is current. The second clip is skipped for an identity frame —
+/// clipping to a superset of the outline would be clipping to something let
+/// through, and skipping it is what keeps an unframed document pixel-identical to
+/// the build before S11.
 fn draw_slot(
     ctx: &Context,
     index: usize,
@@ -146,6 +168,7 @@ fn draw_slot(
     bitmap: &Bitmap,
     crop: &CropTransform,
     canvas: PixelSize,
+    frame: &Frame,
 ) -> Result<(), RenderError> {
     if slot.outline.points.len() < Polygon::MIN_VERTICES {
         return Err(RenderError::DegenerateSlot { slot: index });
@@ -180,16 +203,70 @@ fn draw_slot(
     ctx.save()?;
     outline_path(ctx, &slot.outline, canvas);
     ctx.clip();
+    if !frame.is_identity() {
+        // Normalized rectangle and radius in, canvas pixels out: the frame's two
+        // lengths are fractions of the canvas height, which is what makes them
+        // resolution-independent.
+        let (rect, radius) = frame.clip(slot, canvas.aspect());
+        ctx.new_path();
+        rounded_rect_path(
+            ctx,
+            rect.x0 * canvas_w,
+            rect.y0 * canvas_h,
+            rect.width() * canvas_w,
+            rect.height() * canvas_h,
+            radius * canvas_h,
+        );
+        // A second `clip` intersects with the first: this is exactly
+        // "outline ∩ rounded inset", and the corner it cuts away shows the
+        // backdrop rather than a stretched photo.
+        ctx.clip();
+    }
     let pattern = SurfacePattern::create(bitmap.surface());
     pattern.set_matrix(pattern_matrix);
     pattern.set_filter(Filter::Good);
-    // Anything the photo does not cover stays transparent, so the white base
-    // shows through: rotation crops edges instead of extending the canvas.
+    // Anything the photo does not cover stays transparent, so the backdrop shows
+    // through: rotation crops edges instead of extending the canvas.
     pattern.set_extend(Extend::None);
     ctx.set_source(&pattern)?;
     ctx.paint()?;
     ctx.restore()?;
     Ok(())
+}
+
+/// Adds a rectangle with rounded corners to the current path.
+///
+/// `radius` is in the same units as the rectangle and is clamped here as well as
+/// by [`Frame::clip`], so a caller that hands over its own radius cannot produce a
+/// path that folds inside out. A radius of zero is the plain rectangle.
+fn rounded_rect_path(ctx: &Context, x: f64, y: f64, width: f64, height: f64, radius: f64) {
+    let radius = radius.min(width.min(height) / 2.0).max(0.0);
+    if radius <= 0.0 {
+        ctx.rectangle(x, y, width, height);
+        return;
+    }
+    // Four quarter turns, each `arc` starting where the previous ended. The canvas
+    // has y pointing down, so these run clockwise on screen, which is what makes
+    // them the *outside* corners rather than an inward spiral.
+    let quarter = std::f64::consts::FRAC_PI_2;
+    ctx.new_sub_path();
+    ctx.arc(x + width - radius, y + radius, radius, -quarter, 0.0);
+    ctx.arc(
+        x + width - radius,
+        y + height - radius,
+        radius,
+        0.0,
+        quarter,
+    );
+    ctx.arc(
+        x + radius,
+        y + height - radius,
+        radius,
+        quarter,
+        2.0 * quarter,
+    );
+    ctx.arc(x + radius, y + radius, radius, 2.0 * quarter, 3.0 * quarter);
+    ctx.close_path();
 }
 
 fn outline_path(ctx: &Context, outline: &Polygon, canvas: PixelSize) {

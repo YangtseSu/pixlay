@@ -119,10 +119,8 @@ pub(crate) fn flat_bitmap(
     canvas_px: pixlay_core::PixelSize,
     color: pixlay_core::Rgba8,
 ) -> Result<SlotBitmap, ImagingError> {
-    let cell = doc
-        .cells
-        .get(slot_index)
-        .ok_or(ImagingError::MissingCell { slot: slot_index })?;
+    // The cell's own existence is `fitted_crop`'s question too, and it answers with
+    // the same typed error, so it is asked once.
     let slot = doc
         .template
         .slots
@@ -134,7 +132,7 @@ pub(crate) fn flat_bitmap(
     let slot_bbox = slot.outline.bbox();
     let photo_aspect =
         slot_bbox.width() * canvas_px.aspect() / slot_bbox.height().max(f64::MIN_POSITIVE);
-    let fit = cell.crop.fit(slot, canvas_px.aspect(), photo_aspect);
+    let fit = doc.fitted_crop(slot_index, canvas_px.aspect(), photo_aspect)?;
     let region = fit
         .transform
         .display_region(slot, canvas_px, photo_aspect, REGION_GUARD_PX);
@@ -174,6 +172,8 @@ pub fn slot_bitmap(
     slot_index: usize,
     canvas_px: pixlay_core::PixelSize,
 ) -> Result<SlotBitmap, ImagingError> {
+    // The cell is needed for its own grade below; `fitted_crop` reads the same
+    // cell for the framing.
     let cell = doc
         .cells
         .get(slot_index)
@@ -185,7 +185,7 @@ pub fn slot_bitmap(
         .ok_or(ImagingError::MissingCell { slot: slot_index })?;
 
     let photo_aspect = Sampler::aspect(source);
-    let fit = cell.crop.fit(slot, canvas_px.aspect(), photo_aspect);
+    let fit = doc.fitted_crop(slot_index, canvas_px.aspect(), photo_aspect)?;
     let region = fit
         .transform
         .display_region(slot, canvas_px, photo_aspect, REGION_GUARD_PX);

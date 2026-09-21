@@ -71,6 +71,12 @@ pub enum CoreError {
         max: f64,
     },
 
+    /// A number that has to be finite and is not. This is not `OutOfRange`'s case:
+    /// there is no range to be outside of, and a message that named one would be
+    /// naming a bound the value is not being compared against.
+    #[error("{what} must be a finite number, got {value}")]
+    NotFinite { what: &'static str, value: f64 },
+
     #[error("dpi {dpi} is outside {min}..={max}")]
     DpiOutOfRange { dpi: u32, min: u32, max: u32 },
 

@@ -56,15 +56,28 @@ fn serde_round_trip_is_field_identical() {
     let mut doc = two_slot_doc();
     doc.cells[0] = Cell {
         source: Some(PathBuf::from("photos/a.png")),
+        // A free angle: past the old ±45° cap, and inside the `(-180, 180]` the
+        // document stores, so the round trip is where "the frame and the free
+        // rotation survive a save" is checked rather than assumed.
         crop: CropTransform {
             zoom: 1.25,
             offset: (0.1, -0.2),
-            rotation_deg: -12.5,
+            rotation_deg: -172.5,
         },
         grade: pixlay_core::Grade {
             factor: 1.2,
             saturation: 0.8,
             delta: -0.15,
+        },
+    };
+    doc.frame = pixlay_core::Frame {
+        gap_rel: 0.02,
+        radius_rel: 0.03,
+        color: Rgba8 {
+            r: 20,
+            g: 40,
+            b: 60,
+            a: 255,
         },
     };
     doc.text.push(TextLayer {
@@ -113,6 +126,9 @@ fn serde_round_trip_is_field_identical() {
         "\"rotationDeg\"",
         "\"text\"",
         "\"textFallback\"",
+        "\"frame\"",
+        "\"gapRel\"",
+        "\"radiusRel\"",
     ] {
         assert!(json.contains(key), "{key} missing from {json}");
     }
@@ -363,10 +379,6 @@ fn crop_transform_limits() {
     CropTransform::IDENTITY.validate().expect("identity");
     for crop in [
         CropTransform {
-            rotation_deg: 45.1,
-            ..CropTransform::IDENTITY
-        },
-        CropTransform {
             zoom: 0.0,
             ..CropTransform::IDENTITY
         },
@@ -392,25 +404,263 @@ fn crop_transform_limits() {
     ] {
         assert!(crop.validate().is_err(), "{crop:?} must be rejected");
     }
-    // The limits are inclusive: exactly at them is valid, a hair past is not.
+    // The zoom and offset limits are inclusive: exactly at them is valid, a hair
+    // past is not.
     CropTransform {
-        rotation_deg: pixlay_core::MAX_ROTATION_DEG,
         offset: (1.0, -1.0),
         ..CropTransform::IDENTITY
     }
     .validate()
     .expect("the limits themselves are allowed");
-    CropTransform {
-        rotation_deg: -pixlay_core::MAX_ROTATION_DEG - 0.001,
-        ..CropTransform::IDENTITY
-    }
-    .validate()
-    .expect_err("just past the rotation limit is rejected");
 
-    // The clamp degradation threshold is part of the contract (docs/CONTRACT.md),
-    // so a change to it must be a deliberate edit here too.
-    const { assert!(pixlay_core::CLAMP_ZOOM_LIMIT == 1.5) };
+    // The rotation has **no** range (2026-09-22's ruling: the angle is free), so
+    // every finite value validates — including the ones the old ±45° cap refused,
+    // which is what makes a widened range a change no project can notice.
+    for rotation_deg in [0.0, -45.0, 45.1, 180.0, -180.0, 450.0, 1e9, -1e9] {
+        CropTransform {
+            rotation_deg,
+            ..CropTransform::IDENTITY
+        }
+        .validate()
+        .unwrap_or_else(|error| panic!("{rotation_deg} degrees must validate: {error}"));
+    }
+    // What is left is the domain: a number arithmetic can be done on. The error is
+    // its own variant rather than a range, because there is no range to be outside
+    // of and a message naming one would be a lie.
+    for rotation_deg in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let err = CropTransform {
+            rotation_deg,
+            ..CropTransform::IDENTITY
+        }
+        .validate()
+        .expect_err("a non-finite angle has no framing");
+        assert!(
+            err.to_string().contains("must be a finite number"),
+            "{rotation_deg}: {err}"
+        );
+        assert!(
+            !err.to_string().contains("must be in"),
+            "{rotation_deg}: {err}"
+        );
+    }
+}
+
+#[test]
+fn a_finite_rotation_is_normalized_into_the_half_open_turn() {
+    // A dial cannot accumulate turns: 450 degrees and 90 draw the same picture, and
+    // a project file has no business saying 450. The range is `(-180, 180]`, so
+    // `-180` — the one value the range excludes — lands on the `180` it equals.
+    let wrap = |rotation_deg| {
+        CropTransform {
+            rotation_deg,
+            ..CropTransform::IDENTITY
+        }
+        .normalized()
+        .rotation_deg
+    };
+    for (given, expected) in [
+        (0.0, 0.0),
+        (-0.0, 0.0),
+        (45.0, 45.0),
+        (-45.25, -45.25),
+        (180.0, 180.0),
+        (-180.0, 180.0),
+        (181.0, -179.0),
+        (-181.0, 179.0),
+        (360.0, 0.0),
+        (450.0, 90.0),
+        (-450.0, -90.0),
+        (720.5, 0.5),
+        // 10^9 mod 360 is 280, so the wrapped angle is 280 - 360 = -80.
+        (1e9, -80.0),
+    ] {
+        assert_eq!(wrap(given), expected, "{given} degrees");
+    }
+    // Idempotent, so normalizing on load and again on an edit cannot drift.
+    for rotation_deg in [-720.5, -180.0, 0.0, 179.9, 1e9] {
+        assert_eq!(
+            wrap(wrap(rotation_deg)),
+            wrap(rotation_deg),
+            "{rotation_deg}"
+        );
+    }
+    // A non-finite angle is left exactly as it is: the document is about to be
+    // refused, and the error has to quote what the file said.
+    for rotation_deg in [f64::NAN, f64::INFINITY] {
+        assert_eq!(
+            wrap(rotation_deg).to_bits(),
+            rotation_deg.to_bits(),
+            "{rotation_deg}"
+        );
+    }
+}
+
+#[test]
+fn polygon_clipping_is_the_intersection() {
+    use pixlay_core::Rect;
+
+    let square = Polygon::rect(0.2, 0.2, 0.8, 0.8);
+
+    // A clip that already contains the polygon is the identity **bit for bit**,
+    // which is what keeps the unframed fit the arithmetic it was: the frame's
+    // covering region is the outline clipped to its own bounding box.
+    let unchanged = square.clipped_to(square.bbox());
+    assert_eq!(unchanged, square);
+    for (a, b) in unchanged.points.iter().zip(&square.points) {
+        assert_eq!(
+            (a.x.to_bits(), a.y.to_bits()),
+            (b.x.to_bits(), b.y.to_bits())
+        );
+    }
+
+    // A corner cut: the result is the rectangle they share.
+    let cut = square.clipped_to(Rect {
+        x0: 0.5,
+        y0: 0.5,
+        x1: 1.0,
+        y1: 1.0,
+    });
+    close(cut.area(), 0.09);
+    assert_eq!(cut.bbox().x0, 0.5);
+    assert_eq!(cut.bbox().y1, 0.8);
+
+    // A polygon the clip misses entirely has no interior left.
+    let missed = square.clipped_to(Rect {
+        x0: 0.0,
+        y0: 0.0,
+        x1: 0.1,
+        y1: 0.1,
+    });
+    assert!(missed.points.is_empty(), "{missed:?}");
+    assert_eq!(missed.area(), 0.0);
+    assert!(missed.validate().is_err(), "an empty polygon is not a slot");
+
+    // The concave slot's own case: the notch is what must not survive a clip that
+    // cuts it away, and the L's three shared corners must.
+    let l_shape = Polygon {
+        points: vec![
+            Point::new(0.0, 0.0),
+            Point::new(0.5, 0.0),
+            Point::new(0.5, 0.5),
+            Point::new(1.0, 0.5),
+            Point::new(1.0, 1.0),
+            Point::new(0.0, 1.0),
+        ],
+    };
+    let clipped = l_shape.clipped_to(Rect {
+        x0: 0.0,
+        y0: 0.0,
+        x1: 1.0,
+        y1: 0.75,
+    });
+    close(clipped.area(), 0.5);
+    assert_eq!(clipped.bbox().y1, 0.75, "the clip cut the top");
+    assert!(clipped.contains(Point::new(0.25, 0.25)));
+    assert!(clipped.contains(Point::new(0.75, 0.6)));
+    assert!(
+        !clipped.contains(Point::new(0.75, 0.25)),
+        "the notch stays out"
+    );
+    assert!(!clipped.contains(Point::new(0.75, 0.8)), "above the clip");
+}
+
+#[test]
+fn frame_limits() {
+    use pixlay_core::Frame;
+
+    Frame::default().validate().expect("the default frame");
+    // The frame does not move with the document: no gap, no radius, white.
+    let default = Frame::default();
+    assert_eq!(default.gap_rel, 0.0);
+    assert_eq!(default.radius_rel, 0.0);
+    assert_eq!(default.color, Rgba8::WHITE);
+    assert!(default.is_identity());
+
+    for (what, frame) in [
+        (
+            "negative gap",
+            Frame {
+                gap_rel: -0.01,
+                ..Frame::default()
+            },
+        ),
+        (
+            "gap past the canvas",
+            Frame {
+                gap_rel: 1.5,
+                ..Frame::default()
+            },
+        ),
+        (
+            "negative radius",
+            Frame {
+                radius_rel: -1.0,
+                ..Frame::default()
+            },
+        ),
+        (
+            "NaN gap",
+            Frame {
+                gap_rel: f64::NAN,
+                ..Frame::default()
+            },
+        ),
+        (
+            "infinite radius",
+            Frame {
+                radius_rel: f64::INFINITY,
+                ..Frame::default()
+            },
+        ),
+    ] {
+        assert!(frame.validate().is_err(), "{what} must be rejected");
+    }
+    // A translucent backdrop is refused: the canvas is painted, not blended, and
+    // "preview and export are the same picture" depends on it.
+    let translucent = Frame {
+        color: Rgba8 {
+            r: 255,
+            g: 255,
+            b: 255,
+            a: 254,
+        },
+        ..Frame::default()
+    };
+    let err = translucent.validate().expect_err("translucent");
+    assert!(err.to_string().contains("alpha"), "{err}");
+
+    // The frame's length bound is part of the contract, like the other limits.
+    const { assert!(pixlay_core::MAX_FRAME_REL == 1.0) };
     const { assert!(pixlay_core::MAX_CANVAS_PIXELS == 200_000_000) };
+}
+
+#[test]
+fn a_gap_that_empties_a_cell_is_refused_naming_it() {
+    // The frame is checked against the geometry it decorates: a gap is taken off
+    // every side of every cell, and a cell with nothing left is not a document this
+    // build can render. The error names the slot, because "the frame is too big" is
+    // not actionable for a layout with sixteen cells of different sizes.
+    let mut doc = two_slot_doc();
+    doc.frame.gap_rel = 0.95;
+    let err = doc
+        .validate()
+        .expect_err("a 0.95 gap empties a 0.9-tall slot");
+    assert!(err.to_string().contains("slot 0"), "{err}");
+    assert!(err.to_string().contains("visible area"), "{err}");
+
+    // Just inside the limit is accepted, and it is the *cell* that decides: a flat
+    // but tall slot survives a gap that would empty a short one.
+    doc.frame.gap_rel = 0.05;
+    doc.validate().expect("a 5% gap fits a 90%-tall slot");
+
+    // A zero-height cell has nothing left whatever the gap is: the frame's own
+    // slots are what make that a refusal rather than a division by zero.
+    let mut doc = two_slot_doc();
+    let mut flat = two_slot_template();
+    flat.slots[0].outline = Polygon::rect(0.05, 0.5, 0.5, 0.5);
+    doc.template = flat;
+    doc.frame.gap_rel = 0.001;
+    assert!(doc.validate().is_err());
 }
 
 #[test]

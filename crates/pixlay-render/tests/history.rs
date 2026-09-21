@@ -70,7 +70,9 @@ fn images(doc: &CollageDoc, canvas: PixelSize) -> Images {
     let mut images = Images::new();
     for (index, slot) in doc.template.slots.iter().enumerate() {
         let color = color_of(index, doc.cells[index].source.as_deref());
-        let fit = doc.cells[index].crop.fit(slot, canvas.aspect(), 1.0);
+        let fit = doc
+            .fitted_crop(index, canvas.aspect(), 1.0)
+            .expect("the document fits its own cells");
         let bbox = slot.outline.bbox();
         let displayed = fit.transform.zoom * bbox.width() * f64::from(canvas.width);
         images.insert(

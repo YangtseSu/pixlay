@@ -112,7 +112,9 @@ fn every_slot_region_holds_what_the_slot_shows() {
                 let slot_w = bbox.width() * f64::from(canvas.width);
                 let slot_h = bbox.height() * f64::from(canvas.height);
                 let photo_aspect = 640.0 / 480.0;
-                let fit = framing.fit(&doc.template.slots[slot], canvas.aspect(), photo_aspect);
+                let fit = doc
+                    .fit_crop(slot, framing, canvas.aspect(), photo_aspect)
+                    .expect("the document fits its own cells");
                 let displayed_w = fit.transform.zoom * slot_w;
                 let displayed_h = displayed_w / photo_aspect;
                 let centre = (

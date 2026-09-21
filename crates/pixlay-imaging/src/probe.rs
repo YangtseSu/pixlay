@@ -4,7 +4,8 @@
 //! export draws:
 //!
 //! 1. is the slot's own content where the geometry says it is,
-//! 2. is everything the slots do not cover exactly white,
+//! 2. is everything the slots do not cover exactly the document's backdrop colour
+//!    (`frame.color`, white unless the document says otherwise),
 //! 3. how much do two adjacent slots blend into each other along their shared
 //!    edge.
 //!
@@ -133,18 +134,21 @@ impl SlotProbe {
     }
 }
 
-/// Background purity: samples on the canvas that no slot covers.
+/// Background purity: samples on the canvas that no slot covers, against the
+/// document's own backdrop colour (`frame.color`, white unless the document says
+/// otherwise).
 #[derive(Debug)]
 pub struct BackgroundProbe {
     pub samples: u64,
-    pub non_white: u64,
+    /// Samples whose pixel is not the backdrop colour.
+    pub off_backdrop: u64,
     /// Up to a few offending coordinates, so a failure is localizable.
     pub examples: Vec<(i32, i32, [u8; 3])>,
 }
 
 impl BackgroundProbe {
     pub fn is_clean(&self) -> bool {
-        self.non_white == 0
+        self.off_backdrop == 0
     }
 }
 
@@ -155,11 +159,11 @@ pub struct SeamProbe {
     pub b: usize,
     /// Rows examined (the seam's span, inset by a guard band at both ends).
     pub rows: u64,
-    /// Pixels that are neither the left color, the right color nor white.
+    /// Pixels that are neither the left color, the right color nor the backdrop.
     pub blended: u64,
     /// Widest run of blended pixels in one row.
     pub max_run: u64,
-    /// Worst residual of the white/left/right fit over the blended pixels.
+    /// Worst residual of the backdrop/left/right fit over the blended pixels.
     pub max_residual: f64,
     /// Blended pixels the three-layer model cannot explain.
     pub foreign: u64,
@@ -229,8 +233,8 @@ impl ProbeReport {
             );
         }
         Some(format!(
-            "{} background pixel(s) not white, {} of {} slot samples matched, {} of {} seams unclean",
-            self.background.non_white,
+            "{} background pixel(s) are not the canvas colour, {} of {} slot samples matched, {} of {} seams unclean",
+            self.background.off_backdrop,
             self.interiors.iter().filter(|slot| slot.matches()).count(),
             self.interiors.len(),
             self.seams.iter().filter(|seam| !seam.is_clean()).count(),
@@ -299,9 +303,10 @@ fn stride(width: i32) -> i32 {
 
 fn sample_background(doc: &CollageDoc, image: &Rgb8View<'_>) -> BackgroundProbe {
     let step = stride(image.width);
+    let backdrop = rgb_of(doc.frame.color);
     let mut probe = BackgroundProbe {
         samples: 0,
-        non_white: 0,
+        off_backdrop: 0,
         examples: Vec::new(),
     };
     for y in (0..image.height).step_by(step as usize) {
@@ -328,8 +333,8 @@ fn sample_background(doc: &CollageDoc, image: &Rgb8View<'_>) -> BackgroundProbe 
             }
             probe.samples += 1;
             let pixel = image.pixel(x, y);
-            if pixel != [255, 255, 255] {
-                probe.non_white += 1;
+            if pixel != backdrop {
+                probe.off_backdrop += 1;
                 if probe.examples.len() < 8 {
                     probe.examples.push((x, y, pixel));
                 }
@@ -374,6 +379,7 @@ fn sample_seam(
     };
     let left = rgb_of(palette(seam.a));
     let right = rgb_of(palette(seam.b));
+    let backdrop = rgb_of(doc.frame.color);
     let (x0, y0) = pixel_of_f(seam.from, canvas);
     let (x1, y1) = pixel_of_f(seam.to, canvas);
     let length_px = (x1 - x0).hypot(y1 - y0);
@@ -422,16 +428,16 @@ fn sample_seam(
                 run = 0;
                 continue;
             }
-            if pixel == [255, 255, 255] {
-                // Pure white inside the seam window means the two slots do not
-                // actually meet here.
+            if pixel == backdrop {
+                // Pure backdrop inside the seam window means the two slots do not
+                // actually meet here (a frame's gap, most often).
                 run = 0;
                 continue;
             }
             probe.blended += 1;
             run += 1;
             probe.max_run = probe.max_run.max(run);
-            let residual = blend_residual(pixel, left, right);
+            let residual = blend_residual(pixel, left, right, backdrop);
             probe.max_residual = probe.max_residual.max(residual);
             if residual > MAX_BLEND_RESIDUAL {
                 probe.foreign += 1;
@@ -441,23 +447,23 @@ fn sample_seam(
     probe
 }
 
-/// A blended seam pixel is covered by three layers — the white base and the two
-/// slot colors — so it must be a convex combination of them. A pixel
+/// A blended seam pixel is covered by three layers — the canvas backdrop and the
+/// two slot colors — so it must be a convex combination of them. A pixel
 /// contaminated by anything else (a third color, a filter smear) cannot be
 /// explained and leaves a large residual.
 ///
 /// "Between the two colors" is not the criterion: a seam pixel blended with the
-/// *white base* lands outside the interval of the two colors, which is exactly
-/// what S0 measured for red/blue seams.
-fn blend_residual(pixel: [u8; 3], left: [u8; 3], right: [u8; 3]) -> f64 {
+/// *backdrop* lands outside the interval of the two colors, which is exactly what
+/// S0 measured for red/blue seams.
+fn blend_residual(pixel: [u8; 3], left: [u8; 3], right: [u8; 3], backdrop: [u8; 3]) -> f64 {
     fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
         a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
     }
     let channel = |value: [u8; 3]| {
         [
-            f64::from(value[0]) - 255.0,
-            f64::from(value[1]) - 255.0,
-            f64::from(value[2]) - 255.0,
+            f64::from(value[0]) - f64::from(backdrop[0]),
+            f64::from(value[1]) - f64::from(backdrop[1]),
+            f64::from(value[2]) - f64::from(backdrop[2]),
         ]
     };
     let (u, v, d) = (channel(left), channel(right), channel(pixel));
@@ -476,10 +482,11 @@ fn blend_residual(pixel: [u8; 3], left: [u8; 3], right: [u8; 3]) -> f64 {
         a /= sum;
         b /= sum;
     }
-    let white = 1.0 - a - b;
+    let rest = 1.0 - a - b;
     let mut residual = 0.0f64;
     for c in 0..3 {
-        let fitted = white * 255.0 + a * f64::from(left[c]) + b * f64::from(right[c]);
+        let fitted =
+            rest * f64::from(backdrop[c]) + a * f64::from(left[c]) + b * f64::from(right[c]);
         residual = residual.max((fitted - f64::from(pixel[c])).abs());
     }
     residual

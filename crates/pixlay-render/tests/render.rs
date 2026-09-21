@@ -295,6 +295,10 @@ fn golden_image_matches() {
     // the honest budget is antialiasing rounding, not a percentage. Tighten
     // this if it ever passes at 0.
     let error = rmse(&golden, &image);
+    // Printed, not just compared: this is the number that says a change to `draw`
+    // left the committed geometry alone (measured 0.0 since S1, including across
+    // S11's backdrop and frame clip, which an identity frame must not disturb).
+    eprintln!("golden RMSE {error}");
     assert!(
         error <= GOLDEN_RMSE_LIMIT,
         "golden RMSE {error} exceeds {GOLDEN_RMSE_LIMIT}"
