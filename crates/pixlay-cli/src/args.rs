@@ -22,6 +22,32 @@ use crate::cli::Failure;
 /// by eye anyway.
 pub const MAX_PREVIEW_PX: i32 = 20000;
 
+/// Largest long edge `thumb` produces, in pixels.
+///
+/// A picker's preview is bounded by the window, not by this: the largest picture
+/// the shell draws is a full-window photo (a 4K window is 3840 px, and a HiDPI
+/// one 7680, S13). 8192 therefore leaves room over the biggest preview the
+/// product has and still keeps one preview's buffer trivially small; past it the
+/// caller wants a render, which is `render --preview-px`, not a thumbnail
+/// (`docs/CONTRACT.md` §5).
+pub const MAX_THUMB_PX: u32 = 8192;
+
+/// Extensions `scan` treats as photos.
+///
+/// The decoders this build links read more formats than these — the loaders
+/// carry GIF, BMP, TGA, DDS and more, and an SVG is not a photo at all — and a
+/// listing has to decide *before* it decodes, because reporting every file it
+/// cannot read would turn a folder's README into an error row. So this is the
+/// photo list: the formats a camera, a phone and a screenshot produce. A file
+/// with another extension is not listed and not reported, and `image` / `render`
+/// still accept one when named directly.
+///
+/// `USAGE` documents the same list for the user; the test in
+/// `crates/pixlay-cli/tests/cli.rs` fails if the two drift apart.
+pub const PHOTO_EXTENSIONS: &[&str] = &[
+    "jpg", "jpeg", "png", "heic", "heif", "avif", "jxl", "webp", "tif", "tiff",
+];
+
 /// Resolution a render uses when neither `--dpi` nor `--long-edge` is given.
 pub const DEFAULT_DPI: u32 = 300;
 
@@ -37,9 +63,11 @@ USAGE:
     pixlay-render render --template <name> --dpi <n> --out <file> [OPTIONS]
     pixlay-render probe  --project <file.pixlay> [OPTIONS]
     pixlay-render image  --photo <file> [--json]
+    pixlay-render scan   --dir <path> [--recursive] [--json]
+    pixlay-render thumb  --photo <file> --px <n> --out <file> [--json]
     pixlay-render text   --project <file.pixlay> [--json]
     pixlay-render templates [--aspect <ratio>] [--json]
-    pixlay-render init --template <name> --out <file.pixlay> [--json]
+    pixlay-render init --template <name> --out <file.pixlay> [--photo <p>...] [--json]
     pixlay-render hit    --project <file.pixlay> --at <x>,<y> [--json]
     pixlay-render hit    --template <name> --at <x>,<y> [--json]
     pixlay-render save   --project <file.pixlay> --out <file.pixlay> [--json]
@@ -74,6 +102,24 @@ IMAGE OPTIONS:
                         detected MIME type, the size after EXIF rotation, the
                         sample depth (8 or 16 bits) and the EXIF date when the
                         file carries one.
+
+SCAN OPTIONS:
+    --dir <path>        Directory whose photos to list. Required. One row per
+                        photo: path, MIME type, width and height (after EXIF
+                        rotation), the EXIF date when there is one, and mtime in
+                        seconds, plus `count` and `failed`. The order is lexical
+                        by path. Extensions: .jpg .jpeg .png .heic .heif .avif
+                        .jxl .webp .tif .tiff.
+    --recursive         Descend into subdirectories. Off by default: a picker
+                        opens one folder, and a whole home directory is not a
+                        listing anybody reads.
+
+THUMB OPTIONS:
+    --photo <file>      Photo to preview. Required.
+    --px <n>            Long edge of the preview, 1..=8192. Required. The other
+                        edge keeps the photo's ratio, at least 1 pixel.
+    --out <file>        Preview file, .png / .jpg / .jpeg / .tif / .tiff.
+                        Required, and written at 72 dpi (a screen-sized image).
 
 TEXT OPTIONS:
     --project <file>    Project whose text layers to report. Required. Each
@@ -111,6 +157,14 @@ INIT OPTIONS:
     --template <name>   Template of the project to create. Required.
     --out <file>        Project to write, .pixlay. Required, and never
                         overwritten: `init` refuses to replace an existing file.
+    --photo <file>      A photo of the project, repeated once per photo:
+                        **argument order is cell order**. 2..=9 photos
+                        inclusive, and the template's slot count must equal the
+                        number of photos (both bounds are named on refusal).
+                        Omit for the photo-free project. Paths are stored
+                        relative to the project file when the two share a root,
+                        absolute otherwise, and a photo that is not there is
+                        refused rather than written into the project.
 
 COMMON OPTIONS:
     --json              Print one JSON object instead of key = value lines.
@@ -136,6 +190,8 @@ pub enum Command {
     Render(RenderArgs),
     Probe(ProbeArgs),
     Image(ImageArgs),
+    Scan(ScanArgs),
+    Thumb(ThumbArgs),
     Text(TextArgs),
     Templates(TemplatesArgs),
     Init(InitArgs),
@@ -180,6 +236,25 @@ pub struct ImageArgs {
     pub json: bool,
 }
 
+/// `scan`: a directory of photos, listed. Stage 1's machine surface (S9).
+pub struct ScanArgs {
+    pub dir: PathBuf,
+    /// Descend into subdirectories.
+    pub recursive: bool,
+    pub stats: bool,
+    pub json: bool,
+}
+
+/// `thumb`: one photo, resampled to a preview. The picker's costly half (S9).
+pub struct ThumbArgs {
+    pub photo: PathBuf,
+    /// Long edge of the preview, 1..=`MAX_THUMB_PX`.
+    pub px: u32,
+    pub out: PathBuf,
+    pub stats: bool,
+    pub json: bool,
+}
+
 pub struct TextArgs {
     pub project: PathBuf,
     pub json: bool,
@@ -201,6 +276,9 @@ pub struct TemplatesArgs {
 pub struct InitArgs {
     pub template: String,
     pub out: PathBuf,
+    /// The photos of the project, **argument order = cell order**. Empty writes
+    /// the photo-free project S2 shipped.
+    pub photos: Vec<PathBuf>,
     pub json: bool,
 }
 
@@ -228,9 +306,14 @@ struct Flags {
     long_edge: Option<u32>,
     chroma: Option<Chroma>,
     preview_px: Option<i32>,
-    photo: Option<PathBuf>,
+    /// `--photo`, repeatable: `image` and `thumb` take exactly one, `init` takes
+    /// one per cell in argument order.
+    photos: Vec<PathBuf>,
     aspect: Option<f64>,
     at: Option<Point>,
+    dir: Option<PathBuf>,
+    recursive: bool,
+    px: Option<u32>,
     stats: bool,
     json: bool,
 }
@@ -253,14 +336,16 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
         ],
         "probe" => &["project", "dpi", "stats"],
         "image" => &["photo"],
+        "scan" => &["dir", "recursive", "stats"],
+        "thumb" => &["photo", "px", "out", "stats"],
         "text" => &["project"],
         "templates" => &["aspect"],
-        "init" => &["template", "out"],
+        "init" => &["template", "out", "photo"],
         "hit" => &["project", "template", "at"],
         "save" => &["project", "out"],
         _ => &[],
     };
-    let present: [(&'static str, bool); 11] = [
+    let present: [(&'static str, bool); 14] = [
         ("project", flags.project.is_some()),
         ("template", flags.template.is_some()),
         ("out", flags.out.is_some()),
@@ -268,9 +353,12 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
         ("long-edge", flags.long_edge.is_some()),
         ("chroma", flags.chroma.is_some()),
         ("preview-px", flags.preview_px.is_some()),
-        ("photo", flags.photo.is_some()),
+        ("photo", !flags.photos.is_empty()),
         ("aspect", flags.aspect.is_some()),
         ("at", flags.at.is_some()),
+        ("dir", flags.dir.is_some()),
+        ("recursive", flags.recursive),
+        ("px", flags.px.is_some()),
         ("stats", flags.stats),
     ];
     present
@@ -307,6 +395,8 @@ fn reason(name: &str, flag: &str) -> &'static str {
         ("text", "chroma") => "text renders nothing",
         ("image", "long-edge") => "image decodes at the file's own size",
         ("image", "chroma") => "image writes no file",
+        ("thumb", "dpi") => "thumb writes a screen-sized preview, not a print",
+        ("scan", "project") => "scan lists a directory, not a project",
         ("templates", "long-edge") => "templates only lists the library",
         ("templates", "chroma") => "templates only lists the library",
         ("init", "long-edge") => "init only writes the project file",
@@ -315,9 +405,18 @@ fn reason(name: &str, flag: &str) -> &'static str {
         ("render" | "probe" | "image" | "text", "at") => {
             "only `hit` tests one point; the other commands work on a whole document"
         }
+        // The flags that belong to exactly one subcommand, whatever the caller
+        // typed them on: `--dir`, `--recursive` and `--px` are `scan`'s and
+        // `thumb`'s, and saying which command owns one is more use than "not
+        // accepted here".
+        (_, "dir") => "only `scan` lists a directory",
+        (_, "recursive") => "only `scan` descends into subdirectories",
+        (_, "px") => "only `thumb` sizes a preview",
         ("hit", _) => "hit reads a layout and answers about one point in it",
         ("save", _) => "save reads a project and writes a project",
         ("templates", _) => "templates only lists the library",
+        ("scan", _) => "scan reads a directory; run it with --dir",
+        ("thumb", _) => "thumb takes one photo, its preview size and an output file",
         ("init", "project") => "init takes a template, not a project",
         ("init", _) => "init only writes the project file",
         _ => "not accepted here",
@@ -332,7 +431,8 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
         .to_str()
         .ok_or_else(|| Failure::Usage("subcommand must be valid UTF-8".to_string()))?;
     let subcommand = match head {
-        "render" | "probe" | "image" | "text" | "templates" | "init" | "hit" | "save" => head,
+        "render" | "probe" | "image" | "text" | "templates" | "init" | "hit" | "save" | "scan"
+        | "thumb" => head,
         "--help" | "-h" | "help" => return Ok(Command::Help),
         "--version" | "-V" | "version" => return Ok(Command::Version),
         other if other.starts_with('-') => {
@@ -437,7 +537,21 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                 })?;
                 set_once(&mut flags.chroma, chroma, "chroma")?;
             }
-            "photo" => set_once(&mut flags.photo, PathBuf::from(value("photo")?), "photo")?,
+            "photo" => flags.photos.push(PathBuf::from(value("photo")?)),
+            "dir" => set_once(&mut flags.dir, PathBuf::from(value("dir")?), "dir")?,
+            "recursive" => flags.recursive = true,
+            "px" => {
+                let raw = number(&value("px")?, "px")?;
+                let pixels = u32::try_from(raw).map_err(|_| {
+                    Failure::Usage(format!("--px must be a positive integer, got {raw}"))
+                })?;
+                if !(1..=MAX_THUMB_PX).contains(&pixels) {
+                    return Err(Failure::Usage(format!(
+                        "--px {pixels} is outside 1..={MAX_THUMB_PX}"
+                    )));
+                }
+                set_once(&mut flags.px, pixels, "px")?;
+            }
             "aspect" => {
                 let raw = value("aspect")?;
                 let aspect = parse_aspect(&raw)?;
@@ -471,11 +585,36 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
             }))
         }
         "image" => {
-            let photo = flags
-                .photo
-                .ok_or_else(|| Failure::Usage("image needs --photo <file>".to_string()))?;
+            let photo = one_photo("image", &flags)?;
             Ok(Command::Image(ImageArgs {
                 photo,
+                json: flags.json,
+            }))
+        }
+        "scan" => {
+            let dir = flags
+                .dir
+                .ok_or_else(|| Failure::Usage("scan needs --dir <path>".to_string()))?;
+            Ok(Command::Scan(ScanArgs {
+                dir,
+                recursive: flags.recursive,
+                stats: flags.stats,
+                json: flags.json,
+            }))
+        }
+        "thumb" => {
+            let photo = one_photo("thumb", &flags)?;
+            let px = flags
+                .px
+                .ok_or_else(|| Failure::Usage("thumb needs --px <n>".to_string()))?;
+            let out = flags
+                .out
+                .ok_or_else(|| Failure::Usage("thumb needs --out <file>".to_string()))?;
+            Ok(Command::Thumb(ThumbArgs {
+                photo,
+                px,
+                out,
+                stats: flags.stats,
                 json: flags.json,
             }))
         }
@@ -528,6 +667,7 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
             Ok(Command::Init(InitArgs {
                 template,
                 out,
+                photos: std::mem::take(&mut flags.photos),
                 json: flags.json,
             }))
         }
@@ -659,6 +799,22 @@ fn ratio_part(text: &str, what: &str) -> Result<f64, Failure> {
         )));
     }
     Ok(value)
+}
+
+/// The one file `--photo` names, for the commands that read a single photo.
+///
+/// `--photo` is repeatable because `init` takes one per cell; a command that
+/// reads one file says so instead of quietly using the first argument, and a
+/// second one is a usage error rather than a silent drop.
+fn one_photo(name: &str, flags: &Flags) -> Result<PathBuf, Failure> {
+    match flags.photos.as_slice() {
+        [photo] => Ok(photo.clone()),
+        [] => Err(Failure::Usage(format!("{name} needs --photo <file>"))),
+        photos => Err(Failure::Usage(format!(
+            "{name} reads one photo; --photo was given {} times",
+            photos.len()
+        ))),
+    }
 }
 
 fn set_once<T>(slot: &mut Option<T>, value: T, name: &str) -> Result<(), Failure> {

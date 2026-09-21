@@ -57,6 +57,7 @@ pub mod layout;
 pub mod linear;
 pub mod probe;
 pub mod resample;
+pub mod thumb;
 pub mod transfer;
 
 mod error;
@@ -70,3 +71,4 @@ pub use layout::{REGION_GUARD_PX, SlotBitmap, slot_bitmap, slot_bitmaps};
 pub use linear::{LinearRgb16, LinearRgba16};
 pub use probe::{ProbeReport, Rgb8View, probe};
 pub use resample::{Region, resample};
+pub use thumb::{Thumbnail, thumbnail};

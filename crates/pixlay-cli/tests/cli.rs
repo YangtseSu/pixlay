@@ -144,6 +144,10 @@ fn help_and_version_succeed_on_stdout() {
         "--out",
         "--dpi",
         "--preview-px",
+        "--photo",
+        "--dir",
+        "--recursive",
+        "--px",
         "--json",
         "--stats",
     ] {
@@ -2142,5 +2146,600 @@ fn hit_and_save_keep_the_usage_and_locale_rules() {
         failure.iter().all(|stderr| stderr == &failure[0]),
         "hit's failure message changed under a locale"
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---------------------------------------------------------------------------
+// S9: the library, the preview and the selection
+// ---------------------------------------------------------------------------
+
+/// The folder `scan` is pointed at: one file per case a picker has to survive.
+///
+/// Built from the committed photos rather than committed again — the fixtures
+/// already are the decodable files this step needs — plus the three things no
+/// photo fixture can be: a file with an image extension that is not an image, a
+/// file the decoder cannot open at all, and a file that is not a photo.
+fn library_dir(dir: &Path) {
+    std::fs::create_dir_all(dir).expect("create the library");
+    let photos = fixture_dir().join("photos");
+    for name in [
+        "square.png",
+        "landscape.jpg",
+        "photo.heic",
+        "photo-16bit.png",
+        "oriented-6.jpg",
+        "dated.jpg",
+    ] {
+        std::fs::copy(photos.join(name), dir.join(name))
+            .unwrap_or_else(|error| panic!("{name}: {error}"));
+    }
+    // A non-image: the decoder refuses it, and the row has to carry the reason.
+    std::fs::write(dir.join("broken.png"), b"this is not a PNG\n").expect("write broken.png");
+    // An unreadable file. A dangling symlink rather than a permission bit: a test
+    // that happens to run as root would not notice `chmod 000`.
+    std::os::unix::fs::symlink(dir.join("absent.jpg"), dir.join("unreadable.jpg"))
+        .expect("symlink unreadable.jpg");
+    // Not a photo at all: no image extension, so it is not listed.
+    std::fs::write(dir.join("notes.txt"), b"not a photo\n").expect("write notes.txt");
+    // A subdirectory, which only `--recursive` descends into.
+    std::fs::create_dir_all(dir.join("nested")).expect("nested");
+    std::fs::copy(photos.join("portrait.jpg"), dir.join("nested/portrait.jpg"))
+        .expect("copy nested/portrait.jpg");
+}
+
+/// `scan`'s rows as one map per file, so a test asserts facts rather than line
+/// order (`file.<n>.<field>`).
+fn scan_rows(output: &Output) -> Vec<std::collections::BTreeMap<String, String>> {
+    let mut rows: Vec<std::collections::BTreeMap<String, String>> = Vec::new();
+    for line in stdout(output).lines() {
+        let Some((key, value)) = line.split_once(" = ") else {
+            continue;
+        };
+        let Some(rest) = key.strip_prefix("file.") else {
+            continue;
+        };
+        let Some((index, field)) = rest.split_once('.') else {
+            continue;
+        };
+        let index: usize = index.parse().expect("a row index");
+        while rows.len() <= index {
+            rows.push(std::collections::BTreeMap::new());
+        }
+        rows[index].insert(field.to_string(), value.to_string());
+    }
+    rows
+}
+
+/// One library row, looked up by the file name it ends with.
+fn row<'a>(
+    rows: &'a [std::collections::BTreeMap<String, String>],
+    name: &str,
+) -> &'a std::collections::BTreeMap<String, String> {
+    rows.iter()
+        .find(|row| row["path"].ends_with(name))
+        .unwrap_or_else(|| panic!("no scan row for {name}"))
+}
+
+#[test]
+fn scan_lists_a_folder_of_photos_one_row_per_file() {
+    let dir = out_dir("scan");
+    let library = dir.join("library");
+    library_dir(&library);
+    let path = library.to_str().expect("utf-8 path");
+
+    let listed = run(&["scan", "--dir", path]);
+    assert_eq!(code(&listed), 0, "{}", stderr(&listed));
+    assert!(stderr(&listed).is_empty(), "{}", stderr(&listed));
+    assert_eq!(field(&listed, "status"), "ok");
+    assert_eq!(field(&listed, "dir"), path);
+    assert_eq!(field(&listed, "recursive"), "false");
+    // Eight rows: six photos and the two refusals.
+    assert_eq!(field(&listed, "count"), "8");
+    assert_eq!(field(&listed, "failed"), "2");
+
+    let rows = scan_rows(&listed);
+    assert_eq!(rows.len(), 8);
+    // The order is lexical by path, and the same run twice is byte-identical:
+    // that is what makes a listing diffable.
+    let paths: Vec<&String> = rows.iter().map(|row| &row["path"]).collect();
+    let mut sorted = paths.clone();
+    sorted.sort();
+    assert_eq!(paths, sorted, "scan's order is not lexical by path");
+    let again = run(&["scan", "--dir", path]);
+    assert_eq!(stdout(&listed), stdout(&again), "scan is not stable");
+
+    // The facts a grid tile is laid out against, per file.
+    let square = row(&rows, "square.png");
+    assert_eq!(square["status"], "ok");
+    assert_eq!(square["mime"], "image/png");
+    assert_eq!(square["width"], "640");
+    assert_eq!(square["height"], "640");
+    assert_eq!(square["date"], "");
+    let mtime = std::fs::metadata(library.join("square.png"))
+        .expect("stat")
+        .modified()
+        .expect("mtime")
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("after the epoch")
+        .as_secs();
+    assert_eq!(square["mtime"], mtime.to_string());
+
+    assert_eq!(row(&rows, "landscape.jpg")["mime"], "image/jpeg");
+    // A HEIC is recognised as a HEIF-family image (glycin reports the family; the
+    // imaging crate's decode test pins the same string).
+    assert_eq!(row(&rows, "photo.heic")["mime"], "image/heif");
+    assert_eq!(row(&rows, "photo-16bit.png")["width"], "800");
+    assert_eq!(row(&rows, "dated.jpg")["date"], "2019:07:14 10:32:00");
+    // The size is the size **after** EXIF rotation: the file stores 600x1200 and
+    // displays 1200x600, which is the size a preview is laid out against.
+    assert_eq!(row(&rows, "oriented-6.jpg")["width"], "1200");
+    assert_eq!(row(&rows, "oriented-6.jpg")["height"], "600");
+
+    // Neither a text file nor a subdirectory is a row.
+    assert!(rows.iter().all(|row| !row["path"].ends_with("notes.txt")));
+    assert!(
+        rows.iter()
+            .all(|row| !row["path"].ends_with("portrait.jpg"))
+    );
+
+    // `--recursive` is the only way in, and it says so in its own report.
+    let deep = run(&["scan", "--dir", path, "--recursive"]);
+    assert_eq!(code(&deep), 0, "{}", stderr(&deep));
+    assert_eq!(field(&deep, "recursive"), "true");
+    assert_eq!(field(&deep, "count"), "9");
+    assert!(row(&scan_rows(&deep), "nested/portrait.jpg")["width"] == "600");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn scan_reports_a_file_it_cannot_decode_as_a_row() {
+    let dir = out_dir("scan-refusals");
+    let library = dir.join("library");
+    library_dir(&library);
+
+    let output = run(&["scan", "--dir", library.to_str().unwrap()]);
+    // The listing is the result, so a file this build cannot read does not fail
+    // the command — the row says which file and why, and the grid can show it.
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let rows = scan_rows(&output);
+
+    let broken = row(&rows, "broken.png");
+    assert_eq!(broken["status"], "failed");
+    assert!(
+        broken["reason"].len() > 10,
+        "the decoder's reason has to be quoted: {broken:?}"
+    );
+    assert!(
+        !broken.contains_key("width") && !broken.contains_key("height"),
+        "a failed row has no size to report: {broken:?}"
+    );
+
+    let unreadable = row(&rows, "unreadable.jpg");
+    assert_eq!(unreadable["status"], "failed");
+    assert!(
+        unreadable["reason"].contains("unreadable.jpg"),
+        "the failing path must be named: {unreadable:?}"
+    );
+
+    // The healthy files are still there, in the same listing.
+    assert_eq!(row(&rows, "square.png")["status"], "ok");
+    assert_eq!(field(&output, "failed"), "2");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn thumb_writes_a_preview_at_the_requested_long_edge() {
+    let dir = out_dir("thumb");
+    // A flat photo makes every pixel expectation exact: a preview of a solid
+    // colour is that colour, wherever it is sampled (the imaging crate's own test
+    // covers the ramp and the alpha cases).
+    let color = [30u8, 140, 200];
+    let photo = dir.join("flat.png");
+    image::RgbImage::from_fn(400, 200, |_, _| image::Rgb(color))
+        .save(&photo)
+        .expect("write the flat photo");
+
+    let out = dir.join("small.png");
+    let output = run(&[
+        "thumb",
+        "--photo",
+        photo.to_str().unwrap(),
+        "--px",
+        "100",
+        "--out",
+        out.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert!(stderr(&output).is_empty(), "{}", stderr(&output));
+    assert_eq!(field(&output, "status"), "ok");
+    assert_eq!(field(&output, "format"), "png");
+    assert_eq!(field(&output, "mime"), "image/png");
+    assert_eq!(field(&output, "src_w"), "400");
+    assert_eq!(field(&output, "src_h"), "200");
+    assert_eq!(field(&output, "px"), "100");
+    // The long edge is exact and the other keeps the photo's ratio.
+    assert_eq!(field(&output, "out_w"), "100");
+    assert_eq!(field(&output, "out_h"), "50");
+    // The grid, read back from the file rather than from the report.
+    let preview = image::open(&out).expect("open the preview").to_rgb8();
+    assert_eq!(preview.dimensions(), (100, 50));
+    // And the resolution the preview carries: 72 dpi as the PNG `pHYs` chunk, i.e.
+    // 2835 pixels per metre, unit 1.
+    assert_eq!(png_pixel_dimensions(&out), (2835, 2835, 1));
+    assert_eq!(
+        std::fs::metadata(&out).expect("stat").len().to_string(),
+        field(&output, "bytes")
+    );
+    for pixel in preview.pixels() {
+        for channel in 0..3 {
+            assert!(
+                pixel[channel].abs_diff(color[channel]) <= 1,
+                "a flat photo previewed to {pixel:?}"
+            );
+        }
+    }
+
+    // The size a preview reports is the size after EXIF rotation, so a tile and a
+    // preview agree about a photo that a camera stored sideways.
+    let rotated = dir.join("rotated.png");
+    let output = run(&[
+        "thumb",
+        "--photo",
+        fixture_dir()
+            .join("photos/oriented-6.jpg")
+            .to_str()
+            .unwrap(),
+        "--px",
+        "256",
+        "--out",
+        rotated.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "src_w"), "1200");
+    assert_eq!(field(&output, "src_h"), "600");
+    assert_eq!(
+        image::open(&rotated).expect("open").to_rgb8().dimensions(),
+        (256, 128),
+        "a preview of the 600x1200 file is laid out the way it displays"
+    );
+
+    // This is the picker's budget number (`AGENTS.md`: a visual conclusion has to
+    // become a number), so `--stats` is part of the surface rather than a bonus.
+    let measured = run(&[
+        "thumb",
+        "--photo",
+        photo.to_str().unwrap(),
+        "--px",
+        "256",
+        "--out",
+        dir.join("measured.png").to_str().unwrap(),
+        "--stats",
+    ]);
+    assert_eq!(code(&measured), 0, "{}", stderr(&measured));
+    assert!(field(&measured, "ms").parse::<f64>().expect("ms") > 0.0);
+    assert!(
+        field(&measured, "encode_ms")
+            .parse::<f64>()
+            .expect("encode_ms")
+            > 0.0
+    );
+    assert!(
+        field(&measured, "peak_rss_mb")
+            .parse::<f64>()
+            .expect("peak")
+            > 10.0,
+        "peak_rss_mb is the ruler's own definition"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn init_photo_writes_the_arguments_as_cells_in_order() {
+    let dir = out_dir("init-photo");
+    let photos = ["square.png", "landscape.jpg", "portrait.jpg"];
+    for name in photos {
+        std::fs::copy(fixture_dir().join("photos").join(name), dir.join(name))
+            .unwrap_or_else(|error| panic!("{name}: {error}"));
+    }
+    let path = dir.join("three.pixlay");
+    let output = run(&[
+        "init",
+        "--template",
+        "strip-3-3x1",
+        "--out",
+        path.to_str().unwrap(),
+        "--photo",
+        dir.join("square.png").to_str().unwrap(),
+        "--photo",
+        dir.join("landscape.jpg").to_str().unwrap(),
+        "--photo",
+        dir.join("portrait.jpg").to_str().unwrap(),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "photos"), "3");
+    assert_eq!(field(&output, "cells"), "3");
+
+    let project = Project::load(&path).expect("the written project loads");
+    let stored: Vec<String> = project
+        .doc()
+        .cells
+        .iter()
+        .map(|cell| {
+            cell.source
+                .as_deref()
+                .expect("every cell has a photo")
+                .display()
+                .to_string()
+        })
+        .collect();
+    // A photo beside the project is stored relative to it, so the project stays
+    // movable — the same rule `save_as` applies to a copy.
+    assert_eq!(
+        stored,
+        photos.map(str::to_string).to_vec(),
+        "argument order is cell order"
+    );
+    assert!(
+        project
+            .sources()
+            .expect("every photo resolves")
+            .iter()
+            .all(Option::is_some)
+    );
+
+    // And it renders: three photos in three cells, not three empty ones.
+    let rendered = run(&[
+        "render",
+        "--project",
+        path.to_str().unwrap(),
+        "--preview-px",
+        "600",
+        "--out",
+        dir.join("three.jpg").to_str().unwrap(),
+    ]);
+    assert_eq!(code(&rendered), 0, "{}", stderr(&rendered));
+    assert_eq!(field(&rendered, "occupied"), "3");
+    assert_eq!(field(&rendered, "cells"), "3");
+
+    // A photo in another directory is stored relative to the project wherever the
+    // two share a root, which is what makes a project folder portable.
+    let elsewhere = dir.join("elsewhere");
+    std::fs::create_dir_all(&elsewhere).expect("elsewhere");
+    for name in ["square.png", "landscape.jpg"] {
+        std::fs::copy(
+            fixture_dir().join("photos").join(name),
+            elsewhere.join(name),
+        )
+        .expect("copy");
+    }
+    let other = dir.join("other.pixlay");
+    let output = run(&[
+        "init",
+        "--template",
+        "strip-2-2x1",
+        "--out",
+        other.to_str().unwrap(),
+        "--photo",
+        elsewhere.join("square.png").to_str().unwrap(),
+        "--photo",
+        elsewhere.join("landscape.jpg").to_str().unwrap(),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let stored: Vec<String> = Project::load(&other)
+        .expect("loads")
+        .doc()
+        .cells
+        .iter()
+        .map(|cell| cell.source.clone().expect("occupied").display().to_string())
+        .collect();
+    assert_eq!(
+        stored,
+        vec!["elsewhere/square.png", "elsewhere/landscape.jpg"]
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn init_refuses_a_photo_count_outside_the_range_or_a_wrong_slot_count() {
+    let dir = out_dir("init-refusals");
+    let photo = dir.join("p.png");
+    std::fs::copy(fixture_dir().join("photos/square.png"), &photo).expect("copy");
+    let path = dir.join("out.pixlay");
+    let photo_arg = photo.to_str().unwrap().to_string();
+
+    // One photo and ten: the 2..=9 clamp names both bounds, exits 1, and writes
+    // nothing — a refused command leaves no half-made project behind.
+    for count in [1usize, 10] {
+        let mut args = vec![
+            "init",
+            "--template",
+            "mosaic-8-s14",
+            "--out",
+            path.to_str().unwrap(),
+        ];
+        for _ in 0..count {
+            args.push("--photo");
+            args.push(&photo_arg);
+        }
+        let output = run(&args);
+        assert_eq!(code(&output), 1, "{count} photos: {}", stderr(&output));
+        assert!(stdout(&output).is_empty(), "{count} wrote to stdout");
+        assert!(
+            stderr(&output).contains("2..=9"),
+            "{count} photos: {}",
+            stderr(&output)
+        );
+    }
+    assert!(!path.exists(), "a refused init must write nothing");
+
+    // Three photos into a two-slot template: the numbers are named.
+    let output = run(&[
+        "init",
+        "--template",
+        "strip-2-2x1",
+        "--out",
+        path.to_str().unwrap(),
+        "--photo",
+        &photo_arg,
+        "--photo",
+        &photo_arg,
+        "--photo",
+        &photo_arg,
+    ]);
+    assert_eq!(code(&output), 1, "{}", stderr(&output));
+    assert!(stdout(&output).is_empty());
+    assert!(
+        stderr(&output).contains("strip-2-2x1"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(
+        stderr(&output).contains('2') && stderr(&output).contains('3'),
+        "the template's count and the photo count must both be named: {}",
+        stderr(&output)
+    );
+    assert!(!path.exists());
+
+    // A photo that is not there is a *failure* (exit 2), not a usage error: the
+    // arguments were well formed.
+    let output = run(&[
+        "init",
+        "--template",
+        "strip-2-2x1",
+        "--out",
+        path.to_str().unwrap(),
+        "--photo",
+        &photo_arg,
+        "--photo",
+        dir.join("absent.png").to_str().unwrap(),
+    ]);
+    assert_eq!(code(&output), 2, "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("absent.png"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(!path.exists());
+
+    // The photo-free project S2 shipped is unchanged, and says so.
+    let output = run(&[
+        "init",
+        "--template",
+        "strip-2-2x1",
+        "--out",
+        path.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "photos"), "0");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn scan_and_thumb_keep_the_usage_and_locale_rules() {
+    let dir = out_dir("scan-thumb-usage");
+    let library = dir.join("library");
+    library_dir(&library);
+    let path = library.to_str().expect("utf-8 path");
+
+    // Usage errors, all of them: a flag from another subcommand, a missing
+    // required flag, an out-of-range size, an output format this build does not
+    // write. Exit 1, stdout empty, stderr naming the problem.
+    for args in [
+        vec!["scan"],
+        vec!["scan", "--project", "x.pixlay"],
+        vec!["scan", "--out", "x.png"],
+        vec!["scan", "--dpi", "300"],
+        vec!["scan", "--dir", path, "--recursive", "--dir", path],
+        vec!["thumb", "--photo", "x.jpg", "--px", "10"],
+        vec!["thumb", "--px", "10", "--out", "x.png"],
+        vec!["thumb", "--photo", "x.jpg", "--out", "x.png"],
+        vec!["thumb", "--photo", "x.jpg", "--px", "0", "--out", "x.png"],
+        vec![
+            "thumb", "--photo", "x.jpg", "--px", "9000", "--out", "x.png",
+        ],
+        vec!["thumb", "--photo", "x.jpg", "--px", "10", "--out", "x.gif"],
+        vec![
+            "thumb", "--photo", "x.jpg", "--px", "10", "--out", "x.png", "--dir", "/tmp",
+        ],
+        vec![
+            "thumb", "--photo", "x.jpg", "--photo", "y.jpg", "--px", "10", "--out", "x.png",
+        ],
+        vec![
+            "render",
+            "--template",
+            "mosaic-8-s14",
+            "--dpi",
+            "72",
+            "--out",
+            "x.png",
+            "--px",
+            "10",
+        ],
+        vec!["image", "--photo", "x.jpg", "--dir", "/tmp"],
+    ] {
+        let output = run(&args);
+        assert_eq!(code(&output), 1, "{args:?}: {}", stderr(&output));
+        assert!(stdout(&output).is_empty(), "{args:?} wrote to stdout");
+        assert!(!stderr(&output).is_empty(), "{args:?} said nothing");
+    }
+
+    // A `--dir` that is not a directory exists but cannot be used: exit 2, and
+    // the path is named.
+    for bad in [dir.join("absent"), dir.join("library/square.png")] {
+        let output = run(&["scan", "--dir", bad.to_str().unwrap()]);
+        assert_eq!(code(&output), 2, "{bad:?}: {}", stderr(&output));
+        assert!(stdout(&output).is_empty());
+        assert!(
+            stderr(&output).contains(bad.file_name().unwrap().to_str().unwrap()),
+            "{}",
+            stderr(&output)
+        );
+    }
+
+    // stdout and stderr are byte-identical under any locale, on the report and on
+    // the refusal alike.
+    let mut listed = Vec::new();
+    for (lang, all) in [
+        ("C", "C"),
+        ("zh_CN.UTF-8", "zh_CN.UTF-8"),
+        ("de_DE.UTF-8", "de_DE.UTF-8"),
+    ] {
+        let scan = run_in(&["scan", "--dir", path, "--json"], None, Some((lang, all)));
+        assert_eq!(code(&scan), 0, "{lang}: {}", stderr(&scan));
+        assert!(scan.stderr.is_empty(), "{lang}: {}", stderr(&scan));
+        listed.push(scan.stdout.clone());
+
+        let thumb = run_in(
+            &[
+                "thumb",
+                "--photo",
+                library.join("square.png").to_str().unwrap(),
+                "--px",
+                "32",
+                "--out",
+                dir.join("locale.png").to_str().unwrap(),
+                "--json",
+            ],
+            None,
+            Some((lang, all)),
+        );
+        assert_eq!(code(&thumb), 0, "{lang}: {}", stderr(&thumb));
+        assert!(thumb.stderr.is_empty(), "{lang}: {}", stderr(&thumb));
+    }
+    assert!(
+        listed.iter().all(|stdout| stdout == &listed[0]),
+        "scan changed under a locale"
+    );
+
+    // `--help` documents the extensions `scan` actually accepts: the two lists
+    // are the user's only way to find out why a folder came back empty.
+    let help = run(&["--help"]);
+    assert_eq!(code(&help), 0);
+    for extension in pixlay_cli::args::PHOTO_EXTENSIONS {
+        assert!(
+            stdout(&help).contains(&format!(".{extension}")),
+            "--help does not mention .{extension}"
+        );
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }

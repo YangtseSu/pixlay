@@ -43,6 +43,12 @@ pub enum ImagingError {
     #[error("the imaging thread is not available: {0}")]
     Driver(String),
 
+    /// A preview was asked for with no pixels at all. Reported rather than
+    /// rounded up to one pixel: a caller that computed a size of zero has a bug,
+    /// and a 1x1 picture would hide it.
+    #[error("a thumbnail needs a long edge of at least 1 pixel")]
+    EmptyThumbnail,
+
     /// A document that does not fit the slot count of its own template cannot be
     /// laid out. `CollageDoc::validate` catches this on load; an in-memory
     /// document reaches here.

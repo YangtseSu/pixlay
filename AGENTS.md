@@ -347,8 +347,8 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
 
 ## Module boundaries
 
-    pixlay-core     CollageDoc, templates, geometry, framing transforms, command history. Must not depend on gtk / cairo
-    pixlay-imaging  decoding (glycin), resampling, grading, EXIF, color spaces, encoding (PNG/JPEG/TIFF). Must not depend on gtk or cairo
+    pixlay-core     CollageDoc, templates, geometry, framing transforms, command history, the selection policy. Must not depend on gtk / cairo
+    pixlay-imaging  decoding (glycin), resampling, grading, EXIF, color spaces, preview thumbnails, encoding (PNG/JPEG/TIFF). Must not depend on gtk or cairo
     pixlay-render   the single draw(doc, target), Cairo + pangocairo. Must not depend on gtk
     pixlay-cli      windowless render entry point, automation and verification tooling, and the AI's operating surface. Must not depend on gtk4
     pixlay          gtk4 + libadwaita shell and interaction

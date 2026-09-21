@@ -339,7 +339,7 @@ fn rebase_sources(doc: &mut CollageDoc, from_dir: &Path, to_dir: &Path) {
         if source.is_absolute() {
             continue;
         }
-        if let Some(relative) = relative_path(&to, &from.join(source)) {
+        if let Some(relative) = relative_to(&to, &from.join(source)) {
             cell.source = Some(relative);
         }
     }
@@ -351,7 +351,13 @@ fn rebase_sources(doc: &mut CollageDoc, from_dir: &Path, to_dir: &Path) {
 /// components of both sides come from [`Path::components`], so `.` and repeated
 /// separators are already gone and `..` is compared literally — the same thing the
 /// filesystem does with it.
-fn relative_path(from: &Path, target: &Path) -> Option<PathBuf> {
+///
+/// Public because it is the rule a *written* `source` follows, and two writers
+/// apply it: [`Project::save_as`] rebasing a copy, and the CLI's `init --photo`
+/// storing the photos a user picked next to the project it is creating. Written
+/// lexically so neither has to touch the filesystem, and so a project can be
+/// expressed while its photos are on a drive that is not mounted.
+pub fn relative_to(from: &Path, target: &Path) -> Option<PathBuf> {
     let from: Vec<_> = from.components().collect();
     let target: Vec<_> = target.components().collect();
     let common = from.iter().zip(&target).take_while(|(a, b)| a == b).count();

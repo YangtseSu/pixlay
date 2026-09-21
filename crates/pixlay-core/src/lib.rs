@@ -29,6 +29,7 @@ mod error;
 mod geometry;
 mod grade;
 mod history;
+mod selection;
 mod template;
 mod text;
 
@@ -41,13 +42,16 @@ pub mod templates;
 
 pub use canvas::{CanvasSpec, MAX_CANVAS_MM, MM_PER_INCH, PixelSize};
 pub use crop::{CropFit, CropTransform, DisplayRegion};
-pub use doc::{Cell, CollageDoc, Project};
+pub use doc::{Cell, CollageDoc, Project, relative_to};
 pub use error::CoreError;
 pub use geometry::{EPSILON, Point, Polygon, Rect};
 pub use grade::{
     FilterPreset, GRADE_DELTA_RANGE, GRADE_FACTOR_RANGE, GRADE_SATURATION_RANGE, Grade,
 };
 pub use history::{Command, History};
+pub use selection::{
+    MAX_PHOTOS, MIN_PHOTOS, Removed, Selection, SelectionError, last_photo, remove_last,
+};
 pub use template::{AREA_TOLERANCE, SharedEdge, Slot, Template};
 pub use text::{
     Anchor, Rgba8, TextFallback, TextLayer, TextMode, TextToken, TextTokenUse, TextValues,

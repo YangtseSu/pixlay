@@ -340,9 +340,11 @@ pixlay-render render    --project <file.pixlay> --dpi <n> --chroma 444|422|420 -
 pixlay-render render    --template <name> --dpi <n> --out <file>   # no project, no photos
 pixlay-render probe     --project <file.pixlay>
 pixlay-render image     --photo <file>
+pixlay-render scan      --dir <path> [--recursive] [--json]
+pixlay-render thumb     --photo <file> --px <n> --out <file>
 pixlay-render text      --project <file.pixlay>
 pixlay-render templates [--aspect <ratio>] [--json]
-pixlay-render init      --template <name> --out <file.pixlay>
+pixlay-render init      --template <name> --out <file.pixlay> [--photo <p>...]
 pixlay-render hit       --project <file.pixlay> --at <x>,<y> [--json]
 pixlay-render hit       --template <name> --at <x>,<y> [--json]
 pixlay-render save      --project <file.pixlay> --out <file.pixlay> [--json]
@@ -351,7 +353,7 @@ pixlay-render save      --project <file.pixlay> --out <file.pixlay> [--json]
 | Item | Contract |
 |---|---|
 | stdout | **only** machine-readable results (sorted `key = value`, or a single object with `--json`). Diagnostics all go to stderr |
-| stability | same input, same output; the results carry no timestamps and no absolute paths. `--stats`'s `ms`/`encode_ms`/`peak_rss_mb` are the **only** exception (they are the measurement) |
+| stability | same input, same output; the results carry no timestamps and no absolute paths. `--stats`'s `ms`/`encode_ms`/`peak_rss_mb` are the **only** exception (they are the measurement), and `scan` is the other one **by subject**: a directory listing *is* a set of paths and modification times (S9), so reporting them is the result rather than contamination — two runs over an unchanged directory are still byte-identical, which is what the rule protects |
 | locale | under any value of `LANG` / `LC_ALL` / `LANGUAGE`, stdout and stderr are **byte-identical** (including the error branches) |
 | interaction | does not read stdin, does not wait for a prompt, works with no TTY; `--help` covers every flag and every exit code |
 | exit codes | 0 success / 1 usage error / 2 project, decode, render or write failure / 2 probe verdict not passed |
@@ -393,7 +395,28 @@ comparable, and `--quality` was deliberately not added — a knob nobody tests b
 | `--template` / `--out` | — | both required; `--out` must end in `.pixlay` |
 | refusal | any other flag (`--dpi`, `--project`, …) is a usage error (exit 1) | same; and an existing `--out` path is a **failure** (exit 2) because `init` never overwrites a project |
 | unknown template | — | usage error (exit 1), stderr lists the names this build knows |
-| content | the whole library in library order (by slot count) | a photo-free default project at the template's aspect on a 1189 mm long edge, every cell empty, written by `CollageDoc::to_json` and loadable by `Project::load` |
+| content | the whole library in library order (by slot count) | a default project at the template's aspect on a 1189 mm long edge, written by `CollageDoc::to_json` and loadable by `Project::load`; **with `--photo` the arguments fill the cells in order** (below) |
+
+**S9's two subcommands are the library's machine surface** — stages 1–2 of the main path, "browse a folder" and "show me this photo" — plus the extension of `init` that turns a selection into a document. The picker's grid and its fit-and-zoom preview call the same two pieces of code, so what the GUI shows has a number behind it.
+
+| Item | `scan` | `thumb` |
+|---|---|---|
+| shape | `dir`, `recursive`, `count`, `failed`, and one `file.<i>` row per photo: `path`, `status`, and either `mime` / `width` / `height` / `date` / `mtime`, or `reason` | `format`, `mime`, `src_w`, `src_h`, `px`, `out_w`, `out_h`, `bytes` |
+| what it is for | what a picker needs from a folder, and the key S12's decode cache invalidates on: `mtime`, whole seconds since the Unix epoch | the picker's expensive half — decode plus resample to a tile's size — as a CLI number; `--stats` is the budget number S12's decisions are measured against |
+| size | `height`/`width` are the size **after EXIF rotation** (`ImageDetails`' early dimensions are a hint and are *not* post-rotation, which is why a full decode happens), so `image` and `scan` cannot disagree about a file | `--px n` is the exact long edge, 1..=**8192**; the other edge keeps the photo's ratio (`round`, at least 1 px). The bound is the product's largest preview with room: a full-window 4K photo preview is 3840 px and a HiDPI one 7680, so past 8192 the caller wants `render --preview-px` |
+| candidates | files whose extension is in `PHOTO_EXTENSIONS` (`.jpg .jpeg .png .heic .heif .avif .jxl .webp .tif .tiff`), case-insensitively; **no recursion unless `--recursive`**, and only real directories are descended into (a symlink to a parent would never terminate). A non-photo extension is neither a row nor an error — the alternative is a folder's README becoming an error row | `--out`'s extension, the same four formats `render` writes. A preview is written at **72 dpi**: one image pixel per point is what a screen-sized picture means, and the encoder always writes a resolution |
+| refusal | a file with a photo extension that does not decode **is** a row (`status = failed`) with the decoder's own reason, and the command still exits **0**: the listing is the result. A `--dir` that is not a directory is exit **2** with the path named | a photo that does not decode, or an `--out` this build cannot write, is exit **2**; `--px` outside the range is exit **1** |
+| pixels | — | the whole photo, resampled once at the preview's own grid — the same `resample` (Lanczos3, linear light, kernel widened by the downscale ratio) and the same `over_white` + quantize as a slot, so a preview is not a second picture of the same file |
+
+**`init --photo` is where a selection becomes a document** (S9), and it goes through `pixlay_core::Selection` — the same policy the picker uses (S13), so "the third photo the user picked is the third cell" has one implementation:
+
+| Item | Rule |
+|---|---|
+| order | **argument order is cell order**; the source of cell *i* is the *i*-th `--photo` |
+| count | 2..=9 inclusive (ruling 3). Outside it: usage error (exit 1) naming both bounds (`a collage needs 2..=9 photos, got 10`). Omitting `--photo` entirely is still the photo-free project S2 shipped |
+| template | the slot count must equal the number of photos; a mismatch is a usage error (exit 1) naming the template, its slots and the photo count |
+| paths | a **photo that is not there** is a failure (exit 2, the path named) — the same rule a project that points at a deleted file follows. Each stored `source` is relative to the project file when the two share a root (`pixlay_core::relative_to`, the function `Project::save_as` rebases with) and absolute otherwise, so a project whose photos sit beside it can be moved |
+| the policy itself | `pixlay_core::selection`: `Selection` (ordered photos, the 2..=9 clamp, `layouts()` = the templates with that many slots), `remove_last` / `Removed::restore` (the LIFO batch rule: the last **occupied** cell, because a per-cell clear leaves holes, and the cell comes back in its own slot with its framing and grade). Pure functions, no filesystem |
 
 Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wall clock, with compositing and encoding reported separately.
 
@@ -449,6 +472,7 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
 | command history / hit testing / project writing | **S6.5, landed**; `SetTemplate` added by **S7** | `pixlay-core`: `Command` (one edit: source, framing, grade, filter, text layers, the `{date}` fallback, the template and its canvas — `SetTemplate` carries both because a canvas and a template must agree on their aspect ratio — and the canvas alone) and `History` (snapshot undo/redo; `apply` is all-or-nothing and the document has no mutable accessor; the GUI commits **one command per gesture**, §9), `Template::slot_at(point)` for hit testing, `CollageDoc::save` / `Project::save` / `Project::save_as` for writing a document. The CLI's `hit` and `save` are the machine surface of the first and the last; the command history is a test surface only, on purpose (§5) |
 | text rendering | **S5, landed** | `pixlay_render::text`: one Pango layout per layer, drawn by `draw`; token resolution is `TextLayer::resolve` in `pixlay-core`, the tile grid is `pixlay_core::tiled_grid`; see §1 "Text layers" |
 | encoding and metadata | **S6, landed** | `pixlay_imaging::encode`: one pass per format writing pixels, resolution, sampling and the ICC profile (`icc`), for PNG / JPEG / TIFF; the CLI's `--long-edge` / `--chroma` and the per-format rules are §5, the profile is §4.1 |
+| the library and the selection | **S9, landed** | `pixlay_core::selection`: `Selection` (the ordered photo list, the 2..=9 clamp, `layouts()`), `last_photo` / `remove_last` / `Removed::restore` (the LIFO batch rule) — pure, no filesystem. `pixlay_imaging::thumb`: `thumbnail(source, long_edge)`, the same `resample` at a preview grid. The CLI's `scan` / `thumb` / `init --photo` are the machine surface (the rules are §5) |
 
 ## 8. Measured (2026-09-20, this machine)
 
@@ -519,6 +543,21 @@ eight photos and one `{date}` layer on a 14043x10532 A0 sheet, per format:
 | the strings | `po/POTFILES` = the crate's 11 source files; `xgettext --language=Rust` finds **118** msgids, five of them tagged `rust-format` |
 | the layout | utility pane 380 px maximum beside the canvas; at the minimum window size (480x360) the sheet is still drawn in full and the pane is still allocated (asserted) |
 | a display, or none | the four GUI test binaries are one test each and run on the session's display; with none they re-run themselves under `xvfb-run` (pinning `GTK_IM_MODULE=gtk-im-context-simple` and `NO_AT_BRIDGE=1`, because GTK's `im-ibus` module recurses without a session bus), and the whole suite is green headlessly |
+
+### S9 (2026-09-22, `--release`, this machine)
+
+`scan` and `thumb` on the committed fixtures (the numbers are `--stats`'s own fields, three runs each;
+`ms` is decode + resample, `encode_ms` the write):
+
+| Item | Value |
+|---|---|
+| `scan --dir tests/fixtures/photos` (14 files: JPEG, PNG, 16-bit PNG, HEIC, EXIF-Orientation-6) | **ms 190–194**, **`peak_rss_mb` 32.6–32.8** → ~13.6 ms per file: opening a folder *is* the decodes, and nothing is cached between them |
+| `thumb --px 256` of a 960x540 JPEG and a 600x900 JPEG | **ms 49–50** + **`encode_ms` 8.8–9.1**, **`peak_rss_mb` 19.5–19.9**, PNG |
+| `thumb --px 1024` of the same photos plus the 1600x1200 PNG and the HEIC | ms 70–155, `encode_ms` 33–179, `peak_rss_mb` 26.6–35.5 |
+| the whole preview path against ImageMagick (`magick compare -metric RMSE`, `thumb --px 200` of `resample-source.png` vs the committed `resample-lanczos-200.png`) | **1.51/255** — the same reduction the resample test measures at 1.41/255 through the decoder, so the CLI's decode → resample → flatten → quantize → write path is one implementation of the reference rather than a second one |
+
+That is the picker's budget number S12 is decided against: a 256 px preview of a 1 MP photo costs
+~50 ms and 20 MB in this build, which is the cost a gesture step must not pay per frame.
 
 Every threshold constant in the tests annotates this source, so a change in the numbers can be discovered.
 

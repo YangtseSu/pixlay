@@ -8,15 +8,15 @@ use std::ffi::OsString;
 use std::io::Write;
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use pixlay_core::{PixelSize, Project, TextValues};
 use pixlay_imaging::{Chroma, Export, Format, Rgb8View, SlotBitmap, icc};
 use pixlay_render::Images;
 
 use crate::args::{
-    self, Command, HitArgs, ImageArgs, InitArgs, ProbeArgs, RenderArgs, SaveArgs, Size, Source,
-    TemplatesArgs, TextArgs, USAGE,
+    self, Command, HitArgs, ImageArgs, InitArgs, ProbeArgs, RenderArgs, SaveArgs, ScanArgs, Size,
+    Source, TemplatesArgs, TextArgs, ThumbArgs, USAGE,
 };
 use crate::report::Report;
 use crate::stats;
@@ -49,6 +49,8 @@ pub fn run(argv: &[OsString]) -> Result<u8, Failure> {
         Command::Render(args) => render(args),
         Command::Probe(args) => probe(args),
         Command::Image(args) => image(args),
+        Command::Scan(args) => scan(args),
+        Command::Thumb(args) => thumb(args),
         Command::Text(args) => text(args),
         Command::Templates(args) => list_templates(args),
         Command::Init(args) => init_project(args),
@@ -169,12 +171,18 @@ fn list_templates(args: TemplatesArgs) -> Result<u8, Failure> {
     Ok(EXIT_SUCCESS)
 }
 
-/// `init`: a template as a loadable, photo-free project.
+/// `init`: a template as a loadable project, with the photos the caller names.
 ///
 /// Callers should not have to hand-write `.pixlay` JSON — the format has one
 /// canonical writer (`CollageDoc::to_json`) and this is where they reach it. The
 /// file is never overwritten: replacing a project the user already has is not
 /// something a command called `init` should do quietly.
+///
+/// With `--photo`, **argument order is cell order** and the mapping goes through
+/// the selection policy (`pixlay_core::Selection`), which is the same function the
+/// picker and the layout stage use — so "the third photo the user picked is the
+/// third cell" is one rule with one implementation, and the 2..=9 clamp and the
+/// slot-count check are applied here exactly as they are in the GUI.
 fn init_project(args: InitArgs) -> Result<u8, Failure> {
     let template = pixlay_core::templates::get(&args.template).ok_or_else(|| {
         Failure::Usage(format!(
@@ -183,7 +191,17 @@ fn init_project(args: InitArgs) -> Result<u8, Failure> {
             pixlay_core::templates::names().join(", ")
         ))
     })?;
-    let doc = pixlay_core::templates::document(&template);
+    let doc = if args.photos.is_empty() {
+        // The photo-free project S2 shipped: an empty cell renders white.
+        pixlay_core::templates::document(&template)
+    } else {
+        let photos = stored_photos(&args.photos, &args.out)?;
+        let selection = pixlay_core::Selection::new(photos)
+            .map_err(|error| Failure::Usage(error.to_string()))?;
+        selection
+            .document(&template)
+            .map_err(|error| Failure::Usage(error.to_string()))?
+    };
     // Validating before writing is cheap, and it keeps a bug in the library from
     // shipping as an unloadable file.
     doc.validate()
@@ -211,9 +229,62 @@ fn init_project(args: InitArgs) -> Result<u8, Failure> {
         format!("{}x{}", doc.canvas.width_mm, doc.canvas.height_mm),
     );
     report.int("cells", doc.cells.len() as i64);
+    // `photos` is what was asked for, `cells` is what the template has: they are
+    // equal for a project with photos, and 0 against N for the photo-free one.
+    report.int(
+        "photos",
+        doc.cells
+            .iter()
+            .filter(|cell| cell.source.is_some())
+            .count() as i64,
+    );
     report.int("bytes", json.len() as i64);
     emit(&report, args.json);
     Ok(EXIT_SUCCESS)
+}
+
+/// The `source` paths `init` stores for the photos it was given.
+///
+/// Two jobs, in the order that keeps the messages useful: a photo that is not
+/// there is refused (exit 2, the path named — the same rule a loaded project
+/// follows, where a missing photo must fail loudly rather than export a white
+/// hole), and then each path is expressed the way a *written* `source` should be.
+fn stored_photos(photos: &[PathBuf], project: &Path) -> Result<Vec<PathBuf>, Failure> {
+    for photo in photos {
+        if !photo.is_file() {
+            return Err(Failure::Failed(format!(
+                "{}: no such photo",
+                photo.display()
+            )));
+        }
+    }
+    Ok(photos
+        .iter()
+        .map(|photo| stored_source(photo, project))
+        .collect())
+}
+
+/// One photo's path as a project should store it: relative to the project file
+/// when the two share a root, absolute otherwise.
+///
+/// The rule `Project::save_as` applies to a copy, applied where the project is
+/// first created: a project whose photos sit beside it can be moved or zipped, and
+/// one whose photos are on another filesystem keeps an absolute path, which the
+/// format accepts as it stands. Lexical (`pixlay_core::relative_to`), so nothing
+/// here needs the filesystem to answer, and a photo behind an unmounted drive is
+/// still expressible.
+fn stored_source(photo: &Path, project: &Path) -> PathBuf {
+    let Ok(photo) = std::path::absolute(photo) else {
+        return photo.to_path_buf();
+    };
+    let Ok(project) = std::path::absolute(project) else {
+        return photo;
+    };
+    let dir = project
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    pixlay_core::relative_to(dir, &photo).unwrap_or(photo)
 }
 
 /// `W:H` when the ratio is one a person would name, a decimal otherwise.
@@ -573,6 +644,220 @@ fn image(args: ImageArgs) -> Result<u8, Failure> {
             report.text("date", "");
         }
     }
+    emit(&report, args.json);
+    Ok(EXIT_SUCCESS)
+}
+
+/// `scan`: the photos in a directory, as the picker's grid sees them (S9).
+///
+/// Stage 1 of the flow — "open a folder and browse" — has to be measurable
+/// without a window (`AGENTS.md`: nothing may be possible only in the GUI), and
+/// what a grid needs from a folder is a list: the path, what the decoder says the
+/// file is, the size **after** EXIF rotation (a tile and a preview lay out
+/// against the size a person sees, not the size the file stores), the date a
+/// caption can use, and `mtime`, which is the key S12's decode cache invalidates
+/// on.
+///
+/// Two properties the picker depends on:
+///
+/// * **a refusal is a row, not a skip.** A corrupt file, an image past the decode
+///   cap or a dangling symlink is `status = failed` with the decoder's own reason,
+///   so the grid can show a broken tile and the user can act on it. Omitting the
+///   file silently would make "the folder has nothing" and "the folder has
+///   something this build cannot read" the same answer.
+/// * **the order is lexical and stable.** Two runs over an unchanged directory are
+///   byte-identical. The listing's paths and `mtime` values *are* its input, so
+///   they are reported rather than stripped the way every other command strips
+///   them: a caller that cannot see a file's mtime has to stat the filesystem
+///   again to trust the answer.
+fn scan(args: ScanArgs) -> Result<u8, Failure> {
+    let stopwatch = stats::Stopwatch::start();
+    if !args.dir.is_dir() {
+        return Err(Failure::Failed(format!(
+            "{}: not a directory",
+            args.dir.display()
+        )));
+    }
+    let mut paths = Vec::new();
+    collect_photos(&args.dir, args.recursive, &mut paths)?;
+    paths.sort();
+
+    let mut report = Report::new();
+    report.text("status", "ok");
+    report.text("command", "scan");
+    report.text("dir", args.dir.display().to_string());
+    report.bool("recursive", args.recursive);
+    let mut failed = 0;
+    for (index, path) in paths.iter().enumerate() {
+        let prefix = report.row("file", index);
+        report.text(&format!("{prefix}.path"), path.display().to_string());
+        match facts(path) {
+            Ok(facts) => {
+                report.text(&format!("{prefix}.status"), "ok");
+                report.text(&format!("{prefix}.mime"), facts.mime);
+                report.int(&format!("{prefix}.width"), i64::from(facts.width));
+                report.int(&format!("{prefix}.height"), i64::from(facts.height));
+                report.text(&format!("{prefix}.date"), facts.date);
+                report.int(&format!("{prefix}.mtime"), facts.mtime);
+            }
+            Err(reason) => {
+                failed += 1;
+                report.text(&format!("{prefix}.status"), "failed");
+                report.text(&format!("{prefix}.reason"), reason);
+            }
+        }
+    }
+    report.int("count", paths.len() as i64);
+    report.int("failed", failed);
+    add_stats(&mut report, args.stats, stopwatch.elapsed(), None, "none");
+    emit(&report, args.json);
+    Ok(EXIT_SUCCESS)
+}
+
+/// Every photo file under `dir`, appended to `out`.
+///
+/// Only real directories are descended into: a symlink that points at its own
+/// parent would otherwise make `--recursive` run forever, and following links is
+/// not what "the photos in this folder" means.
+fn collect_photos(dir: &Path, recursive: bool, out: &mut Vec<PathBuf>) -> Result<(), Failure> {
+    let entries = std::fs::read_dir(dir)
+        .map_err(|error| Failure::Failed(format!("{}: {error}", dir.display())))?;
+    for entry in entries {
+        let entry =
+            entry.map_err(|error| Failure::Failed(format!("{}: {error}", dir.display())))?;
+        let path = entry.path();
+        let kind = entry
+            .file_type()
+            .map_err(|error| Failure::Failed(format!("{}: {error}", path.display())))?;
+        if kind.is_dir() {
+            if recursive {
+                collect_photos(&path, recursive, out)?;
+            }
+            continue;
+        }
+        if is_photo(&path) {
+            out.push(path);
+        }
+    }
+    Ok(())
+}
+
+/// Whether `scan` treats a file as a photo: its extension is one of
+/// `args::PHOTO_EXTENSIONS`, case-insensitively (a camera writes `.JPG`).
+fn is_photo(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_ascii_lowercase())
+        .is_some_and(|extension| args::PHOTO_EXTENSIONS.contains(&extension.as_str()))
+}
+
+/// What one file is, as far as the grid is concerned.
+struct Facts {
+    mime: String,
+    width: u32,
+    height: u32,
+    date: String,
+    mtime: i64,
+}
+
+/// Decodes one file far enough to describe it.
+///
+/// The whole frame, not the loader's early dimensions: `ImageDetails` is a hint
+/// ("often correct … for an early rendering estimate", glycin's own words) and it
+/// is not the size after rotation, which is the size the grid is laid out
+/// against. `image` makes the same call, so the two commands cannot disagree
+/// about a file's size.
+fn facts(path: &Path) -> Result<Facts, String> {
+    let source = pixlay_imaging::Source::decode(path).map_err(|error| error.to_string())?;
+    Ok(Facts {
+        mime: source.mime().to_string(),
+        width: source.width(),
+        height: source.height(),
+        date: source
+            .exif()
+            .and_then(pixlay_imaging::exif::date_time_original)
+            .unwrap_or_default(),
+        mtime: mtime_seconds(path),
+    })
+}
+
+/// A file's modification time, in whole seconds since the Unix epoch.
+///
+/// Zero when the platform cannot say: a cache key that matches nothing is safer
+/// than one that matches a file it never looked at, and the row is still a row.
+fn mtime_seconds(path: &Path) -> i64 {
+    std::fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|since| since.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// Resolution `thumb` writes into a preview: 72, one image pixel per point, which
+/// is what a screen-sized picture means (docs/CONTRACT.md §5). The encoder always
+/// writes a resolution, and this is the honest one for a preview — not the DPI of
+/// the print the photo might become.
+const THUMB_DPI: f64 = 72.0;
+
+/// `thumb`: one photo's preview pixels as a file (S9).
+///
+/// The picker's expensive half is the decode plus the resample to the size a tile
+/// shows, and this is that half with a number attached: S13 holds the widget's
+/// texture to these pixels, and `--stats` reports what one preview costs, which is
+/// the budget S12's cache and coarse-grid decisions are made against.
+fn thumb(args: ThumbArgs) -> Result<u8, Failure> {
+    let format = Format::from_path(&args.out).ok_or_else(|| {
+        Failure::Usage(format!(
+            "--out {}: expected {}",
+            args.out.display(),
+            Format::EXTENSIONS
+        ))
+    })?;
+    let stopwatch = stats::Stopwatch::start();
+    let source = pixlay_imaging::Source::decode(&args.photo)
+        .map_err(|error| Failure::Failed(error.to_string()))?;
+    let preview = pixlay_imaging::thumbnail(&source, args.px)
+        .map_err(|error| Failure::Failed(error.to_string()))?;
+    let compose = stopwatch.elapsed();
+
+    let encode_watch = stats::Stopwatch::start();
+    let bytes = pixlay_imaging::encode::write(
+        &args.out,
+        &Export {
+            format,
+            dpi: THUMB_DPI,
+            // A preview is a screen picture; there is nothing to subsample for,
+            // and 4:4:4 is the project's default anyway.
+            chroma: Chroma::default(),
+            image: Rgb8View {
+                width: preview.width,
+                height: preview.height,
+                data: &preview.pixels,
+            },
+        },
+    )
+    .map_err(|error| Failure::Failed(error.to_string()))?;
+    let encode_ms = encode_watch.elapsed();
+
+    let mut report = Report::new();
+    report.text("status", "ok");
+    report.text("command", "thumb");
+    report.text("format", format.name());
+    report.text("mime", source.mime().to_string());
+    report.int("src_w", i64::from(source.width()));
+    report.int("src_h", i64::from(source.height()));
+    report.int("px", i64::from(args.px));
+    report.int("out_w", i64::from(preview.width));
+    report.int("out_h", i64::from(preview.height));
+    report.int("bytes", bytes as i64);
+    add_stats(
+        &mut report,
+        args.stats,
+        compose,
+        Some(encode_ms),
+        icc::DESCRIPTION,
+    );
     emit(&report, args.json);
     Ok(EXIT_SUCCESS)
 }

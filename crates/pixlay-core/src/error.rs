@@ -80,6 +80,12 @@ pub enum CoreError {
     #[error("slot {slot} does not exist; the template has {slots} slots")]
     NoSuchSlot { slot: usize, slots: usize },
 
+    /// A restore of a removed cell found its slot occupied again: the document
+    /// changed while the cell was out, and putting the old contents back would
+    /// silently drop whatever a later edit put there (`crate::selection`).
+    #[error("slot {slot} already holds a photo; restoring would overwrite it")]
+    SlotOccupied { slot: usize },
+
     /// A command named a text layer the document does not have. `index` equal to
     /// the layer count is a valid *insert* position (it appends), so this only
     /// fires past the end.

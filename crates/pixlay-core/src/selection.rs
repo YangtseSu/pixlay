@@ -1,0 +1,224 @@
+//! The selection policy: which photos a collage holds, and in which order.
+//!
+//! Stages 1–2 of the main path (`AGENTS.md`: `open → pick 2–9 photos → pick a
+//! layout → adjust → export`) are a list of photos in the order the user picked
+//! them, and **order is cell order**: the picker's tray is where that mapping is
+//! visible and re-orderable, not decoration. This module is the mapping itself,
+//! and it is pure — no cairo, no GTK, no filesystem — so the picker (S13), the
+//! layout stage (S14) and the CLI's `init --photo` share one implementation
+//! instead of three that agree by luck.
+//!
+//! Three rules live here:
+//!
+//! * **the floor and the ceiling.** A collage needs `2..=9` photos (ruling 3).
+//!   The floor is enforced where a selection becomes a document
+//!   ([`Selection::document`]) and the ceiling where a photo is added
+//!   ([`Selection::push`]), because those are the two moments a user can hit them:
+//!   the tray legitimately holds zero or one photo while the user is still
+//!   picking, and a tenth is refused with a message rather than truncated.
+//! * **the count filter.** The layouts a selection can use are the library's
+//!   templates with exactly that many slots ([`Selection::layouts`]) — which is
+//!   also why `strip-10-10x1` stays in the library and never appears in the
+//!   picker: the ceiling is 9, so a ten-slot layout is never a candidate.
+//! * **the batch rule (LIFO).** [`remove_last`] clears the last *occupied* cell
+//!   and nothing else, and the [`Removed`] it hands back puts that cell back
+//!   where it was. A single cell can be cleared on its own (ruling 7), so "the
+//!   last photo" is the last occupied cell rather than the last cell, and
+//!   restoring means *that* slot — not the first empty one.
+
+use std::path::PathBuf;
+
+use thiserror::Error;
+
+use crate::doc::{Cell, CollageDoc};
+use crate::error::CoreError;
+use crate::template::Template;
+use crate::templates;
+
+/// Fewest photos a collage can be made of.
+pub const MIN_PHOTOS: usize = 2;
+
+/// Most photos a picker offers. The library's own limit is `MAX_SLOTS` (10,
+/// `strip-10-10x1`), but the product's cap is 9 (ruling 3); a document may still
+/// hold ten slots, because a project written by another build must load.
+pub const MAX_PHOTOS: usize = 9;
+
+/// Why a selection cannot do what was asked of it.
+///
+/// Both variants are *request* errors, not document errors: the caller asked for
+/// a collage of one photo, or for a layout that does not have the count. The CLI
+/// reports them as usage errors (exit 1), and the GUI shows them in place.
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+pub enum SelectionError {
+    #[error("a collage needs {min}..={max} photos, got {found}")]
+    PhotoCount {
+        found: usize,
+        min: usize,
+        max: usize,
+    },
+    #[error("template {template} has {slots} slots but the selection has {photos} photos")]
+    SlotCount {
+        template: String,
+        slots: usize,
+        photos: usize,
+    },
+}
+
+/// The photos a user has picked, in the order they will land in cells.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Selection {
+    photos: Vec<PathBuf>,
+}
+
+impl Selection {
+    /// A selection of `photos`, in cell order. Refuses more than [`MAX_PHOTOS`]
+    /// (the ceiling is a *request* limit, so it fires here rather than silently
+    /// dropping the tail); the floor is checked by [`document`](Self::document).
+    pub fn new(photos: Vec<PathBuf>) -> Result<Self, SelectionError> {
+        let mut selection = Self::default();
+        for photo in photos {
+            selection.push(photo)?;
+        }
+        Ok(selection)
+    }
+
+    /// The photos, in cell order.
+    pub fn photos(&self) -> &[PathBuf] {
+        &self.photos
+    }
+
+    pub fn len(&self) -> usize {
+        self.photos.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.photos.is_empty()
+    }
+
+    /// Whether another photo fits under the ceiling. The picker's "add" control
+    /// reads this; below the floor is not this question.
+    pub fn accepts_more(&self) -> bool {
+        self.photos.len() < MAX_PHOTOS
+    }
+
+    /// Appends a photo and returns the cell index it landed in.
+    pub fn push(&mut self, photo: PathBuf) -> Result<usize, SelectionError> {
+        if !self.accepts_more() {
+            return Err(SelectionError::PhotoCount {
+                found: self.photos.len() + 1,
+                min: MIN_PHOTOS,
+                max: MAX_PHOTOS,
+            });
+        }
+        self.photos.push(photo);
+        Ok(self.photos.len() - 1)
+    }
+
+    /// Drops the last photo — the LIFO half of the batch control, on the
+    /// selection. The document-side half is [`remove_last`], which also keeps the
+    /// cell's framing and grade so they can come back.
+    pub fn pop(&mut self) -> Option<PathBuf> {
+        self.photos.pop()
+    }
+
+    /// Drops the photo at `index` (ruling 7's per-cell clear). `None` past the
+    /// end, so a stale index is a no-op rather than a panic.
+    pub fn remove(&mut self, index: usize) -> Option<PathBuf> {
+        (index < self.photos.len()).then(|| self.photos.remove(index))
+    }
+
+    /// The layouts this selection can use: every template with exactly this many
+    /// slots, in library order.
+    ///
+    /// An empty selection asks for nothing and gets nothing — there is no
+    /// zero-slot layout to offer, and a caller that wants the whole library asks
+    /// `templates::all` itself.
+    pub fn layouts(&self) -> Vec<Template> {
+        templates::all()
+            .into_iter()
+            .filter(|template| template.slots.len() == self.photos.len())
+            .collect()
+    }
+
+    /// The document these photos make on `template`, in cell order.
+    ///
+    /// This is the one place the picker's list becomes a document, so the CLI's
+    /// `init --photo` and the GUI's Next cannot disagree about what "the third
+    /// photo" means. Paths are stored exactly as given: making them relative to
+    /// the project file is a *writing* concern (`Project::save_as`), not a
+    /// selection one, and this module has no filesystem.
+    pub fn document(&self, template: &Template) -> Result<CollageDoc, SelectionError> {
+        let photos = self.photos.len();
+        if !(MIN_PHOTOS..=MAX_PHOTOS).contains(&photos) {
+            return Err(SelectionError::PhotoCount {
+                found: photos,
+                min: MIN_PHOTOS,
+                max: MAX_PHOTOS,
+            });
+        }
+        let slots = template.slots.len();
+        if slots != photos {
+            return Err(SelectionError::SlotCount {
+                template: template.name.clone(),
+                slots,
+                photos,
+            });
+        }
+        let mut doc = templates::document(template);
+        for (cell, photo) in doc.cells.iter_mut().zip(&self.photos) {
+            cell.source = Some(photo.clone());
+        }
+        Ok(doc)
+    }
+}
+
+/// The last cell that holds a photo, if any.
+///
+/// A batch control has to know whether there is anything to drop before it acts,
+/// and asking by removing would change the document to answer a question.
+pub fn last_photo(doc: &CollageDoc) -> Option<usize> {
+    doc.cells.iter().rposition(|cell| cell.source.is_some())
+}
+
+/// A cell a batch removal cleared, kept whole so it can come back unchanged.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Removed {
+    /// The cell index it was taken from.
+    pub slot: usize,
+    /// The cell as it was: photo, framing and grade.
+    pub cell: Cell,
+}
+
+impl Removed {
+    /// Puts the cell back where it came from (LIFO, the other half of
+    /// [`remove_last`]).
+    ///
+    /// Refused when the cell has been taken since — restoring would overwrite
+    /// whatever is there now — or when the document no longer has that cell. The
+    /// caller then has to decide; guessing which photo to lose is not this
+    /// function's call.
+    pub fn restore(self, doc: &mut CollageDoc) -> Result<(), CoreError> {
+        let slots = doc.cells.len();
+        let cell = doc.cells.get_mut(self.slot).ok_or(CoreError::NoSuchSlot {
+            slot: self.slot,
+            slots,
+        })?;
+        if cell.source.is_some() {
+            return Err(CoreError::SlotOccupied { slot: self.slot });
+        }
+        *cell = self.cell;
+        Ok(())
+    }
+}
+
+/// Clears the last occupied cell and returns what it held.
+///
+/// Nothing else moves: the other cells keep their photo, framing and grade, and
+/// the removed cell's own framing and grade travel out with it, so a later
+/// [`Removed::restore`] is the exact inverse rather than a re-placement with
+/// defaults.
+pub fn remove_last(doc: &mut CollageDoc) -> Option<Removed> {
+    let slot = last_photo(doc)?;
+    let cell = std::mem::take(&mut doc.cells[slot]);
+    Some(Removed { slot, cell })
+}
