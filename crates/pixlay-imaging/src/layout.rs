@@ -55,6 +55,13 @@ pub const REGION_GUARD_PX: f64 = 3.0;
 /// One slot's bitmap, ready for `pixlay_render::Bitmap::from_argb32_region`.
 #[derive(Clone, Debug)]
 pub struct SlotBitmap {
+    /// EXIF `DateTimeOriginal` of the file this bitmap came from, verbatim.
+    ///
+    /// The decoder is the only stage that has seen the file, so the one field a
+    /// text layer needs from a photo travels out with the pixels instead of
+    /// costing a second decode (S5, `{date}`). `None` for a file with no usable
+    /// date, which is what makes a layer fall back to the document's own string.
+    pub date: Option<String>,
     /// Cell index this bitmap belongs to.
     pub slot: usize,
     pub width: u32,
@@ -146,6 +153,7 @@ pub(crate) fn flat_bitmap(
     }
     Ok(SlotBitmap {
         slot: slot_index,
+        date: None,
         width: texels.2 as u32,
         height: texels.3 as u32,
         origin: (f64::from(texels.0), f64::from(texels.1)),
@@ -200,6 +208,7 @@ pub fn slot_bitmap(
 
     Ok(SlotBitmap {
         slot: slot_index,
+        date: source.exif().and_then(crate::exif::date_time_original),
         width: texels.2 as u32,
         height: texels.3 as u32,
         origin: (f64::from(texels.0), f64::from(texels.1)),

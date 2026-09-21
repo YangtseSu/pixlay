@@ -192,6 +192,15 @@ pub trait Sampler {
     /// One pixel, straight sRGB, 16 bits per channel.
     fn pixel(&self, x: u32, y: u32) -> [u16; 4];
 
+    /// The file's EXIF block, when there is one.
+    ///
+    /// Text layers substitute `{date}` from it (S5, `pixlay-render`): asking the
+    /// decoder that already has the file beats decoding it a second time, and a
+    /// synthetic sampler — the probe's flat content — has no file and says `None`.
+    fn exif(&self) -> Option<&[u8]> {
+        None
+    }
+
     /// `width / height`.
     fn aspect(&self) -> f64 {
         f64::from(self.width()) / f64::from(self.height())
@@ -209,6 +218,10 @@ impl Sampler for Source {
 
     fn pixel(&self, x: u32, y: u32) -> [u16; 4] {
         Source::pixel(self, x, y)
+    }
+
+    fn exif(&self) -> Option<&[u8]> {
+        self.exif.as_deref()
     }
 }
 

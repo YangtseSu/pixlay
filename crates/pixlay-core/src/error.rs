@@ -89,4 +89,10 @@ pub enum CoreError {
     /// than an `OutOfRange` whose range would be misleading.
     #[error("tiled text step must be positive in both components, got ({x}, {y})")]
     InvalidTiledStep { x: f64, y: f64 },
+
+    /// The step has no upper *bound*, but a small one asks for an unbounded amount
+    /// of work. Refused at load time so the document is rejected where the user can
+    /// still do something about it.
+    #[error("tiled text step ({x}, {y}) asks for more than {max} tiles")]
+    TooManyTiles { x: f64, y: f64, max: usize },
 }

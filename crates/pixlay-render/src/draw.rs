@@ -14,6 +14,7 @@ use pixlay_core::{CollageDoc, CropTransform, PixelSize, Polygon, Slot};
 
 use crate::bitmap::{Bitmap, Images};
 use crate::error::RenderError;
+use crate::text;
 
 /// Where and at what size a document is drawn.
 ///
@@ -80,11 +81,6 @@ pub fn draw(doc: &CollageDoc, images: &Images, target: &Target) -> Result<(), Re
     if !target.scale.is_finite() || target.scale <= 0.0 {
         return Err(RenderError::InvalidScale(target.scale));
     }
-    if !doc.text.is_empty() {
-        return Err(RenderError::TextLayersUnsupported {
-            count: doc.text.len(),
-        });
-    }
 
     // The band's offset is taken in output pixels and divided back into canvas
     // pixels, so a band's top row is the row the caller asked for whatever the
@@ -128,6 +124,10 @@ pub fn draw(doc: &CollageDoc, images: &Images, target: &Target) -> Result<(), Re
             .fit(slot, target.canvas_px.aspect(), bitmap.aspect());
         draw_slot(ctx, index, slot, bitmap, &fit.transform, target.canvas_px)?;
     }
+
+    // Text last: it is a canvas-level content layer, so it covers the cells and a
+    // photo's framing can never move it (docs/CONTRACT.md §4, S5).
+    text::draw_layers(ctx, doc, images, target.canvas_px)?;
 
     ctx.restore()?;
     Ok(())

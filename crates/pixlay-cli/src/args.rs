@@ -33,6 +33,7 @@ USAGE:
     pixlay-render render --template <name> --dpi <n> --out <file> [OPTIONS]
     pixlay-render probe  --project <file.pixlay> [OPTIONS]
     pixlay-render image  --photo <file> [--json]
+    pixlay-render text   --project <file.pixlay> [--json]
     pixlay-render templates [--aspect <ratio>] [--json]
     pixlay-render init --template <name> --out <file.pixlay> [--json]
     pixlay-render --help | --version
@@ -56,7 +57,19 @@ IMAGE OPTIONS:
                         sample depth (8 or 16 bits) and the EXIF date when the
                         file carries one.
 
+TEXT OPTIONS:
+    --project <file>    Project whose text layers to report. Required. Each
+                        layer's `{date}` / `{filename}` / `{index}` is resolved the
+                        way `render` resolves it, so a token's actual text can be
+                        read without rendering the project.
+
 TEMPLATES OPTIONS:
+TEXT OPTIONS:
+    --project <file>    Project whose text layers to report. Required. Each
+                        layer's `{date}` / `{filename}` / `{index}` is resolved the
+                        way `render` resolves it, so a token's actual text can be
+                        read without rendering the project.
+
 TEMPLATES OPTIONS:
     --aspect <ratio>    List only the templates authored for this canvas shape,
                         as W:H (4:3) or a decimal (1.333333). Omit to list all.
@@ -92,6 +105,7 @@ pub enum Command {
     Render(RenderArgs),
     Probe(ProbeArgs),
     Image(ImageArgs),
+    Text(TextArgs),
     Templates(TemplatesArgs),
     Init(InitArgs),
     Help,
@@ -117,6 +131,11 @@ pub struct RenderArgs {
 
 pub struct ImageArgs {
     pub photo: PathBuf,
+    pub json: bool,
+}
+
+pub struct TextArgs {
+    pub project: PathBuf,
     pub json: bool,
 }
 
@@ -161,6 +180,7 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
         "render" => &["project", "template", "out", "dpi", "preview-px", "stats"],
         "probe" => &["project", "dpi", "stats"],
         "image" => &["photo"],
+        "text" => &["project"],
         "templates" => &["aspect"],
         "init" => &["template", "out"],
         _ => &[],
@@ -193,6 +213,10 @@ fn reason(name: &str, flag: &str) -> &'static str {
         ("render", "photo") => "render takes photos from a project, not from --photo",
         ("probe", "photo") => "probe takes photos from a project",
         ("image", "project") => "image decodes one file; use --photo",
+        ("text", "photo") => "text reads the project's layers and their slots",
+        ("text", "dpi") => "text renders nothing; size is a fraction of the canvas",
+        ("text", "preview-px") => "text renders nothing",
+        ("text", "template") => "text reads a project",
         ("image", "dpi") => "image decodes at the file's own size",
         ("image", "out") => "image writes no file",
         ("image", "template") => "image decodes one file; use --photo",
@@ -215,7 +239,7 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
         .to_str()
         .ok_or_else(|| Failure::Usage("subcommand must be valid UTF-8".to_string()))?;
     let subcommand = match head {
-        "render" | "probe" | "image" | "templates" | "init" => head,
+        "render" | "probe" | "image" | "text" | "templates" | "init" => head,
         "--help" | "-h" | "help" => return Ok(Command::Help),
         "--version" | "-V" | "version" => return Ok(Command::Version),
         other if other.starts_with('-') => {
@@ -332,6 +356,15 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                 .ok_or_else(|| Failure::Usage("image needs --photo <file>".to_string()))?;
             Ok(Command::Image(ImageArgs {
                 photo,
+                json: flags.json,
+            }))
+        }
+        "text" => {
+            let project = flags
+                .project
+                .ok_or_else(|| Failure::Usage("text needs --project".to_string()))?;
+            Ok(Command::Text(TextArgs {
+                project,
                 json: flags.json,
             }))
         }

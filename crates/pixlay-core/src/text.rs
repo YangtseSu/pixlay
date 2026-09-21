@@ -132,6 +132,19 @@ pub fn scan_tokens(content: &str) -> Result<Vec<TextTokenUse>, String> {
     Ok(found)
 }
 
+/// What a slot's photo can tell a text layer that the document does not store.
+///
+/// `{date}` is EXIF `DateTimeOriginal` and `{filename}` is the source path's file
+/// name: both belong to the decoder and the loader, so they arrive here as values
+/// instead of being something the layer could read for itself (contract §1).
+/// `{index}` is the layer's own `source_slot` and needs no value.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TextValues {
+    /// EXIF `DateTimeOriginal`, verbatim; `None` when the file has no usable one.
+    pub date: Option<String>,
+    pub filename: Option<String>,
+}
+
 /// One canvas-level text layer.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -157,6 +170,72 @@ pub struct TextLayer {
 impl TextLayer {
     /// Largest font size accepted, as a fraction of the canvas height.
     pub const MAX_SIZE_REL: f64 = 1.0;
+
+    /// Largest number of tiles one layer may ask for.
+    ///
+    /// A tiled step has no upper bound, so a small enough step is a request for an
+    /// unbounded amount of work: `step = 1e-9` is a billion by a billion tiles.
+    /// 10,000 is far past any watermark a person would draw — a 1/100 step is a
+    /// 101x101 grid of marks — and it is checked when the document loads, so a
+    /// project with such a hole is refused rather than discovered at export time.
+    pub const MAX_TILES: usize = 10_000;
+
+    /// `content` with every `{date}`, `{filename}` and `{index}` replaced.
+    ///
+    /// A token with no value renders as an empty string: the alternative — leaving
+    /// `{date}` on the finished collage because a phone stripped the EXIF block —
+    /// puts a debugging token in the user's product. The one fallback is `{date}`'s,
+    /// and it is the document's own [`TextFallback::date`] (contract §1).
+    ///
+    /// `values` are what the layer's `source_slot` has to offer; pass
+    /// `TextValues::default()` when the layer names no slot.
+    ///
+    /// `{index}` is the slot index as the document numbers slots — `0` for the
+    /// first slot in template order, the same number the `template.<i>` and
+    /// `probe` rows of the CLI use.
+    ///
+    /// `values` are ignored when the layer names no slot: a layer without a
+    /// `sourceSlot` has no photo to say what the file name or the date is, and
+    /// taking them anyway would let a caller who looked up the wrong slot change
+    /// what a watermark says.
+    ///
+    /// An unknown `{token}` is left as literal text. It cannot reach here from a
+    /// loaded project (`validate` refuses one), only from a document mutated in
+    /// memory, and the renderer's policy for those is to draw what they say.
+    pub fn resolve(&self, values: &TextValues, fallback: &TextFallback) -> String {
+        let values = match self.source_slot {
+            Some(_) => values,
+            None => &TextValues::default(),
+        };
+        let Ok(uses) = scan_tokens(&self.content) else {
+            return self.content.clone();
+        };
+        if uses.is_empty() {
+            return self.content.clone();
+        }
+        let mut out = String::with_capacity(self.content.len() + 16);
+        let mut cursor = 0;
+        for use_ in &uses {
+            out.push_str(&self.content[cursor..use_.start]);
+            match use_.token {
+                TextToken::Date => match values.date.as_deref().filter(|date| !date.is_empty()) {
+                    Some(date) => out.push_str(date),
+                    None => out.push_str(&fallback.date),
+                },
+                TextToken::Filename => {
+                    out.push_str(values.filename.as_deref().unwrap_or_default());
+                }
+                TextToken::Index => {
+                    if let Some(slot) = self.source_slot {
+                        out.push_str(&slot.to_string());
+                    }
+                }
+            }
+            cursor = use_.end;
+        }
+        out.push_str(&self.content[cursor..]);
+        out
+    }
 
     pub fn validate(&self, layer: usize, slots: usize) -> Result<(), CoreError> {
         if !self.size_rel.is_finite() || self.size_rel <= 0.0 || self.size_rel > Self::MAX_SIZE_REL
@@ -217,6 +296,16 @@ impl TextLayer {
                         y: step.1,
                     });
                 }
+                // The step has no *upper* bound, but a small enough one is an
+                // unbounded amount of work: the grid starts at the canvas origin
+                // and covers it, so the count follows from the step alone.
+                if tiled_grid(step).is_none() {
+                    return Err(CoreError::TooManyTiles {
+                        x: step.0,
+                        y: step.1,
+                        max: Self::MAX_TILES,
+                    });
+                }
             }
         }
         if let Err(token) = scan_tokens(&self.content) {
@@ -228,6 +317,35 @@ impl TextLayer {
         }
         Ok(())
     }
+}
+
+/// The tile grid a `step` asks for: `(columns, rows)`, or `None` when it would need
+/// more than [`TextLayer::MAX_TILES`] tiles.
+///
+/// The grid starts at the canvas origin (`(0, 0)` is the first tile's anchor), so
+/// each axis has one anchor per step up to and including the far edge:
+/// `floor(1 / step) + 1` of them. The far-edge anchor is kept deliberately — its
+/// tile is invisible unrotated, but a rotated watermark swings ink back over the
+/// canvas, and dropping it would leave a stripe with no watermark on it.
+///
+/// Both the loader (`TextLayer::validate`) and the renderer ask this one function,
+/// so a refused document and a drawn one cannot disagree about what a step means.
+pub fn tiled_grid(step: (f64, f64)) -> Option<(usize, usize)> {
+    fn axis(step: f64) -> Option<usize> {
+        if !step.is_finite() || step <= 0.0 {
+            return None;
+        }
+        let anchors = (1.0 / step).floor() + 1.0;
+        if anchors >= TextLayer::MAX_TILES as f64 {
+            // Saturate instead of wrapping: a step of 1e-300 is a number, and the
+            // product below has to stay comparable against the cap.
+            return Some(TextLayer::MAX_TILES);
+        }
+        Some(anchors as usize)
+    }
+    let columns = axis(step.0)?;
+    let rows = axis(step.1)?;
+    (columns * rows <= TextLayer::MAX_TILES).then_some((columns, rows))
 }
 
 /// Values for the dynamic fields when the source photo cannot supply them.

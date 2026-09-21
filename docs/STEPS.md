@@ -16,8 +16,8 @@ The first sentence for a new session:
 
 Legend: ✅ done · 🚧 in progress · ⏸ blocked (waiting on a human decision or external input) · ⬜ not started
 
-**Current progress: S4 — ✅ done (2026-09-21, no human gate; the session ends at the S4┊S5 boundary, which splitting principle 5 puts after S4's irreversible decoding-backend decision — the one that decides S8's `depends`)**
-**Next action: start S5 in a new session (canvas-level text: free placement, the tiled watermark, `{date}` from EXIF through `pixlay-imaging::exif`).**
+**Current progress: S5 — ✅ done (2026-09-21, no unfinished work; its one human gate — the CJK kinsoku and punctuation-squeezing feel — is open in "Where humans must step in" with its preview at `/var/tmp/pixlay-s5/text-preview.png`)**
+**Next action: start S6 (export: physical size + DPI and long-edge-pixels modes, pixels and metadata written in one pass). The boundary list pairs S5 with S6 in one session; this one ended at the S5 result because the task was S5.**
 
 | Step | Status | Date | What it delivers |
 |---|---|---|---|
@@ -26,7 +26,7 @@ Legend: ✅ done · 🚧 in progress · ⏸ blocked (waiting on a human decision
 | S2 · Template system (geometry only) | ✅ done | 2026-09-21 | 12 templates covering 2–10 slots, grouped by aspect ratio, generated on a dyadic lattice and frozen under a `templateVersion`; `templates` and `init` added to the CLI |
 | S3 · Framing and clamp | ✅ done | 2026-09-21 | `CropTransform::fit`: absolute-zoom framing whose request is fitted to the slot by raising the zoom, clamping the pan and, past `CLAMP_ZOOM_LIMIT`, limiting the rotation; applied by `draw`, exact on all 64 shipped slots |
 | S4 · Image pipeline | ✅ done | 2026-09-21 | `pixlay-imaging`: the sandboxed glycin decoder (HEIC included), EXIF orientation applied to the pixels, a 16-bit linear Lanczos3 resample of the region each slot shows, per-slot grading and the global filter, the buffer ladder, and the probe moved down from the CLI |
-| S5 · Text layers | ⬜ not started | — | Canvas-level text, free placement and tiled watermark through one mechanism, `{date}` from EXIF |
+| S5 · Text layers | ✅ done | 2026-09-21 | Canvas-level text in `pixlay-render` with Pango: free placement and tiled watermark through one mechanism, `{date}`/`{filename}`/`{index}` from the slot's photo, kinsoku by Pango and punctuation squeezing through the font's `halt`; `text` added to the CLI and the probe refuses text documents |
 | S6 · Export | ⬜ not started | — | Physical size + DPI and long-edge-pixels modes, pixels and metadata written in one pass |
 | S6.5 · Command history / project IO / hit testing | ⬜ not started | — | `Command` + undo stack, `.pixlay` save/load with atomic write, point → slot hit testing |
 | S7 · GTK shell and interaction | ⬜ not started | — | The window: the three-minute main path, keyboard and HIG conformance, i18n wiring |
@@ -59,6 +59,7 @@ Wherever the original criteria said "visual / readable / three minutes", they we
 | After S0 | Look at the numbers: is Cairo usable? | ✅ passed (2026-09-20, human): **Cairo stays** |
 | After S1 | Review the contract. This is the only place a human must confirm — if the contract is wrong, the seven steps after it are all wasted, and the model itself cannot see that "this contract will not be enough later". Before reviewing, first read "Open decisions": every entry in those tables changes the contract's shape | ✅ passed (2026-09-21, human): **contract v1 passes**, defects fixed per the review (see S1's ruling) |
 | After S4 | Look at the downsampling: is a 4000 px photo in a 400 px slot free of aliasing and mush? The numbers are on disk (RMSE 1.41 against ImageMagick's Lanczos, a 16x separation from one-sample-per-texel on the zone plate), the preview is `/var/tmp/verify-preview.png`, and S4's exit criteria call this the one human criterion of the step | ⏳ open — see "S4 · the one visual criterion" |
+| After S5 | Look at the text: do CJK line breaks and squeezed punctuation read right? The preview is `/var/tmp/pixlay-s5/text-preview.png` (the fixture `crates/pixlay-cli/tests/fixtures/text.pixlay`: a wrapped caption with `：“`, `。”` and a break inside a sentence, a `{date}` line, and a tiled watermark), the numbers are in "S5 · the one visual criterion", and S5's exit criteria call this the one human criterion of the step | ⏳ open — see "S5 · the one visual criterion" |
 
 **The gate's closing action** is in `AGENTS.md` "Session and persistence discipline": a ruling block + the status row + this table's entry + `docs/CONTRACT.md` + commit,
 and it is not done if one of the five is missing.
@@ -225,7 +226,7 @@ The exit criteria, item by item:
    and the receiving thread builds the `Bitmap`, the same discipline as GTK objects not crossing threads.
 2. `Target.scale` and `Target.band` are separate: `scale` is for the preview and `band` is for A0 banding (peak = one band + the sum of bitmaps).
    Measured: band stitching vs the whole image has RMSE 0.033 (so S0's 941 MB peak still has room to come down; left to S4).
-3. When the document contains text layers, `draw` **errors** (`TextLayersUnsupported`) instead of silently not drawing them. Once S5 is hooked up this error disappears.
+3. When the document contains text layers, `draw` **errors** (`TextLayersUnsupported`) instead of silently not drawing them. Once S5 is hooked up this error disappears. *(Resolved in S5: the variant is gone and the layers are drawn.)*
 4. `TextLayer` went into the v1 contract (its fields are frozen), but rendering is in S5; `TextFallback.date` is already defined.
    The contract lists the v1 non-goals explicitly (see `docs/CONTRACT.md` §6).
 5. S1 has no decoder yet (that is S4's business), so `--content detail|flat` fills slots with **deterministic placeholder content**;
@@ -323,7 +324,8 @@ and found the contract had drifted from the implementation.
   text layers, stdout purity on usage errors, byte-identical output under four locales, stdin being
   ignored, exit codes, and the `probe` "numbers on stdout, verdict on stderr" rule.
 - **Residual, not a defect**: `text` is refused by `draw` until S5, so the §1 example is a valid
-  document but is not renderable as written. The example says so.
+  document but is not renderable as written. The example says so. *(S5 removed the residual: the
+  example renders as written, and `docs/CONTRACT.md` §1 no longer carries the warning.)*
 - **Verdict: the contract still passes after these fixes.** All seven items were ruled *fix now*, not defer — D1 and D3 make
   the contract lie about itself, and D2 is a validation gap that S5 would turn into a visible bug.
 - **The gate's five parts are complete** with this commit, so **S2 may start in a new session**. The
@@ -509,7 +511,7 @@ The exit criteria, item by item:
 3. **`CropFit` kept exactly two fields** (`transform`, `rotation_limited`): a clamped pan is visible by comparing the request with the fit, so no third flag was added and the S1 contract shape is untouched.
 4. **The probe's CLI failure test had to move**, which is a contract-level consequence rather than a test detail: see decision 3.
 
-## S4 · Image pipeline — ⬜ not started
+## S4 · Image pipeline — ✅ done (2026-09-21)
 
 - **Goal**: by the time a bitmap enters rendering it is right in decoding, orientation, color and bit depth.
 - **Work**: `pixlay-imaging` — glycin decoding (including HEIC/AVIF), automatic EXIF rotation, resampling (`sRGB → linear → process → sRGB`, Lanczos3), a 16-bit intermediate buffer, per-slot color grading + a global uniform filter. The structure for background work returning to the main thread through a channel is settled first.
@@ -653,7 +655,7 @@ contract depends on the resampler's edge behaviour.
   plus a zone-plate check of the aliasing energy
 - `--content detail|flat` and `pixlay-cli/src/content.rs` are deleted here, and `probe` sinks down to `pixlay-imaging` (see S1's deviations, item 5)
 
-## S5 · Text layers — ⬜ not started
+## S5 · Text layers — ✅ done (2026-09-21)
 
 - **Goal**: canvas-level text is correct, and both forms go through the same mechanism.
 - **Work**: a text layer is the basic unit, and a tiled watermark is one of its modes; dynamic EXIF fields such as `{date}`; Pango + pangocairo layout.
@@ -664,6 +666,162 @@ contract depends on the resampler's edge behaviour.
   - the text position is stable after a rotation (verifying the "content layers run last" constraint)
 - **Not doing**: no text editing UI.
 - **Human**: the CJK kinsoku and punctuation-squeezing feel, judged by eye (see "Where humans must step in").
+- **Done (2026-09-21)**: `pixlay-render/src/text.rs` (one Pango layout per layer, free and
+  tiled), token resolution in `pixlay-core`, `Sampler::exif` + `SlotBitmap::date` in
+  `pixlay-imaging`, `text` and the probe's refusal in the CLI, and the pinned test font;
+  criteria, decisions and numbers in "S5 result" below. The preview for the human gate is
+  `/var/tmp/pixlay-s5/text-preview.png`.
+
+### S5 result (2026-09-21)
+
+`[all criteria are in the tests in the repository; the numbers below are the release binary's output on this machine unless a test is named]`
+
+The exit criteria, item by item:
+
+| Criterion | Landing point | Measured |
+|---|---|---|
+| free placement and a tiled watermark both produce an image | `pixlay-render/tests/text/measure.rs` (`measure_free_placement_puts_the_box_on_the_anchor`, `measure_a_tiled_watermark_covers_the_grid_from_the_canvas_origin`), and end to end `pixlay-cli/tests/cli.rs::rendered_text_reaches_the_output` | the free layer's ink rectangle equals the rectangle the layout's **own metrics** predict (anchor × box × ink offset, within 2 px) for four anchors; the tiled layer paints a solid em square at each of the anchors the canvas can see — 15 anchors for `step (0.5, 0.25)`, counted by `tiled_grid`, with the far-edge row and column off-canvas exactly as the contract's "Tiled phase" says. The free layer's ink box is compared against the layout's own metrics, so an off-by-one in the anchor fractions cannot pass. The CLI renders the committed fixture (`text.pixlay`, a caption + a `{date}` + a 15-tile watermark) and the same project with `text: []`: the layers change more than a thousand pixels (the test's floor; the assertion would fail if the layers reached only the report), so the criterion is not a report-only claim |
+| `{date}` is filled correctly from EXIF, and the fallback when EXIF is missing has a test | `pixlay-core/tests/text.rs` (resolution), `pixlay-render/tests/text/measure.rs::measure_tokens_render_the_values_the_slot_reports`, `pixlay-cli/tests/cli.rs` (`text_reports_resolved_tokens_from_the_projects_photos`, `text_falls_back_to_the_documents_own_date`) | `pixlay-render text` on the fixture reports `2019:07:14 10:32:00` — the EXIF value of slot 5's `dated.jpg`, not the document's stored `2026-09-21`. A photo with no EXIF block, an empty slot and a layer naming no slot all resolve to the stored string, and with no stored string the token renders as **nothing**, never as `{date}`. Each render case is compared against the same text typed out literally: the two renders are byte-identical, so the assertion is about the *string* and not about ink having appeared |
+| CJK kinsoku and punctuation squeezing are visually correct | `pixlay-render/tests/text/measure.rs` (`measure_kinsoku_keeps_punctuation_off_a_line_start`, `measure_consecutive_punctuation_is_compressed_to_half_width`), plus the human gate below | kinsoku is Pango's: `他他他说。他` at a four-em width breaks `他他他 / 说。他` (the breaker pulls back rather than starting a line with `。`), and over 4 paragraphs × 6 widths no line starts with a closing mark and none ends with an opening one. Squeezing is the renderer's, through the font's `halt`: `。，` = 0.5 + 1.0 em, `。。。` = 0.5 + 0.5 + 1.0, a lone `。` = 1.0, and a mark at a line boundary keeps 1.0 (measured with the pinned font, 20 px) |
+| the text position is stable after a rotation | `pixlay-render/tests/text/measure.rs` (`measure_a_slot_rotation_does_not_move_the_text`, `measure_a_text_layer_rotates_about_its_anchor`) | rotating a **slot** by 35° changes the slot and moves the text by **0 px** (the ink's bounding box is identical); rotating a **layer** by 45/90/180/−30° moves its ink centre to the rotated position within **2 px**, so the rotation is about the anchor and not about the canvas origin |
+| (from the review additions) the font size is normalized | `measure_preview_and_export_agree_with_text`, `docs/CONTRACT.md` §1 "Text layers" | the same document at 2N and N, the 2N one downsampled: RMSE **1.92** (threshold 6), and the ink rectangle at 2N is the rectangle at N **doubled to within 1 px** — the layout is computed in canvas pixels, so only the glyph raster changes with the scale |
+| (from the review additions) "no line starts with a forbidden character" is checkable through `pango_layout_get_line*` | the same kinsoku test | it is: each line's text comes from `LayoutLine::start_index` / `length`, and the two sets (`行頭禁則` / `行末禁則`) are the test's own constants |
+
+**What was built, in one line each.**
+
+- `pixlay-render/src/text.rs`: one Pango layout per layer, drawn by `draw` after the
+  slots. Free mode wraps within the canvas width and is placed by `anchor`; tiled mode
+  puts an unwrapped mark's box's top-left corner on each grid anchor and rotates it about
+  that point. Font options (`hint none`, `metrics off`, `antialias gray`) are set before
+  any layout exists, which is what keeps the layout scale-independent.
+- `pixlay-core/src/text.rs`: `TextLayer::resolve(&values, &fallback)` (the token rule),
+  `TextValues`, `TextLayer::MAX_TILES` and `tiled_grid(step)`.
+- `pixlay-imaging`: `Sampler::exif()` and `SlotBitmap::date`, so `{date}` rides out with
+  the pixels instead of costing a second decode.
+- `pixlay-cli`: `text` (the resolved layers, tokens substituted), `render`'s report gained
+  `text = n`, and `probe` refuses a document with text layers.
+- Fixtures: `text.pixlay` (the S5 fixture) and a `{date}` layer added to `verify.pixlay`,
+  so `AGENTS.md`'s verification render exercises text from now on; the pinned test font
+  under `fixtures/fonts/`.
+
+### S5 · decisions this step made
+
+1. **Punctuation squeezing is not something Pango does, and the font has to be asked.**
+   Measured 2026-09-21: `。，` advances two full ems — exactly like two isolated marks — and
+   no layout option changes that. The rule the criteria ask for is also about a *run*
+   rather than a character (a lone `。` must keep its blank, or every sentence end in the
+   product crowds the word after it), so the renderer marks each mark that another mark
+   follows and asks the font for the OpenType `halt` (half-width) positioning feature.
+   Consequence, accepted: what a compressed mark *looks* like is the font's design, and a
+   font without `halt` simply does not compress. The alternative — moving glyphs ourselves
+   — is a layout engine, and the workspace's `unsafe_code = deny` rules out the glyph-level
+   FFI it would need.
+2. **Pango's line breaking is kept, and `。` at a line *end* is left alone.** Pango
+   implements the Unicode line-breaking rules, so kinsoku's 行頭禁則/行末禁則 come for free
+   and the tests pin them instead of reimplementing them. What is *not* done is JLREQ's
+   other half of squeezing — trimming the trailing blank of a mark that ends a line — which
+   needs a per-line layout pass; v1 draws a mark's own advance there. Written into §6 as a
+   non-goal rather than left to be discovered.
+3. **The free layer's box is the canvas width.** A layer has no size of its own in the
+   contract (§6: no text-box field), so wrapping needs *a* width, and the canvas is the one
+   width the document already has: long text wraps at the canvas edge instead of running
+   off it, and the wrapped box is what `anchor` places. A tiled tile is *not* wrapped — a
+   watermark is one mark per tile — which is the one place the two modes differ.
+4. **The tile grid keeps its far-edge anchors, and got a cap.** `floor(1/step) + 1` per
+   axis: the anchor at the far edge draws nothing unrotated, but a rotated watermark swings
+   ink back over the sheet from there, so dropping it would leave a bare stripe. The cap
+   (`MAX_TILES = 10,000`, checked when the document loads) exists because a step has no
+   upper bound and therefore no lower one either: a 1/100 step is 10,201 tiles, and the
+   renderer asks the same `tiled_grid` so an in-memory document cannot hang it either.
+5. **`{index}` is the slot index, 0-based.** The contract's own words are "the slot index",
+   and every other slot number this product prints (`template.<i>`, `probe`'s rows) is
+   0-based; a second numbering would be a bug waiting to be read the wrong way.
+6. **A token with no value renders as nothing.** The alternative — leaving `{date}` on the
+   finished image because a phone stripped the EXIF block — puts a debugging token in the
+   user's product, and the failure is silent until someone exports.
+7. **The font is the system's, the tests' font is committed.** Production asks fontconfig
+   for `sans-serif` and never names a font (a collage has to open on another machine);
+   `tests/fixtures/fonts/pixlay-test-sans.otf` — a 93 KB subset of Noto Sans CJK SC with
+   the `halt` feature kept — is what the *tests* measure with, pinned through
+   `FONTCONFIG_FILE`. The pin is a process property, so the text measurements run in a
+   child process (see 8) rather than through a `set_var` this workspace's lints refuse.
+8. **The text measurements are `#[ignore]`d and run by one harness test.** A plain
+   `cargo test` runs `the_text_measurements_run_with_the_committed_test_font`, which starts
+   the same test binary again with the pinned fontconfig and asserts the child passed *and*
+   executed at least the expected number of measurements: a filter that matches nothing (a
+   rename, a typo) fails instead of measuring nothing. `fonts.rs` carries the reasoning.
+9. **The probe refuses a document with text layers.** Its interior samples assert "this
+   slot is its palette colour" and its background samples assert white; a watermark over a
+   slot is indistinguishable from a wrong photo, and a probe that answered anyway would be
+   lying about the render. Exit 2, empty stdout, and the reason on stderr — the same shape
+   as a decode failure, because there is no number to report.
+10. **`render` reports `text = n`, and a new `text` subcommand reports the resolved
+    strings.** "{date} is filled from EXIF" has no machine-visible surface otherwise: it
+    would have to be checked by rendering and reading pixels back. `text` decodes only the
+    slots a layer names (once each) and writes nothing, so it stays a query and not a
+    second renderer.
+
+### S5 · measured (2026-09-21, `--release`, this machine)
+
+| Item | Value |
+|---|---|
+| the `AGENTS.md` verification render (`render --project crates/pixlay-cli/tests/fixtures/verify.pixlay --dpi 300 --stats`, eight photos + one `{date}` layer) | 14043x10532, **ms 6164/6359** (two runs) + **encode_ms 2469/2475**, **`peak_rss_mb` 1641**, **9,114,833 bytes**; the same project with `text: []`: ms 6360/5660, peak 1631, 9,056,692 bytes — the layer's cost is **below the run-to-run spread of the decode+resample stage**, so nothing smaller than that is claimed at 139.5 MP |
+| text cost at 16.7 MP (400x300 mm at 300 dpi, empty cells) | white sheet **24-42 ms** (3 runs); + **2,601 tiles** 295-436 ms → **≈ 0.13 ms per tile** (the 10,000-tile cap is ~1.3 s of drawing); + 20 wrapped CJK captions 31-57 ms, i.e. below the spread |
+| the text fixture as a 2400 px preview (`text.pixlay`, dpi 150, **pinned font**) | ms 459 + encode 45, peak 77 MB, 3,320,360 bytes; with `text: []` ms 355, 3,276,176 bytes — the three layers cost about **100 ms** at 2400 px. The machine's own `sans-serif` gives 443 ms / 3,380,931 bytes: the difference is glyph rasterization, and the line breaks are the same |
+| squeezing (pinned font, 20 px) | `。` 20.0; `。，` 10.0 + 20.0; `。。` 10.0 + 20.0; `。”` 10.0 + 20.0; `。。。` 10.0 + 10.0 + 20.0; `（（` 10.0 + 20.0; `。\n。` 20.0 + 20.0 |
+| kinsoku | `他他他说。他` at 4 em: `他他他 / 说。他`; 4 paragraphs × 6 widths (3-9 em): no forbidden line start, no forbidden line end, every case wrapped |
+| layout vs scale | the ink rectangle at 2N is the one at N doubled to within 1 px; 2N-vs-N RMSE 1.92 (no text: 1.53) |
+| the pinned font | `pixlay-test-sans.otf` 93,100 bytes, 691 glyphs, 204 codepoints, GPOS `halt` present; fontconfig with only this font resolves `sans-serif` to it |
+| the fixtures | `text.pixlay` (3 layers: a 45-character wrapped caption, a `{date}` line, a 15-tile watermark) and `verify.pixlay` + one `{date}` layer; regenerating the font is `python3 crates/pixlay-cli/tests/fixtures/fonts/generate.py` |
+| visual inspection | `/var/tmp/pixlay-s5/text-preview.png`: the caption wraps at the canvas width with no line starting on a mark, `：“` and `。”` are visibly tighter than a full em, the `{date}` line carries the EXIF date, and the tiled watermark sits on a 5x3 grid with its far-edge tiles off the sheet |
+
+### S5 · the one visual criterion
+
+**The human looks at two things, and only at these two:**
+
+1. **Kinsoku** — in `/var/tmp/pixlay-s5/text-preview.png`, the caption is 45 characters and
+   wraps inside a sentence: line 1 has to end *short* (the breaker pulls the break back so
+   that the `，` after `中文文字` does not start line 2). If a line ever starts with `，` or
+   `。`, that is the defect.
+2. **Punctuation squeezing** — `他说：“今天天气很好。”` has `：“` and `。”` in it, and both
+   runs are drawn at 3/4 of what they would cost uncompressed. Asked simply: do those two
+   pairs read as tight typography, or as a collision?
+
+**Status: rendered, numbers on disk (`docs/CONTRACT.md` §8 "S5"), and the human verdict is
+the one that counts** (the gate table's row). It does not gate S6: nothing in the export
+step depends on how a squeezed mark looks.
+
+Regenerate the preview with:
+
+    cargo run --release -p pixlay-cli --bin pixlay-render -- render \
+      --project crates/pixlay-cli/tests/fixtures/text.pixlay --dpi 150 --preview-px 2400 \
+      --stats --out /var/tmp/pixlay-s5/text-preview.png
+
+This renders with the machine's own `sans-serif`, which is what production does; measured
+2026-09-21, the committed subset the *tests* pin breaks the same caption at the same
+character (the two renders differ by 2.9% of pixels, all of it glyph rasterization), so the
+criterion below is about the same layout either way. The preview above is the system-font
+one — the product's look.
+
+### S5 · deviations from and additions to the review additions
+
+1. **"Punctuation squeezing" turned out not to exist in Pango**, so the criterion would
+   have been unimplementable as "assert Pango squeezes". It is implemented through the
+   font's `halt` feature instead (decision 1), and the test asserts the *advances* the
+   criterion describes ("the spacing between adjacent punctuation is smaller than the
+   default spacing") rather than a Pango behaviour.
+2. **The kinsoku test is Pango's, the squeezing test is ours** — the review addition
+   treated them as one checkable pair; they are two mechanisms, and the tests say which is
+   which, because a future Pango that starts squeezing punctuation by itself must not
+   silently double-compress (the test would fail, which is the point).
+3. **`text` was added to the CLI.** The review additions did not ask for a subcommand, but
+   the criteria did ("`{date}` is filled correctly from EXIF") and a pixel-level assertion
+   cannot name the *string* a token produced. `render`'s report also gained `text = n`.
+4. **The probe now refuses text documents**, which is new behaviour for «probe» and is in
+   the contract's §5. It follows from the probe's design (it probes content it painted
+   itself), not from text being unrenderable.
+5. **The `fonts` row in "Open decisions → C" is now executed**: production bundles no font,
+   the tests pin a committed subset, and no test needs a display or a system font.
 
 ### S5 · review additions (2026-09-20)
 
@@ -868,7 +1026,7 @@ Not done: `cargo vendor` currently has empty dependencies, so this criterion can
 | source ICC | v1 does not read the source ICC and interprets everything as sRGB, and the documentation states that this is a known limitation (doing it properly needs lcms2 + a rendering-intent definition) |
 | output ICC | embed the sRGB IEC61966-2.1 profile bytes; do not pull in lcms2 |
 | decoding backend | see "The two paths for the decoding backend" below; measure first, then decide, **and this decision determines S8's `depends`** |
-| fonts | production does not bundle fonts (Noto Sans CJK is too large); the golden text tests use a small test font committed in the repository, and checks that render with system fonts are marked `#[ignore]` |
+| fonts | production does not bundle fonts (Noto Sans CJK is too large); the golden text tests use a small test font committed in the repository, and checks that render with system fonts are marked `#[ignore]`. **Executed in S5 (2026-09-21)**: production asks fontconfig for `sans-serif` and names no font; `crates/pixlay-cli/tests/fixtures/fonts/pixlay-test-sans.otf` (93 KB, a subset of Noto Sans CJK SC with `halt` kept, regenerated by `generate.py`) is what the text tests measure with, pinned by `FONTCONFIG_FILE` in a child process. **No test needs a system font at all** — so none is `#[ignore]`d for that reason, and S8's `check()` can run the text measurements in a font-free chroot |
 | dependency registry | every new dependency is registered in AGENTS (name / version / why / size); S1 registers the first batch in one go |
 | AUR package name and version | package name `pixlay`; the release tag `vX.Y.Z` is pushed to GitHub, and the PKGBUILD's `source=` uses the tag tarball |
 

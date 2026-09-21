@@ -13,12 +13,15 @@
 //! * Output is always composited over opaque white (project hard constraint), so
 //!   an export never carries alpha.
 //!
-//! Text layers are part of the document contract but are rendered in S5;
-//! `draw` refuses a document that has any instead of exporting it without them.
+//! Canvas-level text layers go through the same call: the layout is Pango's, the
+//! drawing is cairo's, and the position is canvas-space so a caption never moves
+//! when the photo under it is reframed (S5).
 
 mod bitmap;
 mod draw;
 mod error;
+
+pub mod text;
 
 pub use bitmap::{Bitmap, Images};
 pub use draw::{Band, Rgb8Image, Target, draw, output_px, render_rgb8, render_surface, rgb8};

@@ -30,7 +30,7 @@ Per the splitting principles in `docs/STEPS.md`, the contract must be **frozen a
     { "source": null, "crop": { "zoom": 1.0, "offset": [0,0], "rotationDeg": 0 } }   // an empty slot renders white
   ],
   "filter": "warm",                 // the canvas-wide one-click filter (S4); "none" is the default
-  "text": [                         // canvas-level text layers (rendered in S5)
+  "text": [                         // canvas-level text layers (S5: drawn by the same `draw`)
     { "content": "{date} #{index}", "mode": {"kind":"free","position":[0.5,0.9],"anchor":"bottomCenter"},
       "sizeRel": 0.02, "rotationDeg": 6, "color": {"r":0,"g":0,"b":0,"a":255}, "sourceSlot": 0 }
   ],
@@ -38,10 +38,11 @@ Per the splitting principles in `docs/STEPS.md`, the contract must be **frozen a
 }
 ```
 
-> This example is a valid document: the two slots give a cut template whose areas sum to
-> exactly 1.0, and the canvas is exactly 4:3 to match `template.aspect`. It is not
-> renderable as written, because `draw` refuses text layers until S5 (see §4); drop the
-> `text` array to render it today.
+> This example is a valid document, and since S5 nothing in it is refused by the renderer:
+> the two slots give a cut template whose areas sum to exactly 1.0, the canvas is exactly
+> 4:3 to match `template.aspect`, and the text layer draws — with `{date}` resolving to what
+> the slot's photo says, or to `textFallback` when it says nothing (see "Text layers"
+> below). Its photos are the project's own, as any project's are.
 
 **Version policy** (S1 review ruling, 2026-09-20: **breaking changes allowed, but no migrations written**).
 
@@ -85,6 +86,48 @@ Conventions:
 - **Text layer order**: `text` is drawn in array order, later ones cover earlier ones, and all of them cover the cells.
 - **Tiled phase**: the tile grid starts from the canvas origin `(0,0)`, and each tile rotates around its own anchor; there is no per-tile variation.
 
+### Text layers (the shape S5 filled in)
+
+`TextLayer` itself was frozen at S1; S5 fixed what its fields *mean*, and none of it
+changed the document shape.
+
+- **What a token resolves to.** `{date}` is EXIF `DateTimeOriginal` **verbatim, no
+  timezone conversion**, read from the slot `sourceSlot` names; when that photo has no
+  usable tag (or the layer names no slot at all) the document's `textFallback.date` is
+  used, which is what makes an export reproducible. `{filename}` is that slot's source
+  file name. `{index}` is the slot index `sourceSlot` names, **0-based** — `0` is the
+  first slot in template order, the same number `template.<i>` rows and `probe` print.
+  **A token with no value renders as nothing**: `{date}` never appears literally on a
+  finished collage because a phone stripped the EXIF block. A layer that names no slot
+  resolves `{date}` against the fallback and both other tokens to nothing.
+- **Where the box goes.** A free layer's text is laid out within the **canvas width**
+  (long text wraps there rather than running off the canvas), and the box that results is
+  placed by `anchor`: `position` *is* that point of the box, in normalized canvas
+  coordinates. `sizeRel` is the font size as a fraction of the **canvas height**, so a
+  CJK glyph is exactly `sizeRel * canvas height` wide. The box is the layout's *logical*
+  extents, so a line's leading is part of it and the text does not shift when a line is
+  added. A tiled layer's tiles are **not** wrapped — a watermark is one mark per tile —
+  and each tile's box top-left corner sits on its grid anchor.
+- **The tile grid** is anchored at the canvas origin and has one anchor per `step` up to
+  and including the far edge: `floor(1/step) + 1` per axis. The far-edge anchors are kept
+  on purpose (their tiles are off-canvas unrotated, but a rotated watermark swings ink
+  back over the sheet, and dropping them would leave a bare stripe). How many tiles that
+  is, and the cap on it, are in the limit table below; `pixlay_core::tiled_grid` is the
+  one function both the loader and the renderer ask.
+- **Line breaking is Pango's**, which is the product's answer for CJK: it follows the
+  Unicode line-breaking rules, so no line starts with `。`, `，`, `”` or `）` and none ends
+  with `（` (kinsoku). Measured 2026-09-21: `他他他说。他` at a four-em width breaks as
+  `他他他 / 说。他` — the breaker pulls the break back one character rather than starting a
+  line with the mark, and `pixlay-render`'s tests pin both that case and the rule over a
+  sweep of widths and paragraphs.
+- **Punctuation squeezing is ours, through the font's `halt` feature.** Pango does *not*
+  compress punctuation by itself (measured: `。，` costs two full ems, exactly like two
+  isolated marks), and the rule is about a *run*, not about a character: in a run of
+  consecutive CJK marks every mark but the last is drawn at half width (`。”` costs 1.5 em,
+  a lone `。` still costs 1). A line break ends a run. The renderer asks for `halt` — the
+  OpenType "alternate half widths" *positioning* feature — so how a compressed mark looks
+  stays the font's decision, and a font without the feature simply does not compress.
+
 ## 2. Limit constants (all have explicit errors, no panics)
 
 | Item | Value | Source |
@@ -103,6 +146,7 @@ Conventions:
 | text font size | 0 < `sizeRel` ≤ 1.0 (fraction of canvas height) | — |
 | text position (free mode) | both components inside `[0,1]` | a free layer is placed in normalized canvas coordinates, so anything outside is off the canvas by definition |
 | tiled step | both components > 0, finite | step 0 or a negative value makes the tiling loop forever; there is no upper bound |
+| tiles per text layer | ≤ 10,000 (`TextLayer::MAX_TILES`) | a step is unbounded from above and therefore unbounded *downward*: `1e-9` is a billion by a billion tiles. A 1/100 step is already a 101x101 grid = 10,201 tiles and is refused when the document loads, so the cap is where a person's watermark stops being a watermark. `pixlay_core::tiled_grid` answers the count; the renderer asks the same function and never hangs on an in-memory document either |
 | `--preview-px` | 1..=20000 (long edge, in pixels) | a preview larger than this cannot be reviewed by eye anyway |
 | grade `factor` | 0.2..=5.0 | ±2 stops of exposure around 1.0; beyond that the control only saturates every channel |
 | grade `saturation` | 0.0..=4.0 | 0 is greyscale, 1 leaves the pixel alone |
@@ -163,8 +207,23 @@ Images                            // slot → Bitmap; absent = that cell is left
   and at 72dpi/scale=0.3 three bands totaled 759 rows while the whole image was 758 rows — `round` is not additive, and this could only be fixed this way.
   Measured, the whole image vs the three-band stitching has RMSE 0.033 (scale 1.0; see below), and scale 0.1/0.3/0.5 was measured too.
   **Banding is a genuinely usable memory-saving measure**: A0 landscape 10 slots @300dpi is 1470 MB for the whole image → 597 MB for 16 bands (see §8).
-- Text layers **are refused by `draw`** in v1 (`TextLayersUnsupported`) — better to error than to export something with text missing.
-  S5 wires it up and the contract does not change.
+- **Text layers are drawn last** (S5): after the cells, in array order, positioned in canvas
+  space, so reframing a photo cannot move a caption and a rotated slot cannot rotate one.
+  The layout is Pango's and the drawing is cairo's; the font size is `sizeRel * canvas
+  height` in *canvas* pixels, so a preview lays the text out identically to the export —
+  the glyph raster is smaller, nothing else moves.
+
+  The context's font options are set before any layout exists: `hint_style = none`,
+  `hint_metrics = off`, `antialias = gray`. Hinted metrics snap glyph positions to device
+  pixels, which lays out the same document differently at two scales, and subpixel
+  filtering would put color fringes on an export. The family is the system's
+  `sans-serif` — v1 has no font field (§6), so nothing here names a font and nothing fails
+  because a particular font is missing; the tests pin the environment instead.
+
+  What a slot's photo contributes (`{date}`, `{filename}`) arrives with the bitmaps:
+  `Bitmap` → `Images` also carries [`TextValues`] per slot, filled by whoever decoded the
+  file. A document rendered without a decoder therefore still draws its text, with
+  `{date}` taking the document's own fallback.
 
 ### 4.1 The image pipeline (S4): what arrives at `draw`
 
@@ -244,6 +303,7 @@ pixlay-render render    --project <file.pixlay> --dpi <n> --out <file>
 pixlay-render render    --template <name> --dpi <n> --out <file>   # no project, no photos
 pixlay-render probe     --project <file.pixlay>
 pixlay-render image     --photo <file>
+pixlay-render text      --project <file.pixlay>
 pixlay-render templates [--aspect <ratio>] [--json]
 pixlay-render init      --template <name> --out <file.pixlay>
 ```
@@ -260,8 +320,10 @@ pixlay-render init      --template <name> --out <file.pixlay>
 | probe lower bound | when `occupied = 0` (all empty slots) the verdict is **failed**: every question the probe asks is about some slot, and with no slot there is no conclusion. Previously it "passed vacuously" (status=ok, exit 0) |
 | output format | determined by the `--out` extension: `.png` / `.jpg` / `.jpeg`, anything else is a usage error |
 | `--preview-px n` | n pixels on the long edge; the same `draw`, only `scale` changes. The **bitmaps are sized for the preview too** (S4): decoding and resampling a full A0 and letting Cairo shrink it would cost the export's time and memory for a thumbnail, and would do the shrinking with Cairo's filter instead of the pipeline's |
+| `render`'s report | carries `text` (how many text layers the document has) next to `cells` and `occupied`, so "the layers reached the renderer" is visible without reading pixels |
 | `--stats` | appends `{ms, encode_ms, peak_rss_mb, icc}`; `render` emits all four, `probe` emits no `encode_ms` (it does not encode). The measurement rules are below |
 | `probe` | samples and outputs numbers (in-slot photo color, out-of-slot white background, shared-edge blended pixels, three-color convex combination residual), exit code 2 when the verdict is not passed |
+| `text` | one row per layer: the **resolved** `content` (tokens substituted exactly as `render` substitutes them), `mode`, `size_rel`, `rotation_deg`, the `source_slot` when it names one, and for a free layer `position` / `anchor` or for a tiled one `step` / `tiles` (the grid `tiled_grid` answers). It decodes only the slots a layer names, once each, and writes nothing. Without it, "{date} is filled from EXIF" could only be checked by rendering and reading pixels back |
 | `image` | one file's decode facts: `mime`, `width`, `height`, `depth` (8 or 16), `aspect`, `exif_bytes`, `date` (EXIF `DateTimeOriginal`, empty when absent). It is how "HEIC decodes" and "orientation 6 is applied" are visible without rendering a project. `--out`/`--dpi`/etc. are usage errors: it decodes at the file's own size and writes nothing |
 
 **S2's two subcommands report the template library and create a project.** They add a data source, not a new failure mode:
@@ -291,6 +353,18 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
 ## 6. v1 non-goals (must be listed explicitly, otherwise "it won't be enough later" is invisible to everyone)
 
 - per-slot text layers (text is **canvas-level only**; a tiled watermark is one of its modes, not a second mechanism)
+- **a font field, or any bundled font**: a text layer has no family, weight, style or
+  alignment of its own, and the layer's box is filled from the left. The renderer asks
+  fontconfig for the generic `sans-serif`, which is what makes a collage portable between
+  machines and what keeps a translated language pack from needing one font per script.
+  *Counted cost: a user who wants a specific typeface cannot have one in v1. The way out
+  is a `font` field with a `serde` default, which is an addition and not a version bump.*
+- **per-line punctuation trimming**: a `。` at the end of a line keeps its trailing blank
+  (JLREQ's 行末の約物, the other half of squeezing), and no mark hangs into a margin.
+  v1 compresses a *run* of marks and nothing else — the rule above is what a line's start
+  and end are aligned by.
+- rich text: no bold/italic runs, no alignment paragraph, no tables or columns, and no
+  text box of the user's own size (the canvas width is the box)
 - nested groups / layer trees / blend modes
 - framing rotation beyond ±45°; **rotation only crops edges, it never grows the canvas**
 - CMYK JPEG and per-slot colour spaces. **Not** the source ICC: v1 honours it — the
@@ -313,7 +387,7 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
 | template generator | **S2, landed** | `pixlay_core::templates` (`generator` recipes + the committed `frozen` data) and the `templates` / `init` subcommands; see §3 and §5 |
 | the image pipeline | **S4, landed** | `pixlay-imaging`: `Source::decode`, `resample`, `LinearRgb16::apply`, `slot_bitmap`/`slot_bitmaps`, `probe`; the buffer ladder and the colour decisions are §4.1 |
 | command history / hit testing / project writing | S6.5 | not in the S1 contract; `CollageDoc` is their state carrier |
-| text rendering | S5 | `TextLayer` is already in the contract; `draw` refuses it for now |
+| text rendering | **S5, landed** | `pixlay_render::text`: one Pango layout per layer, drawn by `draw`; token resolution is `TextLayer::resolve` in `pixlay-core`, the tile grid is `pixlay_core::tiled_grid`; see §1 "Text layers" |
 | encoding and metadata | S6 | for now the `image` crate stands in; S6 replaces it with a single pass writing pixels + chroma sampling + ICC + DPI |
 
 ## 8. Measured (2026-09-20, this machine)
@@ -341,5 +415,17 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
 | 16-bit intermediate | the sRGB round trip is exact for all 256 code values; an 8-bit *linear* intermediate loses more than 16 of them |
 | grading identity | `factor = 1, s = 1, Δ = 0` is byte-identical; `factor = 1.25` moves the mean by more than 5 levels |
 | `probe` on the A0 project (flat content) | 532 ms, 2231 MB peak, 8/8 slots on their palette colour, 12/12 seams clean, blend 0.999 px per seam px, worst residual 0.12 (threshold 3.0), widest run 1 px (threshold 2), `foreign = 0` |
+
+### S5 (2026-09-21, `--release`, this machine)
+
+| Item | Value |
+|---|---|
+| the `AGENTS.md` verification render (`render --project tests/fixtures/verify.pixlay --dpi 300 --stats`, eight photos **and one `{date}` layer** since S5) | 14043x10532, **ms 6164/6359** (two runs) + **encode_ms 2469/2475**, **`peak_rss_mb` 1641**, 9,114,833 bytes. The same project with the layer removed: ms 6360/5660, peak 1631, 9,056,692 bytes — **the one line's cost is below the run-to-run spread of the decode+resample stage**, so no per-layer number is claimed at 139.5 MP |
+| per-layer cost at 16.7 MP (400x300 mm at 300 dpi, empty cells) | white sheet alone **24-42 ms** (3 runs); + 2,601 tiles **295-436 ms** → a tile is about **0.13 ms**, so the 10,000-tile cap is ~1.3 s of drawing at that size; + 20 wrapped CJK captions 31-57 ms (below the spread) |
+| punctuation squeezing | one em per full-width mark; `。，` = 0.5 + 1.0 em, `。。。` = 0.5 + 0.5 + 1.0, a lone `。` = 1.0, and a mark at a line boundary keeps 1.0 |
+| kinsoku | `他他他说。他` at a four-em width breaks as `他他他 / 说。他`; over 4 paragraphs x 6 widths, no line starts with `、。，．：；？！）］｝〕〉》」』】〙〛’”` and none ends with `（［｛〔〈《「『【〘〚‘“` |
+| preview vs export with text (2N vs N, downsampled) | RMSE **1.92** (threshold 6; AGENTS.md's photo-only A0 measurement is 2.62); the text's ink rectangle at 2N is the one at N doubled to within 1 px |
+| the committed test font | `pixlay-cli/tests/fixtures/fonts/pixlay-test-sans.otf`, **93,100 bytes**, 691 glyphs covering 204 codepoints, GPOS `halt` present; regenerated by `fonts/generate.py` from Arch's `noto-fonts-cjk` (SIL OFL, `OFL.txt` beside it) |
+| the text fixture (`render --project tests/fixtures/text.pixlay --dpi 150 --preview-px 2400`) | 2400x1801, **ms 459** + encode 45, peak 77 MB, 3,320,360 bytes with its three layers; the same project with `text: []` is ms 355, 3,276,176 bytes — the three layers (a wrapped 45-character CJK caption, a date line and a 15-tile watermark) cost about **100 ms** at 2400 px |
 
 Every threshold constant in the tests annotates this source, so a change in the numbers can be discovered.

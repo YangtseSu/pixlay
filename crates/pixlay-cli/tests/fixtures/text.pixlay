@@ -1,8 +1,8 @@
 {
   "docVersion": 1,
   "canvas": {
-    "widthMm": 1189.0,
-    "heightMm": 891.75
+    "widthMm": 400.0,
+    "heightMm": 300.0
   },
   "template": {
     "name": "mosaic-8-s14",
@@ -319,22 +319,61 @@
   ],
   "text": [
     {
-      "content": "{date}",
+      "content": "他说：“今天天气很好。”然后他走了。这是一段用来测试断行的中文文字，标点不应该出现在行首。",
       "mode": {
         "kind": "free",
         "position": [
           0.5,
-          0.985
+          0.04
         ],
-        "anchor": "bottomCenter"
+        "anchor": "topCenter"
       },
-      "sizeRel": 0.022,
+      "sizeRel": 0.0404,
       "rotationDeg": 0.0,
       "color": {
         "r": 0,
         "g": 0,
         "b": 0,
-        "a": 255
+        "a": 230
+      },
+      "sourceSlot": null
+    },
+    {
+      "content": "{date}",
+      "mode": {
+        "kind": "free",
+        "position": [
+          0.97,
+          0.95
+        ],
+        "anchor": "bottomRight"
+      },
+      "sizeRel": 0.03,
+      "rotationDeg": 0.0,
+      "color": {
+        "r": 255,
+        "g": 255,
+        "b": 255,
+        "a": 235
+      },
+      "sourceSlot": 5
+    },
+    {
+      "content": "PIXLAY {date}",
+      "mode": {
+        "kind": "tiled",
+        "step": [
+          0.5,
+          0.25
+        ]
+      },
+      "sizeRel": 0.022,
+      "rotationDeg": -20.0,
+      "color": {
+        "r": 255,
+        "g": 255,
+        "b": 255,
+        "a": 80
       },
       "sourceSlot": 5
     }

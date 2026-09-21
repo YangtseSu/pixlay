@@ -10,12 +10,9 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 
 use cairo::ImageSurface;
-use pixlay_core::{
-    Anchor, CanvasSpec, CollageDoc, CropTransform, Point, Polygon, Rgba8, Slot, Template,
-    TextLayer, TextMode,
-};
+use pixlay_core::{CanvasSpec, CollageDoc, CropTransform, Polygon, Rgba8, Slot, Template};
 use pixlay_render::{
-    Band, Bitmap, Images, RenderError, Rgb8Image, Target, draw, render_rgb8, render_surface, rgb8,
+    Band, Bitmap, Images, Rgb8Image, Target, draw, render_rgb8, render_surface, rgb8,
 };
 
 const DPI: u32 = 96;
@@ -437,27 +434,6 @@ fn band_rows_split_the_output_exactly() {
     }
     assert!(Band { index: 3, count: 3 }.out_rows(100).is_err());
     assert!(Band { index: 0, count: 0 }.out_rows(100).is_err());
-}
-#[test]
-fn text_layers_are_refused_until_s5() {
-    let mut doc = doc();
-    doc.text.push(TextLayer {
-        content: "{date}".to_string(),
-        mode: TextMode::Free {
-            position: Point::new(0.5, 0.5),
-            anchor: Anchor::Center,
-        },
-        size_rel: 0.05,
-        rotation_deg: 0.0,
-        color: Rgba8::BLACK,
-        source_slot: None,
-    });
-    doc.validate().expect("the contract accepts text layers");
-    let error = render_rgb8(&doc, &flat_images(), DPI, 1.0, None).expect_err("must refuse");
-    assert!(matches!(
-        error,
-        RenderError::TextLayersUnsupported { count: 1 }
-    ));
 }
 
 #[test]

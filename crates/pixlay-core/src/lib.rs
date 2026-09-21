@@ -48,7 +48,8 @@ pub use grade::{
 };
 pub use template::{AREA_TOLERANCE, SharedEdge, Slot, Template};
 pub use text::{
-    Anchor, Rgba8, TextFallback, TextLayer, TextMode, TextToken, TextTokenUse, scan_tokens,
+    Anchor, Rgba8, TextFallback, TextLayer, TextMode, TextToken, TextTokenUse, TextValues,
+    scan_tokens, tiled_grid,
 };
 
 /// Version of the document format this build reads and writes.

@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use cairo::{Context, Format, ImageSurface, Operator};
 
 use crate::error::RenderError;
-use pixlay_core::Rgba8;
+use pixlay_core::{Rgba8, TextValues};
 
 /// An owned, immutable pixel buffer in Cairo's native `ARgb32` layout:
 /// premultiplied, one `u32` per pixel, native endianness.
@@ -163,9 +163,14 @@ fn surface_from_argb32(
 
 /// The bitmaps of one render, keyed by cell index. A slot with no entry stays
 /// white — that is the empty cell, not an error.
+///
+/// The same map carries what each slot's *photo* tells a text layer
+/// ([`TextValues`]): the decoder is the only thing that has seen the file, and the
+/// renderer must not go and decode again to substitute `{date}`.
 #[derive(Clone, Debug, Default)]
 pub struct Images {
     bitmaps: BTreeMap<usize, Bitmap>,
+    values: BTreeMap<usize, TextValues>,
 }
 
 impl Images {
@@ -179,6 +184,20 @@ impl Images {
 
     pub fn get(&self, slot: usize) -> Option<&Bitmap> {
         self.bitmaps.get(&slot)
+    }
+
+    /// Records the values a slot's source photo gives the text layers.
+    pub fn set_text_values(&mut self, slot: usize, values: TextValues) {
+        self.values.insert(slot, values);
+    }
+
+    /// What that slot's photo gives the text layers, if anything was recorded.
+    ///
+    /// A slot with no photo (an empty cell) has none, and a document rendered
+    /// without a decoder (the photo-free smoke path) has none either: both make a
+    /// layer's `{date}` fall back to the document's own string.
+    pub fn text_values(&self, slot: usize) -> Option<&TextValues> {
+        self.values.get(&slot)
     }
 
     pub fn len(&self) -> usize {

@@ -36,8 +36,9 @@ pub enum RenderError {
     #[error("cannot read pixels from a {format} surface")]
     SurfaceFormat { format: String },
 
-    /// Text layers are part of the document contract, but rendering them is S5.
-    /// Failing loudly beats silently exporting a document without its text.
-    #[error("document has {count} text layers; text rendering arrives with S5 (docs/STEPS.md)")]
-    TextLayersUnsupported { count: usize },
+    /// A tiled layer so small that drawing it would never finish. `validate`
+    /// refuses such a document, so reaching this means an in-memory document was
+    /// mutated past its limits — the renderer does not hang on one either.
+    #[error("tiled text step ({x}, {y}) asks for more than {max} tiles")]
+    TooManyTiles { x: f64, y: f64, max: usize },
 }

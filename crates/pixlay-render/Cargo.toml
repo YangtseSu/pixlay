@@ -15,6 +15,7 @@ workspace = true
 [dependencies]
 pixlay-core = { path = "../pixlay-core" }
 cairo-rs = "0.22.9"
+pangocairo = "0.22.9"
 thiserror = "2.0"
 
 [dev-dependencies]
