@@ -16,15 +16,15 @@ The first sentence for a new session:
 
 Legend: ✅ done · 🚧 in progress · ⏸ blocked (waiting on a human decision or external input) · ⬜ not started
 
-**Current progress: S2 — ✅ done (2026-09-21, no human gate; the session ends here because the frozen geometry is irreversible)**
-**Next action: start S3 in a new session.**
+**Current progress: S3 — ✅ done (2026-09-21, no human gate; the session ends at the S3┊S4 boundary, which splitting principle 5 puts before S4's irreversible decoding-backend decision)**
+**Next action: start S4 in a new session (its first item is the decoding-backend measurement, which decides S8's `depends`).**
 
 | Step | Status | Date | What it delivers |
 |---|---|---|---|
 | S0 · Cairo limit spike | ✅ done | 2026-09-20 | Cairo renders A0@300dpi inside the budget: 185/551 ms compositing, 941 MB peak `VmHWM`, both formats written. Gate passed: Cairo stays |
 | S1 · Minimal contract + feedback loop | ✅ done | 2026-09-20 | `CollageDoc` v1 frozen, the single `draw`, `pixlay-render render` produces images, `probe` answers in numbers. Gate passed 2026-09-21 (review 1), defects from review 2 fixed the same day |
 | S2 · Template system (geometry only) | ✅ done | 2026-09-21 | 12 templates covering 2–10 slots, grouped by aspect ratio, generated on a dyadic lattice and frozen under a `templateVersion`; `templates` and `init` added to the CLI |
-| S3 · Framing and clamp | ⬜ not started | — | Absolute-zoom framing with rotation and a clamp that always covers the slot |
+| S3 · Framing and clamp | ✅ done | 2026-09-21 | `CropTransform::fit`: absolute-zoom framing whose request is fitted to the slot by raising the zoom, clamping the pan and, past `CLAMP_ZOOM_LIMIT`, limiting the rotation; applied by `draw`, exact on all 64 shipped slots |
 | S4 · Image pipeline | ⬜ not started | — | `pixlay-imaging`: decoding, EXIF rotation, 16-bit linear resampling, per-slot grading and the global filter |
 | S5 · Text layers | ⬜ not started | — | Canvas-level text, free placement and tiled watermark through one mechanism, `{date}` from EXIF |
 | S6 · Export | ⬜ not started | — | Physical size + DPI and long-edge-pixels modes, pixels and metadata written in one pass |
@@ -444,7 +444,7 @@ The exit criteria, item by item:
 5. **`count` is part of the `templates` report** (not only the `template.N.*` rows): a caller filtering by aspect needs to know "there are none"
    without counting rows, and it keeps `--json` self-describing.
 
-## S3 · Framing and clamp — ⬜ not started
+## S3 · Framing and clamp — ✅ done (2026-09-21)
 
 - **Goal**: the in-slot framing math is entirely correct, including rotation by any angle.
 - **Work**: absolute zoom (displayed width / canvas width), offset, rotation; "parent container clips + child primitive transforms"; recompute the clamp after a rotation or a slot change. Fake image sizes are fine; no image pipeline is needed.
@@ -454,6 +454,7 @@ The exit criteria, item by item:
   - crop edges only, never grow the canvas: the canvas size is unchanged under any framing
 - **Not doing**: no GUI gestures; no image decoding.
 - **Human**: none. The clamp contract shape was already ruled on in "Open decisions → B. Confirmed", so this step runs to completion without a human answer.
+- **Done (2026-09-21)**: `CropTransform::fit` in `pixlay-core/src/crop.rs`, applied by `pixlay-render`'s `draw`; criteria, decisions and numbers in "S3 result" below.
 
 ### S3 · review additions (2026-09-20)
 
@@ -462,6 +463,50 @@ The exit criteria, item by item:
   It was: see "Open decisions → B. Confirmed", elongated-slot clamp degradation.
 - the epsilon for "covers the entire slot" is given a number (normalized 1e-6 suggested, or ≤0.5px at 300dpi), written into the test constants
 - hit testing (see S6.5) and clamp are both geometry and can be merged into this step
+
+### S3 result (2026-09-21)
+
+`[all criteria are in the tests in the repository; the numbers below are the release binary's output on this machine unless a test is named]`
+
+The exit criteria, item by item:
+
+| Criterion | Landing point | Measured |
+|---|---|---|
+| sweep (rotation × zoom × offset × each slot shape), photo always covers after the clamp | `pixlay-core/tests/framing.rs` (`every_framing_covers_its_slot`, `the_floor_is_the_smallest_zoom_that_covers`) and `pixlay-render/tests/framing.rs` (`every_framing_covers_its_slot_without_spilling_or_growing_the_canvas`) | **28,800 fits** — the library's 12 templates, all **64 slots**, 6 rotations (±45°, ±18°, 7.5°, 0°) × 5 offsets (both corners of the allowed box, one-sided, centred) × 5 photo aspects (0.5–2.4) × 3 zooms (0.35/1/3). Coverage tolerance `COVERAGE_EPSILON = 1e-6` of a canvas edge (0.014 px on A0's long edge), and the clamp is *tight*: the worst sample over the whole sweep measures **1.0000000000000002 half extents — one ulp above the photo's edge**, so it magnifies nothing beyond what covering needs. Coverage is measured on the renderer's placement model — vertices, edge midpoints and an interior grid — not by reusing the clamp's own vertex test, so a wrong centre, aspect or rotation direction cannot pass. Both of the clamp's branches are reached (the sweep asserts that: `limited > 0`, `panned > 0`) |
+| the same thing at the pixel boundary | `pixlay-render/tests/framing.rs` | **360 renders** (2 templates × 5 rotations × 4 offsets × 3 zooms × 3 photo aspects) at 454×340 and 454×454: every sampled pixel ≥3 px inside a slot shows that slot's color and every sampled pixel ≥3 px outside every slot is white (the gutter template is the one with margin to check). 2.5 s in the debug test profile |
+| a change of rotation angle triggers a clamp recomputation | `pixlay-core/tests/framing.rs::a_rotation_change_recomputes_the_clamp`, `pixlay-render/tests/framing.rs::a_rotation_the_document_asks_for_is_clamped_into_coverage` | a 4:3 photo in a 4:3 slot, measured: zoom **1.0 upright, 1.2554 at 12°, 1.3957 at 20°**, and at 45° the limit's own zoom 1.5 (with the angle cut to 27.3°). The render of a document asking zoom 1 with **rotation 13°** — which needs 1.26× and would leave the corners white — covers every sample pixel, while the test asserts the request alone does *not* cover (otherwise it would prove nothing) |
+| crop edges only, never grow the canvas | the same render sweep | **360/360 renders are exactly the canvas's pixel size**, and no pixel outside the slots ever shows a photo color (a rotated photo spilling into a neighbour would land in the neighbour's color class) |
+
+**What the clamp is** (`pixlay-core/src/crop.rs`, `CropTransform::fit(slot, canvas_aspect, photo_aspect) -> CropFit`). The stored crop is a request; the fit is what covers. The canvas and the slot never grow, so there are exactly three levers: `zoom` is raised to the covering value with the photo centred (`max(1, photo_aspect * slot_height / slot_width)`, exact for the library's rectangles *and* its concave slot, because a rectangle contains a polygon iff it contains its vertices); `offset` is pulled back along the line to the slot centre; `rotation_deg` is kept while the zoom it needs stays within `CLAMP_ZOOM_LIMIT` times that upright floor, and otherwise reduced to the widest angle that fits, with `CropFit::rotation_limited` reporting it. `draw` applies the fit before placing the bitmap (`crop.rs`: "the stored transform is a request; what gets drawn is the fit").
+
+### S3 · decisions this step made
+
+1. **The degradation limit is relative to the *upright* floor, not an absolute zoom — and that is what makes "very elongated slots" work at all.** The AGENTS entry's own 6.7–7.6× figure is the *upright* covering zoom of a narrow slot (measured here: the ten-column strip needs **6.0×** for a 4:3 photo), so an absolute reading of "> 1.5×" would refuse rotation to every strip template while fixing nothing. Relative, a narrow slot is never degraded for being narrow: measured, that strip at 45° needs **5.19× — less than upright** (a rotated photo fits a sliver better), so the angle survives untouched; `an_elongated_slot_keeps_its_rotation` pins that. The angles the limit does cut, measured with a matching photo asking 45°: **45° kept at 1:1, 34.0° at 6:5, 27.3° at 4:3, 22.6° at 3:2, 18.0° at 16:9, 11.2° at 8:3**, mirrored for slots taller than wide. `CLAMP_ZOOM_LIMIT` is the one constant that widens the range, and the table lives in `docs/CONTRACT.md` §2 so a future review can argue with the numbers instead of the code.
+2. **A pan is clamped; it is never paid for with magnification.** The other reading of "the photo must cover" — raise the zoom until the *requested* offset also covers — is legal by the contract and gives a doubled magnification whenever a user drags a photo near the edge: dragging would zoom. So the fit clamps the offset at the zoom the *shape* demands instead. This is also why the S1 golden image is **byte-identical after S3** (its two crops are zoom 1.4/1.2 with offsets that the clamp finds feasible), which is the strongest regression signal this step could ask for: the clamp did not move a single pixel of the framing that was already correct.
+3. **The fit is applied inside `draw`, so no contract-legal document can render an uncovered slot.** Consequence that had to be paid for: S1's `a_failing_probe_still_prints_its_numbers` (probe fails because `zoom: 0.5` leaves white inside a slot) is no longer reachable through the CLI — the same document now *passes*, because the clamp raised the zoom. The test was re-pointed at exactly that (`a_crop_below_the_covering_zoom_is_clamped_instead_of_leaving_white`), and the probe's own falsifiability — which S1 required — moved to `crates/pixlay-cli/tests/probe.rs`, which hands the probe an image that is wrong by construction (an unpainted slot) and asserts the interior criterion fails while the background and seam criteria stay clean. The probe keeps its leading question (S1's `probe` reads the renderer's output, which is where a regression shows); what it can no longer be made to fail by is a *document*.
+4. **Hit testing was not merged into this step.** The review additions said the two "can be merged"; they are both geometry, but S6.5 already owns hit testing with its own exit criterion (a sweep of centroids and points 1 px outside every boundary against the analytic answer), and merging would move an exit criterion out of the step that has to close it. Nothing here blocks it: `Polygon::contains` and `distance_to_boundary` are the same primitives.
+5. **The fit is taken in the space `draw` places into, not in the document's space.** `draw` passes the *output canvas pixels'* aspect, because that is the space its own slot arithmetic uses; the document's millimetre aspect differs from it by the pixel rounding (≤0.1% on the test canvas, ≤3e-5 at A0@300dpi). Every quantity the fit produces is a ratio, so the two agree to that order anyway — taking the renderer's is what makes "covers" exact for the arithmetic that actually paints.
+6. **The fit is idempotent, and cheap enough to run unconditionally.** `a_document_that_is_already_fitted_renders_identically` proves it at the pixel level (pre-fitting every crop in the document changes the render by **0 bytes**), and the idempotence holds bit-for-bit because the pan clamp walks the segment by scaling the *offset* — the value the caller stores — rather than by interpolating the photo centre, which would round differently on the second pass. Cost per slot fit, measured `--release` over 50,000 fits: **0.07 µs** for an identity request, **4.98 µs** worst case (rotation search plus a pan clamp), i.e. under 50 µs for a ten-slot document.
+7. **The clamp is a *precondition* for S4's decoder, and its zoom is the display size.** Sizing a bitmap from the stored request instead of the fit makes the canvas magnify it, and the half-texel filtering at the bitmap's edge smears transparency into the slot — measured while writing the render tests, with a request 11.6× below the fitted zoom: a **white smear about 6 px wide** inside the slot, which no coverage criterion can be measured through. The render tests size their bitmaps from the fit, which is the shape S4 must copy.
+8. **The lower-bound numbers this step produced** (they replace the estimates the AGENTS entry carried): the upright floor is `max(1, photo_aspect * slot_height / slot_width)` — a ten-column strip with a 4:3 photo needs 6.0×, with a 3:2 photo 8.4× at 1/10 width (the shipped strip is 2/16 wide, hence 6.0), and a 5:2 slot with a square photo 2.5×. Two boundaries are *returned untouched* rather than guessed at, because no framing can be computed there: a request holding a NaN or an infinity (only an in-memory document can, since `validate` refuses one on load) and a degenerate slot or aspect. The clamp reaches `MAX_ZOOM` only if a slot's own shape demands it (a 0.05-wide slot on a square canvas with a 100:1 photo), which is the one place the coverage promise cannot be kept; `the_zoom_cap_is_a_hard_ceiling` pins that it returns the cap and a *valid* transform rather than an out-of-range one.
+
+### S3 · measured (2026-09-21, `--release`, this machine)
+
+| Item | Value |
+|---|---|
+| the `AGENTS.md` verification render (`render --template mosaic-8-s14 --dpi 300 --stats`) | 14043×10532, **ms 1620** compositing + **encode_ms 2148** JPEG, **`peak_rss_mb` 1611**, **42,525,185 bytes** — the same byte count S2 measured, so a document whose crops are already covering is rendered bit-identically after S3 |
+| the framing stress project (8 crops: zoom 0.5–3.0, offsets up to ±1, rotations ±45°, every one below or at its floor) | `probe --dpi 150`: `occupied = 8`, `passed = true`, **8/8 slots match** their own color, **12/12 seams clean**, `foreign = 0` on all of them, blend 0.995–0.998 px per seam px |
+| visual inspection | the 1200 px preview of that stress project: eight color regions, the orange slot still the L-shaped one wrapping the grey slot's two edges, **no white anywhere inside the frame**, no slot's content crossing into a neighbour, and the four rotated slots show clean grain rather than the smeared edge a wrong clamp would leave |
+| every template rendered at `--preview-px 480` | 12/12 exit 0, `occupied == cells`, correct pixel size per aspect — S2's numbers reproduced |
+| fit cost | 0.07 µs per slot (identity request), 4.98 µs per slot (rotation + infeasible pan), release, 50,000 fits each |
+| coverage tolerance | the review suggested 1e-6 normalized or ≤0.5 px at 300dpi; the tests use **1e-6** (0.014 px on A0's long edge) while the clamp's own arithmetic is exact to ~1e-15 — the budget is spent on nothing, and the measured worst sample is 2.2e-16 past the edge |
+
+### S3 · deviations from and additions to the review additions
+
+1. **The 1.5× threshold got an explicit reference** (the upright covering zoom) instead of the "1.5×" the ruling left open, because the absolute reading is self-defeating for the very case the entry was about — see decision 1. This is the one place where this step had to interpret a ruling rather than execute it, and it is written into `docs/CONTRACT.md` §2 and `CLAMP_ZOOM_LIMIT`'s doc comment.
+2. **The pan clamp is part of the fit**, which the "three levers" work line implied but the review additions did not spell out; decision 2 carries the reasoning.
+3. **`CropFit` kept exactly two fields** (`transform`, `rotation_limited`): a clamped pan is visible by comparing the request with the fit, so no third flag was added and the S1 contract shape is untouched.
+4. **The probe's CLI failure test had to move**, which is a contract-level consequence rather than a test detail: see decision 3.
 
 ## S4 · Image pipeline — ⬜ not started
 
@@ -694,7 +739,7 @@ Not done: `cargo vendor` currently has empty dependencies, so this criterion can
 | undo granularity and snapshots | one gesture = one command (committed when the drag ends); a snapshot stores the whole `CollageDoc`, with no diff |
 | config storage | serde files under `~/.config/pixlay/` (the same scheme as `.pixlay`); **no GSettings** |
 | limit constants | canvas ≤ **200 MP**, DPI **72–600**, slot count **2–10**; out of range gives a clear error, not a panic (A0@300dpi = 139.5 MP, leaving 43% headroom) |
-| Elongated-slot clamp degradation | when the required zoom is > **1.5×** (`CLAMP_ZOOM_LIMIT` in `pixlay-core`, beside `MAX_ZOOM` / `MAX_ROTATION_DEG`), **limit the rotation angle**; the clamp result (`CropFit::rotation_limited`) carries a "limited" flag for the UI |
+| Elongated-slot clamp degradation | when the required zoom is > **1.5×** (`CLAMP_ZOOM_LIMIT` in `pixlay-core`, beside `MAX_ZOOM` / `MAX_ROTATION_DEG`), **limit the rotation angle**; the clamp result (`CropFit::rotation_limited`) carries a "limited" flag for the UI. **Implemented in S3 (2026-09-21)**: the reference is the *upright covering zoom*, not an absolute zoom — the absolute reading would refuse rotation to every strip template (that is what the 6.7–7.6× in the AGENTS entry actually measured) — and the kept angles plus the reasoning are in `docs/CONTRACT.md` §2 and "S3 · decisions" |
 | `.pixlay` path resolution | relative to the project file; a missing file = a clear error + a non-zero exit code; atomic write (tmp + rename) |
 
 ### C. After S1, before S4 (still recommendations; locked as recommended unless objected to)

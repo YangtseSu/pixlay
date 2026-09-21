@@ -15,7 +15,9 @@
 //! * Limits (slot count, dpi, canvas pixels, rotation) are enforced by
 //!   [`CollageDoc::validate`] and reported as typed errors, never as panics.
 //! * Framing state is absolute ([`CropTransform::zoom`] is displayed width over
-//!   slot width), so swapping a photo does not move the visible area.
+//!   slot width), so swapping a photo does not move the visible area, and what is
+//!   drawn is the *fit* of the stored request ([`CropTransform::fit`]), so a
+//!   photo always covers its slot.
 //!
 //! Template generation (S2), the framing clamp (S3) and command history, project
 //! writing and hit testing (S6.5) build on these types.
@@ -88,6 +90,20 @@ pub const MAX_ZOOM: f64 = 1000.0;
 /// this a slot would need absurd magnification to stay covered.
 pub const MAX_ROTATION_DEG: f64 = 45.0;
 
-/// Zoom above which the clamp reduces the rotation angle instead of magnifying
-/// further (docs/STEPS.md, "Open decisions → B. Confirmed": elongated-slot clamp degradation).
+/// Multiple of the upright covering zoom above which [`CropTransform::fit`]
+/// reduces the requested rotation angle instead of magnifying the photo further
+/// (docs/STEPS.md, "Open decisions → B. Confirmed": elongated-slot clamp degradation).
+///
+/// The reference is the *upright floor*: the zoom the slot's shape and the
+/// photo's aspect demand with the photo centred and unrotated. Measured that way
+/// a slot which is inherently narrow — the ten-column strip needs 6x for a 4:3
+/// photo — is not degraded for that reason alone, and rotating such a slot costs
+/// *less* than leaving it upright. What is refused is rotation that magnifies
+/// without bound: covering a slot of physical aspect `r` with a matching photo
+/// needs `r*sin(t) + cos(t)` at angle `t`, so the widest angle this limit keeps is
+/// the one where that reaches 1.5 — measured (2026-09-21, matching photo, 45
+/// degrees requested) 45 degrees kept for a square slot, 34.0 for 6:5, 27.3 for
+/// 4:3, 22.6 for 3:2, 18.0 for 16:9, 11.2 for 8:3, and the same angles mirrored
+/// for slots taller than they are wide. Raising this constant is what widens that
+/// range; the photo is magnified by exactly as much as the angle it keeps needs.
 pub const CLAMP_ZOOM_LIMIT: f64 = 1.5;

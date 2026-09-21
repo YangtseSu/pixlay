@@ -119,7 +119,14 @@ pub fn draw(doc: &CollageDoc, images: &Images, target: &Target) -> Result<(), Re
         let Some(slot) = doc.template.slots.get(index) else {
             continue;
         };
-        draw_slot(ctx, index, slot, bitmap, &cell.crop, target.canvas_px)?;
+        // The stored crop is a request; what gets drawn is its fit (S3). The fit
+        // is taken in the space this placement uses (the output canvas pixels,
+        // whose aspect is the rounded one), so "covers the slot" is exact for the
+        // arithmetic below and not only for the document's millimetres.
+        let fit = cell
+            .crop
+            .fit(slot, target.canvas_px.aspect(), bitmap.aspect());
+        draw_slot(ctx, index, slot, bitmap, &fit.transform, target.canvas_px)?;
     }
 
     ctx.restore()?;
@@ -128,9 +135,10 @@ pub fn draw(doc: &CollageDoc, images: &Images, target: &Target) -> Result<(), Re
 
 /// Clip to the slot outline, then place the bitmap inside it.
 ///
-/// The photo's displayed width is `crop.zoom * slot_width` — the absolute zoom
-/// the document stores. With `zoom = 1` a photo whose aspect ratio matches the
-/// slot fills it exactly; anything else needs the S3 clamp to cover.
+/// `crop` is already fitted ([`CropTransform::fit`]): its zoom is at least the
+/// one that covers the slot, its rotation is one the zoom can afford, and its
+/// offset keeps the photo over the slot. The photo's displayed width is
+/// `crop.zoom * slot_width` — the absolute zoom the document stores.
 fn draw_slot(
     ctx: &Context,
     index: usize,

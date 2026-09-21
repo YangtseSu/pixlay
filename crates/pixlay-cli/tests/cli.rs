@@ -270,12 +270,16 @@ fn probe_reports_numbers_the_renderer_can_be_judged_by() {
 }
 
 #[test]
-fn a_failing_probe_still_prints_its_numbers() {
-    // A probe that fails is a *result*, not an inability to produce one: the
-    // numbers are the whole point, so stdout carries them and the exit code is
-    // the verdict. A crop below the covering zoom leaves white inside the slot,
-    // which is exactly what the interior probe exists to catch.
-    let dir = out_dir("probe-fail");
+fn a_crop_below_the_covering_zoom_is_clamped_instead_of_leaving_white() {
+    // A crop is a *request*; what `draw` paints is its fit (S3). `zoom: 0.5`
+    // cannot cover this slot, and the probe — whose first question is whether the
+    // slot's own content is where the geometry says it is — passes anyway,
+    // because the clamp raised the zoom before painting. S1 asserted the opposite
+    // (that this document left white inside the slot and failed the probe); that
+    // was a property of a renderer with no clamp, and the probe's ability to fail
+    // its interior criterion is now pinned in `tests/probe.rs`, which hands it an
+    // image that is wrong by construction.
+    let dir = out_dir("probe-clamped");
     let project = write_project(&dir, "underzoomed.pixlay", true);
     let json = std::fs::read_to_string(&project).expect("read");
     assert!(
@@ -291,20 +295,12 @@ fn a_failing_probe_still_prints_its_numbers() {
         "--dpi",
         "150",
     ]);
-    assert_eq!(code(&output), 2, "a failed probe exits 2");
-    assert!(
-        !stdout(&output).is_empty(),
-        "the numbers are still the result"
-    );
-    assert_eq!(field(&output, "status"), "failed");
-    assert_eq!(field(&output, "slot.0.match"), "false");
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "status"), "ok");
+    assert_eq!(field(&output, "passed"), "true");
+    assert_eq!(field(&output, "slot.0.match"), "true");
     assert_eq!(field(&output, "slot.0.expected"), "200,30,40");
-    assert_eq!(field(&output, "slot.0.actual"), "255,255,255");
-    assert!(
-        stderr(&output).contains("probe failed"),
-        "{}",
-        stderr(&output)
-    );
+    assert_eq!(field(&output, "slot.0.actual"), "200,30,40");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

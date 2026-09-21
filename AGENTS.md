@@ -321,11 +321,18 @@ not a criterion — a visual conclusion must become a number (a probe) in the CL
   **without HEIC**. Conclusion open → S4's first task is to run one real decode down each path and
   pick, and the CLI and the tests need a path that does not depend on the sandboxed loader.
 - The actual behavior of Pango's CJK line-breaking (kinsoku) and punctuation squeezing.
-- Whether the conservative clamp for irregular slots — computed from a circumscribed axis-aligned
-  rectangle, allowing slight white slivers — is acceptable.
-- The framing zoom floor for very elongated slots can explode (extreme configurations measure
-  6.7–7.6×). Policy undecided: when the required floor exceeds a threshold (1.5× suggested),
-  **limit the rotation angle** instead of zooming without bound.
+- The conservative clamp for irregular slots — computed from a circumscribed axis-aligned rectangle,
+  allowing slight white slivers — is **not needed and not used**: S3's clamp tests the outline's own
+  vertices, which is exact for a concave slot too (a rectangle contains a polygon iff it contains its
+  vertices), so no sliver is allowed and none is measured (28,800 framings against a 1e-6 tolerance,
+  the worst sample 2.2e-16 past the photo's edge).
+- **Framing clamp (S3, 2026-09-21): decided and implemented.** The framing zoom floor for very
+  elongated slots is not made unbounded by rotation: `CLAMP_ZOOM_LIMIT = 1.5` is a multiple of the
+  *upright covering zoom* (measured: a ten-column strip needs 6.0× with a 4:3 photo), and past it the
+  clamp reduces the requested rotation angle to the widest that fits instead of magnifying further.
+  A narrow slot is therefore never degraded for being narrow — rotating one costs *less* than leaving
+  it upright (5.19× against 6.0×, measured) — while a matched 4:3 slot keeps 27.3° of the 45° asked
+  for. The rule, the per-aspect angle table and the pan-clamp decision are in `docs/CONTRACT.md` §1/§2.
 - Seam behavior re-measured (2026-09-20): blended pixels on shared edges / seam length ≈ 1.08,
   **identical** at A0 and at 1/5 size → the blend width is one physical pixel and independent of
   output resolution, with no strong bleeding. **Remaining question: this 1 px seam is visible in a

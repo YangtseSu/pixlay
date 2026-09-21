@@ -65,6 +65,15 @@ Conventions:
 - `rotationDeg` is capped at ±45°, and every component of `crop.offset` has |offset| ≤ 1 (past that no clamp can get the coverage back).
 - **Direction convention**: both `rotationDeg` and a text layer's `rotationDeg` are positive **clockwise on screen** (the canvas y axis points down,
   cairo's `rotate` in that space is clockwise, and the renderer passes it through as-is).
+- **A crop is a request; what gets drawn is its fit** (`CropTransform::fit`, S3). The canvas and the slot never grow, so the
+  fit has exactly three levers: `zoom` is raised to the value that covers the slot with the photo centred (a larger request
+  is kept as it is), `offset` is pulled back along the line to the slot centre until the photo covers again — a pan stops at
+  the frame edge rather than being paid for with magnification — and `rotationDeg` is kept while the zoom it needs stays
+  within `CLAMP_ZOOM_LIMIT` times the upright covering zoom, otherwise the widest angle that fits is used and
+  `CropFit::rotation_limited` reports it. The fit is **idempotent**, so clamping on an edit and again in `draw` costs nothing
+  and the second pass reports nothing. `draw` applies the fit, so no document this build accepts can render an uncovered
+  slot; the fit's own boundary is a slot so extreme that covering it needs more than `MAX_ZOOM`, which gets the cap (and is
+  what a decoder's memory budget, S4, limits from the other side).
 - **Text layer order**: `text` is drawn in array order, later ones cover earlier ones, and all of them cover the cells.
 - **Tiled phase**: the tile grid starts from the canvas origin `(0,0)`, and each tile rotates around its own anchor; there is no per-tile variation.
 
@@ -80,14 +89,14 @@ Conventions:
 | template aspect ratio | 0.1..=10.0 | a template outside this range is not a collage layout; it also bounds what a canvas can be matched to |
 | slot outline | ≥ 3 vertices, finite, every vertex inside `[0,1]`, area > 0 | a polygon with no interior is not a slot |
 | framing rotation | ±45° (clockwise is positive, canvas y points down) | `AGENTS.md` |
-| framing zoom | `0 < zoom ≤ 1000` | the upper bound is necessary: zoom determines the size of the decoded bitmap, and without an upper bound it overflows. S4's decoder sets a limit **separately by memory budget**; the two layers each mind their own |
-| crop offset | every component \|offset\| ≤ 1 (slot widths / heights) | beyond half a slot the photo centre leaves the slot, and no clamp can cover it again |
+| framing zoom | `0 < zoom ≤ 1000` | the upper bound is necessary: zoom determines the size of the decoded bitmap, and without an upper bound it overflows. S4's decoder sets a limit **separately by memory budget**; the two layers each mind their own. The fit raises the drawn zoom to the covering value and never lowers a larger request |
+| crop offset | every component \|offset\| ≤ 1 (slot widths / heights) | beyond half a slot the photo centre leaves the slot, and no clamp can cover it again. The fit reduces it further whenever the requested pan would uncover the slot |
 | canvas vs template aspect ratio | difference ≤ 1e-6, otherwise a hard error | the two are each annotated independently, normalized coordinates carry no aspect ratio themselves; the GUI's template selector groups by aspect ratio and lists only the matching ones |
 | text font size | 0 < `sizeRel` ≤ 1.0 (fraction of canvas height) | — |
 | text position (free mode) | both components inside `[0,1]` | a free layer is placed in normalized canvas coordinates, so anything outside is off the canvas by definition |
 | tiled step | both components > 0, finite | step 0 or a negative value makes the tiling loop forever; there is no upper bound |
 | `--preview-px` | 1..=20000 (long edge, in pixels) | a preview larger than this cannot be reviewed by eye anyway |
-| clamp degradation threshold | when the required scale is > 1.5×, **the rotation angle is limited** (`CLAMP_ZOOM_LIMIT` in `pixlay-core`) | `docs/STEPS.md`, "Open decisions → B. Confirmed" |
+| clamp degradation threshold | when the zoom the **requested rotation** needs exceeds `CLAMP_ZOOM_LIMIT` = **1.5 times the upright covering zoom**, the angle is reduced to the widest one that fits (`CLAMP_ZOOM_LIMIT` in `pixlay-core`) | `docs/STEPS.md`, "Open decisions → B. Confirmed". The reference is the upright floor, not an absolute zoom: a ten-column strip needs 6x upright for a 4:3 photo and rotating it needs *less*, so it is never degraded. Measured kept angles, matching photo and 45° asked (2026-09-21): 45° (unlimited) at 1:1, 34.0° at 6:5, 27.3° at 4:3, 22.6° at 3:2, 18.0° at 16:9, 11.2° at 8:3, mirrored for portrait slots |
 
 Every entry above is enforced with a typed error, never a panic, and each is covered by
 `crates/pixlay-core/tests/contract.rs` or `crates/pixlay-cli/tests/cli.rs`. An implementation
@@ -131,6 +140,11 @@ Images                            // slot → Bitmap; absent = that cell is left
 ```
 
 - **Cairo only blits and clips**: the bitmaps coming in are already decoded, downsampled, rotated and graded (`pixlay-imaging`, S4).
+- **The crop is fitted before it is drawn** (`CropTransform::fit`, S3): the slot's outline, the aspect of the space being drawn
+  into and the bitmap's aspect go in, and the transform that comes out is what is painted. A document may therefore store any
+  contract-legal request and still render covered. S4's decoder sizes its bitmap from the same fit — the fit's zoom *is* the
+  display size — because sizing from the stored request instead would leave the canvas resampling, which it must never do
+  (measured in S3: a request 11.6x below the fitted zoom smeared one texel's transparent edge about 6 px into the slot).
 - Composite onto an **opaque white background**; the output is never transparent.
 - **Band rendering**: `Band::out_rows()` partitions on **output pixels** (`first = total * index / count`),
   so at any `scale` the band sizes sum to exactly the whole image. It previously partitioned by canvas rows, rounding each band on its own,
@@ -208,7 +222,7 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
 
 | Item | Lands in | Shape |
 |---|---|---|
-| clamp math | S3 | `CropTransform` + `CropFit { transform, rotation_limited }` (the types are already in `pixlay-core`) |
+| clamp math | **S3, landed** | `CropTransform::fit(slot, canvas_aspect, photo_aspect) -> CropFit { transform, rotation_limited }`, applied by `draw`; the fit is idempotent and never exceeds `MAX_ZOOM` |
 | template generator | **S2, landed** | `pixlay_core::templates` (`generator` recipes + the committed `frozen` data) and the `templates` / `init` subcommands; see §3 and §5 |
 | command history / hit testing / project writing | S6.5 | not in the S1 contract; `CollageDoc` is their state carrier |
 | text rendering | S5 | `TextLayer` is already in the contract; `draw` refuses it for now |
