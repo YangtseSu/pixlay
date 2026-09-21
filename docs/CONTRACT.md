@@ -148,6 +148,8 @@ changed the document shape.
 | tiled step | both components > 0, finite | step 0 or a negative value makes the tiling loop forever; there is no upper bound |
 | tiles per text layer | ≤ 10,000 (`TextLayer::MAX_TILES`) | a step is unbounded from above and therefore unbounded *downward*: `1e-9` is a billion by a billion tiles. A 1/100 step is already a 101x101 grid = 10,201 tiles and is refused when the document loads, so the cap is where a person's watermark stops being a watermark. `pixlay_core::tiled_grid` answers the count; the renderer asks the same function and never hangs on an in-memory document either |
 | `--preview-px` | 1..=20000 (long edge, in pixels) | a preview larger than this cannot be reviewed by eye anyway |
+| `--long-edge` (export size) | 1..=30000 (long edge, in pixels; `MAX_LONG_EDGE_PX` in `pixlay-core`) | a pixel count, not a resolution: A0 at the maximum DPI (600) is 28087 px on its long edge, so the range covers every resolution this product accepts. The **canvas pixel budget still applies to the grid it derives** (a square canvas at 20000 px is 400 MP and is refused, exit 2), so the flag's range and the budget are two different limits and both are checked |
+| JPEG output resolution | ≤ 65535 dpi (`MAX_JPEG_DPI` in `pixlay-imaging`) | JFIF stores the density in 16 bits. A physical-size export is inside this range by construction (≤ 600 dpi); a pixel-count export on a very narrow canvas can derive one past it (`--long-edge 20000` on a 1 mm canvas is 508000 dpi) and is then **refused**, not saturated — a written number that is not the one the grid has is a lie the file cannot take back |
 | grade `factor` | 0.2..=5.0 | ±2 stops of exposure around 1.0; beyond that the control only saturates every channel |
 | grade `saturation` | 0.0..=4.0 | 0 is greyscale, 1 leaves the pixel alone |
 | grade `delta` (`Δ`, warmth) | -1.0..=1.0 | `r *= 1 + delta`, `b *= 1 - delta`; past 1 the mapping is no longer monotone |
@@ -249,6 +251,20 @@ against ImageMagick's. Source alpha is preserved through the resample
 an opaque pixel) and flattened onto white at the end, which is the same rule as
 §4's "composite onto opaque white".
 
+**The output carries the profile** (S6). Every export embeds an sRGB ICC profile,
+because an sRGB file whose numbers are not labelled is a file whose colour depends
+on who opens it. The bytes are built in `pixlay_imaging::icc` from the IEC
+61966-2.1 colorimetry — the primaries and the D65 white point as chromaticities,
+the piecewise transfer function, the Bradford adaptation into the D50 profile
+connection space — rather than shipped as a blob, because v1 pulls in no colour
+library to generate or validate one. The shape is ICC v4 (`mntr` / `RGB ` / `XYZ `,
+`para` transfer curves, `chad`), the shape lcms2 writes, and it is deterministic:
+the creation date and the profile id are zero, so the same document yields the
+same bytes. Measured against the sRGB profile committed in a fixture (lcms2's, via
+ImageMagick): the colorants agree to 2.2e-4, the curve parameters to one unit in
+the last place, and converting an export from this profile to that one moves the
+pixels by 0.0015/255 (§8, "S6").
+
 **Depth.** The decoded buffer keeps the file's own depth (8 or 16 bits per
 channel); everything after it is 16-bit — the resampler's output, the flattened
 buffer, the graded buffer — and the only quantization is the final 8-bit write.
@@ -294,12 +310,17 @@ and the antialiased clip edge. The property this buys is pinned by a test:
 rendering a document with the whole bitmap and with the region gives the same
 pixels.
 - `render_surface` / `render_rgb8` are just thin shells that allocate a surface + call `draw`; `rgb8` composites ARgb32 premultiplied uniformly
-  onto a white background and gives the straight-through RGB the encoder wants.
+  onto a white background and gives the straight-through RGB the encoder wants. **`render_surface_sized` / `render_rgb8_sized` are the same shells
+  with the canvas pixel grid passed in** (S6): a resolution is an export parameter, not a renderer concept, and the two export modes produce
+  grids no single DPI reproduces (`CanvasSpec::pixel_size` rounds both edges from a DPI, `pixel_size_for_long_edge` makes one edge exact).
+  The DPI-taking shells compute their grid and call the sized ones, so there is one surface allocator and one `draw`.
 
 ## 5. CLI: the machine operating surface
 
 ```text
 pixlay-render render    --project <file.pixlay> --dpi <n> --out <file>
+pixlay-render render    --project <file.pixlay> --long-edge <px> --out <file>
+pixlay-render render    --project <file.pixlay> --dpi <n> --chroma 444|422|420 --out <file>
 pixlay-render render    --template <name> --dpi <n> --out <file>   # no project, no photos
 pixlay-render probe     --project <file.pixlay>
 pixlay-render image     --photo <file>
@@ -318,10 +339,13 @@ pixlay-render init      --template <name> --out <file.pixlay>
 | usage error and "failed to produce a result" | stdout stays empty; stderr names the failing path (or the missing flag) |
 | probe verdict not passed | **not "failed to produce a result"**: the numbers are the result, so stdout emits all the numbers as usual, with `status = failed` and `passed = false`, stderr emits a one-line summary, and the exit code is 2 |
 | probe lower bound | when `occupied = 0` (all empty slots) the verdict is **failed**: every question the probe asks is about some slot, and with no slot there is no conclusion. Previously it "passed vacuously" (status=ok, exit 0) |
-| output format | determined by the `--out` extension: `.png` / `.jpg` / `.jpeg`, anything else is a usage error |
+| output format | determined by the `--out` extension: `.png` / `.jpg` / `.jpeg` / `.tif` / `.tiff`, anything else is a usage error (exit 1, stdout empty, the message names the formats this build writes) |
+| export resolution | `--dpi n` (72..=600) writes **exactly that resolution** into the file and sizes the grid `round(mm / 25.4 * dpi)`; `--long-edge n` (1..=30000) makes the long edge exactly n pixels, sizes the other edge `round(n * short_mm / long_mm)` (at least 1, half away from zero) and writes the resolution the grid works out to, `long_edge_px * 25.4 / long_edge_mm`. The two flags are mutually exclusive (exit 1), because they are two different requests; a resolution is echoed and a pixel count is derived, and neither is guessed from the other |
+| per-format metadata (S6) | PNG: `pHYs` = `round(dpi * 1000 / 25.4)` pixels per metre, `iCCP` with the profile (the `sRGB` chunk is **not** written next to it — the specification says the two should not both appear, and the profile is the one carrying the colorimetry). JPEG: JFIF `APP0` density = `round(dpi)` pixels per inch, `APP2` `ICC_PROFILE` segments, and the sampling factors of the request. TIFF: `XResolution`/`YResolution` = `round(dpi * 100) / 100`, unit 2 (inch), tag 34675 (type `UNDEFINED`) for the profile, LZW with the horizontal predictor |
+| `--chroma` | JPEG only (444 the default, 422, 420); given with a PNG or TIFF `--out` it is a usage error (exit 1), because those formats store three samples per pixel and accepting it would drop it silently. The request is visible in the file's own `SOF0`, which is what makes it checkable — re-encoding an export to patch metadata is what silently rewrites it (S0 measured 2.71 MB → 1.49 MB when 4:4:4 was re-encoded as 4:2:0) |
 | `--preview-px n` | n pixels on the long edge; the same `draw`, only `scale` changes. The **bitmaps are sized for the preview too** (S4): decoding and resampling a full A0 and letting Cairo shrink it would cost the export's time and memory for a thumbnail, and would do the shrinking with Cairo's filter instead of the pipeline's |
-| `render`'s report | carries `text` (how many text layers the document has) next to `cells` and `occupied`, so "the layers reached the renderer" is visible without reading pixels |
-| `--stats` | appends `{ms, encode_ms, peak_rss_mb, icc}`; `render` emits all four, `probe` emits no `encode_ms` (it does not encode). The measurement rules are below |
+| `render`'s report | carries `text` (how many text layers the document has) next to `cells` and `occupied`, so "the layers reached the renderer" is visible without reading pixels. In physical-size mode `dpi` is an **integer** — the resolution that was asked for and written; in pixel mode it is a **decimal**, the one the grid works out to, next to `long_edge`. A JPEG report carries `chroma` as well |
+| `--stats` | appends `{ms, encode_ms, peak_rss_mb, icc}`; `render` emits all four, `probe` emits no `encode_ms` (it does not encode). `icc` is the description of the profile the written file carries (`sRGB IEC61966-2.1`); a command that writes no file reports `none`. The measurement rules are below |
 | `probe` | samples and outputs numbers (in-slot photo color, out-of-slot white background, shared-edge blended pixels, three-color convex combination residual), exit code 2 when the verdict is not passed |
 | `text` | one row per layer: the **resolved** `content` (tokens substituted exactly as `render` substitutes them), `mode`, `size_rel`, `rotation_deg`, the `source_slot` when it names one, and for a free layer `position` / `anchor` or for a tiled one `step` / `tiles` (the grid `tiled_grid` answers). It decodes only the slots a layer names, once each, and writes nothing. Without it, "{date} is filled from EXIF" could only be checked by rendering and reading pixels back |
 | `image` | one file's decode facts: `mime`, `width`, `height`, `depth` (8 or 16), `aspect`, `exif_bytes`, `date` (EXIF `DateTimeOriginal`, empty when absent). It is how "HEIC decodes" and "orientation 6 is applied" are visible without rendering a project. `--out`/`--dpi`/etc. are usage errors: it decodes at the file's own size and writes nothing |
@@ -388,7 +412,7 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
 | the image pipeline | **S4, landed** | `pixlay-imaging`: `Source::decode`, `resample`, `LinearRgb16::apply`, `slot_bitmap`/`slot_bitmaps`, `probe`; the buffer ladder and the colour decisions are §4.1 |
 | command history / hit testing / project writing | S6.5 | not in the S1 contract; `CollageDoc` is their state carrier |
 | text rendering | **S5, landed** | `pixlay_render::text`: one Pango layout per layer, drawn by `draw`; token resolution is `TextLayer::resolve` in `pixlay-core`, the tile grid is `pixlay_core::tiled_grid`; see §1 "Text layers" |
-| encoding and metadata | S6 | for now the `image` crate stands in; S6 replaces it with a single pass writing pixels + chroma sampling + ICC + DPI |
+| encoding and metadata | **S6, landed** | `pixlay_imaging::encode`: one pass per format writing pixels, resolution, sampling and the ICC profile (`icc`), for PNG / JPEG / TIFF; the CLI's `--long-edge` / `--chroma` and the per-format rules are §5, the profile is §4.1 |
 
 ## 8. Measured (2026-09-20, this machine)
 
@@ -427,5 +451,24 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
 | preview vs export with text (2N vs N, downsampled) | RMSE **1.92** (threshold 6; AGENTS.md's photo-only A0 measurement is 2.62); the text's ink rectangle at 2N is the one at N doubled to within 1 px |
 | the committed test font | `pixlay-cli/tests/fixtures/fonts/pixlay-test-sans.otf`, **93,100 bytes**, 691 glyphs covering 204 codepoints, GPOS `halt` present; regenerated by `fonts/generate.py` from Arch's `noto-fonts-cjk` (SIL OFL, `OFL.txt` beside it) |
 | the text fixture (`render --project tests/fixtures/text.pixlay --dpi 150 --preview-px 2400`) | 2400x1801, **ms 459** + encode 45, peak 77 MB, 3,320,360 bytes with its three layers; the same project with `text: []` is ms 355, 3,276,176 bytes — the three layers (a wrapped 45-character CJK caption, a date line and a 15-tile watermark) cost about **100 ms** at 2400 px |
+
+### S6 (2026-09-21, `--release`, this machine)
+
+The `AGENTS.md` verification render (`render --project tests/fixtures/verify.pixlay --dpi 300`),
+eight photos and one `{date}` layer on a 14043x10532 A0 sheet, per format:
+
+| Item | Value |
+|---|---|
+| JPEG q90 4:4:4 | **9,216,300 bytes**, `encode_ms` **1799**, `peak_rss_mb` 1643. The encoder is `jpeg-encoder` 0.7.1; the S0–S5 baseline was `image`'s (= zune-jpeg): 9,114,833 bytes / 2469 ms — **1.1% larger and 27% faster** |
+| JPEG q90 4:2:0 (`--chroma 420`) | **6,110,454 bytes** (−34%), `encode_ms` **1031**, same 300 dpi and the same ICC profile |
+| PNG | **33,955,066 bytes**, `encode_ms` **5709**, `peak_rss_mb` 1642. Against the S0 baseline (27,773 ms, 125.6 MB for synthetic grain content, `docs/STEPS.md` "Measured baseline") this is 0.21x the time — the content differs (eight resampled photos here, per-pixel grain there), so it is a ceiling check on the 3x cap, not a like-for-like ratio |
+| TIFF (LZW + horizontal predictor) | **42,748,009 bytes**, `encode_ms` **2495**, `peak_rss_mb` 1642 |
+| the whole render, all three formats | `ms` 6250–6559, i.e. unchanged from S5's 6164–6359: encoding is the only new cost, and it is inside `encode_ms` |
+| `--long-edge 9000` on the same project | 9000x6750 px, `dpi` **192.262405**, `pHYs` 7569 px/m, 16,948,376 bytes, `encode_ms` 2988, `peak_rss_mb` 712 |
+| the same project as a 1600 px preview | ms 315 + encode 423, `peak_rss_mb` 54, 1,010,033 bytes |
+| the embedded profile | **664 bytes**; `identify` reads it back as `icc:description: sRGB IEC61966-2.1` in all three formats; colorants within 2.2e-4 of the sRGB profile ImageMagick/lcms2 wrote into `photos/adobe-rgb-srgb.png`, all five `para` parameters within 1.5e-5 (one unit in the last place) |
+| the profile against lcms2 | `magick export.png -profile /usr/share/color/icc/colord/sRGB.icc`: RMSE **0.378 of 65535** = 0.0015/255 over a 1200 px preview — the two profiles describe the same colour space |
+| what the tools report | PNG: `Resolution: 118.11x118.11 PixelsPerCentimeter`; JPEG: `300x300 PixelsPerInch`, `jpeg:sampling-factor: 1x1,1x1,1x1` (and `2x2,1x1,1x1` for `--chroma 420`); TIFF: `300x300 PixelsPerInch` and `ICC Profile: <present>, 664 bytes` (the `914.4, 914.4 pixels/inch` reading is the encoder test's fractional-resolution case; checked with `identify -verbose` and `tiffinfo`) |
+| visual inspection | `/var/tmp/pixlay-s6/preview.png`: the same eight slots as S5, the concave slot continuous, the photos' own white blocks where the fixtures have them, the `{date}` caption reading `2019:07:14 10:32:00`, no white inside any slot |
 
 Every threshold constant in the tests annotates this source, so a change in the numbers can be discovered.

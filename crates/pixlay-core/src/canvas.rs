@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::CoreError;
-use crate::{MAX_CANVAS_PIXELS, MAX_DPI, MIN_DPI};
+use crate::{MAX_CANVAS_PIXELS, MAX_DPI, MAX_LONG_EDGE_PX, MIN_DPI};
 
 /// Millimetres per inch. The canvas is declared in millimetres and converted
 /// here, at the render boundary; normalized geometry never sees pixels.
@@ -68,6 +68,71 @@ impl CanvasSpec {
             }
         }
         Ok(())
+    }
+
+    /// Pixel size whose **long edge is exactly `long_edge_px`**.
+    ///
+    /// The export mode that takes a pixel count instead of a resolution (S6). The
+    /// long edge is exact — that is the whole point of the mode — and the other
+    /// edge keeps the canvas's own ratio, rounded half away from zero like
+    /// [`pixel_size`](Self::pixel_size), so a square canvas stays exactly square
+    /// and the other shapes stay within half a pixel of their ratio. The
+    /// resolution such an export carries is [`dpi_for`](Self::dpi_for): the pixel
+    /// count is the request, and the DPI is the consequence.
+    pub fn pixel_size_for_long_edge(&self, long_edge_px: u32) -> Result<PixelSize, CoreError> {
+        if long_edge_px == 0 || long_edge_px > MAX_LONG_EDGE_PX {
+            return Err(CoreError::OutOfRange {
+                what: "long edge (px)",
+                value: f64::from(long_edge_px),
+                min: 1.0,
+                max: f64::from(MAX_LONG_EDGE_PX),
+            });
+        }
+        let landscape = self.width_mm >= self.height_mm;
+        let (long_mm, short_mm) = if landscape {
+            (self.width_mm, self.height_mm)
+        } else {
+            (self.height_mm, self.width_mm)
+        };
+        let short_px = (f64::from(long_edge_px) * short_mm / long_mm)
+            .round()
+            .max(1.0) as i32;
+        let long_px = long_edge_px as i32;
+        let pixel = if landscape {
+            PixelSize {
+                width: long_px,
+                height: short_px,
+            }
+        } else {
+            PixelSize {
+                width: short_px,
+                height: long_px,
+            }
+        };
+        let pixels = pixel.pixels();
+        if pixels > MAX_CANVAS_PIXELS {
+            return Err(CoreError::CanvasTooLarge {
+                pixels,
+                max: MAX_CANVAS_PIXELS,
+            });
+        }
+        Ok(pixel)
+    }
+
+    /// The resolution a pixel grid of this size gives this canvas: the long edge
+    /// against the long edge, in pixels per inch.
+    ///
+    /// This is what an export that was asked for *pixels* writes into the file, so
+    /// busy metadata matches the grid that was actually rendered instead of
+    /// repeating a resolution nobody asked for. An export that was asked for a DPI
+    /// carries that DPI verbatim — a request is honoured even when the rounding of
+    /// the pixel grid makes the achieved resolution differ from it in the fourth
+    /// decimal (A4 at 300 dpi is 299.96 dpi of pixels), because that is the number
+    /// the user chose and the one the printer's queue is built around.
+    pub fn dpi_for(&self, pixel: PixelSize) -> f64 {
+        let px = f64::from(pixel.width.max(pixel.height));
+        let mm = self.width_mm.max(self.height_mm);
+        px * MM_PER_INCH / mm
     }
 
     /// Pixel size at `dpi`.

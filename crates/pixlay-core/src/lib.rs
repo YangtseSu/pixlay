@@ -78,6 +78,16 @@ pub const MAX_SLOTS: usize = 10;
 pub const MIN_DPI: u32 = 72;
 pub const MAX_DPI: u32 = 600;
 
+/// Longest edge an export asked for *pixels* may have, in pixels.
+///
+/// Bounded because the pixel grid, not the DPI, decides the output size in that
+/// mode: A0 at the maximum DPI (600) is 28087 px on the long edge, so 30000
+/// covers every resolution this product accepts with a little room, and anything
+/// larger is a typo rather than a print. The canvas pixel budget
+/// ([`MAX_CANVAS_PIXELS`]) is checked as well, so a square 30000 px request is
+/// refused for its area even though its edge is inside this range.
+pub const MAX_LONG_EDGE_PX: u32 = 30000;
+
 /// Largest canvas the product renders, in pixels. A0 at 300 dpi is 139.5 MP, so
 /// this leaves ~43% of headroom.
 pub const MAX_CANVAS_PIXELS: u64 = 200_000_000;

@@ -4,15 +4,24 @@
 //! Boundary: this crate must not depend on gtk4 — it is the fast loop, and its
 //! compile time is the iteration cost.
 //!
-//! The command contract (frozen in S1, `docs/CONTRACT.md`):
+//! The command contract (frozen in S1, `docs/CONTRACT.md`; the export modes are
+//! S6's):
 //!
 //! ```text
 //! pixlay-render render    --project <file.pixlay> --dpi <n> --out <file>
 //! pixlay-render render    --template <name> --dpi <n> --out <file>   # no photos
+//! pixlay-render render    --project <file.pixlay> --long-edge <px> --out <file>
+//! pixlay-render render    --project <file.pixlay> --dpi <n> --chroma 420 --out x.jpg
 //! pixlay-render probe     --project <file.pixlay>
+//! pixlay-render image     --photo <file>
+//! pixlay-render text      --project <file.pixlay>
 //! pixlay-render templates [--aspect <ratio>] [--json]
 //! pixlay-render init      --template <name> --out <file.pixlay>
 //! ```
+//!
+//! The output format follows `--out`'s extension (`.png`, `.jpg`, `.jpeg`, `.tif`,
+//! `.tiff`), and the encoder writes the resolution and the sRGB profile in the
+//! same pass as the pixels (`pixlay_imaging::encode`).
 //!
 //! * stdout carries only the machine-readable result (sorted `key = value`
 //!   lines, or one JSON object with `--json`); diagnostics go to stderr.
@@ -32,6 +41,5 @@
 
 pub mod args;
 pub mod cli;
-pub mod encode;
 pub mod report;
 pub mod stats;

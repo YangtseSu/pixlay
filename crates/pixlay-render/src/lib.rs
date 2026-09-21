@@ -24,5 +24,8 @@ mod error;
 pub mod text;
 
 pub use bitmap::{Bitmap, Images};
-pub use draw::{Band, Rgb8Image, Target, draw, output_px, render_rgb8, render_surface, rgb8};
+pub use draw::{
+    Band, Rgb8Image, Target, draw, output_px, render_rgb8, render_rgb8_sized, render_surface,
+    render_surface_sized, rgb8,
+};
 pub use error::RenderError;

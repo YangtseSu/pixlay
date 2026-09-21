@@ -34,7 +34,3 @@ pub fn peak_rss_mb() -> Option<f64> {
     }
     None
 }
-
-/// Embedded ICC profile of the output. Always `none` until S6 writes the bytes;
-/// the field exists now so the shape of `--stats` does not change later.
-pub const ICC: &str = "none";

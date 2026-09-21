@@ -187,6 +187,10 @@ at `Cargo.lock` diffs during review.
   Measured: `cairo_surface_write_to_png` on A0 emits only IHDR/bKGD/IDAT — no pHYs and no iCCP
   (`identify` reports `Units: Undefined`) — and `cairo_surface_set_fallback_resolution` has no
   effect on a bitmap backend. Writing PNG through Cairo necessarily loses DPI.
+  Since S6 the encoder is `pixlay_imaging::encode`: PNG `pHYs` + `iCCP`, JPEG JFIF density + `APP2`
+  ICC + the `SOF0` sampling factors of the request, TIFF `XResolution`/`YResolution` + tag 34675 —
+  each written while the pixels go out, never by a second pass over the finished file. The DPI/ICC
+  rounding rules and the per-format field list are in `docs/CONTRACT.md` §5.
 - **The evaluation order is frozen** and must not be reordered:
   `decode + color normalization → geometry (crop / flip / 90° / arbitrary rotation) → per-slot
   grading → global filter → slot compositing → canvas decoration → text layers → output transform`
@@ -278,7 +282,7 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
 ## Module boundaries
 
     pixlay-core     CollageDoc, templates, geometry, framing transforms, command history. Must not depend on gtk / cairo
-    pixlay-imaging  decoding (glycin), resampling, grading, EXIF, color spaces. Must not depend on gtk or cairo
+    pixlay-imaging  decoding (glycin), resampling, grading, EXIF, color spaces, encoding (PNG/JPEG/TIFF). Must not depend on gtk or cairo
     pixlay-render   the single draw(doc, target), Cairo + pangocairo. Must not depend on gtk
     pixlay-cli      windowless render entry point, automation and verification tooling, and the AI's operating surface. Must not depend on gtk4
     pixlay          gtk4 + libadwaita shell and interaction
@@ -374,7 +378,10 @@ policy: track the latest": latest stable only, no upper pin.
 | `serde_json` 1.0.151 | `pixlay-core`, `pixlay-cli` (dev) | JSON read/write; `deny_unknown_fields` turns "misspelled field" into a load-time error | Same |
 | `thiserror` 2.0.20 | `pixlay-core`, `pixlay-render` | core/render errors are typed errors (part of the contract); `anyhow` is allowed only in `pixlay-cli` | Pure macro, zero runtime |
 | `cairo-rs` 0.22.9 | `pixlay-render` | The only rendering backend; GTK4 already depends on cairo, so packaging is free | System cairo 1.18.4; the `png` feature is dev-only (golden image read/write) |
-| `image` 0.25.10 | `pixlay-cli` | **Temporary stand-in**: S1 has to emit PNG/JPEG, and only S6 builds the encoder that writes "pixels + chroma subsampling + ICC + DPI in one pass"; S6 decides whether it stays. Since S4 it is also a **dev-dependency of the CLI's tests**, which write flat PNG photos to render against; `pixlay-imaging`'s tests use it for nothing | Registered, unchanged |
+| `png` 0.18.1 | `pixlay-imaging` | The PNG writer of the one-pass encoder (S6). `image`'s PNG writer exposes neither `pHYs` nor `iCCP` (their values stay at the defaults) and Cairo's emits no `pHYs` at all, so neither can carry an export's DPI | Pure Rust; it was already in the tree through `image`, so the download set did not grow |
+| `jpeg-encoder` 0.7.1 | `pixlay-imaging` | The JPEG writer of the one-pass encoder (S6): `set_density` (JFIF), `set_sampling_factor` (4:4:4 / 4:2:2 / 4:2:0) and `add_icc_profile` (`APP2`), which is exactly the "pixels + sampling + ICC + DPI in one pass" the constraint names | Pure Rust; already in the tree through `glycin-image-rs`. Measured against the previous writer (`image` = zune-jpeg): +1.1% bytes, −27% time at A0/300dpi/q90/4:4:4 |
+| `tiff` 0.11.3 (`lzw`) | `pixlay-imaging` | The TIFF writer of the one-pass encoder (S6): `XResolution`/`YResolution`/`ResolutionUnit` and tag 34675 for the profile. Only the `lzw` feature is enabled — it is the compression the S0 baseline measured, and every reader understands it | Pure Rust (`weezl`); already in the tree through `image` |
+| `image` 0.25.10 | `pixlay-cli` (**dev only** since S6) | It was S1's encoder stand-in and S6 replaced it (`pixlay_imaging::encode` writes the DPI and the ICC profile that this crate's writers leave at their defaults). What it is still for: the CLI's **tests** read renders back with `image::open` (PNG/JPEG/TIFF) and write flat photos to render against, and `pixlay-cli/tests/fixtures/generate.py` produced the fixtures | Not a production dependency any more, so the shipped binary no longer links it |
 | `glycin` 4.0.0 | `pixlay-imaging` | The decoding backend, measured against the in-process alternative (S4): the sandboxed loader is the only one of the two that decodes HEIC and AVIF, and it works with an empty environment | Pulls `glib`/`gio` and, through `cfg(target_os = "linux")`, `libseccomp` / `bubblewrap` / `fontconfig` / the distro's loader packages — this is what S8's `depends` must name |
 | `glib` 0.22 / `gio` 0.22 | `pixlay-imaging` | The decode is driven on a private `MainContext`: a glycin frame request only completes while one is iterated (measured: every frame hung under a plain executor until glycin's own 60 s limit). `glib`'s `futures` feature provides `MainContext::block_on`; `gio::File` is glycin's own input type | Already in the tree with `glycin`; named here because the API is used directly |
 | `pangocairo` 0.22.9 | `pixlay-render` | Canvas-level text: a `pango::Layout` drawn through `pangocairo` is the only way shaped text reaches a cairo context. The family is the system's `sans-serif`; the tests pin the committed subset under `crates/pixlay-cli/tests/fixtures/fonts/` with `FONTCONFIG_FILE` | Pulls `pango` + `pango-sys` alongside the `cairo`/`glib` S4 already had, and Arch's `pango` 1.58.2 is in the GTK stack S7 links anyway |

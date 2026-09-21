@@ -23,11 +23,19 @@ workspace = true
 [dependencies]
 pixlay-core = { path = "../pixlay-core" }
 pixlay-render = { path = "../pixlay-render" }
-# Interim encoding: S6 replaces this with an encoder that writes pixels,
-# chroma sampling, ICC and DPI in one pass. Registered in the dependency log.
+# The encoder lives in the imaging crate (S6): it writes pixels and metadata in
+# one pass, and it is not a CLI concern — the GUI exports through it too.
 pixlay-imaging = { path = "../pixlay-imaging" }
-image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
 
 [dev-dependencies]
 pixlay-render = { path = "../pixlay-render" }
 serde_json = "1.0"
+# The tests read renders back (`image::open`) and write flat photos to render
+# against. The `image` crate is a dev-dependency only from S6 on: production
+# encoding is `pixlay-imaging::encode`, which writes the resolution and the sRGB
+# profile that `image`'s writers leave at their defaults.
+image = { version = "0.25.10", default-features = false, features = [
+    "jpeg",
+    "png",
+    "tiff",
+] }

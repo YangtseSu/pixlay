@@ -10,17 +10,16 @@ use std::io::Write;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use pixlay_core::{Project, TextValues};
-use pixlay_imaging::{Rgb8View, SlotBitmap};
+use pixlay_core::{PixelSize, Project, TextValues};
+use pixlay_imaging::{Chroma, Export, Format, Rgb8View, SlotBitmap, icc};
 use pixlay_render::Images;
 
 use crate::args::{
-    self, Command, ImageArgs, InitArgs, ProbeArgs, RenderArgs, Source, TemplatesArgs, TextArgs,
-    USAGE,
+    self, Command, ImageArgs, InitArgs, ProbeArgs, RenderArgs, Size, Source, TemplatesArgs,
+    TextArgs, USAGE,
 };
-use crate::encode::Format;
 use crate::report::Report;
-use crate::{encode, stats};
+use crate::stats;
 
 /// Exit codes, as the contract fixes them.
 pub const EXIT_SUCCESS: u8 = 0;
@@ -163,10 +162,20 @@ fn ratio_label(aspect: f64) -> String {
 fn render(args: RenderArgs) -> Result<u8, Failure> {
     let format = Format::from_path(&args.out).ok_or_else(|| {
         Failure::Usage(format!(
-            "--out {}: expected a .png, .jpg or .jpeg file",
-            args.out.display()
+            "--out {}: expected {}",
+            args.out.display(),
+            Format::EXTENSIONS
         ))
     })?;
+    // A dropped flag that looks honored is worse than a refusal (S1's rule for
+    // `--dpi` on `templates`): PNG and TIFF store three samples per pixel, so
+    // there is nothing for `--chroma` to set.
+    if args.chroma != Chroma::default() && format != Format::Jpeg {
+        return Err(Failure::Usage(format!(
+            "--chroma applies to JPEG only, and {} stores every sample",
+            format.name()
+        )));
+    }
 
     // Load the document first: a broken project must fail before anything is
     // rendered, and its message must name the path that is wrong.
@@ -192,42 +201,86 @@ fn render(args: RenderArgs) -> Result<u8, Failure> {
     doc.validate()
         .map_err(|error| Failure::Failed(error.to_string()))?;
 
-    let full = doc
-        .canvas
-        .pixel_size(args.dpi)
-        .map_err(|error| Failure::Failed(error.to_string()))?;
+    // The pixel grid, and the resolution the file has to carry. A `--dpi` export
+    // echoes the resolution back; a `--long-edge` export derives it from the grid
+    // it actually renders (`CanvasSpec::dpi_for`).
+    let (canvas_px, dpi) = match args.size {
+        Size::Dpi(dpi) => (
+            doc.canvas
+                .pixel_size(dpi)
+                .map_err(|error| Failure::Failed(error.to_string()))?,
+            f64::from(dpi),
+        ),
+        Size::LongEdge(pixels) => {
+            let pixel = doc
+                .canvas
+                .pixel_size_for_long_edge(pixels)
+                .map_err(|error| Failure::Failed(error.to_string()))?;
+            (pixel, doc.canvas.dpi_for(pixel))
+        }
+    };
     let scale = match args.preview_px {
-        Some(long_edge) => f64::from(long_edge) / f64::from(full.width.max(full.height)),
+        Some(long_edge) => f64::from(long_edge) / f64::from(canvas_px.width.max(canvas_px.height)),
         None => 1.0,
     };
     // The bitmaps are sized in the space `draw` writes into, so a preview decodes
     // and resamples at preview size instead of paying for the export and letting
     // Cairo shrink it. `draw`'s own `scale` then brings canvas pixels to device
     // pixels, and the pattern is 1:1 in both cases.
-    let canvas_px = pixlay_core::PixelSize {
-        width: pixlay_render::output_px(full.width, scale),
-        height: pixlay_render::output_px(full.height, scale),
+    let bitmap_px = PixelSize {
+        width: pixlay_render::output_px(canvas_px.width, scale),
+        height: pixlay_render::output_px(canvas_px.height, scale),
     };
 
     let stopwatch = stats::Stopwatch::start();
     // The photo-free path has no cells to decode: every slot stays white.
     let images = match &args.source {
-        Source::Project(_) => decode_slots(&doc, &sources, canvas_px)?,
+        Source::Project(_) => decode_slots(&doc, &sources, bitmap_px)?,
         Source::Template(_) => Images::new(),
     };
-    let image = pixlay_render::render_rgb8(&doc, &images, args.dpi, scale, None)
+    let image = pixlay_render::render_rgb8_sized(&doc, &images, canvas_px, scale, None)
         .map_err(|error| Failure::Failed(error.to_string()))?;
     let compose = stopwatch.elapsed();
 
+    // Pixels and metadata in one pass: the encoder writes the resolution and the
+    // sRGB profile while it writes the image (`pixlay_imaging::encode`).
     let encode_watch = stats::Stopwatch::start();
-    let bytes = encode::write(&args.out, format, &image).map_err(Failure::Failed)?;
+    let bytes = pixlay_imaging::encode::write(
+        &args.out,
+        &Export {
+            format,
+            dpi,
+            chroma: args.chroma,
+            image: Rgb8View {
+                width: image.width,
+                height: image.height,
+                data: &image.data,
+            },
+        },
+    )
+    .map_err(|error| Failure::Failed(error.to_string()))?;
     let encode_ms = encode_watch.elapsed();
 
     let mut report = Report::new();
     report.text("status", "ok");
     report.text("command", "render");
     report.text("format", format.name());
-    report.int("dpi", i64::from(args.dpi));
+    match args.size {
+        // An integer in physical mode: the resolution the user asked for, which is
+        // what the file carries.
+        Size::Dpi(dpi) => {
+            report.int("dpi", i64::from(dpi));
+        }
+        // A decimal in pixel mode: the resolution the grid works out to, which is
+        // the number the file carries.
+        Size::LongEdge(pixels) => {
+            report.int("long_edge", i64::from(pixels));
+            report.float("dpi", dpi);
+        }
+    }
+    if format == Format::Jpeg {
+        report.text("chroma", args.chroma.name());
+    }
     report.int("cells", doc.cells.len() as i64);
     report.int("occupied", images.len() as i64);
     report.int("text", doc.text.len() as i64);
@@ -237,7 +290,13 @@ fn render(args: RenderArgs) -> Result<u8, Failure> {
     if let Some(preview) = args.preview_px {
         report.int("preview_px", i64::from(preview));
     }
-    add_stats(&mut report, args.stats, compose, Some(encode_ms));
+    add_stats(
+        &mut report,
+        args.stats,
+        compose,
+        Some(encode_ms),
+        icc::DESCRIPTION,
+    );
     emit(&report, args.json);
     Ok(EXIT_SUCCESS)
 }
@@ -519,7 +578,7 @@ fn probe(args: ProbeArgs) -> Result<u8, Failure> {
         report.bool(&format!("{prefix}.clean"), seam.is_clean());
     }
     report.bool("passed", result.ok());
-    add_stats(&mut report, args.stats, compose, None);
+    add_stats(&mut report, args.stats, compose, None, "none");
     emit(&report, args.json);
 
     // The numbers are the result, so they go to stdout; the verdict on stderr,
@@ -530,11 +589,15 @@ fn probe(args: ProbeArgs) -> Result<u8, Failure> {
     }
 }
 
+/// Appends the ruler's fields. `icc` is the profile the *file* carries, so a
+/// command that writes no file reports `none` rather than naming a profile
+/// nothing embedded.
 fn add_stats(
     report: &mut Report,
     enable: bool,
     compose: std::time::Duration,
     encode: Option<std::time::Duration>,
+    icc: &str,
 ) {
     if !enable {
         return;
@@ -546,7 +609,7 @@ fn add_stats(
     if let Some(peak) = stats::peak_rss_mb() {
         report.float("peak_rss_mb", peak);
     }
-    report.text("icc", stats::ICC);
+    report.text("icc", icc);
 }
 
 fn emit(report: &Report, json: bool) {

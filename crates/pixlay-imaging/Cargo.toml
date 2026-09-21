@@ -1,6 +1,6 @@
 [package]
 name = "pixlay-imaging"
-description = "Decoding, resampling, color adjustment, EXIF and color space handling."
+description = "Decoding, resampling, color adjustment, EXIF, color space handling and encoding."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -25,3 +25,13 @@ glycin = "4.0.0"
 # only completes while its main context is being iterated.
 glib = { version = "0.22", features = ["futures"] }
 gio = "0.22"
+# Encoding (S6): one pass per format, writing pixels and metadata together —
+# resolution and the sRGB profile. The `image` crate's writers expose neither
+# (`image` leaves them at the defaults), and Cairo's PNG writer emits no pHYs and
+# no iCCP at all, so the encoder is these three crates directly.
+png = "0.18.1"
+jpeg-encoder = "0.7.1"
+# LZW only: it is the compression the S0 baseline measured for TIFF, and every
+# reader understands it. The other codecs this crate ships are decoders we never
+# call.
+tiff = { version = "0.11.3", default-features = false, features = ["lzw"] }

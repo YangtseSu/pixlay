@@ -206,7 +206,8 @@ fn outline_path(ctx: &Context, outline: &Polygon, canvas: PixelSize) {
     ctx.close_path();
 }
 
-/// Renders `doc` into a fresh image surface.
+/// Renders `doc` into a fresh image surface of the canvas pixel size `canvas_px`,
+/// scaled by `scale`.
 ///
 /// A thin wrapper: it allocates the surface, builds the context and calls
 /// [`draw`]. Previews and exports differ only in `scale` and `band`.
@@ -217,10 +218,27 @@ pub fn render_surface(
     scale: f64,
     band: Option<Band>,
 ) -> Result<ImageSurface, RenderError> {
+    render_surface_sized(doc, images, doc.canvas.pixel_size(dpi)?, scale, band)
+}
+
+/// The same, with the canvas pixel grid given directly.
+///
+/// A resolution is an export parameter, not a renderer concept, and the two
+/// export modes produce grids no single DPI reproduces:
+/// `CanvasSpec::pixel_size` rounds both edges from a DPI, while
+/// `CanvasSpec::pixel_size_for_long_edge` makes one edge exact. Taking the grid
+/// rather than the DPI is also what keeps the caller's arithmetic and the
+/// renderer's the same arithmetic — `draw` places every slot in these pixels.
+pub fn render_surface_sized(
+    doc: &CollageDoc,
+    images: &Images,
+    canvas_px: PixelSize,
+    scale: f64,
+    band: Option<Band>,
+) -> Result<ImageSurface, RenderError> {
     if !scale.is_finite() || scale <= 0.0 {
         return Err(RenderError::InvalidScale(scale));
     }
-    let canvas_px = doc.canvas.pixel_size(dpi)?;
     // The whole render's size, rounded once. Band sizes are then carved out of
     // it in output pixels, which is the only partition whose parts sum to the
     // whole (rounding is not additive).
@@ -335,6 +353,18 @@ pub fn render_rgb8(
     band: Option<Band>,
 ) -> Result<Rgb8Image, RenderError> {
     let surface = render_surface(doc, images, dpi, scale, band)?;
+    rgb8(&surface)
+}
+
+/// [`render_surface_sized`] followed by [`rgb8`].
+pub fn render_rgb8_sized(
+    doc: &CollageDoc,
+    images: &Images,
+    canvas_px: PixelSize,
+    scale: f64,
+    band: Option<Band>,
+) -> Result<Rgb8Image, RenderError> {
+    let surface = render_surface_sized(doc, images, canvas_px, scale, band)?;
     rgb8(&surface)
 }
 

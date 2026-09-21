@@ -288,6 +288,76 @@ fn canvas_limits_and_rounding() {
     assert!(CanvasSpec::new(5000.0, 100.0).validate().is_err());
 }
 
+/// The pixel-count export mode (S6): the long edge is exact, the other edge keeps
+/// the ratio, and the resolution the file then carries is derived from the grid.
+#[test]
+fn a_long_edge_is_exact_and_the_other_edge_keeps_the_ratio() {
+    let square = CanvasSpec::SQUARE;
+    let pixel = square
+        .pixel_size_for_long_edge(1000)
+        .expect("a square grid");
+    assert_eq!((pixel.width, pixel.height), (1000, 1000));
+
+    // A4 landscape: 297 x 210 mm. 1000 px on the long edge, and
+    // round(210 / 297 * 1000) = 707 on the short one.
+    let pixel = CanvasSpec::A4_LANDSCAPE
+        .pixel_size_for_long_edge(1000)
+        .expect("landscape");
+    assert_eq!((pixel.width, pixel.height), (1000, 707));
+
+    // The same canvas portrait puts the exact edge on the other axis.
+    let pixel = CanvasSpec::A4_PORTRAIT
+        .pixel_size_for_long_edge(1000)
+        .expect("portrait");
+    assert_eq!((pixel.width, pixel.height), (707, 1000));
+
+    // The rounding rule is half away from zero, the same as `pixel_size`'s:
+    // 210 / 595 * 1000 = 352.94, and 1000 is exact either way.
+    let pixel = CanvasSpec::new(595.0, 210.0)
+        .pixel_size_for_long_edge(1000)
+        .expect("an A-series long edge");
+    assert_eq!((pixel.width, pixel.height), (1000, 353));
+
+    // A0 landscape at 16000 px: 16000 x 11317 (round(841 / 1189 * 16000)), and the
+    // resolution the grid works out to is 341.8 dpi.
+    let a0 = CanvasSpec::A0_LANDSCAPE
+        .pixel_size_for_long_edge(16_000)
+        .expect("well inside the budget");
+    assert_eq!((a0.width, a0.height), (16000, 11317));
+    assert!((CanvasSpec::A0_LANDSCAPE.dpi_for(a0) - 16000.0 * 25.4 / 1189.0).abs() < 1e-9);
+
+    // The flag's range and the canvas budget are two different limits and both
+    // apply: 30000 is inside the range, and a 4:3 canvas at that edge is 636.6 MP,
+    // over the 200 MP budget. The budget is what refuses it, and the message says
+    // how much it was.
+    let err = CanvasSpec::A0_LANDSCAPE
+        .pixel_size_for_long_edge(pixlay_core::MAX_LONG_EDGE_PX)
+        .expect_err("over the canvas budget");
+    assert!(err.to_string().contains("636600000 pixels"), "{err}");
+
+    // A resolution in physical mode is echoed, not derived: an A4 at 300 dpi is
+    // 2480 x 3508 px, which is 300.01 dpi on the long edge and 299.96 on the short
+    // one, and the file still says 300 — that is the number the user asked for.
+    let a4 = CanvasSpec::A4_PORTRAIT.pixel_size(300).expect("A4@300dpi");
+    assert!(CanvasSpec::A4_PORTRAIT.dpi_for(a4) > 300.0);
+
+    // The range, and the canvas budget the grid still has to respect: a square
+    // canvas at the maximum edge is 900 MP.
+    for pixels in [0, pixlay_core::MAX_LONG_EDGE_PX + 1] {
+        let err = square
+            .pixel_size_for_long_edge(pixels)
+            .expect_err("outside the range");
+        assert!(err.to_string().contains("long edge"), "{pixels}: {err}");
+    }
+    let err = square
+        .pixel_size_for_long_edge(20000)
+        .expect_err("over the canvas budget");
+    assert!(err.to_string().contains("400000000 pixels"), "{err}");
+    // Exactly at the budget is inside it (14142^2 = 199,996,164).
+    let pixel = square.pixel_size_for_long_edge(14142).expect("inside");
+    assert_eq!(pixel.pixels(), 199_996_164);
+}
+
 #[test]
 fn crop_transform_limits() {
     CropTransform::IDENTITY.validate().expect("identity");

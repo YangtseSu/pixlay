@@ -1,4 +1,5 @@
-//! Decoding, resampling, color adjustment, EXIF and color space handling.
+//! Decoding, resampling, color adjustment, EXIF, color space handling and
+//! encoding.
 //!
 //! Boundary: no gtk, and no cairo either — a bitmap leaves this crate as a bare
 //! buffer, and the receiving thread (or the caller) wraps it. Threading is the
@@ -41,10 +42,17 @@
 //! [`slot_bitmaps`] does all of it for a whole document; [`slot_bitmap`] does it
 //! for one slot, and [`resample`] is public because the tests measure it directly
 //! (the aliasing and RMSE criteria are about that one stage).
+//!
+//! The mirror image of the pipeline is the export: [`encode`] writes PNG, JPEG or
+//! TIFF with the resolution and the sRGB profile ([`icc`]) in the same pass as the
+//! pixels. It lives here because it is pixels in and pixels out — no cairo, no gtk
+//! — and because both the CLI and the GUI export through it.
 
 pub mod decode;
 mod driver;
+pub mod encode;
 pub mod exif;
+pub mod icc;
 pub mod layout;
 pub mod linear;
 pub mod probe;
@@ -56,6 +64,7 @@ mod error;
 pub use decode::{
     DECODE_TIMEOUT, DecodeLimits, Depth, MAX_DECODE_EDGE, MAX_DECODE_PIXELS, Sampler, Source,
 };
+pub use encode::{Chroma, Export, Format};
 pub use error::ImagingError;
 pub use layout::{REGION_GUARD_PX, SlotBitmap, slot_bitmap, slot_bitmaps};
 pub use linear::{LinearRgb16, LinearRgba16};

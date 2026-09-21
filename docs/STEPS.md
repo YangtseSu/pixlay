@@ -16,8 +16,8 @@ The first sentence for a new session:
 
 Legend: ✅ done · 🚧 in progress · ⏸ blocked (waiting on a human decision or external input) · ⬜ not started
 
-**Current progress: S5 — ✅ done (2026-09-21, no unfinished work; its one human gate — the CJK kinsoku and punctuation-squeezing feel — is open in "Where humans must step in" with its preview at `/var/tmp/pixlay-s5/text-preview.png`)**
-**Next action: start S6 (export: physical size + DPI and long-edge-pixels modes, pixels and metadata written in one pass). The boundary list pairs S5 with S6 in one session; this one ended at the S5 result because the task was S5.**
+**Current progress: S6 — ✅ done (2026-09-21, no unfinished work; the step has no human gate of its own — the one visual question it inherits, S4's downsampling quality, stays open in "Where humans must step in")**
+**Next action: start S6.5 (command history / project IO / hit testing), which is windowless and gate-free. The boundary list's session ended with the S5+S6 pair, and this session was that pair (S5 as its task, then S6); S7 opens a new session of its own, as the boundary list says.**
 
 | Step | Status | Date | What it delivers |
 |---|---|---|---|
@@ -27,7 +27,7 @@ Legend: ✅ done · 🚧 in progress · ⏸ blocked (waiting on a human decision
 | S3 · Framing and clamp | ✅ done | 2026-09-21 | `CropTransform::fit`: absolute-zoom framing whose request is fitted to the slot by raising the zoom, clamping the pan and, past `CLAMP_ZOOM_LIMIT`, limiting the rotation; applied by `draw`, exact on all 64 shipped slots |
 | S4 · Image pipeline | ✅ done | 2026-09-21 | `pixlay-imaging`: the sandboxed glycin decoder (HEIC included), EXIF orientation applied to the pixels, a 16-bit linear Lanczos3 resample of the region each slot shows, per-slot grading and the global filter, the buffer ladder, and the probe moved down from the CLI |
 | S5 · Text layers | ✅ done | 2026-09-21 | Canvas-level text in `pixlay-render` with Pango: free placement and tiled watermark through one mechanism, `{date}`/`{filename}`/`{index}` from the slot's photo, kinsoku by Pango and punctuation squeezing through the font's `halt`; `text` added to the CLI and the probe refuses text documents |
-| S6 · Export | ⬜ not started | — | Physical size + DPI and long-edge-pixels modes, pixels and metadata written in one pass |
+| S6 · Export | ✅ done | 2026-09-21 | Physical size + DPI and long-edge-pixels modes, pixels and metadata written in one pass: `pixlay-imaging::encode` (PNG/JPEG/TIFF) + `icc`, `--long-edge` / `--chroma`, `dpi_for` |
 | S6.5 · Command history / project IO / hit testing | ⬜ not started | — | `Command` + undo stack, `.pixlay` save/load with atomic write, point → slot hit testing |
 | S7 · GTK shell and interaction | ⬜ not started | — | The window: the three-minute main path, keyboard and HIG conformance, i18n wiring |
 | S8 · Packaging | ⬜ not started | — | `PKGBUILD`, desktop file, icons, metainfo, translations; installable from AUR |
@@ -829,7 +829,7 @@ one — the product's look.
   to assert that no line starts with a forbidden character; punctuation squeezing asserts that the spacing between adjacent punctuation is smaller than the default spacing
 - the font size must use **normalized canvas-relative units**, otherwise the preview/export RMSE criterion fails immediately
 
-## S6 · Export — ⬜ not started
+## S6 · Export — ✅ done (2026-09-21)
 
 - **Goal**: both export modes are correct, and metadata is done in one pass.
 - **Work**: physical size + DPI mode; specified long-edge-in-pixels mode; encoding and metadata inside the same pipeline.
@@ -840,6 +840,10 @@ one — the product's look.
   - A0 can produce PNG / JPEG / TIFF
 - **Not doing**: no export UI; no PDF (not in scope).
 - **Human**: none. The one visual question this step inherits is S4's downsampling quality.
+- **Done (2026-09-21)**: `pixlay-imaging::encode` (PNG/JPEG/TIFF, one pass) plus
+  `pixlay-imaging::icc` (the sRGB profile built from the IEC 61966-2.1 colorimetry),
+  `CanvasSpec::pixel_size_for_long_edge` / `dpi_for`, the `render_*_sized` shells, and the
+  CLI's `--long-edge` / `--chroma` / `.tif`; criteria, decisions and numbers in "S6 result".
 
 ### S6 · review additions (2026-09-20)
 
@@ -852,6 +856,126 @@ one — the product's look.
 - the time cap uses a relative value (≤ 3× the baseline); the baseline is in "Measured baseline"
 - **the path where artifacts land on disk**: on this machine `/tmp` is tmpfs (7.5 GB), an A0 photo-content PNG is 342 MB and a TIFF 476 MB, so writing tmpfs costs another copy in memory
 - banding is the export path's memory lever: `Band::out_rows` partitions output pixels, and S1 measured A0 landscape 10 slots at 300dpi dropping from 1470 MB whole to 597 MB in 16 bands (see S1's ruling, item 1)
+
+### S6 result (2026-09-21)
+
+`[all criteria are in the tests in the repository; the numbers below are the release binary's output on this machine unless a test is named]`
+
+The exit criteria, item by item:
+
+| Criterion | Landing point | Measured |
+|---|---|---|
+| physical-size mode: the file carries the correct DPI and ICC | `pixlay-imaging/tests/encode.rs` (`the_png_carries_its_resolution_and_profile`, `the_jpeg_carries_its_resolution_profile_and_subsampling`, `the_tiff_carries_its_tags_and_round_trips`), `pixlay-cli/tests/cli.rs::every_export_format_is_written_with_its_metadata` | **300 dpi and the profile in all three formats**, read back by tools that are not ours: `identify -verbose` reports `300x300 PixelsPerInch` + `Profile-icc: 664 bytes` + `icc:description: sRGB IEC61966-2.1` for the JPEG and TIFF, `118.11x118.11 PixelsPerCentimeter` (= 11811 px/m = 300.00 dpi, the `pHYs` unit) for the PNG, and `tiffinfo` reports `Resolution: 300, 300 pixels/inch` + `ICC Profile: <present>, 664 bytes`. The PNG test also pins that the `sRGB` chunk is **not** written next to `iCCP` |
+| long-edge mode: the long-edge pixel count matches the request exactly | `pixlay-core/tests/contract.rs::a_long_edge_is_exact_and_the_other_edge_keeps_the_ratio`, `pixlay-cli/tests/cli.rs::long_edge_is_exact_and_carries_the_resolution_it_works_out_to` | `--long-edge 9000` on the A0 project renders **9000x6750** (the file and the report agree), and a portrait canvas puts the exact edge on the other axis (`1234` high, `823` wide for a 2:3 canvas). The core test sweeps square / landscape / portrait / A-series and the rounding rule (`round(n * short / long)`, half away from zero), and pins that the flag's range and the canvas budget are two limits that both apply |
+| chroma subsampling matches the request (the two-pass trap) | `pixlay-imaging/tests/encode.rs` (all three values), `pixlay-cli/tests/cli.rs::chroma_reaches_the_jpeg_it_was_asked_for` | the assertion is on the file's own `SOF0` sampling factors: `1x1,1x1,1x1` (444, the default), `2x1,1x1,1x1` (422), `2x2,1x1,1x1` (420), and `identify` reads the same back (`jpeg:sampling-factor: 2x2,1x1,1x1`). This is the check the trap fails: re-encoding to patch metadata rewrites the factors whatever the request was. `--chroma` with a PNG/TIFF `--out` is a usage error (exit 1, nothing written) |
+| A0 can produce PNG / JPEG / TIFF | "S6 · measured" below | **all three** at 14043x10532: JPEG 9,216,300 bytes / `encode_ms` 1799, PNG 33,955,066 / 5709, TIFF 42,748,009 / 2495, each `peak_rss_mb` **1643/1642/1642** against the 2.5 GB budget, and each decoded back by ImageMagick at the right size, resolution and profile |
+
+**The criteria the review additions added**, and where they landed:
+
+| Item | Landing point | Measured |
+|---|---|---|
+| "cairo supplies pixels only, the encoder writes the metadata itself" | `pixlay-imaging/src/encode.rs` (module docs: the per-format field list and the rounding rules) | no format is written twice: PNG's `pHYs`/`iCCP` go into the header before the `IDAT` stream, JPEG's density/sampling/`APP2` are set on the encoder before `encode`, TIFF's tags are written before the strips |
+| the per-format field list is in the criteria | `docs/CONTRACT.md` §5 ("per-format metadata") | PNG `pHYs` + `iCCP`; JPEG JFIF density + `APP2` + `SOF0`; TIFF `XResolution`/`YResolution`/unit + tag 34675. The PNG `sRGB` chunk is deliberately absent (the specification says it should not accompany `iCCP`) |
+| the rounding rule and "what DPI is written" in pixel mode | `docs/CONTRACT.md` §5 + `encode.rs`'s rounding constants | `dpi = long_edge_px * 25.4 / long_edge_mm` (one number for both axes, the long edge's); PNG stores `round(dpi * 1000 / 25.4)` px/m, JPEG `round(dpi)` px/inch in 16 bits (past 65535 it is refused, not saturated), TIFF `round(dpi * 100) / 100` as a rational |
+| the time cap (≤ 3x the baseline) | "S6 · measured" | JPEG 1799 ms against S4/S5's 2469 ms (0.73x, the same project and content); PNG 5709 ms against S0's 27773 ms (0.21x, different content, so a ceiling check); TIFF 2495 ms against S0's 4800 ms |
+| artifacts land on disk, never on tmpfs | both test files' `out_dir` (`$XDG_CACHE_HOME` or `/var/tmp`), this session's output in `/var/tmp/pixlay-s6/` | the A0 PNG is 34 MB and the TIFF 43 MB; tmpfs would have held another copy |
+| banding is the export path's memory lever | not used — see "S6 · decisions" 5 | the measured export peak is 1643 MB of a 2.5 GB budget, and the encoder APIs take a whole buffer per frame, so banding would save the surface without changing what the encoders need |
+
+### S6 · decisions this step made
+
+1. **The encoder lives in `pixlay-imaging`, and it is three writers used directly.**
+   `image` could not do the job: its PNG writer exposes neither the pixel dimensions nor the ICC
+   profile, and its JPEG writer neither the sampling factor nor the `APP2` profile (it is
+   zune-jpeg). So S6 depends on `png`, `jpeg-encoder` and `tiff` directly — all three were
+   already in the tree as dependencies of `image`/`glycin-image-rs`, so the download set did not
+   grow, and `image` moved to `pixlay-cli`'s dev-dependencies, where it is what the tests read
+   renders back with. The encoder sits beside the decoder because it is the same boundary (pixels
+   in, pixels out, no cairo and no gtk) and because the GUI will export through it in S7.
+2. **The ICC profile is generated, not shipped.** `docs/STEPS.md`'s own decision was "embed the
+   sRGB IEC61966-2.1 profile bytes; do not pull in lcms2", and there is no trustworthy copy of
+   those bytes in the tree. `pixlay_imaging::icc` builds an ICC v4 display profile from the
+   published colorimetry instead: the primaries and the D65 white point as chromaticities, the
+   piecewise transfer function as a `para` type-3 curve, and a Bradford D65→D50 adaptation — the
+   same shape and the same numbers lcms2 writes. It is ~200 lines of matrix arithmetic with no
+   colour code of ours in any *conversion* (the conversion is still the loader's), and it is
+   checkable against an implementation that is not ours: the fixture's embedded lcms2 profile.
+   Measured: colorants within **2.2e-4**, all five curve parameters within **1.5e-5** (one unit in
+   the last place of 15.16 fixed point), and ImageMagick converting an export *from* this profile
+   *to* colord's sRGB moves the pixels by **0.0015/255** — lcms2 reads the two as the same space.
+   The alternative (committing a third-party `.icc` blob) would have meant shipping bytes whose
+   provenance and licence had to be argued about in S8, for no gain.
+3. **A pixel count and a resolution are two requests, and the file echoes whichever was made.**
+   `--dpi 300` writes 300 dpi even though the rounded grid is 299.96 dpi of actual pixels (A4), and
+   `--long-edge n` derives the resolution from the grid it rendered. That asymmetry is deliberate:
+   a printer queue is built around the number the user typed, and a pixel request has no number to
+   echo, so writing the achieved resolution is the only honest answer. The two flags are mutually
+   exclusive, and neither is silently converted into the other. `draw` itself no longer sees a DPI
+   at all — `CanvasSpec::pixel_size_for_long_edge` and `pixel_size` both produce a pixel grid, and
+   `render_rgb8_sized` takes it (`render_rgb8` is the DPI convenience wrapper).
+4. **The long-edge range and the canvas budget are two different limits.** `MAX_LONG_EDGE_PX`
+   is 30000, because A0 at the maximum DPI is 28087 px and anything past that is a typo rather than
+   a print; the 200 MP budget is checked on the grid the flag derives, so `--long-edge 20000` on a
+   square canvas is refused with the pixel count in the message. The flag's own range is a usage
+   error (exit 1, the S1 rule for out-of-range values); the budget is a document error (exit 2).
+5. **Export renders whole; banding is not used here.** The review pointed at `Band::out_rows` as
+   the memory lever, and it is — for *rendering*. For *encoding* the APIs decide the shape: `png`
+   wants the whole frame's rows in one call, `jpeg-encoder` wants the whole buffer (`encode(&[u8])`),
+   `tiff` could stream strips but the RGB buffer would still exist. So a banded export would save
+   the ARgb32 surface while the encoders still need the whole RGB image, and the measured peak
+   (1643 MB against the 2.5 GB budget) says the lever is not needed. Recorded rather than silently
+   skipped: if a future step needs the last 550 MB, a banded path that renders into the RGB buffer
+   directly is the place to look.
+6. **JPEG quality stays 90, and 4:4:4 stays the default.** Both are S0/S4's numbers, so every
+   measurement in this file stays comparable, and `AGENTS.md` fixes 4:4:4 as the default; `--chroma`
+   is the request surface for the two subsampled modes, which the encoder writes into the frame
+   header.
+7. **TIFF is LZW with the horizontal predictor.** The S0 baseline measured `magick -compress LZW`,
+   every reader understands it, and the `tiff` crate's `deflate`/`fax`/`jpeg` features are switched
+   off in our manifest — a TIFF decoder we never call is not a dependency worth shipping. The ICC
+   tag is written as its spec'd type (`UNDEFINED`, tag 34675): `write_tag` can only express `BYTE`
+   for a byte slice, so the payload is written first and the entry built from its offset.
+8. **`--stats`'s `icc` field became real.** It was the string `none` from S1 (a placeholder so the
+   field's shape would not change); it is now the description of the profile the written file
+   carries. It is checkable from both ends: the encoder test reads the profile's own `desc` tag back
+   out of the file, and the CLI test asserts the report names the same description the encoder
+   writes. A command that writes no file (`probe`) still reports `none`, which is now a statement
+   about that command rather than a stub.
+
+### S6 · measured (2026-09-21, `--release`, this machine)
+
+The `AGENTS.md` verification render, eight photos and one `{date}` layer at 300 dpi on A0
+(14043x10532), one row per format:
+
+| Item | Value |
+|---|---|
+| JPEG q90 4:4:4 | **9,216,300 bytes**, `encode_ms` **1799**, whole run `ms` 6559, **`peak_rss_mb` 1643** |
+| JPEG q90 4:2:0 (`--chroma 420`) | **6,110,454 bytes** (−34%), `encode_ms` **1031**, `ms` 6393, peak 1643 |
+| PNG | **33,955,066 bytes**, `encode_ms` **5709**, `ms` 6316, peak 1642 |
+| TIFF (LZW + predictor) | **42,748,009 bytes**, `encode_ms` **2495**, `ms` 6250, peak 1642 |
+| the S0–S5 JPEG baseline, same content | 9,114,833 bytes / `encode_ms` 2469: the new writer is **1.1% larger and 27% faster** |
+| `--long-edge 9000` (pixel mode) | 9000x6750, `dpi` **192.262405**, `pHYs` 7569 px/m (`identify`: 75.69 px/cm), 16,948,376 bytes, `encode_ms` 2988, `ms` 2497, **`peak_rss_mb` 712** |
+| the same project as a 1600 px preview | `ms` 315 + `encode_ms` 423, `peak_rss_mb` 54, 1,010,033 bytes |
+| what the tools see | PNG `Resolution: 118.11x118.11 PixelsPerCentimeter`; JPEG `300x300 PixelsPerInch`, `jpeg:sampling-factor: 1x1,1x1,1x1`; TIFF `Resolution: 300, 300 pixels/inch`, `ICC Profile: <present>, 664 bytes`; all three `icc:description: sRGB IEC61966-2.1` |
+| the profile against lcms2 | `magick export.png -profile /usr/share/color/icc/colord/sRGB.icc` → RMSE **0.378 of 65535** = 0.0015/255 over a 1200 px preview |
+| visual inspection | `/var/tmp/pixlay-s6/preview.png`: eight slots, the concave slot continuous, the `{date}` caption `2019:07:14 10:32:00`, no white inside any slot |
+
+### S6 · deviations from and additions to the review additions
+
+1. **The per-format list gained a subtraction.** The review wrote "PNG = pHYs + iCCP (+ sRGB
+   chunk)"; the profile is authoritative and the PNG specification says `sRGB` and `iCCP` should not
+   both appear, so `sRGB` is *not* written. A test asserts its absence, so re-adding it is a
+   deliberate edit rather than a silent one.
+2. **The JPEG profile goes in `APP2` only.** The review offered "JFIF density **or** EXIF resolution
+   + APP2 ICC"; JFIF is what `jpeg-encoder` writes and what every reader looks at first, and an
+   export's metadata in one place is easier to verify than the same number in two. EXIF is not
+   written at all (S6 has no EXIF requirement, and v1 does not preserve source metadata).
+3. **The encoder writes no chroma subsampling for PNG/TIFF, and the CLI refuses the flag rather
+   than ignoring it** — the S1 rule that a silently dropped flag looks like it worked.
+4. **`image` left the production dependency set**, which the review's "for now the `image` crate
+   stands in; S6 decides whether it stays" explicitly left open. It stays as a *test* dependency,
+   which is where it earns its place (reading renders back and writing fixture photos).
+5. **`--quality` was not added.** The criteria ask for chroma subsampling, not for a quality knob,
+   and a flag nobody tests is a flag that breaks quietly; quality is 90 at one place in the code.
 
 ## S6.5 · Command history / project IO / hit testing (still windowless) — ⬜ not started
 
@@ -1024,7 +1148,7 @@ Not done: `cargo vendor` currently has empty dependencies, so this criterion can
 | Question | Recommendation |
 |---|---|
 | source ICC | v1 does not read the source ICC and interprets everything as sRGB, and the documentation states that this is a known limitation (doing it properly needs lcms2 + a rendering-intent definition) |
-| output ICC | embed the sRGB IEC61966-2.1 profile bytes; do not pull in lcms2 |
+| output ICC | embed the sRGB IEC61966-2.1 profile bytes; do not pull in lcms2. **Executed in S6 (2026-09-21)**: the bytes are *generated* in `pixlay_imaging::icc` from the published colorimetry (ICC v4 `mntr`/`RGB `/`XYZ `, `para` TRC, Bradford `chad`) rather than committed as a third-party blob, and validated against the lcms2 profile committed in `photos/adobe-rgb-srgb.png` (colorants within 2.2e-4, and ImageMagick converting through it moves the pixels by 0.0015/255) |
 | decoding backend | see "The two paths for the decoding backend" below; measure first, then decide, **and this decision determines S8's `depends`** |
 | fonts | production does not bundle fonts (Noto Sans CJK is too large); the golden text tests use a small test font committed in the repository, and checks that render with system fonts are marked `#[ignore]`. **Executed in S5 (2026-09-21)**: production asks fontconfig for `sans-serif` and names no font; `crates/pixlay-cli/tests/fixtures/fonts/pixlay-test-sans.otf` (93 KB, a subset of Noto Sans CJK SC with `halt` kept, regenerated by `generate.py`) is what the text tests measure with, pinned by `FONTCONFIG_FILE` in a child process. **No test needs a system font at all** — so none is `#[ignore]`d for that reason, and S8's `check()` can run the text measurements in a font-free chroot |
 | dependency registry | every new dependency is registered in AGENTS (name / version / why / size); S1 registers the first batch in one go |

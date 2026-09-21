@@ -1,6 +1,6 @@
 //! Argument parsing for the machine surface.
 //!
-//! No argument-parsing crate: the surface is five subcommands and a dozen
+//! No argument-parsing crate: the surface is six subcommands and a score of
 //! flags, and the contract (exit codes, stdout purity, locale independence)
 //! needs exact control over every message.
 //!
@@ -13,13 +13,17 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-use pixlay_core::{MAX_DPI, MIN_DPI};
+use pixlay_core::{MAX_DPI, MAX_LONG_EDGE_PX, MIN_DPI};
+use pixlay_imaging::Chroma;
 
 use crate::cli::Failure;
 
 /// Largest preview edge in pixels; a preview larger than this cannot be reviewed
 /// by eye anyway.
 pub const MAX_PREVIEW_PX: i32 = 20000;
+
+/// Resolution a render uses when neither `--dpi` nor `--long-edge` is given.
+pub const DEFAULT_DPI: u32 = 300;
 
 /// File extension a project written by `init` must have. A `.pixlay` is a
 /// document, and a mistyped extension is more likely a typo than an intention.
@@ -42,10 +46,21 @@ RENDER OPTIONS:
     --project <file>    Project to render. Paths inside it are relative to it.
     --template <name>   Render a template with no photos (see `templates`).
     --out <file>        Output file. Format comes from the extension:
-                        .png, .jpg, .jpeg. Required.
-    --dpi <n>           Export resolution, 72..=600. Default 300.
+                        .png, .jpg, .jpeg, .tif, .tiff. Required.
+    --dpi <n>           Export resolution, 72..=600. Default 300. The output is
+                        the canvas size at that resolution, and the file carries
+                        this number.
+    --long-edge <n>     Export a long edge of exactly n pixels, 1..=30000, and
+                        write the resolution that pixel grid works out to. The
+                        other edge follows the canvas ratio, rounded. Exclusive
+                        with --dpi, which it replaces.
+    --chroma <j:a:b>    JPEG chroma subsampling: 444 (the default), 422 or 420.
+                        A JPEG-only flag: sampling is what the encoder does.
     --preview-px <n>    Render the long edge at n pixels instead of full size,
-                        1..=20000. The same draw, only the scale changes.
+                        1..=20000. The same draw, only the scale changes (and
+                        the bitmaps are sized for it, so a preview does not pay
+                        for the export). Exclusive with --long-edge, which sizes
+                        the export itself.
 
 PROBE OPTIONS:
     --project <file>    Project to probe. Required.
@@ -123,10 +138,23 @@ pub enum Source {
 pub struct RenderArgs {
     pub source: Source,
     pub out: PathBuf,
-    pub dpi: u32,
+    pub size: Size,
     pub preview_px: Option<i32>,
+    pub chroma: Chroma,
     pub stats: bool,
     pub json: bool,
+}
+
+/// How a render decides its pixel grid.
+///
+/// The two modes are the two ways a user asks for an output size, and they are
+/// not interchangeable: a resolution is a request the file echoes back, while a
+/// pixel count is a request the file's resolution is derived from.
+pub enum Size {
+    /// A resolution in dots per inch, 72..=600.
+    Dpi(u32),
+    /// A long edge in pixels, 1..=30000; that edge is exactly this.
+    LongEdge(u32),
 }
 
 pub struct ImageArgs {
@@ -164,6 +192,8 @@ struct Flags {
     template: Option<String>,
     out: Option<PathBuf>,
     dpi: Option<u32>,
+    long_edge: Option<u32>,
+    chroma: Option<Chroma>,
     preview_px: Option<i32>,
     photo: Option<PathBuf>,
     aspect: Option<f64>,
@@ -177,7 +207,16 @@ struct Flags {
 /// a silently dropped `--dpi 300` on `templates` looks like it was honored.
 fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static str)> {
     let valid: &[&str] = match name {
-        "render" => &["project", "template", "out", "dpi", "preview-px", "stats"],
+        "render" => &[
+            "project",
+            "template",
+            "out",
+            "dpi",
+            "long-edge",
+            "chroma",
+            "preview-px",
+            "stats",
+        ],
         "probe" => &["project", "dpi", "stats"],
         "image" => &["photo"],
         "text" => &["project"],
@@ -185,11 +224,13 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
         "init" => &["template", "out"],
         _ => &[],
     };
-    let present: [(&'static str, bool); 8] = [
+    let present: [(&'static str, bool); 10] = [
         ("project", flags.project.is_some()),
         ("template", flags.template.is_some()),
         ("out", flags.out.is_some()),
         ("dpi", flags.dpi.is_some()),
+        ("long-edge", flags.long_edge.is_some()),
+        ("chroma", flags.chroma.is_some()),
         ("preview-px", flags.preview_px.is_some()),
         ("photo", flags.photo.is_some()),
         ("aspect", flags.aspect.is_some()),
@@ -223,6 +264,16 @@ fn reason(name: &str, flag: &str) -> &'static str {
         ("probe", "template") => "probe reads a project",
         ("probe", "out") => "probe writes no file",
         ("probe", "preview-px") => "probe always renders at full size",
+        ("probe", "long-edge") => "probe always renders at full size",
+        ("probe", "chroma") => "probe writes no file to subsample",
+        ("text", "long-edge") => "text renders nothing; size is a fraction of the canvas",
+        ("text", "chroma") => "text renders nothing",
+        ("image", "long-edge") => "image decodes at the file's own size",
+        ("image", "chroma") => "image writes no file",
+        ("templates", "long-edge") => "templates only lists the library",
+        ("templates", "chroma") => "templates only lists the library",
+        ("init", "long-edge") => "init only writes the project file",
+        ("init", "chroma") => "init only writes the project file",
         ("probe", "aspect") => "probe filters no template list",
         ("templates", _) => "templates only lists the library",
         ("init", "project") => "init takes a template, not a project",
@@ -322,6 +373,28 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                 }
                 set_once(&mut flags.preview_px, pixels, "preview-px")?;
             }
+            "long-edge" => {
+                let raw = number(&value("long-edge")?, "long-edge")?;
+                let pixels = u32::try_from(raw).map_err(|_| {
+                    Failure::Usage(format!("--long-edge must be a positive integer, got {raw}"))
+                })?;
+                if !(1..=MAX_LONG_EDGE_PX).contains(&pixels) {
+                    return Err(Failure::Usage(format!(
+                        "--long-edge {pixels} is outside 1..={MAX_LONG_EDGE_PX}"
+                    )));
+                }
+                set_once(&mut flags.long_edge, pixels, "long-edge")?;
+            }
+            "chroma" => {
+                let raw = value("chroma")?;
+                let text = raw
+                    .to_str()
+                    .ok_or_else(|| Failure::Usage("--chroma must be valid UTF-8".to_string()))?;
+                let chroma = Chroma::parse(text).ok_or_else(|| {
+                    Failure::Usage(format!("--chroma must be 444, 422 or 420, got {text}"))
+                })?;
+                set_once(&mut flags.chroma, chroma, "chroma")?;
+            }
             "photo" => set_once(&mut flags.photo, PathBuf::from(value("photo")?), "photo")?,
             "aspect" => {
                 let raw = value("aspect")?;
@@ -410,11 +483,28 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
             let out = flags
                 .out
                 .ok_or_else(|| Failure::Usage("render needs --out <file>".to_string()))?;
+            let size = match (flags.dpi, flags.long_edge) {
+                (Some(_), Some(_)) => {
+                    return Err(Failure::Usage(
+                        "--dpi and --long-edge both size the output; give one".to_string(),
+                    ));
+                }
+                (Some(dpi), None) => Size::Dpi(dpi),
+                (None, Some(pixels)) => Size::LongEdge(pixels),
+                (None, None) => Size::Dpi(DEFAULT_DPI),
+            };
+            if flags.long_edge.is_some() && flags.preview_px.is_some() {
+                return Err(Failure::Usage(
+                    "--preview-px renders a preview of the export; --long-edge sizes the export"
+                        .to_string(),
+                ));
+            }
             Ok(Command::Render(RenderArgs {
                 source,
                 out,
-                dpi: flags.dpi.unwrap_or(300),
+                size,
                 preview_px: flags.preview_px,
+                chroma: flags.chroma.unwrap_or_default(),
                 stats: flags.stats,
                 json: flags.json,
             }))

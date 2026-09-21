@@ -253,6 +253,263 @@ fn preview_px_sets_the_long_edge() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The PNG `pHYs` chunk, as `(xppu, yppu, unit)`. Read from the file's own chunk
+/// stream, so a `--long-edge` assertion is about the export and not about the
+/// report the same command printed.
+fn png_pixel_dimensions(path: &Path) -> (u32, u32, u8) {
+    let bytes = std::fs::read(path).expect("read the PNG");
+    assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n");
+    let mut at = 8;
+    while at + 12 <= bytes.len() {
+        let length = u32::from_be_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
+        if &bytes[at + 4..at + 8] == b"pHYs" {
+            let data = &bytes[at + 8..at + 8 + length];
+            return (
+                u32::from_be_bytes(data[0..4].try_into().unwrap()),
+                u32::from_be_bytes(data[4..8].try_into().unwrap()),
+                data[8],
+            );
+        }
+        at += 12 + length;
+    }
+    panic!("no pHYs chunk in {}", path.display());
+}
+
+/// The component sampling factors a JPEG declares in its `SOF0` — the record of
+/// what the encoder actually did, which is what the two-pass metadata trap
+/// destroys.
+fn jpeg_sampling(path: &Path) -> Vec<(u8, u8)> {
+    let bytes = std::fs::read(path).expect("read the JPEG");
+    assert_eq!(&bytes[..2], &[0xff, 0xd8]);
+    let mut at = 2;
+    while at + 4 <= bytes.len() {
+        let marker = bytes[at + 1];
+        if marker == 0xda {
+            break;
+        }
+        let length = usize::from(u16::from_be_bytes([bytes[at + 2], bytes[at + 3]]));
+        if marker == 0xc0 {
+            let frame = &bytes[at + 4..at + 2 + length];
+            return (0..frame[5] as usize)
+                .map(|index| {
+                    let sampling = frame[6 + 3 * index + 1];
+                    (sampling >> 4, sampling & 0x0f)
+                })
+                .collect();
+        }
+        at += 2 + length;
+    }
+    panic!("no SOF0 in {}", path.display());
+}
+
+#[test]
+fn long_edge_is_exact_and_carries_the_resolution_it_works_out_to() {
+    let dir = out_dir("long-edge");
+    // `mosaic-8-s14` is 4:3 on a 1189 x 891.75 mm canvas, so the long edge is the
+    // width and the short one is exactly 3/4 of it.
+    let out = dir.join("long.png");
+    let output = run(&[
+        "render",
+        "--template",
+        "mosaic-8-s14",
+        "--long-edge",
+        "9000",
+        "--out",
+        out.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "long_edge"), "9000");
+    assert_eq!(field(&output, "out_w"), "9000");
+    assert_eq!(field(&output, "out_h"), "6750");
+    let image = image::open(&out).expect("a readable PNG").to_rgb8();
+    assert_eq!((image.width(), image.height()), (9000, 6750));
+
+    // The resolution the file carries is the one the grid works out to:
+    // 9000 px over 1189 mm is 192.2624 dpi, i.e. 7569 px/m.
+    let reported: f64 = field(&output, "dpi").parse().unwrap();
+    assert!(
+        (reported - 9000.0 * 25.4 / 1189.0).abs() < 1e-6,
+        "{reported}"
+    );
+    assert_eq!(png_pixel_dimensions(&out), (7569, 7569, 1));
+
+    // A portrait canvas puts its exact edge on the other axis.
+    let portrait = dir.join("portrait.png");
+    let output = run(&[
+        "render",
+        "--template",
+        "strip-2-1x2",
+        "--long-edge",
+        "1234",
+        "--out",
+        portrait.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "out_h"), "1234");
+    // 2:3 canvas: 1234 * 2/3 = 822.67, rounded half away from zero.
+    assert_eq!(field(&output, "out_w"), "823");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn chroma_reaches_the_jpeg_it_was_asked_for() {
+    let dir = out_dir("chroma");
+    for (chroma, expected) in [
+        ("444", vec![(1, 1), (1, 1), (1, 1)]),
+        ("422", vec![(2, 1), (1, 1), (1, 1)]),
+        ("420", vec![(2, 2), (1, 1), (1, 1)]),
+    ] {
+        let out = dir.join(format!("chroma-{chroma}.jpg"));
+        let output = run(&[
+            "render",
+            "--template",
+            "grid-4-2x2",
+            "--dpi",
+            "72",
+            "--chroma",
+            chroma,
+            "--out",
+            out.to_str().unwrap(),
+        ]);
+        assert_eq!(code(&output), 0, "{}", stderr(&output));
+        assert_eq!(field(&output, "chroma"), chroma);
+        assert_eq!(jpeg_sampling(&out), expected, "chroma {chroma} in SOF0");
+    }
+
+    // 4:4:4 is the default (`AGENTS.md`), and the report names it.
+    let plain = dir.join("plain.jpg");
+    let output = run(&[
+        "render",
+        "--template",
+        "grid-4-2x2",
+        "--dpi",
+        "72",
+        "--out",
+        plain.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "chroma"), "444");
+    assert_eq!(jpeg_sampling(&plain), vec![(1, 1), (1, 1), (1, 1)]);
+
+    // A PNG stores three samples per pixel, so accepting `--chroma` there would
+    // drop the flag silently.
+    let png = dir.join("chroma.png");
+    let output = run(&[
+        "render",
+        "--template",
+        "grid-4-2x2",
+        "--chroma",
+        "420",
+        "--out",
+        png.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&output), 1, "{}", stderr(&output));
+    assert!(stdout(&output).is_empty());
+    assert!(stderr(&output).contains("--chroma"), "{}", stderr(&output));
+    assert!(!png.exists(), "a refused render writes nothing");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn every_export_format_is_written_with_its_metadata() {
+    let dir = out_dir("formats");
+    for (name, format) in [
+        ("out.png", "png"),
+        ("out.jpg", "jpeg"),
+        ("out.jpeg", "jpeg"),
+        ("out.tif", "tiff"),
+        ("out.tiff", "tiff"),
+    ] {
+        let out = dir.join(name);
+        let output = run(&[
+            "render",
+            "--template",
+            "grid-4-2x2",
+            "--dpi",
+            "72",
+            "--out",
+            out.to_str().unwrap(),
+        ]);
+        assert_eq!(code(&output), 0, "{name}: {}", stderr(&output));
+        assert_eq!(field(&output, "format"), format);
+        // Decodable by another implementation, at the size the report claims.
+        let image = image::open(&out).expect("a readable image");
+        assert_eq!(
+            (image.width(), image.height()),
+            (
+                field(&output, "out_w").parse::<u32>().unwrap(),
+                field(&output, "out_h").parse::<u32>().unwrap()
+            ),
+            "{name}"
+        );
+        assert_eq!(
+            std::fs::metadata(&out).expect("stat").len().to_string(),
+            field(&output, "bytes"),
+            "{name}"
+        );
+
+        // The resolution and the profile are in the file. PNG deflates the
+        // profile into iCCP, so its presence is what this level checks; what the
+        // bytes decode to is `pixlay-imaging`'s test.
+        let bytes = std::fs::read(&out).expect("read back");
+        let holds = |needle: &[u8]| bytes.windows(needle.len()).any(|window| window == needle);
+        match format {
+            "png" => {
+                assert_eq!(png_pixel_dimensions(&out), (2835, 2835, 1), "{name}");
+                assert!(holds(b"iCCP"), "{name} carries no profile");
+            }
+            "jpeg" => {
+                assert!(holds(b"ICC_PROFILE"), "{name} carries no profile");
+                assert!(holds(b"JFIF"), "{name} is not JFIF");
+            }
+            _ => {
+                assert!(holds(b"acsp"), "{name} carries no profile");
+                assert!(holds(b"pixl"), "{name} carries no profile");
+            }
+        }
+    }
+
+    // An extension nothing writes is still a usage error, and the message names
+    // the formats this build has.
+    let output = run(&["render", "--template", "grid-4-2x2", "--out", "out.gif"]);
+    assert_eq!(code(&output), 1);
+    assert!(stderr(&output).contains(".tiff"), "{}", stderr(&output));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_export_modes_are_mutually_exclusive() {
+    let dir = out_dir("modes");
+    let out = dir.join("out.png").to_str().unwrap().to_string();
+    fn with_template<'a>(out: &'a str, flags: &[&'a str]) -> Vec<&'a str> {
+        let mut args = vec!["render", "--template", "grid-4-2x2", "--out", out];
+        args.extend_from_slice(flags);
+        args
+    }
+    for flags in [
+        // Both size the output, and they disagree about what the number means.
+        &["--dpi", "300", "--long-edge", "1000"][..],
+        // A preview is a smaller render of the export; a long edge *is* the size.
+        &["--long-edge", "1000", "--preview-px", "400"],
+        // Out of range on both ends, and zero.
+        &["--long-edge", "0"],
+        &["--long-edge", "30001"],
+        &["--long-edge", "wide"],
+        // A chroma spelling that is not one of the three.
+        &["--chroma", "411"],
+    ] {
+        let output = run(&with_template(&out, flags));
+        assert_eq!(code(&output), 1, "{flags:?}: {}", stderr(&output));
+        assert!(stdout(&output).is_empty(), "{flags:?} wrote to stdout");
+        assert!(!stderr(&output).is_empty(), "{flags:?} said nothing");
+    }
+    assert!(
+        !Path::new(out.as_str()).exists(),
+        "a usage error writes nothing"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn probe_reports_numbers_the_renderer_can_be_judged_by() {
     let dir = out_dir("probe");
@@ -446,7 +703,8 @@ fn stats_adds_measurements_without_changing_the_rest() {
     let measured = field(&with_stats, "peak_rss_mb").parse::<f64>().unwrap();
     assert!(measured > 10.0, "peak_rss_mb {measured}");
     assert!(field(&with_stats, "ms").parse::<f64>().unwrap() > 0.0);
-    assert_eq!(field(&with_stats, "icc"), "none");
+    // `icc` is the profile the written file carries, not a promise (S6).
+    assert_eq!(field(&with_stats, "icc"), pixlay_imaging::icc::DESCRIPTION);
 
     // Everything except the measured fields is identical, so the ruler adds
     // fields rather than changing the report.
