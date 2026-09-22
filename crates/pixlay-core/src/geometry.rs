@@ -7,7 +7,7 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Tolerance for "same point / on the boundary / collinear" comparisons in
-/// normalized units. 1e-9 is ~1.4e-4 px on an A0 sheet at 300 dpi: far below
+/// normalized units. 1e-9 is 1.4e-5 px on the 14043-px reference grid: far below
 /// anything the product can express, far above float noise from the same
 /// arithmetic.
 pub const EPSILON: f64 = 1e-9;

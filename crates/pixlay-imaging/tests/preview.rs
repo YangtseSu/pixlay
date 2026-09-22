@@ -19,7 +19,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use pixlay_core::{CanvasSpec, Cell, CollageDoc, CropTransform, PixelSize, templates};
+use pixlay_core::{Cell, CollageDoc, CropTransform, PixelSize, templates};
 use pixlay_imaging::{
     Built, Depth, GESTURE_GRID_SCALE, Preview, PreviewSource, Sampler, Source, gesture_grid,
     preview_source_long_edge,
@@ -62,10 +62,7 @@ fn sources(paths: &[PathBuf]) -> Vec<Option<PathBuf>> {
 fn document(sources: &[Option<PathBuf>]) -> CollageDoc {
     let template = templates::get(TEMPLATE).expect("the template is in the library");
     assert_eq!(sources.len(), template.slots.len());
-    let mut doc = CollageDoc::new(
-        CanvasSpec::with_ratio(template.aspect, CanvasSpec::A4_LANDSCAPE.width_mm),
-        template,
-    );
+    let mut doc = CollageDoc::new(template);
     for (cell, source) in doc.cells.iter_mut().zip(sources) {
         *cell = Cell {
             source: source.clone(),

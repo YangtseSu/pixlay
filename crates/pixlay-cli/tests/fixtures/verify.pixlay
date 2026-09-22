@@ -1,9 +1,5 @@
 {
-  "docVersion": 2,
-  "canvas": {
-    "widthMm": 1189.0,
-    "heightMm": 891.75
-  },
+  "docVersion": 3,
   "template": {
     "name": "mosaic-8-s14",
     "version": 1,

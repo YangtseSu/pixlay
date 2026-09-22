@@ -16,13 +16,13 @@
 //!
 //! Everything here is procedural: flat bitmaps, no decoder, no display.
 
-use pixlay_core::{CanvasSpec, CollageDoc, Frame, Polygon, Rgba8, Slot, Template};
+use pixlay_core::{CollageDoc, Frame, PixelSize, Polygon, Rgba8, Slot, Template};
 use pixlay_render::{Bitmap, Images, Rgb8Image, render_rgb8};
 
-/// The pixel grid the probes measure on. 300 dpi over 120x90 mm is 1417x1063 px,
+/// The pixel grid the probes measure on: a 4:3 grid with a 1417 px long edge,
 /// so a 4% gap is 42 px — wide enough that a one-pixel antialiased edge at each
 /// side of it is unambiguous.
-const DPI: u32 = 300;
+const LONG_EDGE: u32 = 1417;
 
 const LEFT: [u8; 3] = [200, 30, 40];
 const RIGHT: [u8; 3] = [30, 160, 60];
@@ -47,7 +47,7 @@ fn doc(frame: Frame) -> CollageDoc {
             },
         ],
     };
-    let mut doc = CollageDoc::new(CanvasSpec::new(120.0, 90.0), template);
+    let mut doc = CollageDoc::new(template);
     doc.frame = frame;
     doc
 }
@@ -72,8 +72,8 @@ fn images(doc: &CollageDoc, canvas: pixlay_core::PixelSize) -> Images {
 fn render(frame: Frame) -> (Rgb8Image, pixlay_core::PixelSize) {
     let doc = doc(frame);
     doc.validate().expect("the frame is a legal one");
-    let canvas = doc.canvas.pixel_size(DPI).expect("canvas size");
-    let image = render_rgb8(&doc, &images(&doc, canvas), DPI, 1.0, None).expect("renders");
+    let canvas = PixelSize::for_long_edge(doc.template.aspect, LONG_EDGE).expect("canvas size");
+    let image = render_rgb8(&doc, &images(&doc, canvas), canvas, 1.0, None).expect("renders");
     assert_eq!((image.width, image.height), (canvas.width, canvas.height));
     (image, canvas)
 }

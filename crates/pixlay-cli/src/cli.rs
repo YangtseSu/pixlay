@@ -9,14 +9,14 @@ use std::io::Write;
 
 use std::path::{Path, PathBuf};
 
-use pixlay_core::{CanvasSpec, PixelSize, Project};
+use pixlay_core::{PixelSize, Project};
 use pixlay_imaging::preview::GESTURE_STEP_DEG;
 use pixlay_imaging::{Export, Format, Preview, Rgb8View, SlotBitmap, gesture_grid, icc};
 use pixlay_render::Images;
 
 use crate::args::{
-    self, Command, EditArgs, GestureArgs, HitArgs, ImageArgs, InitArgs, ProbeArgs, RenderArgs,
-    SaveArgs, ScanArgs, Size, Source, TemplatesArgs, ThumbArgs, USAGE,
+    self, Command, DEFAULT_LONG_EDGE_PX, EditArgs, GestureArgs, HitArgs, ImageArgs, InitArgs,
+    ProbeArgs, RenderArgs, SaveArgs, ScanArgs, Source, TemplatesArgs, ThumbArgs, USAGE,
 };
 use crate::report::Report;
 use crate::stats;
@@ -177,12 +177,6 @@ fn edit_project(args: EditArgs) -> Result<u8, Failure> {
         .map_err(|error| Failure::Failed(error.to_string()))?;
     let mut doc = project.doc().clone();
     args.frame.apply(&mut doc.frame);
-    // The sheet is a resize, not a relayout: the long edge is in millimetres and
-    // the other one follows the template's aspect, which is what keeps the
-    // document valid (`validate` refuses a canvas that disagrees with it).
-    if let Some(mm) = args.sheet {
-        doc.canvas = CanvasSpec::with_ratio(doc.template.aspect, mm);
-    }
 
     if let Some(slot) = args.slot {
         if slot >= doc.cells.len() {
@@ -202,15 +196,15 @@ fn edit_project(args: EditArgs) -> Result<u8, Failure> {
             }
             .normalized();
             doc.cells[slot].crop = match sources.get(slot).and_then(Option::as_ref) {
-                // The fit is taken in the document's own space — the canvas aspect,
-                // not a preview grid's — because this is the number that gets
-                // written. It is the *edited* request that is fitted, not the crop
-                // the document already had: `fit_crop` is the same reference
+                // The fit is taken in the document's own space — the template's
+                // aspect, not a preview grid's — because this is the number that
+                // gets written. It is the *edited* request that is fitted, not the
+                // crop the document already had: `fit_crop` is the same reference
                 // `draw` will use.
                 Some(photo) => {
                     let source = pixlay_imaging::Source::decode(photo)
                         .map_err(|error| Failure::Failed(error.to_string()))?;
-                    doc.fit_crop(slot, request, doc.canvas.aspect(), source.aspect())
+                    doc.fit_crop(slot, request, doc.template.aspect, source.aspect())
                         .map_err(|error| Failure::Failed(error.to_string()))?
                         .transform
                 }
@@ -250,9 +244,6 @@ fn edit_project(args: EditArgs) -> Result<u8, Failure> {
     report.float("radius", doc.frame.radius_rel);
     let border = doc.frame.color;
     report.text("border", rgb([border.r, border.g, border.b]));
-    // The long edge, always: a caller that set it cannot otherwise see what the
-    // other edge became, and a caller that did not gets the document's own.
-    report.float("sheet_mm", doc.canvas.width_mm.max(doc.canvas.height_mm));
     if let Some(slot) = args.slot {
         let cell = &doc.cells[slot];
         report.int("slot", slot as i64);
@@ -269,12 +260,11 @@ fn edit_project(args: EditArgs) -> Result<u8, Failure> {
     Ok(EXIT_SUCCESS)
 }
 
-/// `templates`: the library, optionally filtered to one canvas shape.
+/// `templates`: the library, optionally filtered to one layout shape.
 ///
 /// This is the query S7's picker runs and the one a caller needs before it can
-/// name a template: a canvas and a template only fit each other when their aspect
-/// ratios agree, and the canvas is what the user picks first. The list stays in
-/// library order (by slot count), so the output is stable.
+/// name a template. The list stays in library order (by slot count), so the
+/// output is stable.
 fn list_templates(args: TemplatesArgs) -> Result<u8, Failure> {
     // The filter is the library's own query, so `templates --aspect 4:3` and the
     // picker cannot disagree about what "the same aspect" means.
@@ -353,10 +343,6 @@ fn init_project(args: InitArgs) -> Result<u8, Failure> {
     report.text("template", doc.template.name.clone());
     report.int("version", i64::from(doc.template.version));
     report.text("aspect", ratio_label(doc.template.aspect));
-    report.text(
-        "canvas",
-        format!("{}x{}", doc.canvas.width_mm, doc.canvas.height_mm),
-    );
     report.int("cells", doc.cells.len() as i64);
     // `photos` is what was asked for, `cells` is what the template has: they are
     // equal for a project with photos, and 0 against N for the photo-free one.
@@ -479,24 +465,12 @@ fn render(args: RenderArgs) -> Result<u8, Failure> {
     doc.validate()
         .map_err(|error| Failure::Failed(error.to_string()))?;
 
-    // The pixel grid, and the resolution the file has to carry. A `--dpi` export
-    // echoes the resolution back; a `--long-edge` export derives it from the grid
-    // it actually renders (`CanvasSpec::dpi_for`).
-    let (canvas_px, dpi) = match args.size {
-        Size::Dpi(dpi) => (
-            doc.canvas
-                .pixel_size(dpi)
-                .map_err(|error| Failure::Failed(error.to_string()))?,
-            f64::from(dpi),
-        ),
-        Size::LongEdge(pixels) => {
-            let pixel = doc
-                .canvas
-                .pixel_size_for_long_edge(pixels)
-                .map_err(|error| Failure::Failed(error.to_string()))?;
-            (pixel, doc.canvas.dpi_for(pixel))
-        }
-    };
+    // The pixel grid, from the one size parameter there is: the long edge, which
+    // is exact, with the other edge following the template's aspect rounded half
+    // away from zero.
+    let long_edge = args.long_edge.unwrap_or(DEFAULT_LONG_EDGE_PX);
+    let canvas_px = PixelSize::for_long_edge(doc.template.aspect, long_edge)
+        .map_err(|error| Failure::Failed(error.to_string()))?;
     let scale = match args.preview_px {
         Some(long_edge) => f64::from(long_edge) / f64::from(canvas_px.width.max(canvas_px.height)),
         None => 1.0,
@@ -516,18 +490,17 @@ fn render(args: RenderArgs) -> Result<u8, Failure> {
         Source::Project(_) => decode_slots(&doc, &sources, bitmap_px)?,
         Source::Template(_) => Images::new(),
     };
-    let image = pixlay_render::render_rgb8_sized(&doc, &images, canvas_px, scale, None)
+    let image = pixlay_render::render_rgb8(&doc, &images, canvas_px, scale, None)
         .map_err(|error| Failure::Failed(error.to_string()))?;
     let compose = stopwatch.elapsed();
 
-    // Pixels and metadata in one pass: the encoder writes the resolution and the
-    // sRGB profile while it writes the image (`pixlay_imaging::encode`).
+    // Pixels and metadata in one pass: the encoder writes the sRGB profile while
+    // it writes the image (`pixlay_imaging::encode`).
     let encode_watch = stats::Stopwatch::start();
     let bytes = pixlay_imaging::encode::write(
         &args.out,
         &Export {
             format,
-            dpi,
             image: Rgb8View {
                 width: image.width,
                 height: image.height,
@@ -542,19 +515,8 @@ fn render(args: RenderArgs) -> Result<u8, Failure> {
     report.text("status", "ok");
     report.text("command", "render");
     report.text("format", format.name());
-    match args.size {
-        // An integer in physical mode: the resolution the user asked for, which is
-        // what the file carries.
-        Size::Dpi(dpi) => {
-            report.int("dpi", i64::from(dpi));
-        }
-        // A decimal in pixel mode: the resolution the grid works out to, which is
-        // the number the file carries.
-        Size::LongEdge(pixels) => {
-            report.int("long_edge", i64::from(pixels));
-            report.float("dpi", dpi);
-        }
-    }
+    // The request, an integer: the long edge the output was rendered at.
+    report.int("long_edge", i64::from(long_edge));
     report.int("cells", doc.cells.len() as i64);
     report.int("occupied", images.len() as i64);
     // The frame the render used, always: with `--gap`/`--radius`/`--border-color`
@@ -798,12 +760,6 @@ fn mtime_seconds(path: &Path) -> i64 {
         .unwrap_or(0)
 }
 
-/// Resolution `thumb` writes into a preview: 72, one image pixel per point, which
-/// is what a screen-sized picture means (docs/CONTRACT.md §5). The encoder always
-/// writes a resolution, and this is the honest one for a preview — not the DPI of
-/// the print the photo might become.
-const THUMB_DPI: f64 = 72.0;
-
 /// `thumb`: one photo's preview pixels as a file (S9).
 ///
 /// The picker's expensive half is the decode plus the resample to the size a tile
@@ -830,7 +786,6 @@ fn thumb(args: ThumbArgs) -> Result<u8, Failure> {
         &args.out,
         &Export {
             format,
-            dpi: THUMB_DPI,
             image: Rgb8View {
                 width: preview.width,
                 height: preview.height,
@@ -936,7 +891,7 @@ fn gesture(args: GestureArgs) -> Result<u8, Failure> {
 
     // The grid the window rests at, and the grid it draws at while a gesture is
     // live — the editor's own two (`pixlay_imaging::gesture_grid`).
-    let resting = preview_grid(args.grid, doc.canvas.aspect());
+    let resting = preview_grid(args.grid, doc.template.aspect);
     let moving = gesture_grid(resting);
 
     let mut preview = Preview::new();
@@ -1074,9 +1029,10 @@ fn probe(args: ProbeArgs) -> Result<u8, Failure> {
     let doc = project.doc().clone();
 
     let stopwatch = stats::Stopwatch::start();
-    let full = doc
-        .canvas
-        .pixel_size(args.dpi)
+    let long_edge = args.long_edge.unwrap_or(DEFAULT_LONG_EDGE_PX);
+    // The one size parameter, the same number `render` would use: the probe
+    // samples pixel coordinates, and a preview grid would move every one of them.
+    let full = PixelSize::for_long_edge(doc.template.aspect, long_edge)
         .map_err(|error| Failure::Failed(error.to_string()))?;
     // The probe renders **its own** content: flat colors, one per occupied cell
     // (`pixlay_imaging::probe_bitmaps`). Real photos cannot be probed — a white
@@ -1091,7 +1047,7 @@ fn probe(args: ProbeArgs) -> Result<u8, Failure> {
     for bitmap in &bitmaps {
         images.insert(bitmap.slot, render_bitmap(bitmap)?);
     }
-    let image = pixlay_render::render_rgb8(&doc, &images, args.dpi, 1.0, None)
+    let image = pixlay_render::render_rgb8(&doc, &images, full, 1.0, None)
         .map_err(|error| Failure::Failed(error.to_string()))?;
     let compose = stopwatch.elapsed();
 
@@ -1102,11 +1058,11 @@ fn probe(args: ProbeArgs) -> Result<u8, Failure> {
         height: image.height,
         data: &image.data,
     };
-    let result = pixlay_imaging::probe::probe(&doc, &view, args.dpi);
+    let result = pixlay_imaging::probe::probe(&doc, &view);
     let mut report = Report::new();
     report.text("status", if result.ok() { "ok" } else { "failed" });
     report.text("command", "probe");
-    report.int("dpi", i64::from(args.dpi));
+    report.int("long_edge", i64::from(long_edge));
     report.int("slots", result.slots as i64);
     report.int("occupied", result.occupied.len() as i64);
     report.int("out_w", i64::from(result.width));

@@ -17,14 +17,12 @@
 //! The two halves of that are in [`Command::apply`] and [`History::apply`]: a
 //! command writes into a *copy* of the document, and the copy is validated before
 //! it becomes current. A command that would leave the document outside the
-//! contract — a zoom past `MAX_ZOOM`, a canvas that no longer matches the
-//! template, a slot the template does not have — is refused and
-//! changes nothing, which is the same all-or-nothing rule loading a file
-//! follows.
+//! contract — a zoom past `MAX_ZOOM`, a slot the template does not have — is
+//! refused and changes nothing, which is the same all-or-nothing rule loading a
+//! file follows.
 
 use std::path::PathBuf;
 
-use crate::canvas::CanvasSpec;
 use crate::crop::CropTransform;
 use crate::doc::CollageDoc;
 use crate::error::CoreError;
@@ -32,11 +30,10 @@ use crate::template::Template;
 
 /// One edit to a document.
 ///
-/// Deliberately small: it covers what v1 lets a user change — which photo a slot
-/// shows, how it is framed, the template and the canvas size. It is not a
-/// serialization format (nothing writes a command to disk, and no version tracks
-/// it), and it is not an editing language: a command does one thing, and the GUI
-/// sends a sequence of them.
+/// Deliberately small: it covers what a user changes — which photo a slot shows,
+/// how it is framed, the template. It is not a serialization format (nothing
+/// writes a command to disk, and no version tracks it), and it is not an editing
+/// language: a command does one thing, and the GUI sends a sequence of them.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
     /// Point a cell at a photo, or empty it (`None`), which renders the slot
@@ -56,13 +53,11 @@ pub enum Command {
     /// recomputes, so a request that would leave the cell uncovered is still a legal
     /// document.
     SetCrop { slot: usize, crop: CropTransform },
-    /// Replace the document's template geometry and its canvas in one step (S7).
+    /// Replace the document's template geometry (S7).
     ///
     /// A template change is not a relayout of the same document: it changes the
-    /// slot count, so it resizes `cells`. The two halves travel together because a
-    /// canvas and a template must agree on their aspect ratio
-    /// ([`CollageDoc::validate`]), so a caller that sent them separately would have
-    /// to pass through an invalid document between the two commands.
+    /// slot count, so it resizes `cells`. There is no second half to carry since
+    /// S12d: the sheet's shape is the template's own aspect.
     ///
     /// Retention: the first `min(old, new)` cells keep their photos and framing —
     /// a template with more slots appends empty ones, a smaller one drops the
@@ -72,14 +67,7 @@ pub enum Command {
     /// document starts"); S7's template picker is what it is for, because a user
     /// who has placed photos must be able to try another layout without starting
     /// over.
-    SetTemplate {
-        template: Template,
-        canvas: CanvasSpec,
-    },
-    /// Resize the canvas. The aspect ratio still has to match the template's
-    /// (`CollageDoc::validate`), which is what makes this a resize of the same
-    /// layout rather than a relayout.
-    SetCanvas { canvas: CanvasSpec },
+    SetTemplate { template: Template },
 }
 
 impl Command {
@@ -111,16 +99,14 @@ impl Command {
             Self::SetCrop { slot, crop } => {
                 cell_mut(doc, *slot)?.crop = crop.normalized();
             }
-            Self::SetTemplate { template, canvas } => {
+            Self::SetTemplate { template } => {
                 doc.template = template.clone();
-                doc.canvas = *canvas;
                 // One cell per slot, in template order: `resize` keeps the cells
                 // that still exist (with their photos and framing) and appends
                 // defaults for new slots.
                 let slots = template.slots.len();
                 doc.cells.resize(slots, crate::Cell::default());
             }
-            Self::SetCanvas { canvas } => doc.canvas = *canvas,
         }
         Ok(())
     }

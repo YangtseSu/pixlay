@@ -26,8 +26,7 @@ The contract is **frozen at S1** and every step after it is built on top of it (
 
 ```jsonc
 {
-  "docVersion": 2,                 // format version; a higher version is refused outright, never guessed at, never downgraded
-  "canvas": { "widthMm": 280.0, "heightMm": 210.0 },   // 4:3, matching the template's aspect
+  "docVersion": 3,                 // format version; a higher version is refused outright, never guessed at, never downgraded
   "template": {                    // geometry is data, not a reference: changing the template in the library does not touch a saved project
     "name": "mosaic-8-s14",
     "version": 1,                  // template geometry version
@@ -47,14 +46,15 @@ The contract is **frozen at S1** and every step after it is built on top of it (
 ```
 
 > This example is a valid document: the two slots give a cut template whose areas sum to
-> exactly 1.0, the canvas is exactly 4:3 to match `template.aspect`, and the frame is the
+> exactly 1.0, the template's declared aspect is the sheet's shape, and the frame is the
 > S11 default — no gap, square corners, a white canvas. Its photos are the project's own,
 > as any project's are.
 >
-> **The shape after S12c (2026-09-22)**: the `grade`, `filter`, `text` and `textFallback`
-> keys are gone, and `docVersion` is **2**. That is what the version policy below calls a
-> breaking change: a version-1 project is refused with the actionable message rather than
-> silently losing the layers it names (the purity ruling, `docs/2026-09-22-STEPS.md`).
+> **The shape after S12d (2026-09-22)**: the `grade`, `filter`, `text`, `textFallback` and
+> `canvas` keys are gone, and `docVersion` is **3**. That is what the version policy below
+> calls a breaking change: a version-1 or version-2 project is refused with the actionable
+> message rather than silently losing the layers and the size it names (the purity ruling
+> and ruling 17, `docs/2026-09-22-STEPS.md`).
 
 **Version policy** (S1 review ruling, 2026-09-20: **breaking changes allowed, but no migrations written**).
 
@@ -72,21 +72,23 @@ Conventions:
 
 - **Unknown fields are refused outright** (`deny_unknown_fields`). A mistyped key should not silently become a default.
 - **Field names are camelCase**; a point is written as a two-element array `[x, y]` (`Point`) — a `.pixlay` is meant to be read by humans.
-- All coordinates / sizes / font sizes are **normalized to `[0,1]`**; absolute pixels appear only after `CanvasSpec::pixel_size(dpi)`.
-  Normalized lengths exist so that a preview lays out exactly like an export, whatever the device scale.
+- All coordinates / sizes / font sizes are **normalized to `[0,1]`**; absolute pixels exist only at the
+  render and export boundary (`PixelSize::for_long_edge(aspect, n)`). Normalized lengths exist so
+  that a preview lays out exactly like an export, whatever the device scale.
 - **The document is photos and a layout, nothing else** (S12c): a cell is `source` plus
-  `crop`, and the canvas carries the `frame`. There is no colour stage, no text layer and no
-  watermark — the purity ruling removed all three, together with the `grade`, `filter`,
-  `text` and `textFallback` fields that carried them.
+  `crop`, and the frame is normalized decoration on the sheet. There is no colour stage, no text
+  layer, no watermark and no size — the purity ruling removed the first three with the `grade`,
+  `filter`, `text` and `textFallback` fields that carried them, and ruling 17 removed the last
+  with the `canvas` field.
 - **Empty slot = `source: null`**, and that cell renders white. `source` is a path relative to the project file;
   an absolute path is accepted as it stands. A missing file → an explicit error, not a skip.
 - `crop.zoom` is **absolute zoom** (displayed width / slot width), not "a multiple of fill":
   when the photo is swapped the baseline does not move and the framing does not jump focus.
 - `rotationDeg` accepts **any finite angle** and is normalized to `(-180, 180]` — the ±45° cap was removed on
   2026-09-22 and the validation is widened by S11 — and every component of `crop.offset` has |offset| ≤ 1 (past that no clamp can get the coverage back).
-- **Direction convention**: `crop.rotationDeg` is positive **clockwise on screen** (the canvas y axis points down,
+- **Direction convention**: `crop.rotationDeg` is positive **clockwise on screen** (the sheet's y axis points down,
   cairo's `rotate` in that space is clockwise, and the renderer passes it through as-is).
-- **A crop is a request; what gets drawn is its fit** (`CropTransform::fit`, S3). The canvas and the slot never grow, so the
+- **A crop is a request; what gets drawn is its fit** (`CropTransform::fit`, S3). The sheet and the slot never grow, so the
   fit has exactly two levers: `zoom` is raised to the value that covers the visible cell with the photo centred (a larger
   request is kept as it is), and `offset` is pulled back along the line to the slot centre until the photo covers again — a
   pan stops at the frame edge rather than being paid for with magnification. `rotationDeg` is kept **exactly as asked**:
@@ -113,23 +115,22 @@ Conventions:
 
 | Item | Value | Source |
 |---|---|---|
-| `docVersion` | exactly `DOC_VERSION` (currently **2**); higher refused, lower refused too | see "Version policy" |
+| `docVersion` | exactly `DOC_VERSION` (currently **3**); higher refused, lower refused too | see "Version policy" |
 | slot count | 2..=9 | `AGENTS.md`; nine since S12c removed the ten-slot recipe |
-| DPI | 72..=600 | `AGENTS.md` |
-| canvas pixels | ≤ 200 MP | A0@300dpi = 139.5 MP, 43% of headroom left |
-| canvas edge length | ≤ 2000 mm | larger than any output device |
-| template aspect ratio | 0.1..=10.0 | a template outside this range is not a collage layout; it also bounds what a canvas can be matched to |
+| long edge | 1..=30000 px (`MAX_LONG_EDGE_PX`) | a pixel count, the one size parameter: what a render renders and what an export writes |
+| canvas pixels | ≤ 200 MP | the largest grid the product has rendered measured 139.5 MP (§8, "S0"); 43% of headroom left |
+| template aspect ratio | 0.1..=10.0 | a template outside this range is not a collage layout |
+| the render grid | long edge exact, the other edge `round` (half away from zero, at least 1 px) — asserted as 4:3 at 4000 → 4000x3000 | the whole grid request, frozen so an export's size does not drift between builds |
 | slot outline | ≥ 3 vertices, finite, every vertex inside `[0,1]`, area > 0 | a polygon with no interior is not a slot |
-| framing rotation | ~~±45°~~ **any finite angle, normalized to `(-180, 180]`** (the cap was removed on 2026-09-22; S11 widens the validation). Clockwise is positive, canvas y points down | the 2026-09-22 ruling, `AGENTS.md` |
+| framing rotation | ~~±45°~~ **any finite angle, normalized to `(-180, 180]`** (the cap was removed on 2026-09-22; S11 widens the validation). Clockwise is positive, sheet y points down | the 2026-09-22 ruling, `AGENTS.md` |
 | framing zoom | `0 < zoom ≤ 1000` | the upper bound is necessary: zoom determines the size of the decoded bitmap, and without an upper bound it overflows. S4's decoder sets a limit **separately by memory budget**; the two layers each mind their own. The fit raises the drawn zoom to the covering value and never lowers a larger request |
 | crop offset | every component \|offset\| ≤ 1 (slot widths / heights) | beyond half a slot the photo centre leaves the slot, and no clamp can cover it again. The fit reduces it further whenever the requested pan would uncover the slot |
-| canvas vs template aspect ratio | difference ≤ 1e-6, otherwise a hard error | the two are each annotated independently, normalized coordinates carry no aspect ratio themselves; the GUI's template selector groups by aspect ratio and lists only the matching ones |
+| template aspect query | `templates::of_aspect` matches within ≤ 1e-6 (`ASPECT_TOLERANCE`) | the picker's grouping: layouts whose declared ratio agrees with the named one |
 | frame gap / radius | both finite, `0 ≤ value ≤ 1.0` (`MAX_FRAME_REL`, fraction of canvas height) | the bound is a typo bound, not a design one: a length past the whole canvas height is not a frame around anything. A gap *inside* the range can still empty a small cell, and that is refused per slot by `CollageDoc::validate`, naming the slot |
 | frame colour alpha | exactly `255` | the backdrop is painted, not blended: a translucent one would make the exported pixel depend on the surface behind it, which is exactly what "preview and export are the same picture" and "an export is never transparent" forbid |
 | `--preview-px` | 1..=20000 (long edge, in pixels) | a preview larger than this cannot be reviewed by eye anyway |
 | `--at` (`hit`) | both components inside 0..=1 | the canvas *is* `[0,1]`: normalized coordinates are what the document stores and what `probe` prints, so a point outside the canvas is a caller that mis-scaled something, not a hit test with an unusual answer |
-| `--long-edge` (export size) | 1..=30000 (long edge, in pixels; `MAX_LONG_EDGE_PX` in `pixlay-core`) | a pixel count, not a resolution: A0 at the maximum DPI (600) is 28087 px on its long edge, so the range covers every resolution this product accepts. The **canvas pixel budget still applies to the grid it derives** (a square canvas at 20000 px is 400 MP and is refused, exit 2), so the flag's range and the budget are two different limits and both are checked |
-| JPEG output resolution | ≤ 65535 dpi (`MAX_JPEG_DPI` in `pixlay-imaging`) | JFIF stores the density in 16 bits. A physical-size export is inside this range by construction (≤ 600 dpi); a pixel-count export on a very narrow canvas can derive one past it (`--long-edge 20000` on a 1 mm canvas is 508000 dpi) and is then **refused**, not saturated — a written number that is not the one the grid has is a lie the file cannot take back |
+| `--long-edge` (export size) | 1..=30000 (long edge, in pixels; `MAX_LONG_EDGE_PX` in `pixlay-core`) | the whole size request: the edge is exact, the other edge follows the template's aspect rounded half away from zero (at least 1 px). The **canvas pixel budget still applies to the grid it derives** (a square canvas at 20000 px is 400 MP and is refused, exit 2), so the flag's range and the budget are two different limits and both are checked |
 | decoded source | ≤ 120 MP and ≤ 20000 px per edge, 20 s | `MAX_DECODE_PIXELS` / `MAX_DECODE_EDGE` / `DECODE_TIMEOUT` in `pixlay-imaging`. A source is RGBA at its own depth, so 120 MP is 480 MB as 8-bit and 960 MB as 16-bit; the area cap is checked between the loader's header and its pixels, so a decompression bomb costs nothing |
 | clamp degradation threshold | ~~when the zoom the **requested rotation** needs exceeds `CLAMP_ZOOM_LIMIT` = **1.5 times the upright covering zoom**, the angle is reduced to the widest one that fits~~ — **removed by S11 (2026-09-22): the angle is free and is never reduced, so the rule and the constant are gone; the zoom pays for the angle, and its worst case over the whole library is 21.7x against a cap of 1000x (§8)** | the S3 row as it was decided (`docs/completed/2026-09-20-STEPS-done.md`): its reference was the upright floor, not an absolute zoom, and a ten-column strip needs 6x upright for a 4:3 photo, so a narrow slot was never degraded. Measured kept angles, matching photo and 45° asked (2026-09-21): 45° (unlimited) at 1:1, 34.0° at 6:5, 27.3° at 4:3, 22.6° at 3:2, 18.0° at 16:9, 11.2° at 8:3, mirrored for portrait slots. Kept as the record of what the cap did |
 
@@ -152,20 +153,18 @@ limit that is not in this table is a contract gap.
 - **Coordinates are dyadic**: every vertex is an integer multiple of `1/32` of a canvas edge, so every area is an exact binary value and
   "the areas sum to exactly 1.0" is an equality, not a tolerance. The coverage check in the tests depends on it too: `512` samples per axis
   is a multiple of `32` and the samples sit at cell centers, so no sample lands on an edge and none can miss a feature.
-- **The matrix is grouped by aspect ratio**, because a canvas and a template only fit each other when their ratios agree (see the limit table).
+- **The matrix is grouped by aspect ratio**, because a sheet's shape *is* its template's (see the limit table).
   The families are `strip-<slots>-<cols>x<rows>` (one band), `grid-<slots>-<cols>x<rows>` (a rectangular tiling) and
   `mosaic-<slots>-<variant>` (mixed splits or a non-rectangular slot) — plus the frozen `mosaic-8-s14`, whose name, `version`, aspect,
   slot order and coordinates are unchanged by S2 (S1's hand-written geometry is now produced by the generator instead of written out).
   A `g` suffix marks a **gutter** in either family (`grid-4-2x2g`, `strip-2-2x1g`): the panes stop short of each other, so the template
   does not tile its canvas and its areas sum to less than 1.0.
 - **Geometry version and document version are separate**: `template.version` follows the template family, `docVersion` follows the format.
-- **The canvas aspect ratio must agree with what the template declares** (tolerance 1e-6): the geometry is normalized, and declaring a canvas with a different ratio silently
-  stretches the template, while this error is invisible no matter which layer you look at it from.
 - **The library covers every slot count from 2 to 9**, at least three layouts each in at least two aspect families (S10); the CLI's `templates` reports the matrix and filters it by aspect ratio. `strip-10-10x1` was the only member above nine and left with S12c.
 - **The picker's range is deeper than one layout** (S10, ruling 10): every count from 2 to 9 carries **at least three
-  layouts, in at least two aspect families** — 27 templates and 152 slots in all, which `pixlay-render templates` reports
-  and `crates/pixlay-core/tests/templates.rs` asserts as a histogram over `MIN_PHOTOS..=MAX_PHOTOS`. Ten keeps the single
-  template S2 shipped, because no picker reaches it (ruling 3).
+  layouts, in at least two aspect families** — 26 templates and 142 slots in all since S12c removed the ten-slot
+  recipe, which `pixlay-render templates` reports
+  and `crates/pixlay-core/tests/templates.rs` asserts as a histogram over `MIN_PHOTOS..=MAX_PHOTOS`.
 - **A shipped name keeps its geometry and its `templateVersion` forever**: S10 added 15 layouts and moved none, and that is a
   test as well as a regeneration diff — `crates/pixlay-core/tests/templates.rs` pins a fingerprint of the geometry every
   template that had shipped before S10 still has, because the determinism test alone cannot see a recipe edit that was
@@ -299,26 +298,22 @@ and the antialiased clip edge. The property this buys is pinned by a test:
 rendering a document with the whole bitmap and with the region gives the same
 pixels.
 - `render_surface` / `render_rgb8` are just thin shells that allocate a surface + call `draw`; `rgb8` composites ARgb32 premultiplied uniformly
-  onto a white background and gives the straight-through RGB the encoder wants. **`render_surface_sized` / `render_rgb8_sized` are the same shells
-  with the canvas pixel grid passed in** (S6): a resolution is an export parameter, not a renderer concept, and the two export modes produce
-  grids no single DPI reproduces (`CanvasSpec::pixel_size` rounds both edges from a DPI, `pixel_size_for_long_edge` makes one edge exact).
-  The DPI-taking shells compute their grid and call the sized ones, so there is one surface allocator and one `draw`.
+  onto a white background and gives the straight-through RGB the encoder wants. The grid is the caller's
+  (`PixelSize::for_long_edge`, S12d): it arrives sized, because there is one surface allocator and one `draw`.
 
 ## 5. CLI: the machine operating surface
 
 ```text
-pixlay-render render    --project <file.pixlay> --dpi <n> --out <file>
 pixlay-render render    --project <file.pixlay> --long-edge <px> --out <file>
 pixlay-render render    --project <file.pixlay> --gap <rel> --radius <rel> --border-color <r,g,b> --out <file>
-pixlay-render render    --template <name> --dpi <n> --out <file>   # no project, no photos
-pixlay-render probe     --project <file.pixlay>
+pixlay-render render    --template <name> --long-edge <px> --out <file>   # no project, no photos
+pixlay-render probe     --project <file.pixlay> --long-edge <px>
 pixlay-render image     --photo <file>
 pixlay-render scan      --dir <path> [--recursive] [--json]
 pixlay-render thumb     --photo <file> --px <n> --out <file>
 pixlay-render templates [--aspect <ratio>] [--json]
 pixlay-render init      --template <name> --out <file.pixlay> [--photo <p>...]
 pixlay-render edit      --project <file.pixlay> --out <file.pixlay> --slot <i> --rotate <deg> --zoom <z> --offset <x>,<y> --clear
-pixlay-render edit      --project <file.pixlay> --out <file.pixlay> --sheet <mm>
 pixlay-render edit      --project <file.pixlay> --out <file.pixlay> --gap <rel> --radius <rel> --border-color <r,g,b>
 pixlay-render hit       --project <file.pixlay> --at <x>,<y> [--json]
 pixlay-render hit       --template <name> --at <x>,<y> [--json]
@@ -336,15 +331,16 @@ pixlay-render save      --project <file.pixlay> --out <file.pixlay> [--json]
 | probe verdict not passed | **not "failed to produce a result"**: the numbers are the result, so stdout emits all the numbers as usual, with `status = failed` and `passed = false`, stderr emits a one-line summary, and the exit code is 2 |
 | probe lower bound | when `occupied = 0` (all empty slots) the verdict is **failed**: every question the probe asks is about some slot, and with no slot there is no conclusion. Previously it "passed vacuously" (status=ok, exit 0) |
 | output format | determined by the `--out` extension: `.png` / `.jpg` / `.jpeg`, anything else is a usage error (exit 1, stdout empty, the message names the formats this build writes). **Two formats since S12c** — TIFF left with the purity ruling, so `.tif` is refused like any other unknown extension rather than falling back to PNG |
-| export resolution | `--dpi n` (72..=600) writes **exactly that resolution** into the file and sizes the grid `round(mm / 25.4 * dpi)`; `--long-edge n` (1..=30000) makes the long edge exactly n pixels, sizes the other edge `round(n * short_mm / long_mm)` (at least 1, half away from zero) and writes the resolution the grid works out to, `long_edge_px * 25.4 / long_edge_mm`. The two flags are mutually exclusive (exit 1), because they are two different requests; a resolution is echoed and a pixel count is derived, and neither is guessed from the other |
-| per-format metadata (S6) | PNG: `pHYs` = `round(dpi * 1000 / 25.4)` pixels per metre, `iCCP` with the profile (the `sRGB` chunk is **not** written next to it — the specification says the two should not both appear, and the profile is the one carrying the colorimetry). JPEG: JFIF `APP0` density = `round(dpi)` pixels per inch, `APP2` `ICC_PROFILE` segments, and the frame's own sampling factors, which are **4:4:4** since S12c removed the request. There is no third format |
+| export size | `--long-edge n` (1..=30000) makes the long edge exactly n pixels and sizes the other edge from the template's aspect rounded half away from zero (at least 1 px). Absent the flag, `render` and `probe` use 4000 (`DEFAULT_LONG_EDGE_PX`) — a square grid of it is 16 MP, an eighth of the 200 MP budget, so the default never touches the limit |
+| per-format metadata (S6, resolutions removed by S12d) | PNG: **no `pHYs`**, `iCCP` with the profile (the `sRGB` chunk is **not** written next to it — the specification says the two should not both appear, and the profile is the one carrying the colorimetry). JPEG: JFIF `APP0` with the density unit **0** (square pixels, no resolution — the encoder's default), `APP2` `ICC_PROFILE` segments, and the frame's own sampling factors, which are **4:4:4** since S12c removed the request. There is no third format |
 | JPEG quality | **90, fixed** (not a flag): it is the S0–S6 baseline, so every measurement in §8 stays
 comparable, and `--quality` was deliberately not added — a knob nobody tests breaks quietly |
 | `--preview-px n` | n pixels on the long edge; the same `draw`, only `scale` changes. The **bitmaps are sized for the preview too** (S4): decoding and resampling a full A0 and letting Cairo shrink it would cost the export's time and memory for a thumbnail, and would do the shrinking with Cairo's filter instead of the pipeline's |
-| `render`'s report | carries `cells` and `occupied` next to the written file's facts. In physical-size mode `dpi` is an **integer** — the resolution that was asked for and written; in pixel mode it is a **decimal**, the one the grid works out to, next to `long_edge` |
+| `render`'s report | carries `long_edge` (the integer the output was rendered at), `cells` and `occupied` next to the written file's facts |
+| `probe`'s report | carries `long_edge` (the integer grid it sampled) instead of a resolution for the same reason |
 | `--stats` | appends `{ms, encode_ms, peak_rss_mb, icc}`; `render` emits all four, `probe` emits no `encode_ms` (it does not encode). `icc` is the description of the profile the written file carries (`sRGB IEC61966-2.1`); a command that writes no file reports `none`. The measurement rules are below |
 | `probe` | samples and outputs numbers (in-slot photo color, out-of-slot backdrop, shared-edge blended pixels, three-color convex combination residual), exit code 2 when the verdict is not passed. The background field is `bg_off_backdrop` — "off the document's backdrop colour", which is `frame.color` and white unless the document says otherwise (S11; it was `bg_non_white` while the backdrop was hard-coded) |
-| `image` | one file's decode facts: `mime`, `width`, `height`, `depth` (8 or 16), `aspect`, `exif_bytes`, `date` (EXIF `DateTimeOriginal`, empty when absent). It is how "HEIC decodes" and "orientation 6 is applied" are visible without rendering a project. `--out`/`--dpi`/etc. are usage errors: it decodes at the file's own size and writes nothing |
+| `image` | one file's decode facts: `mime`, `width`, `height`, `depth` (8 or 16), `aspect`, `exif_bytes`, `date` (EXIF `DateTimeOriginal`, empty when absent). It is how "HEIC decodes" and "orientation 6 is applied" are visible without rendering a project. `--out`/etc. are usage errors: it decodes at the file's own size and writes nothing |
 
 **S6.5's two subcommands** turn the interaction layer's questions into the machine surface (`AGENTS.md`: nothing may be possible only in the GUI). `hit` answers about geometry without decoding a byte; `save` is the one command that writes a document that already holds a user's work.
 
@@ -363,12 +359,12 @@ comparable, and `--quality` was deliberately not added — a knob nobody tests b
 
 | Item | `templates` | `init` |
 |---|---|---|
-| shape | `template.<i>.{name,slots,aspect,version}` plus `count` (and `aspect`, when filtering) | `template`, `version`, `aspect`, `canvas`, `cells`, `bytes` |
-| `--aspect` | the only flag it takes: accepts `W:H` (`4:3`) or a decimal, matched against the template's declared ratio within `ASPECT_TOLERANCE` (the same comparison `CollageDoc::validate` applies). A ratio nothing was authored for is `count = 0` and exit 0 | — |
+| shape | `template.<i>.{name,slots,aspect,version}` plus `count` (and `aspect`, when filtering) | `template`, `version`, `aspect`, `cells`, `bytes` |
+| `--aspect` | the only flag it takes: accepts `W:H` (`4:3`) or a decimal, matched against the template's declared ratio within `ASPECT_TOLERANCE` (the picker's own `templates::of_aspect` query). A ratio nothing was authored for is `count = 0` and exit 0 | — |
 | `--template` / `--out` | — | both required; `--out` must end in `.pixlay` |
-| refusal | any other flag (`--dpi`, `--project`, …) is a usage error (exit 1) | same; and an existing `--out` path is a **failure** (exit 2) because `init` never overwrites a project |
+| refusal | any other flag (`--long-edge`, `--project`, …) is a usage error (exit 1) | same; and an existing `--out` path is a **failure** (exit 2) because `init` never overwrites a project |
 | unknown template | — | usage error (exit 1), stderr lists the names this build knows |
-| content | the whole library in library order (by slot count) | a default project at the template's aspect on a 1189 mm long edge, written by `CollageDoc::to_json` and loadable by `Project::load`; **with `--photo` the arguments fill the cells in order** (below) |
+| content | the whole library in library order (by slot count) | a photo-free project at the template's aspect, written by `CollageDoc::to_json` and loadable by `Project::load`; **with `--photo` the arguments fill the cells in order** (below) |
 
 **S9's two subcommands are the library's machine surface** — stages 1–2 of the main path, "browse a folder" and "show me this photo" — plus the extension of `init` that turns a selection into a document. The picker's grid and its fit-and-zoom preview call the same two pieces of code, so what the GUI shows has a number behind it.
 
@@ -377,7 +373,7 @@ comparable, and `--quality` was deliberately not added — a knob nobody tests b
 | shape | `dir`, `recursive`, `count`, `failed`, and one `file.<i>` row per photo: `path`, `status`, and either `mime` / `width` / `height` / `date` / `mtime`, or `reason` | `format`, `mime`, `src_w`, `src_h`, `px`, `out_w`, `out_h`, `bytes` |
 | what it is for | what a picker needs from a folder, and the key S12's decode cache invalidates on: `mtime`, whole seconds since the Unix epoch | the picker's expensive half — decode plus resample to a tile's size — as a CLI number; `--stats` is the budget number S12's decisions are measured against |
 | size | `height`/`width` are the size **after EXIF rotation** (`ImageDetails`' early dimensions are a hint and are *not* post-rotation, which is why a full decode happens), so `image` and `scan` cannot disagree about a file | `--px n` is the exact long edge, 1..=**8192**; the other edge keeps the photo's ratio (`round`, at least 1 px). The bound is the product's largest preview with room: a full-window 4K photo preview is 3840 px and a HiDPI one 7680, so past 8192 the caller wants `render --preview-px` |
-| candidates | files whose extension is in `PHOTO_EXTENSIONS` (`.jpg .jpeg .png .heic .heif .avif .jxl .webp .tif .tiff` — TIFF is still read even though it is no longer written), case-insensitively; **no recursion unless `--recursive`**, and only real directories are descended into (a symlink to a parent would never terminate). A non-photo extension is neither a row nor an error — the alternative is a folder's README becoming an error row | `--out`'s extension, the same four formats `render` writes. A preview is written at **72 dpi**: one image pixel per point is what a screen-sized picture means, and the encoder always writes a resolution |
+| candidates | files whose extension is in `PHOTO_EXTENSIONS` (`.jpg .jpeg .png .heic .heif .avif .jxl .webp .tif .tiff` — TIFF is still read even though it is no longer written), case-insensitively; **no recursion unless `--recursive`**, and only real directories are descended into (a symlink to a parent would never terminate). A non-photo extension is neither a row nor an error — the alternative is a folder's README becoming an error row | `--out`'s extension, the same four formats `render` writes |
 | refusal | a file with a photo extension that does not decode **is** a row (`status = failed`) with the decoder's own reason, and the command still exits **0**: the listing is the result. A `--dir` that is not a directory is exit **2** with the path named | a photo that does not decode, or an `--out` this build cannot write, is exit **2**; `--px` outside the range is exit **1** |
 | pixels | — | the whole photo, resampled once at the preview's own grid — the same `resample` (Lanczos3, linear light, kernel widened by the downscale ratio) and the same `over_white` + quantize as a slot, so a preview is not a second picture of the same file |
 
@@ -397,7 +393,7 @@ three on both commands, and the difference between them is scope:
 
 | Item | Rule |
 |---|---|
-| `--gap <rel>` / `--radius <rel>` | fractions of the canvas height, `0..=1` (exit 1 outside). On `render` they override the document **for that render only** — the file is not touched — and on `edit` they are written into the document |
+| `--gap <rel>` / `--radius <rel>` | fractions of the sheet height, `0..=1` (exit 1 outside). On `render` they override the document **for that render only** — the file is not touched — and on `edit` they are written into the document |
 | `--border-color <r,g,b>` | three channels `0..=255`, stored opaque (the frame's alpha rule is §2). The report prints it back the same way |
 | what `render` reports | `gap`, `radius` and `border` always, so "which frame did that render use" is answerable without counting pixels — the document's own values, unless a flag overrode one |
 | `edit --slot <i>` | the cell the framing flags apply to; `--rotate`/`--zoom`/`--offset`/`--clear` without it are exit 1 **naming the flag**, because taking them as "the frame, then" would drop them silently. `--slot` past the last cell is exit 1 naming the count |
@@ -409,7 +405,7 @@ three on both commands, and the difference between them is scope:
 | idempotence | fitting a fit returns it bit for bit, so `edit` applied twice to the same project writes the same bytes — asserted on a rotation that has to be paid for *and* a pan that has to be clamped. A frame is likewise idempotent |
 | writing | through `Project::save_as`, the same call `save` makes: atomic, and relative photo paths are rebased when the copy lands in another directory. `--out` may be `--project` (edit in place) |
 | what `edit` reports | `template`, `version`, `cells`, `photos`, the frame's three fields, `bytes`, and — when `--slot` was given — `slot`, `occupied`, `zoom`, `offset`, `rotation_deg` |
-| no `--photo`, no `--dpi` | an edit changes a cell's framing and the document's frame; which photos and how big an export are other commands' questions |
+| no `--photo`, no `--long-edge` | an edit changes a cell's framing and the document's frame; which photos and how big an export are other commands' questions |
 
 **S12 added one subcommand and no flags to the others.** `gesture` is the ruler for what one step of a live
 gesture costs, which is the number ruling 1 (2026-09-22) hands the preview's fate to. It drives the same
@@ -469,6 +465,10 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
   interprets an unprofiled file as sRGB. No colour code of our own: no `lcms2`, no
   rendering intent to define (§4, "Colour")
 - curves / levels / masking / brushes; all of them in `AGENTS.md`'s "Directions not to improve" → "Not doing"
+- **physical sizes and resolutions in any form**: no millimetres, no DPI, no `--dpi`,
+  no `canvas` field, no resolution in a file the product writes (S12d, ruling 17: a
+  raster's only intrinsic size is its pixels, and the product has no concept of
+  paper). Sizes are one long-edge pixel count
 - multi-page / multi-canvas projects
 - **version migration** for `.pixlay` (not written; higher refused, lower refused too, see "Version policy")
 - MCP server, REPL / watch, natural-language arguments, reading defaults from a config file
@@ -481,18 +481,23 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
 | canvas decoration (the frame) | **S11, landed** | `CollageDoc::frame`: `Frame { gapRel, radiusRel, color }`, plus `Frame::covering` / `Frame::clip` and the backdrop + clip stage in `draw`; the CLI's `render --gap/--radius/--border-color` (render-time) and `edit` (§5). Measured cost at A0: none — the frame is a clip path and a fill (§8, "S11") |
 | template generator | **S2, landed** | `pixlay_core::templates` (`generator` recipes + the committed `frozen` data) and the `templates` / `init` subcommands; see §3 and §5 |
 | the image pipeline | **S4, landed**; the preview-grade reduction landed in **S12b**; the grading stage removed by **S12c** | `pixlay-imaging`: `Source::decode`, `resample`, `slot_bitmap`/`slot_bitmaps`, `probe`, and the preview's `Preview` caches + `reduce::PreviewSource`; the buffer ladder and the colour decisions are §4.1 |
-| command history / hit testing / project writing | **S6.5, landed**; `SetTemplate` added by **S7**; the grade/filter/text commands removed by **S12c** | `pixlay-core`: `Command` (one edit: source, framing, the template and its canvas — `SetTemplate` carries both because a canvas and a template must agree on their aspect ratio — and the canvas alone) and `History` (snapshot undo/redo; `apply` is all-or-nothing and the document has no mutable accessor; the GUI commits **one command per gesture**, §9), `Template::slot_at(point)` for hit testing, `CollageDoc::save` / `Project::save` / `Project::save_as` for writing a document. The CLI's `hit` and `save` are the machine surface of the first and the last; the command history is a test surface only, on purpose (§5) |
-| encoding and metadata | **S6, landed**; TIFF and the chroma request removed by **S12c** | `pixlay_imaging::encode`: one pass per format writing pixels, resolution, sampling and the ICC profile (`icc`), for PNG / JPEG; the CLI's `--long-edge` and the per-format rules are §5, the profile is §4.1 |
+| command history / hit testing / project writing | **S6.5, landed**; `SetTemplate` added by **S7**; the grade/filter/text commands removed by **S12c** | `pixlay-core`: `Command` (one edit: source, framing, or the template) and `History` (snapshot undo/redo; `apply` is all-or-nothing and the document has no mutable accessor; the GUI commits **one command per gesture**, §9), `Template::slot_at(point)` for hit testing, `CollageDoc::save` / `Project::save` / `Project::save_as` for writing a document. The CLI's `hit` and `save` are the machine surface of the first and the last; the command history is a test surface only, on purpose (§5) |
+| encoding and metadata | **S6, landed**; TIFF and the chroma request removed by **S12c**, resolutions by **S12d** | `pixlay_imaging::encode`: one pass per format writing pixels, sampling and the ICC profile (`icc`), for PNG / JPEG; the CLI's `--long-edge` and the per-format rules are §5, the profile is §4.1 |
 | the library and the selection | **S9, landed** | `pixlay_core::selection`: `Selection` (the ordered photo list, the 2..=9 clamp, `layouts()`), `last_photo` / `remove_last` / `Removed::restore` (the LIFO batch rule) — pure, no filesystem. `pixlay_imaging::thumb`: `thumbnail(source, long_edge)`, the same `resample` at a preview grid. The CLI's `scan` / `thumb` / `init --photo` are the machine surface (the rules are §5) |
 
 ## 8. Measured (2026-09-20, this machine)
 
-**A note on the records below (S12c, 2026-09-22).** The sections from S5 onwards include rows
+**A note on the records below (S12c + S12d, 2026-09-22).** The sections from S5 onwards include rows
 for text layers, and the rows for S4 and later include grading and the canvas-wide filter.
 Those features were removed by the purity ruling, so a row that mentions `text`, `grade`,
 `filter` or `chroma` is a record of the build that measured it, not a description of this
-one. The numbers stay as they were taken: they are the process record, and the S12c result in
-`docs/2026-09-22-STEPS.md` is where the removal itself is accounted for.
+one. The rows from S0 to S12 also name millimetres, DPI and resolutions (`--dpi`, `pHYs`,
+JFIF densities, "A0 at 300 dpi = 139.5 MP" grids): S12d removed the whole concept, so those
+numbers are records of the grids the builds rendered — including what a "14043 px long
+edge" *means*, which is why the verification entry still renders that many pixels — and
+not claims about a document field or file chunk this build has. The numbers stay as they
+were taken: they are the process record, and the S12c/S12d results in
+`docs/2026-09-22-STEPS.md` are where the removals themselves are accounted for.
 
 | Item | Value |
 |---|---|
@@ -899,7 +904,7 @@ S13–S15): a picker (`AdwNavigationView`'s root page — a `GtkGridView` librar
 tray, a zoomable preview of the focused photo), a layout stage, and then the editor of S7. The
 invariants above are unchanged by the sequence: still one document, one renderer, one gesture per
 command. The library and the gallery are **not** renderers of the document — a candidate thumbnail is
-`render_rgb8_sized` of the same drawn document at a smaller size, and S14's criteria hold it to that.
+`render_rgb8` of the same drawn document at a smaller size, and S14's criteria hold it to that.
 
 - **One document at a time**, edited only through `Command` (`History` in `pixlay-core`): the
   window has no second edit path, and **one gesture is one command**, committed when the
@@ -932,7 +937,7 @@ command. The library and the gallery are **not** renderers of the document — a
   `pixlay_imaging::Preview` — the same type the CLI's `gesture` probe drives — holds preview-grade
   sources keyed by path, modification time **and target size** (budgeted by `MAX_SOURCE_BYTES`, least
   recently used evicted) and **one bitmap set per grid** (at most two: the resting one and the coarse
-  one), carrying over every cell whose cell, source, source identity, template, canvas and filter are
+  one), carrying over every cell whose cell, source, source identity and template are
   unchanged. A step of a gesture therefore rebuilds one cell and touches no disk at all; the window
   counts the decodes the worker reports (`EditorWindow::decoded_sources`) and the GUI test holds a whole
   drag to zero of them once both grids' copies exist. The copy is a **box average in linear light** to

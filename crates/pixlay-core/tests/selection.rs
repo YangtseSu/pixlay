@@ -10,8 +10,8 @@
 use std::path::PathBuf;
 
 use pixlay_core::{
-    CanvasSpec, Cell, CollageDoc, CropTransform, MAX_PHOTOS, MIN_PHOTOS, Removed, Selection,
-    SelectionError, last_photo, remove_last, templates,
+    Cell, CollageDoc, CropTransform, MAX_PHOTOS, MIN_PHOTOS, Removed, Selection, SelectionError,
+    last_photo, remove_last, templates,
 };
 
 fn photo(name: &str) -> PathBuf {
@@ -31,7 +31,7 @@ fn selection(count: usize) -> Selection {
 /// A document on `template` with a source in every cell.
 fn occupied(template: &str) -> CollageDoc {
     let template = templates::get(template).unwrap_or_else(|| panic!("template {template}"));
-    let mut doc = CollageDoc::new(CanvasSpec::with_ratio(template.aspect, 297.0), template);
+    let mut doc = CollageDoc::new(template);
     for (index, cell) in doc.cells.iter_mut().enumerate() {
         cell.source = Some(photo(&format!("cell{index}")));
     }

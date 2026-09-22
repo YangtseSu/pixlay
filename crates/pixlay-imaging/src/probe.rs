@@ -244,14 +244,11 @@ impl ProbeReport {
 }
 
 /// Samples `image`, which must be a full-size render of `doc` painted with [`palette`].
-pub fn probe(doc: &CollageDoc, image: &Rgb8View<'_>, dpi: u32) -> ProbeReport {
-    let canvas = doc
-        .canvas
-        .pixel_size(dpi)
-        .unwrap_or(pixlay_core::PixelSize {
-            width: image.width,
-            height: image.height,
-        });
+pub fn probe(doc: &CollageDoc, image: &Rgb8View<'_>) -> ProbeReport {
+    let canvas = pixlay_core::PixelSize {
+        width: image.width,
+        height: image.height,
+    };
     let mut occupied = Vec::new();
     let mut interiors = Vec::new();
     for (index, slot) in doc.template.slots.iter().enumerate() {

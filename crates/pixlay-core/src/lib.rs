@@ -6,16 +6,18 @@
 //!
 //! The v1 contract frozen by S1 (review copy: `docs/CONTRACT.md`):
 //!
-//! * [`CollageDoc`] is the whole document — canvas, frozen template geometry,
-//!   one [`Cell`] per slot, and the frame around them. It is the only shape
+//! * [`CollageDoc`] is the whole document — frozen template geometry, one
+//!   [`Cell`] per slot, and the frame around them. It is the only shape
 //!   ever serialized to `.pixlay`, and it embeds its template geometry so the
-//!   layout of a saved project cannot change under it.
+//!   layout of a saved project cannot change under it. It carries no size:
+//!   the template's aspect is the sheet's shape, and a render's pixel grid is
+//!   a parameter of the render (`PixelSize::for_long_edge`, S12d).
 //! * Documents carry `docVersion`; a file written by a newer version is rejected
 //!   instead of guessed at or downgraded.
-//! * Limits (slot count, dpi, canvas pixels, zoom, the frame's two lengths) are
-//!   enforced by [`CollageDoc::validate`] and reported as typed errors, never as
-//!   panics. Rotation is *not* one of them: since 2026-09-22 any finite angle is
-//!   legal and every finite angle is normalized into `(-180, 180]`.
+//! * Limits (slot count, long edge, canvas pixels, zoom, the frame's two lengths)
+//!   are enforced by [`CollageDoc::validate`] and reported as typed errors, never
+//!   as panics. Rotation is *not* one of them: since 2026-09-22 any finite angle
+//!   is legal and every finite angle is normalized into `(-180, 180]`.
 //! * Framing state is absolute ([`CropTransform::zoom`] is displayed width over
 //!   slot width), so swapping a photo does not move the visible area, and what is
 //!   drawn is the *fit* of the stored request ([`CropTransform::fit`]), so a
@@ -41,7 +43,7 @@ mod template;
 /// should be able to read where the geometry came from.
 pub mod templates;
 
-pub use canvas::{CanvasSpec, MAX_CANVAS_MM, MM_PER_INCH, PixelSize};
+pub use canvas::PixelSize;
 pub use crop::{CropFit, CropTransform, DisplayRegion};
 pub use doc::{Cell, CollageDoc, Project, relative_to};
 pub use error::CoreError;
@@ -55,13 +57,13 @@ pub use template::{AREA_TOLERANCE, SharedEdge, Slot, Template};
 
 /// Version of the document format this build reads and writes.
 ///
-/// **2 since S12c**: the purity cut removed the `text`, `textFallback`, `filter`
-/// and per-cell `grade` fields, which is the one change the policy below says
-/// bumps this number. A version-1 project is refused with `VersionUnsupported`
-/// instead of a `serde` unknown-field error, and there is no migration: a
-/// version-1 file is a file this build cannot express (the ruling of 2026-09-22,
+/// **3 since S12d**: pixels-only removed the `canvas` field, which is the one
+/// change the policy below says bumps this number. A version-1 or version-2
+/// project is refused with `VersionUnsupported` instead of a `serde`
+/// unknown-field error, and there is no migration: a file from either shape is a
+/// file this build cannot express (the rulings of 2026-09-22,
 /// `docs/2026-09-22-STEPS.md`).
-pub const DOC_VERSION: u32 = 2;
+pub const DOC_VERSION: u32 = 3;
 
 /// Oldest `docVersion` this build reads.
 ///
@@ -71,11 +73,19 @@ pub const DOC_VERSION: u32 = 2;
 /// alters an existing field's meaning or removes one bumps it, and projects from
 /// the old version are then refused with an actionable message. There is no
 /// migration by decision (S1 review, 2026-09-20).
-pub const DOC_VERSION_MIN: u32 = 2;
+pub const DOC_VERSION_MIN: u32 = 3;
 
-/// Tolerance when comparing the canvas aspect with the template's declared
-/// aspect. Both are authored separately, so an exact comparison would reject a
-/// project whose canvas was rounded in millimetres; 1e-6 is ~1e-3 px on A0.
+/// Largest canvas the product renders, in pixels.
+///
+/// Measured (S0, 2026-09-20): the largest grid this product has ever rendered is
+/// 139.5 MP, and the budget leaves ~43% of headroom over it; `peak VmHWM` at that
+/// grid is 1340 MB including encoding, inside the 2.5 GB budget
+/// (`docs/CONTRACT.md` §8).
+pub const MAX_CANVAS_PIXELS: u64 = 200_000_000;
+
+/// Tolerance for the template-aspect picker query (`templates::of_aspect`): a
+/// caller names an aspect by rounding (`16:9`, `1.5`), so an exact comparison
+/// would miss a template whose aspect is computed from slot geometry.
 pub const ASPECT_TOLERANCE: f64 = 1e-6;
 
 /// Smallest and largest slot count a template may declare.
@@ -85,23 +95,13 @@ pub const ASPECT_TOLERANCE: f64 = 1e-6;
 pub const MIN_SLOTS: usize = 2;
 pub const MAX_SLOTS: usize = 9;
 
-/// DPI range accepted by the render and export boundary.
-pub const MIN_DPI: u32 = 72;
-pub const MAX_DPI: u32 = 600;
-
-/// Longest edge an export asked for *pixels* may have, in pixels.
+/// Longest edge a render or export may be asked for, in pixels.
 ///
-/// Bounded because the pixel grid, not the DPI, decides the output size in that
-/// mode: A0 at the maximum DPI (600) is 28087 px on the long edge, so 30000
-/// covers every resolution this product accepts with a little room, and anything
-/// larger is a typo rather than a print. The canvas pixel budget
-/// ([`MAX_CANVAS_PIXELS`]) is checked as well, so a square 30000 px request is
-/// refused for its area even though its edge is inside this range.
+/// Bounded because the long edge is the one parameter that decides the output
+/// size (S12d): past this, a request is a typo rather than an image. The canvas
+/// pixel budget ([`MAX_CANVAS_PIXELS`]) is checked as well, so a square request
+/// inside this range is still refused for its area.
 pub const MAX_LONG_EDGE_PX: u32 = 30000;
-
-/// Largest canvas the product renders, in pixels. A0 at 300 dpi is 139.5 MP, so
-/// this leaves ~43% of headroom.
-pub const MAX_CANVAS_PIXELS: u64 = 200_000_000;
 
 /// Largest framing zoom accepted, as displayed photo width over slot width.
 ///

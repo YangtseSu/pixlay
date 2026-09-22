@@ -21,9 +21,9 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use pixlay_core::{CanvasSpec, CollageDoc, CropTransform, PixelSize, templates};
+use pixlay_core::{CollageDoc, CropTransform, PixelSize, templates};
 use pixlay_imaging::{Preview, SlotBitmap, preview_source_long_edge};
-use pixlay_render::{Bitmap, Images, output_px, render_rgb8_sized};
+use pixlay_render::{Bitmap, Images, output_px, render_rgb8};
 
 /// `CARGO_BIN_EXE_<name>` is set by Cargo for integration tests.
 const BIN: &str = env!("CARGO_BIN_EXE_pixlay-render");
@@ -32,10 +32,9 @@ const BIN: &str = env!("CARGO_BIN_EXE_pixlay-render");
 /// downsampled, stays below 6.
 const RMSE_THRESHOLD: f64 = 6.0;
 
-/// The export's own grid, in dpi: the run renders at this resolution and scales it
-/// down to [`PREVIEW_PX`], which is the CLI's own `--preview-px` path.
-const DPI: u32 = 150;
-
+/// The reference run asks for no grid: `--preview-px` alone renders the default
+/// export grid (the 4000 px long edge `render` falls back to) scaled down, which
+/// is the CLI's own preview path and therefore the only fair reference.
 /// The long edge both renders come out at, in pixels.
 const PREVIEW_PX: u32 = 400;
 
@@ -124,7 +123,7 @@ fn the_preview_grade_source_stays_the_exports_own_renderer() {
         .into_iter()
         .find(|template| template.slots.len() == 4)
         .expect("the library has a four-slot layout");
-    let mut doc = CollageDoc::new(CanvasSpec::with_ratio(template.aspect, 297.0), template);
+    let mut doc = CollageDoc::new(template);
     for (slot, name) in [
         (0usize, "resample-source.png"),
         (1, "resample-source.png"),
@@ -148,8 +147,6 @@ fn the_preview_grade_source_stays_the_exports_own_renderer() {
         "render",
         "--project",
         project.to_str().expect("a UTF-8 path"),
-        "--dpi",
-        &DPI.to_string(),
         "--preview-px",
         &PREVIEW_PX.to_string(),
         "--out",
@@ -170,10 +167,8 @@ fn the_preview_grade_source_stays_the_exports_own_renderer() {
     // ---- the preview's path: the reduction, then the same `draw` ----------
     // The CLI's own arithmetic, repeated so that the *only* difference between the
     // two renders is where the bitmaps came from.
-    let canvas_px = doc
-        .canvas
-        .pixel_size(DPI)
-        .expect("the export grid is valid");
+    let canvas_px =
+        PixelSize::for_long_edge(doc.template.aspect, 4000).expect("the export grid is valid");
     let scale = f64::from(PREVIEW_PX) / f64::from(canvas_px.width.max(canvas_px.height));
     let grid = PixelSize {
         width: output_px(canvas_px.width, scale),
@@ -200,7 +195,7 @@ fn the_preview_grade_source_stays_the_exports_own_renderer() {
         images.insert(slot.slot, bitmap(slot));
     }
     let preview_image =
-        render_rgb8_sized(&doc, &images, canvas_px, scale, None).expect("the preview draws");
+        render_rgb8(&doc, &images, canvas_px, scale, None).expect("the preview draws");
     assert_eq!((preview_image.width, preview_image.height), (width, height));
 
     let difference = rmse(&preview_image.data, &pixels);

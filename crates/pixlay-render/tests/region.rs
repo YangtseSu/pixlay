@@ -9,10 +9,11 @@
 //! The test builds both sides from one synthetic displayed photo, so the only
 //! difference between the two renders is the crop and its origin.
 
-use pixlay_core::{CanvasSpec, CollageDoc, CropTransform, PixelSize, Polygon, Slot, Template};
+use pixlay_core::{CollageDoc, CropTransform, PixelSize, Polygon, Slot, Template};
 use pixlay_render::{Bitmap, Images, Rgb8Image, render_rgb8};
 
-const DPI: u32 = 96;
+/// Long edge of the grid the region test measures on, in pixels.
+const LONG_EDGE: u32 = 395;
 
 /// Three slots sharing seams, one of them not a rectangle, so a framing that
 /// pushes the region around has somewhere to show.
@@ -39,7 +40,7 @@ fn doc() -> CollageDoc {
         aspect: 104.0 / 78.0,
         slots,
     };
-    CollageDoc::new(CanvasSpec::new(104.0, 78.0), template)
+    CollageDoc::new(template)
 }
 
 /// The whole displayed photo, as a function of the texel's own coordinates: a
@@ -83,7 +84,7 @@ fn crop(data: &[u8], w: i32, x0: i32, y0: i32, x1: i32, y1: i32) -> Vec<u8> {
 }
 
 fn canvas_px(doc: &CollageDoc) -> PixelSize {
-    doc.canvas.pixel_size(DPI).expect("canvas size")
+    PixelSize::for_long_edge(doc.template.aspect, LONG_EDGE).expect("canvas size")
 }
 
 /// Both renders for one framing, plus whether the crop was a real one.
@@ -141,8 +142,9 @@ fn render_pair(
         .expect("bitmap"),
     );
 
-    let whole = render_rgb8(doc, &full, DPI, 1.0, None).expect("draw");
-    let part = render_rgb8(doc, &cropped, DPI, 1.0, None).expect("draw");
+    let canvas = canvas_px(doc);
+    let whole = render_rgb8(doc, &full, canvas, 1.0, None).expect("draw");
+    let part = render_rgb8(doc, &cropped, canvas, 1.0, None).expect("draw");
     let real_crop = cw < w || ch < h;
     let _ = bbox;
     (whole, part, real_crop)

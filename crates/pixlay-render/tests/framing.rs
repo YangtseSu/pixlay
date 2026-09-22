@@ -10,10 +10,11 @@
 //! rectangle, no margin at all) and the gutter template (four slots with a gap
 //! that reaches the border, so "outside every slot" has somewhere to show).
 
-use pixlay_core::{CanvasSpec, CollageDoc, CropTransform, PixelSize, Point, Rgba8, templates};
+use pixlay_core::{CollageDoc, CropTransform, PixelSize, Point, Rgba8, templates};
 use pixlay_render::{Bitmap, Images, Rgb8Image, render_rgb8};
 
-const DPI: u32 = 96;
+/// Long edge of the grid the framing sweeps measure on, in pixels.
+const LONG_EDGE: u32 = 454;
 
 /// The templates the sweep runs over.
 const TEMPLATES: [&str; 2] = [templates::SMOKE_TEMPLATE, "grid-4-2x2g"];
@@ -55,13 +56,13 @@ enum Class {
 
 fn doc(name: &str) -> CollageDoc {
     let template = templates::get(name).unwrap_or_else(|| panic!("template {name}"));
-    // A small canvas at the template's own aspect: the sweep renders hundreds of
-    // times, and a canvas of another aspect is a hard error anyway.
-    CollageDoc::new(CanvasSpec::with_ratio(template.aspect, 120.0), template)
+    // A small grid at the template's own aspect: the sweep renders hundreds of
+    // times, so it stays small.
+    CollageDoc::new(template)
 }
 
 fn canvas_px(doc: &CollageDoc) -> PixelSize {
-    doc.canvas.pixel_size(DPI).expect("canvas size")
+    PixelSize::for_long_edge(doc.template.aspect, LONG_EDGE).expect("canvas size")
 }
 
 /// The slot's own aspect in the space `draw` places into.
@@ -190,7 +191,7 @@ fn every_framing_covers_its_slot_without_spilling_or_growing_the_canvas() {
                             };
                         }
                         let images = images(&doc, canvas, &|_| photo_aspect);
-                        let image = render_rgb8(&doc, &images, DPI, 1.0, None).expect("renders");
+                        let image = render_rgb8(&doc, &images, canvas, 1.0, None).expect("renders");
                         // Crop edges only, never grow the canvas: whatever the
                         // framing, the output is exactly the canvas's pixel size.
                         assert_eq!(
@@ -248,7 +249,7 @@ fn a_rotation_the_document_asks_for_is_clamped_into_coverage() {
     let images = images(&doc, canvas, &|index| {
         slot_aspect(&doc, index, canvas_aspect)
     });
-    let image = render_rgb8(&doc, &images, DPI, 1.0, None).expect("renders");
+    let image = render_rgb8(&doc, &images, canvas, 1.0, None).expect("renders");
     check(&image, &samples, "zoom 1, rotation 13, matched photos");
 }
 
@@ -280,8 +281,8 @@ fn a_document_that_is_already_fitted_renders_identically() {
             .transform;
     }
 
-    let raw = render_rgb8(&requested, &images, DPI, 1.0, None).expect("renders");
-    let pre = render_rgb8(&fitted, &images, DPI, 1.0, None).expect("renders");
+    let raw = render_rgb8(&requested, &images, canvas, 1.0, None).expect("renders");
+    let pre = render_rgb8(&fitted, &images, canvas, 1.0, None).expect("renders");
     assert_eq!(
         (raw.width, raw.height),
         (pre.width, pre.height),

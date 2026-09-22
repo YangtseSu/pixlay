@@ -53,9 +53,6 @@ pub enum CoreError {
     #[error("slot {slot}: {reason}")]
     InvalidSlot { slot: usize, reason: &'static str },
 
-    #[error("canvas aspect {canvas} does not match the template aspect {template}")]
-    AspectMismatch { canvas: f64, template: f64 },
-
     #[error("template slot {slot} declares area {declared} but its outline covers {outline}")]
     SlotAreaMismatch {
         slot: usize,
@@ -76,9 +73,6 @@ pub enum CoreError {
     /// naming a bound the value is not being compared against.
     #[error("{what} must be a finite number, got {value}")]
     NotFinite { what: &'static str, value: f64 },
-
-    #[error("dpi {dpi} is outside {min}..={max}")]
-    DpiOutOfRange { dpi: u32, min: u32, max: u32 },
 
     /// A command named a slot the template does not have. The command history
     /// reports this instead of panicking: a GUI that loses its selection while a

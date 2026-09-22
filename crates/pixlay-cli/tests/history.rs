@@ -17,13 +17,14 @@
 
 use std::path::{Path, PathBuf};
 
-use pixlay_core::{CanvasSpec, CollageDoc, Command, CropTransform, History, templates};
+use pixlay_core::{CollageDoc, Command, CropTransform, History, PixelSize, templates};
 use pixlay_imaging::SlotBitmap;
 use pixlay_render::{Bitmap, Images, Rgb8Image, render_rgb8};
 
 /// A small grid: several states are rendered, each one decoding two photos, and
 /// the criterion is about equality of the two renders, not about resolution.
-const DPI: u32 = 96;
+/// Long edge of the grid the undo tests render on, in pixels.
+const LONG_EDGE: u32 = 454;
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -33,7 +34,7 @@ fn fixture(name: &str) -> PathBuf {
 
 fn document(photos: &[PathBuf]) -> CollageDoc {
     let template = templates::get(templates::SMOKE_TEMPLATE).expect("registered");
-    let mut doc = CollageDoc::new(CanvasSpec::with_ratio(template.aspect, 297.0), template);
+    let mut doc = CollageDoc::new(template);
     for (slot, photo) in photos.iter().enumerate() {
         doc.cells[slot].source = Some(photo.clone());
     }
@@ -57,15 +58,15 @@ fn bitmap(bitmap: &SlotBitmap) -> Bitmap {
     .expect("bitmap")
 }
 
-/// One full render: decode and grade every occupied cell, then draw.
+/// One full render: decode every occupied cell, then draw.
 fn render(doc: &CollageDoc) -> Rgb8Image {
-    let canvas = doc.canvas.pixel_size(DPI).expect("canvas size");
+    let canvas = PixelSize::for_long_edge(doc.template.aspect, LONG_EDGE).expect("canvas size");
     let images = pixlay_imaging::slot_bitmaps(doc, canvas, &sources(doc)).expect("decodes");
     let mut bitmaps = Images::new();
     for slot in &images {
         bitmaps.insert(slot.slot, bitmap(slot));
     }
-    render_rgb8(doc, &bitmaps, DPI, 1.0, None).expect("renders")
+    render_rgb8(doc, &bitmaps, canvas, 1.0, None).expect("renders")
 }
 
 /// Pixels that differ, for a failure message that says how much moved.
@@ -119,10 +120,15 @@ fn sequence() -> Vec<Command> {
             slot: 1,
             source: None,
         },
-        // A canvas resize at the same aspect: the pixel grid changes with it, and
-        // undo has to put it back.
-        Command::SetCanvas {
-            canvas: CanvasSpec::with_ratio(4.0 / 3.0, 420.0),
+        // Slot 2, which the previous command filled: framing an empty cell
+        // moves no pixel, so the walk would prove nothing.
+        Command::SetCrop {
+            slot: 2,
+            crop: CropTransform {
+                zoom: 1.8,
+                offset: (-0.2, 0.4),
+                rotation_deg: -30.0,
+            },
         },
     ]
 }

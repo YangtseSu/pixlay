@@ -4,12 +4,11 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::canvas::CanvasSpec;
 use crate::crop::{CropFit, CropTransform};
 use crate::error::CoreError;
 use crate::frame::Frame;
 use crate::template::Template;
-use crate::{ASPECT_TOLERANCE, DOC_VERSION, DOC_VERSION_MIN};
+use crate::{DOC_VERSION, DOC_VERSION_MIN};
 
 /// What one slot shows.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -41,7 +40,6 @@ impl Default for Cell {
 pub struct CollageDoc {
     /// Format version of this document. A file from a newer version is rejected.
     pub doc_version: u32,
-    pub canvas: CanvasSpec,
     pub template: Template,
     /// One cell per slot, in template order.
     pub cells: Vec<Cell>,
@@ -57,11 +55,14 @@ pub struct CollageDoc {
 
 impl CollageDoc {
     /// A document with the slot count of `template` and every cell empty.
-    pub fn new(canvas: CanvasSpec, template: Template) -> Self {
+    ///
+    /// The document carries no size (S12d): the template's aspect is the sheet's
+    /// shape, and how many pixels a render or export puts on it is a parameter of
+    /// the render, never of the document.
+    pub fn new(template: Template) -> Self {
         let cells = vec![Cell::default(); template.slots.len()];
         Self {
             doc_version: DOC_VERSION,
-            canvas,
             template,
             cells,
             frame: Frame::default(),
@@ -87,18 +88,10 @@ impl CollageDoc {
                 supported: DOC_VERSION,
             });
         }
-        self.canvas.validate()?;
-        // The canvas aspect and the template aspect are both part of the layout:
-        // the template's normalized geometry is stretched onto the canvas, so a
-        // mismatch silently distorts every slot. Nothing downstream can detect it,
-        // because normalized coordinates carry no aspect of their own.
-        let canvas_aspect = self.canvas.aspect();
-        if (canvas_aspect - self.template.aspect).abs() > ASPECT_TOLERANCE {
-            return Err(CoreError::AspectMismatch {
-                canvas: canvas_aspect,
-                template: self.template.aspect,
-            });
-        }
+        // The template's aspect is the sheet's shape (S12d removed the canvas that
+        // used to have to agree with it): the normalized geometry is stretched onto
+        // the render grid, whose long edge is the one parameter a caller gives.
+        let canvas_aspect = self.template.aspect;
         self.template.validate()?;
         if self.cells.len() != self.template.slots.len() {
             return Err(CoreError::CellCount {

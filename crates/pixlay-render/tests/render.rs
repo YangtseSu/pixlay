@@ -2,20 +2,24 @@
 //!
 //! Everything here runs without a display and without a decoder: bitmaps are
 //! built procedurally, so these tests are the same on any machine. The one
-//! committed artifact is `golden/draw-v1.png`, which pins the geometry of the
-//! single `draw` across changes to the renderer.
+//! committed artifact is `golden/draw-v2.png`, which pins the geometry of the
+//! single `draw` across changes to the renderer. It is v2 because the draw-v1
+//! golden was rendered at a grid only a millimetre count could size: S12d
+//! removed that count, so what changed in the file is the grid (454 px long
+//! edge), not the geometry.
 
 use std::f64::consts::PI;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 
 use cairo::ImageSurface;
-use pixlay_core::{CanvasSpec, CollageDoc, CropTransform, Polygon, Rgba8, Slot, Template};
+use pixlay_core::{CollageDoc, CropTransform, Polygon, Rgba8, Slot, Template};
 use pixlay_render::{
     Band, Bitmap, Images, Rgb8Image, Target, draw, render_rgb8, render_surface, rgb8,
 };
 
-const DPI: u32 = 96;
+/// Long edge of the grid the contract tests render on, in pixels.
+const LONG_EDGE: u32 = 454;
 
 /// Golden comparison limit, as RMSE over all channels.
 ///
@@ -59,11 +63,11 @@ fn template() -> Template {
 }
 
 fn doc() -> CollageDoc {
-    CollageDoc::new(CanvasSpec::new(120.0, 90.0), template())
+    CollageDoc::new(template())
 }
 
 fn canvas_px() -> pixlay_core::PixelSize {
-    doc().canvas.pixel_size(DPI).expect("canvas size")
+    pixlay_core::PixelSize::for_long_edge(doc().template.aspect, LONG_EDGE).expect("canvas size")
 }
 
 /// Solid colors: turns "did the photo land in the slot" into an exact pixel
@@ -153,7 +157,7 @@ fn downsample2(image: &Rgb8Image) -> Rgb8Image {
 }
 
 fn golden_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/draw-v1.png")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/draw-v2.png")
 }
 
 fn load_golden(path: &Path) -> Rgb8Image {
@@ -166,7 +170,7 @@ fn load_golden(path: &Path) -> Rgb8Image {
 fn slot_interiors_are_covered_and_the_canvas_outside_is_white() {
     let doc = doc();
     let canvas = canvas_px();
-    let image = render_rgb8(&doc, &flat_images(), DPI, 1.0, None).expect("renders");
+    let image = render_rgb8(&doc, &flat_images(), canvas_px(), 1.0, None).expect("renders");
     assert_eq!((image.width, image.height), (canvas.width, canvas.height));
 
     let at = |x: f64, y: f64| {
@@ -207,7 +211,7 @@ fn a_rotated_photo_with_enough_zoom_still_covers_its_slot() {
         offset: (0.0, 0.0),
         rotation_deg: 12.0,
     };
-    let image = render_rgb8(&doc, &flat_images(), DPI, 1.0, None).expect("renders");
+    let image = render_rgb8(&doc, &flat_images(), canvas_px(), 1.0, None).expect("renders");
 
     let (x0, y0, x1, y1) = SLOTS[0];
     let mut white = 0;
@@ -255,7 +259,7 @@ fn a_rotated_photo_is_clipped_to_its_slot() {
         )
         .expect("bitmap"),
     );
-    let image = render_rgb8(&doc, &images, DPI, 1.0, None).expect("renders");
+    let image = render_rgb8(&doc, &images, canvas_px(), 1.0, None).expect("renders");
     let at = |x: f64, y: f64| {
         image.pixel(
             (x * f64::from(canvas.width)) as i32,
@@ -287,7 +291,7 @@ fn golden_image_matches() {
         offset: (-0.1, 0.08),
         rotation_deg: 0.0,
     };
-    let image = render_rgb8(&doc, &pattern_images(), DPI, 1.0, None).expect("renders");
+    let image = render_rgb8(&doc, &pattern_images(), canvas_px(), 1.0, None).expect("renders");
     let golden = load_golden(&golden_path());
     assert_eq!((golden.width, golden.height), (image.width, image.height));
 
@@ -324,7 +328,7 @@ fn regen_golden() {
         offset: (-0.1, 0.08),
         rotation_deg: 0.0,
     };
-    let surface = render_surface(&doc, &pattern_images(), DPI, 1.0, None).expect("renders");
+    let surface = render_surface(&doc, &pattern_images(), canvas_px(), 1.0, None).expect("renders");
     let path = golden_path();
     std::fs::create_dir_all(path.parent().unwrap()).expect("golden dir");
     surface
@@ -339,7 +343,7 @@ fn the_comparison_can_actually_fail() {
     // product would notice. A one-pixel geometry error shows up as a whole
     // column of changed pixels, so that is what the threshold has to catch; a
     // single pixel is far below any sane threshold at this image size.
-    let image = render_rgb8(&doc(), &flat_images(), DPI, 1.0, None).expect("renders");
+    let image = render_rgb8(&doc(), &flat_images(), canvas_px(), 1.0, None).expect("renders");
 
     let mut shifted = Rgb8Image {
         width: image.width,
@@ -368,8 +372,8 @@ fn preview_and_export_agree() {
     // Threshold 6/255 comes from the A0 measurement in AGENTS.md (2.62).
     let doc = doc();
     let images = pattern_images();
-    let single = render_rgb8(&doc, &images, DPI, 1.0, None).expect("renders");
-    let double = render_rgb8(&doc, &images, DPI, 2.0, None).expect("renders");
+    let single = render_rgb8(&doc, &images, canvas_px(), 1.0, None).expect("renders");
+    let double = render_rgb8(&doc, &images, canvas_px(), 2.0, None).expect("renders");
     assert_eq!(double.width, single.width * 2);
     // Measured 2.32 with this content (2026-09-20). AGENTS.md sets the limit at
     // 6 from the A0 measurement of 2.62.
@@ -383,9 +387,9 @@ fn bands_stitch_back_into_the_whole_canvas() {
     let images = pattern_images();
     // Scale is part of the test: the partition has to hold in output pixels, and
     // rounding each band's canvas height separately used to make the bands sum to
-    // one row more than the whole (measured at 72 dpi / scale 0.1 and 0.3).
+    // one row more than the whole (measured at a 454 px grid, scale 0.1 and 0.3).
     for scale in [1.0, 0.5, 0.3, 0.1] {
-        let whole = render_rgb8(&doc, &images, DPI, scale, None).expect("renders");
+        let whole = render_rgb8(&doc, &images, canvas_px(), scale, None).expect("renders");
         let count = 3;
         let mut stitched = Rgb8Image {
             width: whole.width,
@@ -394,7 +398,7 @@ fn bands_stitch_back_into_the_whole_canvas() {
         };
         for index in 0..count {
             let band = Band { index, count };
-            let part = render_rgb8(&doc, &images, DPI, scale, Some(band)).expect("renders");
+            let part = render_rgb8(&doc, &images, canvas_px(), scale, Some(band)).expect("renders");
             assert_eq!(part.width, whole.width, "scale {scale}");
             stitched.height += part.height;
             stitched.data.extend_from_slice(&part.data);
@@ -444,9 +448,18 @@ fn band_rows_split_the_output_exactly() {
 fn invalid_targets_and_bitmaps_are_rejected() {
     let doc = doc();
     let images = flat_images();
-    assert!(render_rgb8(&doc, &images, DPI, 0.0, None).is_err());
-    assert!(render_rgb8(&doc, &images, DPI, f64::NAN, None).is_err());
-    assert!(render_rgb8(&doc, &images, DPI, 1.0, Some(Band { index: 9, count: 2 })).is_err());
+    assert!(render_rgb8(&doc, &images, canvas_px(), 0.0, None).is_err());
+    assert!(render_rgb8(&doc, &images, canvas_px(), f64::NAN, None).is_err());
+    assert!(
+        render_rgb8(
+            &doc,
+            &images,
+            canvas_px(),
+            1.0,
+            Some(Band { index: 9, count: 2 })
+        )
+        .is_err()
+    );
     assert!(Bitmap::filled(0, 10, Rgba8::WHITE).is_err());
     assert!(Bitmap::from_argb32(4, 4, vec![0; 10]).is_err());
 

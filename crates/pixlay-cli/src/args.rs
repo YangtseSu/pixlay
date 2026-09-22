@@ -13,7 +13,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use pixlay_core::{Frame, MAX_DPI, MAX_LONG_EDGE_PX, MIN_DPI, Point, Rgba8};
+use pixlay_core::{Frame, MAX_LONG_EDGE_PX, Point, Rgba8};
 
 use crate::cli::Failure;
 
@@ -60,8 +60,14 @@ pub const PHOTO_EXTENSIONS: &[&str] = &[
     "jpg", "jpeg", "png", "heic", "heif", "avif", "jxl", "webp", "tif", "tiff",
 ];
 
-/// Resolution a render uses when neither `--dpi` nor `--long-edge` is given.
-pub const DEFAULT_DPI: u32 = 300;
+/// The one size parameter: what `render` uses when `--long-edge` is not given,
+/// and what `probe` measures at, and what the window's export form starts at
+/// (the GUI's own copy is in `crates/pixlay/src/window.rs`).
+///
+/// 4000 px: a square grid of it is 16 MP, an eighth of the 200 MP pixel budget
+/// (measured 2026-09-20, `docs/CONTRACT.md` §8), so the default never touches the
+/// limit whatever the template's shape.
+pub const DEFAULT_LONG_EDGE_PX: u32 = 4000;
 
 /// File extension a project written by `init` must have. A `.pixlay` is a
 /// document, and a mistyped extension is more likely a typo than an intention.
@@ -72,7 +78,7 @@ pixlay-render - headless renderer and probe for Pixlay projects
 
 USAGE:
     pixlay-render render --project <file.pixlay> --out <file> [OPTIONS]
-    pixlay-render render --template <name> --dpi <n> --out <file> [OPTIONS]
+    pixlay-render render --template <name> --long-edge <n> --out <file> [OPTIONS]
     pixlay-render probe  --project <file.pixlay> [OPTIONS]
     pixlay-render image  --photo <file> [--json]
     pixlay-render scan   --dir <path> [--recursive] [--json]
@@ -91,13 +97,11 @@ RENDER OPTIONS:
     --template <name>   Render a template with no photos (see `templates`).
     --out <file>        Output file. Format comes from the extension:
                         .png, .jpg, .jpeg. Required.
-    --dpi <n>           Export resolution, 72..=600. Default 300. The output is
-                        the canvas size at that resolution, and the file carries
-                        this number.
-    --long-edge <n>     Export a long edge of exactly n pixels, 1..=30000, and
-                        write the resolution that pixel grid works out to. The
-                        other edge follows the canvas ratio, rounded. Exclusive
-                        with --dpi, which it replaces.
+    --long-edge <n>     Export a long edge of exactly n pixels, 1..=30000.
+                        Default 4000. The other edge follows the template's
+                        aspect ratio, rounded half away from zero, so a square
+                        stays exactly square. Exclusive with --preview-px, which
+                        sizes the preview instead of the export.
     --preview-px <n>    Render the long edge at n pixels instead of full size,
                         1..=20000. The same draw, only the scale changes (and
                         the bitmaps are sized for it, so a preview does not pay
@@ -122,7 +126,7 @@ FRAME OPTIONS (render, edit):
 
 PROBE OPTIONS:
     --project <file>    Project to probe. Required.
-    --dpi <n>           Resolution to probe at, 72..=600. Default 300.
+    --long-edge <n>     Grid to probe at, 1..=30000. Default 4000.
 
 IMAGE OPTIONS:
     --photo <file>      Decode one photo and report what the decoder found: the
@@ -146,7 +150,7 @@ THUMB OPTIONS:
     --px <n>            Long edge of the preview, 1..=8192. Required. The other
                         edge keeps the photo's ratio, at least 1 pixel.
     --out <file>        Preview file, .png / .jpg / .jpeg.
-                        Required, and written at 72 dpi (a screen-sized image).
+                        Required (a screen-sized image).
 
 GESTURE OPTIONS:
     --project <file>    Project to measure a live gesture on. Required, and every
@@ -172,10 +176,8 @@ GESTURE OPTIONS:
     result depend on the machine.
 
 TEMPLATES OPTIONS:
-    --aspect <ratio>    List only the templates authored for this canvas shape,
+    --aspect <ratio>    List only the templates authored for this layout shape,
                         as W:H (4:3) or a decimal (1.333333). Omit to list all.
-                        A template and a canvas must share an aspect ratio, so
-                        this is the query to run before picking one.
 
 HIT OPTIONS:
     --project <file>    Project whose layout to test. Required unless --template
@@ -228,13 +230,6 @@ EDIT OPTIONS:
                         heights away from the cell's centre.
     --clear             Empty the cell: no photo, and its framing back to its
                         default. Exclusive with the framing flags.
-    --sheet <mm>        Long edge of the sheet, in millimetres, 1..=2000. The
-                        shape is the template's: a canvas and a template have to
-                        agree on their aspect ratio, so this sets the long edge
-                        and the other one follows the layout. It is the one
-                        document field the window's export form no longer has a
-                        row for (S12c: the form is a format and a resolution), so
-                        this flag is how a physical size is chosen.
     The stored `crop` is the *fit* of what was asked for (a crop is a request;
     what is drawn is what covers), so `edit` applied twice to the same project
     writes the same bytes. A cell with no photo has nothing to fit against and
@@ -288,7 +283,8 @@ pub enum Source {
 pub struct RenderArgs {
     pub source: Source,
     pub out: PathBuf,
-    pub size: Size,
+    /// The one size parameter; `None` renders at [`DEFAULT_LONG_EDGE_PX`].
+    pub long_edge: Option<u32>,
     pub preview_px: Option<i32>,
     /// Frame overrides for this render only: the document is not changed, and
     /// nothing is written back to it (`edit` is the command that stores a frame).
@@ -341,22 +337,8 @@ pub struct EditArgs {
     pub offset: Option<(f64, f64)>,
     /// Empty the cell: no photo, default framing.
     pub clear: bool,
-    /// Long edge of the sheet in millimetres; `None` keeps the document's own.
-    pub sheet: Option<f64>,
     pub frame: FrameArgs,
     pub json: bool,
-}
-
-/// How a render decides its pixel grid.
-///
-/// The two modes are the two ways a user asks for an output size, and they are
-/// not interchangeable: a resolution is a request the file echoes back, while a
-/// pixel count is a request the file's resolution is derived from.
-pub enum Size {
-    /// A resolution in dots per inch, 72..=600.
-    Dpi(u32),
-    /// A long edge in pixels, 1..=30000; that edge is exactly this.
-    LongEdge(u32),
 }
 
 pub struct ImageArgs {
@@ -398,7 +380,8 @@ pub struct GestureArgs {
 
 pub struct ProbeArgs {
     pub project: PathBuf,
-    pub dpi: u32,
+    /// The one size parameter; `None` probes at [`DEFAULT_LONG_EDGE_PX`].
+    pub long_edge: Option<u32>,
     pub stats: bool,
     pub json: bool,
 }
@@ -438,7 +421,6 @@ struct Flags {
     project: Option<PathBuf>,
     template: Option<String>,
     out: Option<PathBuf>,
-    dpi: Option<u32>,
     long_edge: Option<u32>,
     preview_px: Option<i32>,
     /// `--photo`, repeatable: `image` and `thumb` take exactly one, `init` takes
@@ -459,7 +441,6 @@ struct Flags {
     zoom: Option<f64>,
     offset: Option<(f64, f64)>,
     clear: bool,
-    sheet: Option<f64>,
     stats: bool,
     json: bool,
 }
@@ -474,14 +455,13 @@ impl Flags {
 /// The first flag a subcommand does not accept, with the reason to quote back.
 ///
 /// A flag missing from a subcommand's list is refused there rather than ignored:
-/// a silently dropped `--dpi 300` on `templates` looks like it was honored.
+/// a silently dropped `--project` on `templates` looks like it was honored.
 fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static str)> {
     let valid: &[&str] = match name {
         "render" => &[
             "project",
             "template",
             "out",
-            "dpi",
             "long-edge",
             "preview-px",
             "gap",
@@ -489,7 +469,7 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
             "border-color",
             "stats",
         ],
-        "probe" => &["project", "dpi", "stats"],
+        "probe" => &["project", "long-edge", "stats"],
         "image" => &["photo"],
         "scan" => &["dir", "recursive", "stats"],
         "thumb" => &["photo", "px", "out", "stats"],
@@ -503,7 +483,6 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
             "zoom",
             "offset",
             "clear",
-            "sheet",
             "gap",
             "radius",
             "border-color",
@@ -513,11 +492,10 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
         "gesture" => &["project", "grid", "slot", "steps", "stats"],
         _ => &[],
     };
-    let present: [(&'static str, bool); 24] = [
+    let present: [(&'static str, bool); 22] = [
         ("project", flags.project.is_some()),
         ("template", flags.template.is_some()),
         ("out", flags.out.is_some()),
-        ("dpi", flags.dpi.is_some()),
         ("long-edge", flags.long_edge.is_some()),
         ("preview-px", flags.preview_px.is_some()),
         ("photo", !flags.photos.is_empty()),
@@ -536,7 +514,6 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
         ("zoom", flags.zoom.is_some()),
         ("offset", flags.offset.is_some()),
         ("clear", flags.clear),
-        ("sheet", flags.sheet.is_some()),
         ("stats", flags.stats),
     ];
     present
@@ -557,15 +534,12 @@ fn reason(name: &str, flag: &str) -> &'static str {
         ("render", "photo") => "render takes photos from a project, not from --photo",
         ("probe", "photo") => "probe takes photos from a project",
         ("image", "project") => "image decodes one file; use --photo",
-        ("image", "dpi") => "image decodes at the file's own size",
         ("image", "out") => "image writes no file",
         ("image", "template") => "image decodes one file; use --photo",
         ("probe", "template") => "probe reads a project",
         ("probe", "out") => "probe writes no file",
         ("probe", "preview-px") => "probe always renders at full size",
-        ("probe", "long-edge") => "probe always renders at full size",
         ("image", "long-edge") => "image decodes at the file's own size",
-        ("thumb", "dpi") => "thumb writes a screen-sized preview, not a print",
         ("scan", "project") => "scan lists a directory, not a project",
         ("templates", "long-edge") => "templates only lists the library",
         ("init", "long-edge") => "init only writes the project file",
@@ -589,7 +563,6 @@ fn reason(name: &str, flag: &str) -> &'static str {
         (_, "slot" | "rotate" | "zoom" | "offset" | "clear") => {
             "only `edit` changes one cell's framing"
         }
-        (_, "sheet") => "only `edit` sets the sheet size",
         ("hit", _) => "hit reads a layout and answers about one point in it",
         ("save", _) => "save reads a project and writes a project",
         ("templates", _) => "templates only lists the library",
@@ -666,18 +639,6 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                     .to_str()
                     .ok_or_else(|| Failure::Usage("--template must be valid UTF-8".to_string()))?;
                 set_once(&mut flags.template, name.to_string(), "template")?;
-            }
-            "dpi" => {
-                let raw = number(&value("dpi")?, "dpi")?;
-                let dpi = u32::try_from(raw).map_err(|_| {
-                    Failure::Usage(format!("--dpi must be a positive integer, got {raw}"))
-                })?;
-                if !(MIN_DPI..=MAX_DPI).contains(&dpi) {
-                    return Err(Failure::Usage(format!(
-                        "--dpi {dpi} is outside {MIN_DPI}..={MAX_DPI}"
-                    )));
-                }
-                set_once(&mut flags.dpi, dpi, "dpi")?;
             }
             "preview-px" => {
                 let raw = number(&value("preview-px")?, "preview-px")?;
@@ -800,16 +761,6 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                 set_once(&mut flags.offset, offset, "offset")?;
             }
             "clear" => flags.clear = true,
-            "sheet" => {
-                let sheet = float(&value("sheet")?, "sheet")?;
-                if !(1.0..=pixlay_core::MAX_CANVAS_MM).contains(&sheet) {
-                    return Err(Failure::Usage(format!(
-                        "--sheet {sheet} is outside 1..={} millimetres",
-                        pixlay_core::MAX_CANVAS_MM
-                    )));
-                }
-                set_once(&mut flags.sheet, sheet, "sheet")?;
-            }
             "at" => {
                 let raw = value("at")?;
                 let point = parse_point(&raw)?;
@@ -832,7 +783,7 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                 .ok_or_else(|| Failure::Usage("probe needs --project".to_string()))?;
             Ok(Command::Probe(ProbeArgs {
                 project,
-                dpi: flags.dpi.unwrap_or(300),
+                long_edge: flags.long_edge,
                 stats: flags.stats,
                 json: flags.json,
             }))
@@ -934,7 +885,7 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
         "edit" => {
             // A framing flag without a cell to apply it to has nothing to edit, and
             // taking it as "the frame, then" would be a silent drop (the rule
-            // `--dpi` on `templates` follows). The checks come before the moves so
+            // a dropped `--project` on `templates` follows). The checks come before the moves so
             // the message is about the command line, not about a consumed flag.
             let framing = flags.rotate.is_some()
                 || flags.zoom.is_some()
@@ -954,9 +905,9 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                         .to_string(),
                 ));
             }
-            if !framing && !flags.frame_any() && flags.sheet.is_none() {
+            if !framing && !flags.frame_any() {
                 return Err(Failure::Usage(
-                    "edit needs something to change: --slot with a framing flag, or --sheet/--gap/--radius/--border-color"
+                    "edit needs something to change: --slot with a framing flag, or --gap/--radius/--border-color"
                         .to_string(),
                 ));
             }
@@ -977,7 +928,6 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                 zoom: flags.zoom,
                 offset: flags.offset,
                 clear: flags.clear,
-                sheet: flags.sheet,
                 frame: FrameArgs {
                     gap: flags.gap,
                     radius: flags.radius,
@@ -991,16 +941,6 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
             let out = flags
                 .out
                 .ok_or_else(|| Failure::Usage("render needs --out <file>".to_string()))?;
-            let size = match (flags.dpi, flags.long_edge) {
-                (Some(_), Some(_)) => {
-                    return Err(Failure::Usage(
-                        "--dpi and --long-edge both size the output; give one".to_string(),
-                    ));
-                }
-                (Some(dpi), None) => Size::Dpi(dpi),
-                (None, Some(pixels)) => Size::LongEdge(pixels),
-                (None, None) => Size::Dpi(DEFAULT_DPI),
-            };
             if flags.long_edge.is_some() && flags.preview_px.is_some() {
                 return Err(Failure::Usage(
                     "--preview-px renders a preview of the export; --long-edge sizes the export"
@@ -1010,7 +950,7 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
             Ok(Command::Render(RenderArgs {
                 source,
                 out,
-                size,
+                long_edge: flags.long_edge,
                 preview_px: flags.preview_px,
                 frame: FrameArgs {
                     gap: flags.gap,

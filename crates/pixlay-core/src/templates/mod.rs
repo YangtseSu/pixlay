@@ -45,7 +45,7 @@ mod frozen;
 pub mod generator;
 
 use crate::geometry::{Point, Polygon};
-use crate::{ASPECT_TOLERANCE, CanvasSpec, CollageDoc, Slot, Template};
+use crate::{ASPECT_TOLERANCE, CollageDoc, Slot, Template};
 
 /// The name `AGENTS.md`'s verification command uses. S2 keeps this name and
 /// freezes the geometry behind [`TEMPLATE_VERSION`]; changing either afterwards
@@ -54,11 +54,6 @@ pub const SMOKE_TEMPLATE: &str = "mosaic-8-s14";
 
 /// Geometry version of the smoke template.
 pub const TEMPLATE_VERSION: u32 = 1;
-
-/// Long edge of the canvas a template document is created with (A0's long edge).
-/// A template declares a ratio, not a size, so this is the size `init` and the
-/// smoke render give it; a real project sets its own canvas.
-const CANVAS_LONG_EDGE_MM: f64 = 1189.0;
 
 /// Rebuilds one template from its frozen data.
 fn thaw(entry: &frozen::Frozen) -> Template {
@@ -106,11 +101,10 @@ pub fn get(name: &str) -> Option<Template> {
 }
 
 /// Templates whose declared aspect ratio matches `aspect` within
-/// [`ASPECT_TOLERANCE`], the same tolerance `CollageDoc::validate` applies.
+/// [`ASPECT_TOLERANCE`], the tolerance the picker's query uses.
 ///
-/// This is the picker's query (`docs/CONTRACT.md` §3): a canvas and a template only
-/// fit each other when their ratios agree, and the canvas is what the user picks
-/// first.
+/// This is the picker's query (`docs/CONTRACT.md` §3): the sheet's shape is the
+/// template's, so the aspect a caller names *is* the layout family it wants.
 pub fn of_aspect(aspect: f64) -> Vec<Template> {
     frozen::TEMPLATES
         .iter()
@@ -122,6 +116,5 @@ pub fn of_aspect(aspect: f64) -> Vec<Template> {
 /// A document for `template` with no photos: the photo-free smoke path, and what
 /// `init --template` writes.
 pub fn document(template: &Template) -> CollageDoc {
-    let canvas = CanvasSpec::with_ratio(template.aspect, CANVAS_LONG_EDGE_MM);
-    CollageDoc::new(canvas, template.clone())
+    CollageDoc::new(template.clone())
 }

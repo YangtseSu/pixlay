@@ -17,7 +17,7 @@
 
 use std::path::{Path, PathBuf};
 
-use pixlay_core::{CanvasSpec, CropTransform, templates};
+use pixlay_core::{CropTransform, PixelSize, templates};
 use pixlay_imaging::{Depth, PreviewSource, Sampler, Source};
 
 /// The template the fit is checked against: two rectangles, so the geometry is
@@ -187,9 +187,7 @@ fn the_aspect_is_the_decoded_photos_and_the_fit_does_not_move() {
     let from_reduction = crop.fit(slot, &slot.outline, canvas_aspect, reduced.aspect());
     assert_eq!(from_original, from_reduction);
 
-    let canvas = CanvasSpec::with_ratio(canvas_aspect, 297.0)
-        .pixel_size_for_long_edge(800)
-        .expect("a grid");
+    let canvas = PixelSize::for_long_edge(canvas_aspect, 800).expect("a grid");
     let region = |aspect: f64| {
         from_original
             .transform

@@ -7,7 +7,7 @@
 //! later step has to guess about. The other render tests use opaque bitmaps, so
 //! this is the only place the arithmetic is exercised.
 
-use pixlay_core::{CanvasSpec, CollageDoc, Polygon, Slot, Template};
+use pixlay_core::{CollageDoc, PixelSize, Polygon, Slot, Template};
 use pixlay_render::{Bitmap, Images, render_rgb8};
 
 fn single_slot_doc() -> CollageDoc {
@@ -18,10 +18,16 @@ fn single_slot_doc() -> CollageDoc {
         aspect: 1.0,
         slots: vec![Slot { area: 1.0, outline }],
     };
-    let mut doc = CollageDoc::new(CanvasSpec::new(100.0, 100.0), template);
+    let mut doc = CollageDoc::new(template);
     doc.template.slots.truncate(1);
     doc.cells.truncate(1);
     doc
+}
+
+/// The grid the alpha tests render on: a square 64 px sheet, because the only
+/// question here is per-pixel compositing arithmetic.
+fn canvas() -> PixelSize {
+    PixelSize::for_long_edge(1.0, 64).expect("a grid inside the budget")
 }
 
 /// One bitmap of `[b, g, r, a]` for every pixel, in Cairo's premultiplied
@@ -47,8 +53,14 @@ fn a_translucent_bitmap_reaches_the_output_composited_over_white() {
     // white base the result is mid grey. cairo's premultiply rounding puts it at
     // 127 rather than 128, which is why this compares against 128 within one
     // level instead of for equality.
-    let image =
-        render_rgb8(&single_slot_doc(), &images([0, 0, 0, 128]), 72, 1.0, None).expect("renders");
+    let image = render_rgb8(
+        &single_slot_doc(),
+        &images([0, 0, 0, 128]),
+        canvas(),
+        1.0,
+        None,
+    )
+    .expect("renders");
     let got = image.pixel(image.width / 2, image.height / 2);
     for channel in got {
         assert!(
@@ -59,8 +71,14 @@ fn a_translucent_bitmap_reaches_the_output_composited_over_white() {
 
     // Fully transparent makes no mark at all: the white base shows through, so
     // the export stays opaque and the cell reads as empty.
-    let image =
-        render_rgb8(&single_slot_doc(), &images([0, 0, 0, 0]), 72, 1.0, None).expect("renders");
+    let image = render_rgb8(
+        &single_slot_doc(),
+        &images([0, 0, 0, 0]),
+        canvas(),
+        1.0,
+        None,
+    )
+    .expect("renders");
     assert_eq!(
         image.pixel(image.width / 2, image.height / 2),
         [255, 255, 255]
@@ -71,7 +89,7 @@ fn a_translucent_bitmap_reaches_the_output_composited_over_white() {
     let image = render_rgb8(
         &single_slot_doc(),
         &images([40, 60, 220, 255]),
-        72,
+        canvas(),
         1.0,
         None,
     )

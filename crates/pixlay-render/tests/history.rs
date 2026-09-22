@@ -20,12 +20,11 @@
 //! are applied to the bitmap upstream of `draw`, so `pixlay-cli/tests/history.rs`
 //! measures those through the real pipeline.
 
-use pixlay_core::{
-    CanvasSpec, CollageDoc, Command, CropTransform, History, PixelSize, Rgba8, templates,
-};
+use pixlay_core::{CollageDoc, Command, CropTransform, History, PixelSize, Rgba8, templates};
 use pixlay_render::{Bitmap, Images, Rgb8Image, render_rgb8};
 
-const DPI: u32 = 96;
+/// Long edge of the grid the history tests render on, in pixels.
+const LONG_EDGE: u32 = 454;
 
 /// One flat colour per slot. The photo a cell points at decides *which* colour it
 /// gets, so placing a photo changes the pixels the way it does in the product: the
@@ -57,11 +56,11 @@ fn color_of(slot: usize, source: Option<&std::path::Path>) -> Rgba8 {
 
 fn doc() -> CollageDoc {
     let template = templates::get(templates::SMOKE_TEMPLATE).expect("registered");
-    CollageDoc::new(CanvasSpec::with_ratio(template.aspect, 120.0), template)
+    CollageDoc::new(template)
 }
 
 fn canvas_px(doc: &CollageDoc) -> PixelSize {
-    doc.canvas.pixel_size(DPI).expect("canvas size")
+    PixelSize::for_long_edge(doc.template.aspect, LONG_EDGE).expect("canvas size")
 }
 
 /// One flat bitmap per occupied cell, at the size the slot displays it (the fit's
@@ -91,7 +90,7 @@ fn images(doc: &CollageDoc, canvas: PixelSize) -> Images {
 fn render(history: &History) -> Rgb8Image {
     let doc = history.doc();
     let canvas = canvas_px(doc);
-    render_rgb8(doc, &images(doc, canvas), DPI, 1.0, None).expect("renders")
+    render_rgb8(doc, &images(doc, canvas), canvas, 1.0, None).expect("renders")
 }
 
 /// The number of bytes two renders differ in, for a readable failure.

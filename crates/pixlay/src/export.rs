@@ -1,9 +1,9 @@
-//! Export: the two sizing modes, in the background, with progress.
+//! Export: the one size parameter, in the background, with progress.
 //!
 //! The pipeline is the CLI's, stage for stage — decode each slot in this
 //! document's own framing, composite through the single `draw`, encode pixels and
 //! metadata in one pass — because it is the same product. What the GUI adds is
-//! that it runs on a worker thread (an A0 sheet is 6–7 s of work, and a frozen
+//! that it runs on a worker thread (a large export is 6–7 s of work, and a frozen
 //! window for that long is not an option) and that it reports progress, which
 //! `GtkProgressBar` shows in the window's bottom bar.
 //!
@@ -16,18 +16,17 @@ use std::time::Instant;
 use pixlay_core::{CollageDoc, PixelSize};
 use pixlay_imaging::encode::{Export, Format, write};
 use pixlay_imaging::{Rgb8View, Source, slot_bitmap};
-use pixlay_render::{Bitmap, Images, render_rgb8_sized};
+use pixlay_render::{Bitmap, Images, render_rgb8};
 
 /// What the export form asks for.
 ///
 /// Three fields, because the form has three controls (S12c): the format, **one**
-/// quality option — the resolution, which is all of "how big is this picture" — and
-/// where it goes. The sheet size is a document field rather than a request: it is
-/// set where the document is made, with the CLI's `edit --sheet`.
+/// quality option — the long edge in pixels, which is all of "how big is this
+/// picture" (S12d) — and where it goes.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
-    /// The resolution the export is written at, in dots per inch.
-    pub dpi: u32,
+    /// The long edge the export is rendered at, in pixels.
+    pub long_edge: u32,
     pub format: Format,
     pub path: PathBuf,
 }
@@ -64,7 +63,7 @@ pub struct Report {
     pub bytes: u64,
     pub width: i32,
     pub height: i32,
-    pub dpi: f64,
+    pub long_edge: u32,
     pub ms: u128,
 }
 
@@ -77,7 +76,7 @@ pub fn run(
     progress: &(dyn Fn(Progress) + Sync),
 ) -> Result<Report, String> {
     let started = Instant::now();
-    let (canvas_px, dpi) = grid(doc, settings)?;
+    let canvas_px = grid(doc, settings)?;
 
     // The bitmaps are sized in the export's own pixel grid: `draw` blits them at
     // the size they already are, so a preview-sized bitmap would leave the canvas
@@ -111,14 +110,13 @@ pub fn run(
 
     progress(Progress::Rendering);
     let image =
-        render_rgb8_sized(doc, &images, canvas_px, 1.0, None).map_err(|error| error.to_string())?;
+        render_rgb8(doc, &images, canvas_px, 1.0, None).map_err(|error| error.to_string())?;
 
     progress(Progress::Encoding);
     let bytes = write(
         &settings.path,
         &Export {
             format: settings.format,
-            dpi,
             image: Rgb8View {
                 width: image.width,
                 height: image.height,
@@ -133,25 +131,19 @@ pub fn run(
         bytes,
         width: image.width,
         height: image.height,
-        dpi,
+        long_edge: settings.long_edge,
         ms: started.elapsed().as_millis(),
     })
 }
 
-/// The pixel grid and the resolution the file has to carry.
+/// The pixel grid the export renders.
 ///
-/// One mode, the resolution: the sheet is the document's own size in millimetres
-/// and this multiplies it. The CLI keeps both requests (`--dpi` and `--long-edge`)
-/// because a machine that asks for pixels has to be able to say so; the window's
-/// form asks the one question a person asks about a picture, which is how large
-/// the file is.
-pub fn grid(doc: &CollageDoc, settings: &Settings) -> Result<(PixelSize, f64), String> {
-    let dpi = settings.dpi;
-    let pixel = doc
-        .canvas
-        .pixel_size(dpi)
-        .map_err(|error| error.to_string())?;
-    Ok((pixel, f64::from(dpi)))
+/// The one size parameter (S12d): the form asks the one question a person asks
+/// about a picture — how large the file is — and the grid is the template's own
+/// aspect at that long edge.
+pub fn grid(doc: &CollageDoc, settings: &Settings) -> Result<PixelSize, String> {
+    PixelSize::for_long_edge(doc.template.aspect, settings.long_edge)
+        .map_err(|error| error.to_string())
 }
 
 /// Runs [`run`] on a worker thread, calling `report` on the main context.

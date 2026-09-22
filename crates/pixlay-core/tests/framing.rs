@@ -21,12 +21,10 @@
 use pixlay_core::templates;
 use pixlay_core::{CropTransform, Frame, MAX_ZOOM, Point, Polygon, Slot};
 
-/// Tolerance for "the photo covers the cell" (the contract names it: "the epsilon
-/// for 'covers the entire slot' is given a number, 1e-6 normalized, or ≤0.5 px at
-/// 300 dpi", `docs/CONTRACT.md` §2).
+/// Tolerance for "the photo covers the cell": 1e-6 normalized.
 ///
-/// 1e-6 of a canvas edge is 0.014 px on A0's long edge at 300 dpi, far under the
-/// suggested 0.5 px, while the clamp's own arithmetic is exact to ~1e-15 — so
+/// 1e-6 of a sheet edge is 0.014 px on the 14043-px reference grid, far under
+/// half a pixel, while the clamp's own arithmetic is exact to ~1e-15 — so
 /// nothing that is actually uncovered can pass this.
 const COVERAGE_EPSILON: f64 = 1e-6;
 

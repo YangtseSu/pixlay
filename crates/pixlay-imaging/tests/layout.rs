@@ -6,10 +6,11 @@
 //! is a bug), and a ramp's value at a display coordinate is known from the
 //! mapping the contract defines, independent of how the resampler computes it.
 
-use pixlay_core::{CanvasSpec, CollageDoc, CropTransform, PixelSize, templates};
+use pixlay_core::{CollageDoc, CropTransform, PixelSize, templates};
 use pixlay_imaging::{Sampler, slot_bitmap};
 
-const DPI: u32 = 72;
+/// Long edge of the grid the layout tests measure on, in pixels.
+const LONG_EDGE: u32 = 113;
 
 /// A solid color, 4000x3000: four times longer than the slots it lands in, so the
 /// resampler is always reducing.
@@ -58,7 +59,7 @@ impl Sampler for Ramp {
 /// instead of the millions (the debug profile has no optimization to hide behind).
 fn document(name: &str) -> CollageDoc {
     let template = templates::get(name).unwrap_or_else(|| panic!("template {name}"));
-    let mut doc = CollageDoc::new(CanvasSpec::with_ratio(template.aspect, 40.0), template);
+    let mut doc = CollageDoc::new(template);
     // Every cell occupied, so every slot is laid out.
     for (index, cell) in doc.cells.iter_mut().enumerate() {
         cell.source = Some(std::path::PathBuf::from(format!("photo-{index}.png")));
@@ -67,7 +68,7 @@ fn document(name: &str) -> CollageDoc {
 }
 
 fn canvas_px(doc: &CollageDoc) -> PixelSize {
-    doc.canvas.pixel_size(DPI).expect("canvas size")
+    PixelSize::for_long_edge(doc.template.aspect, LONG_EDGE).expect("canvas size")
 }
 
 /// Cairo's `ARgb32` on little-endian: `B, G, R, A`.

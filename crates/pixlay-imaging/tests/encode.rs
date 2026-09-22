@@ -19,7 +19,6 @@ use pixlay_imaging::{Export, Format, Rgb8View, icc};
 
 const WIDTH: i32 = 96;
 const HEIGHT: i32 = 64;
-const DPI: f64 = 300.0;
 
 fn out_dir(name: &str) -> PathBuf {
     // Artifacts go to disk, never to tmpfs (`AGENTS.md`, measurement rules).
@@ -53,12 +52,11 @@ fn gradient() -> Vec<u8> {
 }
 
 /// Encodes the gradient and returns the bytes, so a test reads a real file.
-fn encode(dir: &Path, name: &str, format: Format, dpi: f64) -> Vec<u8> {
+fn encode(dir: &Path, name: &str, format: Format) -> Vec<u8> {
     let pixels = gradient();
     let path = dir.join(name);
     let export = Export {
         format,
-        dpi,
         image: Rgb8View {
             width: WIDTH,
             height: HEIGHT,
@@ -166,18 +164,17 @@ fn jpeg_sampling(bytes: &[u8]) -> Vec<(u8, u8)> {
 }
 
 #[test]
-fn the_png_carries_its_resolution_and_profile() {
+fn the_png_carries_its_profile_and_no_resolution() {
     let dir = out_dir("png");
-    let bytes = encode(&dir, "out.png", Format::Png, DPI);
+    let bytes = encode(&dir, "out.png", Format::Png);
     let chunks = png_chunks(&bytes);
 
-    // pHYs: pixels per metre, the unit the chunk itself carries. 300 dpi is
-    // 11811 px/m (round(300 * 1000 / 25.4)).
-    let phys = png_chunk(&chunks, b"pHYs").expect("pHYs is present");
-    assert_eq!(phys.len(), 9);
-    assert_eq!(be32(phys, 0), 11_811);
-    assert_eq!(be32(phys, 4), 11_811);
-    assert_eq!(phys[8], 1, "unit is the metre");
+    // No `pHYs` (S12d): the file's size is its pixels, and no resolution is
+    // claimed for it.
+    assert!(
+        png_chunk(&chunks, b"pHYs").is_none(),
+        "the PNG must not claim a resolution"
+    );
 
     // iCCP, deflate-compressed, and never alongside the sRGB chunk: the
     // specification says the two should not both be present, and the profile is
@@ -198,26 +195,29 @@ fn the_png_carries_its_resolution_and_profile() {
     let reader = decoder.read_info().expect("the PNG decodes");
     let info = reader.info();
     assert_eq!(info.icc_profile.as_deref(), Some(icc::srgb_profile()));
-    let dims = info.pixel_dims.expect("pHYs as the reader sees it");
-    assert_eq!((dims.xppu, dims.yppu), (11_811, 11_811));
-    assert_eq!(dims.unit, png::Unit::Meter);
+    assert!(
+        info.pixel_dims.is_none(),
+        "the reader must see no pHYs either"
+    );
     assert_eq!((info.width, info.height), (WIDTH as u32, HEIGHT as u32));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
-fn the_jpeg_carries_its_resolution_profile_and_subsampling() {
+fn the_jpeg_carries_its_profile_and_subsampling_with_no_resolution() {
     let dir = out_dir("jpeg");
-    let bytes = encode(&dir, "out.jpg", Format::Jpeg, DPI);
+    let bytes = encode(&dir, "out.jpg", Format::Jpeg);
 
-    // JFIF APP0: density in pixels per inch (unit 1).
+    // JFIF APP0: the density unit is 0 (square pixels, aspect ratio only), the
+    // encoder's default — no resolution is claimed for a file whose size is only
+    // its pixels (S12d).
     let (_, app0) = jpeg_segments(&bytes)
         .into_iter()
         .find(|(marker, _)| *marker == 0xe0)
         .expect("a JFIF APP0");
     assert_eq!(&app0[..5], b"JFIF\0");
-    assert_eq!(app0[7], 1, "density unit is the inch");
-    assert_eq!((be16(app0, 8), be16(app0, 10)), (300, 300));
+    assert_eq!(app0[7], 0, "density unit is none, not the inch");
+    assert_eq!((be16(app0, 8), be16(app0, 10)), (1, 1));
 
     // APP2 ICC_PROFILE, reassembled across its chunks.
     assert_eq!(jpeg_icc(&bytes), icc::srgb_profile());
@@ -384,29 +384,6 @@ fn description(profile: &[u8]) -> String {
 }
 
 #[test]
-fn a_jpeg_resolution_jfif_cannot_hold_is_refused() {
-    // JFIF stores the density in 16 bits, so an absurd resolution is a refusal
-    // rather than a saturated number that reads as a lie. The pixel-count export
-    // mode can derive one: 20000 px on a 1 mm canvas is 508000 dpi.
-    let dir = out_dir("limits");
-    let pixels = gradient();
-    let export = Export {
-        format: Format::Jpeg,
-        dpi: 508_000.0,
-        image: Rgb8View {
-            width: WIDTH,
-            height: HEIGHT,
-            data: &pixels,
-        },
-    };
-    let path = dir.join("out.jpg");
-    let error = pixlay_imaging::encode::write(&path, &export).expect_err("refused");
-    assert!(error.to_string().contains("65535"), "{error}");
-    assert!(!path.exists(), "nothing is left behind");
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
 fn a_buffer_that_does_not_match_its_size_is_refused() {
     // The encoders index the buffer by the dimensions they were given; a
     // mismatched view is a caller bug, and it is caught before anything is
@@ -416,7 +393,6 @@ fn a_buffer_that_does_not_match_its_size_is_refused() {
     pixels.truncate(pixels.len() - 3);
     let export = Export {
         format: Format::Png,
-        dpi: DPI,
         image: Rgb8View {
             width: WIDTH,
             height: HEIGHT,

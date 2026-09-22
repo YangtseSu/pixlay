@@ -65,7 +65,7 @@ pub fn thumbnail(source: &impl Sampler, long_edge: u32) -> Result<Thumbnail, Ima
 ///
 /// The long edge is exact by construction (`round(src_long * long / src_long)`),
 /// and the short one keeps the photo's ratio: both are rounded half away from
-/// zero, the same rule the canvas grid follows (`CanvasSpec::pixel_size`), and
+/// zero, the same rule the render grid follows (`PixelSize::for_long_edge`), and
 /// neither drops below one pixel — a 10000x1 pano previewed at 100 px is 100x1,
 /// not 100x0.
 ///

@@ -10,13 +10,25 @@
 
 use std::path::PathBuf;
 
-use pixlay_core::{
-    CanvasSpec, Cell, CollageDoc, Command, CoreError, CropTransform, History, templates,
-};
+use pixlay_core::{Cell, CollageDoc, Command, CoreError, CropTransform, History, templates};
 
 fn document() -> CollageDoc {
     let template = templates::get(templates::SMOKE_TEMPLATE).expect("registered");
-    CollageDoc::new(CanvasSpec::with_ratio(template.aspect, 297.0), template)
+    CollageDoc::new(template)
+}
+
+/// A template the library never had: ten slots, one past `MAX_SLOTS` since S12c
+/// removed the ten-slot recipe.
+fn ten_slot_template() -> pixlay_core::Template {
+    let mut template = templates::get(templates::SMOKE_TEMPLATE).expect("registered");
+    template.name = "ten-slot-wish".to_string();
+    while template.slots.len() < 10 {
+        template.slots.push(pixlay_core::Slot {
+            outline: pixlay_core::Polygon::rect(0.05, 0.05, 0.95, 0.95),
+            area: 0.81,
+        });
+    }
+    template
 }
 
 /// One command of every kind this build has, in an order that stays valid.
@@ -34,9 +46,6 @@ fn sequence() -> Vec<Command> {
                 rotation_deg: 12.0,
             },
         },
-        Command::SetCanvas {
-            canvas: CanvasSpec::with_ratio(4.0 / 3.0, 420.0),
-        },
         Command::SetSource {
             slot: 7,
             source: Some(PathBuf::from("photos/b.png")),
@@ -45,7 +54,6 @@ fn sequence() -> Vec<Command> {
         // and the walk still visits one state per command kind.
         Command::SetTemplate {
             template: templates::get("mosaic-5-hero").expect("registered"),
-            canvas: CanvasSpec::with_ratio(4.0 / 3.0, 297.0),
         },
     ]
 }
@@ -158,12 +166,6 @@ fn a_command_that_would_break_the_contract_changes_nothing() {
             },
         ),
         (
-            "a canvas that no longer matches the template",
-            Command::SetCanvas {
-                canvas: CanvasSpec::new(160.0, 90.0),
-            },
-        ),
-        (
             "a slot the template does not have",
             Command::SetSource {
                 slot: 99,
@@ -171,10 +173,9 @@ fn a_command_that_would_break_the_contract_changes_nothing() {
             },
         ),
         (
-            "a template the library does not have",
+            "a template with a slot count outside the limits",
             Command::SetTemplate {
-                template: templates::get("mosaic-5-hero").expect("registered"),
-                canvas: CanvasSpec::with_ratio(16.0 / 9.0, 297.0),
+                template: ten_slot_template(),
             },
         ),
     ];
@@ -232,30 +233,45 @@ fn a_command_that_would_break_the_contract_changes_nothing() {
 #[test]
 fn a_command_after_an_undo_forks_the_redo_path() {
     let mut history = History::new(document()).expect("a valid document");
-    let first = Command::SetCanvas {
-        canvas: CanvasSpec::with_ratio(4.0 / 3.0, 420.0),
+    let first = Command::SetCrop {
+        slot: 0,
+        crop: CropTransform {
+            zoom: 1.2,
+            offset: (0.1, 0.1),
+            rotation_deg: 10.0,
+        },
     };
-    let second = Command::SetCanvas {
-        canvas: CanvasSpec::with_ratio(4.0 / 3.0, 594.0),
+    let second = Command::SetCrop {
+        slot: 0,
+        crop: CropTransform {
+            zoom: 1.4,
+            offset: (0.2, -0.1),
+            rotation_deg: -20.0,
+        },
     };
     history.apply(first.clone()).expect("applies");
-    let wide = history.doc().clone();
+    let framed = history.doc().clone();
     history.apply(second.clone()).expect("applies");
 
     assert!(history.undo());
-    assert_eq!(history.doc(), &wide);
+    assert_eq!(history.doc(), &framed);
     assert_eq!(history.redo_depth(), 1);
 
     // A different command from here: the undone one is no longer reachable.
     history
-        .apply(Command::SetCanvas {
-            canvas: CanvasSpec::with_ratio(4.0 / 3.0, 297.0),
+        .apply(Command::SetCrop {
+            slot: 0,
+            crop: CropTransform {
+                zoom: 0.9,
+                offset: (0.0, 0.0),
+                rotation_deg: 0.0,
+            },
         })
         .expect("applies");
     assert_eq!(history.redo_depth(), 0, "the redo path must be forked");
     assert!(!history.redo());
     assert!(history.undo());
-    assert_eq!(history.doc(), &wide, "undo still walks the real history");
+    assert_eq!(history.doc(), &framed, "undo still walks the real history");
 }
 
 #[test]
@@ -376,19 +392,16 @@ fn a_template_change_keeps_the_photos_it_can_and_never_leaves_a_dangling_slot() 
         })
         .expect("applies");
     // A layer-free document: the retention rule that matters now is the cells'.
-    // `mosaic-5-hero` is 4:3 like the canvas, with five slots.
+    // `mosaic-5-hero` is 4:3, with five slots.
     let template = templates::get("mosaic-5-hero").expect("registered");
-    let canvas = CanvasSpec::with_ratio(template.aspect, 297.0);
     history
         .apply(Command::SetTemplate {
             template: template.clone(),
-            canvas,
         })
         .expect("applies");
 
     let doc = history.doc();
     assert_eq!(doc.template, template);
-    assert_eq!(doc.canvas, canvas);
     assert_eq!(doc.cells.len(), 5, "one cell per slot");
     assert_eq!(
         doc.cells[0].source,

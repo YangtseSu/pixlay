@@ -11,7 +11,7 @@
 
 use std::path::{Path, PathBuf};
 
-use pixlay_core::{CanvasSpec, Cell, CollageDoc, CropTransform, DOC_VERSION, Project, templates};
+use pixlay_core::{Cell, CollageDoc, CropTransform, DOC_VERSION, Project, templates};
 
 fn temp_dir(name: &str) -> PathBuf {
     // Artifacts go to disk, never to tmpfs (`AGENTS.md`, measurement rules).
@@ -28,7 +28,7 @@ fn temp_dir(name: &str) -> PathBuf {
 /// round-trip has somewhere to show up.
 fn document() -> CollageDoc {
     let template = templates::get("strip-3-3x1").expect("registered");
-    let mut doc = CollageDoc::new(CanvasSpec::with_ratio(template.aspect, 297.0), template);
+    let mut doc = CollageDoc::new(template);
     doc.cells[0] = Cell {
         source: Some(PathBuf::from("photos/a.jpg")),
         crop: CropTransform {
@@ -99,7 +99,7 @@ fn saving_over_a_project_replaces_it_and_leaves_no_temporary_file() {
     // A second, different document over the same path: the file is replaced (this
     // is what saving is, and what `init` deliberately refuses to do).
     let mut second = document();
-    second.canvas = CanvasSpec::with_ratio(16.0 / 9.0, 420.0);
+    second.frame.gap_rel = 0.05;
     second.save(&path).expect("saves");
     let replaced = std::fs::read_to_string(&path).expect("read");
     assert_ne!(replaced, first);

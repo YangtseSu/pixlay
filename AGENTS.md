@@ -2,8 +2,8 @@
 
 A Linux-native collage tool. Pick 2–9 photos, pick a layout, adjust, export. Regular and irregular
 templates; per-slot framing (pan / zoom / rotation by any angle); a canvas frame (gap / corner radius /
-colour); export of high-resolution finished images as **PNG or JPEG** (physical size + DPI, or a
-specified long edge in pixels — TIFF and the JPEG chroma request left with S12c).
+colour); export of high-resolution finished images as **PNG or JPEG** (a specified long edge
+in pixels — physical size and DPI left with S12d, TIFF and the JPEG chroma request with S12c).
 **The product is only a collage** (ruled 2026-09-22, S12c): it places photos and frames them. It has no
 colour grading, no text layer, no watermark and no date stamp — S4's per-slot grade and one-click filter
 and S5's canvas-level text layers were built and then removed, because none of them is on the main path
@@ -35,7 +35,7 @@ from an empty sheet (`docs/2026-09-22-UX-DIRECTION.md`).*
     cargo fmt --check
     cargo clippy --workspace --all-targets -- -D warnings
     cargo test
-    cargo run --release -p pixlay-cli -- render --project crates/pixlay-cli/tests/fixtures/verify.pixlay --dpi 300 --stats --out /var/tmp/a.jpg
+    cargo run --release -p pixlay-cli -- render --project crates/pixlay-cli/tests/fixtures/verify.pixlay --long-edge 14043 --stats --out /var/tmp/a.jpg
 
 Of the last two: the second one produces a real image, and you must look at it directly.
 **If you cannot see the image, do not judge whether the render is correct.**
@@ -216,19 +216,19 @@ at `Cargo.lock` diffs during review.
   rotation interpolation and the colour conversion all happen in `pixlay-imaging`; Cairo receives bitmaps that are
   already the right size. *Rationale: this keeps Cairo's weak filtering (bilinear + mipmap only)
   out of the finished product.*
-- **Encoding and metadata happen in one pass.** Colour sampling, ICC and DPI must live in the
+- **Encoding and metadata happen in one pass.** Colour sampling and ICC must live in the
   same pipeline; "encode first, patch the metadata afterwards" is forbidden.
   *Rationale: the second pass re-encodes with default parameters and silently drops 4:4:4 to 4:2:0
   (measured 2.71 MB → 1.49 MB).*
   Implementation meaning: **Cairo supplies pixels only; the encoder writes the metadata itself.**
-  Measured: `cairo_surface_write_to_png` on A0 emits only IHDR/bKGD/IDAT — no pHYs and no iCCP
-  (`identify` reports `Units: Undefined`) — and `cairo_surface_set_fallback_resolution` has no
-  effect on a bitmap backend. Writing PNG through Cairo necessarily loses DPI.
-  Since S6 the encoder is `pixlay_imaging::encode`: PNG `pHYs` + `iCCP`, JPEG JFIF density + `APP2`
-  ICC + the `SOF0` sampling factors, which are 4:4:4 since S12c — each written while the pixels go
-  out, never by a second pass over the finished file. The third format, TIFF, and the `--chroma`
-  request left with the same ruling. The DPI/ICC
-  rounding rules and the per-format field list are in `docs/CONTRACT.md` §5.
+  Measured: `cairo_surface_write_to_png` on A0 emits only IHDR/bKGD/IDAT and no iCCP, so an export
+  written through it loses its colour space. Writing PNG through Cairo is forbidden for the same
+  reason as a second pass.
+  Since S6 the encoder is `pixlay_imaging::encode`: PNG `iCCP`, JPEG `APP2` ICC + the `SOF0`
+  sampling factors, which are 4:4:4 since S12c — each written while the pixels go out, never by
+  a second pass over the finished file. The third format, TIFF, the `--chroma` request and every
+  resolution (PNG `pHYs`, the JFIF density, the `--dpi` flag, the `canvas` field) left with the
+  same two rulings. The ICC rule and the per-format field list are in `docs/CONTRACT.md` §5.
 - **The evaluation order is frozen** and must not be reordered:
   `decode + color normalization → geometry (crop / arbitrary rotation) → per-slot
   slot compositing → canvas decoration → output transform`
@@ -354,7 +354,9 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
   sequence (`AdwNavigationView` push/pop with Back) rather than as two modes to know about.*
 - **Not doing**: beauty retouching, levels / curves, online geocoding, RAW, brush marking, a
   single-image retouch mode, **TIFF output and a JPEG chroma request** (S12c: two formats, one
-  sampling), **and flipping or mirroring a cell in any form** — ruled 2026-09-22: the
+  sampling), **physical sizes and resolutions in any form** (S12d: an export is one long-edge
+  pixel count, and the file carries no resolution), **and flipping or mirroring a cell in any
+  form** — ruled 2026-09-22: the
   per-cell capabilities are zoom, move and rotation by any angle.
   *Rationale: levels / curves is a professional control that needs a full ICC pipeline and is opaque
   to the target user; geocoding carries API quotas, identity requirements and privacy costs, and a
@@ -389,7 +391,7 @@ not a criterion — a visual conclusion must become a number (a probe) in the CL
   cell — the slot, narrowed by the document's frame (`docs/CONTRACT.md` §1)
 - render consistency: the same composition at `2N` and `N`, downsampled, stays below the RMSE
   threshold (measured 2.62/255; threshold 6)
-- encoding: physical-size mode must carry DPI + ICC, and a JPEG must be 4:4:4 in its own `SOF0`
+- encoding: every export carries its ICC profile in the same pass as its pixels, and a JPEG is 4:4:4 in its own `SOF0`
 
 **Every rule a test can enforce lives only in the tests; this file does not restate it.**
 
@@ -450,8 +452,8 @@ policy: track the latest": latest stable only, no upper pin.
 | `serde_json` 1.0.151 | `pixlay-core`, `pixlay-cli` (dev) | JSON read/write; `deny_unknown_fields` turns "misspelled field" into a load-time error | Same |
 | `thiserror` 2.0.20 | `pixlay-core`, `pixlay-render` | core/render errors are typed errors (part of the contract); `anyhow` is allowed only in `pixlay-cli` | Pure macro, zero runtime |
 | `cairo-rs` 0.22.9 | `pixlay-render` | The only rendering backend; GTK4 already depends on cairo, so packaging is free | System cairo 1.18.4; the `png` feature is dev-only (golden image read/write) |
-| `png` 0.18.1 | `pixlay-imaging` | The PNG writer of the one-pass encoder (S6). `image`'s PNG writer exposes neither `pHYs` nor `iCCP` (their values stay at the defaults) and Cairo's emits no `pHYs` at all, so neither can carry an export's DPI | Pure Rust; it was already in the tree through `image`, so the download set did not grow |
-| `jpeg-encoder` 0.7.1 | `pixlay-imaging` | The JPEG writer of the one-pass encoder (S6): `set_density` (JFIF), `set_sampling_factor` (4:4:4 / 4:2:2 / 4:2:0) and `add_icc_profile` (`APP2`), which is exactly the "pixels + sampling + ICC + DPI in one pass" the constraint names | Pure Rust; already in the tree through `glycin-image-rs`. Measured against the previous writer (`image` = zune-jpeg): +1.1% bytes, −27% time at A0/300dpi/q90/4:4:4 |
+| `png` 0.18.1 | `pixlay-imaging` | The PNG writer of the one-pass encoder (S6). `image`'s PNG writer cannot embed an ICC profile in the same pass as the pixels, and Cairo's emits no `iCCP` at all — and an sRGB file whose numbers are not labelled is a file whose colour depends on who opens it | Pure Rust; it was already in the tree through `image`, so the download set did not grow |
+| `jpeg-encoder` 0.7.1 | `pixlay-imaging` | The JPEG writer of the one-pass encoder (S6): `set_sampling_factor` (4:4:4 / 4:2:2 / 4:2:0) and `add_icc_profile` (`APP2`), which is exactly the "pixels + sampling + ICC in one pass" the constraint names (the JFIF density stays at the encoder's resolution-free default since S12d) | Pure Rust; already in the tree through `glycin-image-rs`. Measured against the previous writer (`image` = zune-jpeg): +1.1% bytes, −27% time on the S6 grid (14043 px, q90, 4:4:4) |
 | `image` 0.25.10 | `pixlay-cli` (**dev only** since S6) | It was S1's encoder stand-in and S6 replaced it (`pixlay_imaging::encode` writes the DPI and the ICC profile that this crate's writers leave at their defaults). What it is still for: the CLI's **tests** read renders back with `image::open` (PNG/JPEG) and write flat photos to render against, and `pixlay-cli/tests/fixtures/generate.py` produced the fixtures | Not a production dependency any more, so the shipped binary no longer links it |
 | `glycin` 4.0.0 | `pixlay-imaging` | The decoding backend, measured against the in-process alternative (S4): the sandboxed loader is the only one of the two that decodes HEIC and AVIF, and it works with an empty environment | Pulls `glib`/`gio` and, through `cfg(target_os = "linux")`, `libseccomp` / `bubblewrap` / `fontconfig` / the distro's loader packages — this is what S8's `depends` must name |
 | `glib` 0.22 / `gio` 0.22 | `pixlay-imaging` | The decode is driven on a private `MainContext`: a glycin frame request only completes while one is iterated (measured: every frame hung under a plain executor until glycin's own 60 s limit). `glib`'s `futures` feature provides `MainContext::block_on`; `gio::File` is glycin's own input type | Already in the tree with `glycin`; named here because the API is used directly |

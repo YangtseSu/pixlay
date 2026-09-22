@@ -1,20 +1,24 @@
 //! Output encoding: pixels and metadata in one pass.
 //!
-//! A collage is exported to be printed, so the file has to say what it is: the
-//! resolution it was rendered for and the colour space it is in. Both are written
-//! by the encoder while the pixels go out, never by a second pass over the
-//! finished file — the trap this rule exists for is measured: re-encoding an
-//! already-encoded JPEG to patch its metadata silently drops 4:4:4 to 4:2:0
+//! A collage is exported as a picture, so the file has to say what colour space it
+//! is in — written by the encoder while the pixels go out, never by a second pass
+//! over the finished file. The trap this rule exists for is measured: re-encoding
+//! an already-encoded JPEG to patch its metadata silently drops 4:4:4 to 4:2:0
 //! (2.71 MB to 1.49 MB, S0). Cairo can supply the pixels (`pixlay-render`) but not
-//! the metadata: `cairo_surface_write_to_png` emits only IHDR/bKGD/IDAT — no pHYs
-//! and no iCCP — so an export written through it necessarily loses its DPI.
+//! the metadata: `cairo_surface_write_to_png` emits only IHDR/bKGD/IDAT and no
+//! iCCP, so an export written through it loses its colour space.
 //!
 //! # What each format carries
 //!
-//! | Format | Resolution | Profile |
-//! |---|---|---|
-//! | PNG | `pHYs`, pixels per metre | `iCCP` (deflate) |
-//! | JPEG | JFIF `APP0` density, pixels per inch | `APP2` `ICC_PROFILE` segments |
+//! | Format | Profile |
+//! |---|---|
+//! | PNG | `iCCP` (deflate) |
+//! | JPEG | `APP2` `ICC_PROFILE` segments |
+//!
+//! What a file deliberately does **not** carry is a resolution (S12d): a raster's
+//! only intrinsic size is its pixels, and the product has no concept of paper for
+//! a density number to describe. A PNG has no `pHYs`, and the JPEG's JFIF density
+//! stays at the encoder's default — square pixels, no unit.
 //!
 //! Two formats, not three: TIFF left with S12c (the purity ruling — PNG and JPEG
 //! are what a collage is exported as), and with it the `tiff` dependency.
@@ -22,14 +26,6 @@
 //! The PNG `sRGB` chunk is deliberately **not** written alongside `iCCP`: the
 //! specification says the two should not both be present, and the profile is the
 //! one that carries the actual colorimetry.
-//!
-//! # Rounding rules
-//!
-//! Written once and frozen, so an export's metadata cannot drift between builds:
-//!
-//! * PNG: `round(dpi * 1000 / 25.4)` pixels per metre (the chunk's own unit).
-//! * JPEG: `round(dpi)` as a 16-bit number of pixels per inch. A resolution past
-//!   65535 dpi cannot be written into JFIF and is refused rather than saturated.
 //!
 //! JPEG quality is 90, the S0/S4 baseline. Chroma subsampling is **4:4:4**, fixed
 //! rather than chosen: `AGENTS.md` fixes libjpeg-turbo 4:4:4 as the product's
@@ -48,9 +44,6 @@ use crate::icc;
 /// JPEG quality, as a percentage. 90 is fixed rather than a flag
 /// (`docs/CONTRACT.md` §5), which is what keeps every measurement in §8 comparable.
 pub const JPEG_QUALITY: u8 = 90;
-
-/// The resolution JFIF can hold: 16 bits of pixels per inch.
-const MAX_JPEG_DPI: u32 = 65_535;
 
 /// What `--out`'s extension selects.
 ///
@@ -85,11 +78,9 @@ impl Format {
     pub const EXTENSIONS: &'static str = ".png, .jpg or .jpeg";
 }
 
-/// One image to write, with everything the file has to say about itself.
+/// One image to write, with the metadata the file has to carry.
 pub struct Export<'a> {
     pub format: Format,
-    /// Resolution written into the file, both axes, in pixels per inch.
-    pub dpi: f64,
     pub image: Rgb8View<'a>,
 }
 
@@ -105,18 +96,6 @@ pub fn write(path: &Path, export: &Export<'_>) -> Result<u64, EncodeError> {
             width,
             height,
             found: export.image.data.len(),
-        });
-    }
-    if export.format == Format::Jpeg
-        && (!export.dpi.is_finite()
-            || export.dpi <= 0.0
-            || export.dpi.round() > f64::from(MAX_JPEG_DPI))
-    {
-        // Refused before the file exists: a rejected export leaves nothing behind,
-        // the same discipline `init` follows for an existing project.
-        return Err(EncodeError::JpegResolution {
-            path: path.to_path_buf(),
-            dpi: export.dpi,
         });
     }
     let file = File::create(path).map_err(|error| EncodeError::Io {
@@ -148,11 +127,8 @@ fn write_png(writer: &mut BufWriter<File>, export: &Export<'_>) -> Result<(), Fa
     let mut info = png::Info::with_size(export.image.width as u32, export.image.height as u32);
     info.bit_depth = png::BitDepth::Eight;
     info.color_type = png::ColorType::Rgb;
-    info.pixel_dims = Some(png::PixelDimensions {
-        xppu: pixels_per_metre(export.dpi),
-        yppu: pixels_per_metre(export.dpi),
-        unit: png::Unit::Meter,
-    });
+    // No `pHYs`: the file carries pixels and a colour space, not a resolution
+    // (S12d); leaving `pixel_dims` unset keeps the chunk out entirely.
     info.icc_profile = Some(Cow::Borrowed(icc::srgb_profile()));
     let mut encoder = png::Encoder::with_info(writer, info).map_err(Failure::Png)?;
     // `Balanced` is the library's default level; stated here because the size and
@@ -165,9 +141,9 @@ fn write_png(writer: &mut BufWriter<File>, export: &Export<'_>) -> Result<(), Fa
 }
 
 fn write_jpeg(writer: &mut BufWriter<File>, export: &Export<'_>) -> Result<(), Failure> {
-    let density = export.dpi.round() as u16;
     let mut encoder = jpeg_encoder::Encoder::new(writer, JPEG_QUALITY);
-    encoder.set_density(jpeg_encoder::PixelDensity::dpi(density));
+    // The JFIF density is left at the encoder's default (unit 0, square pixels):
+    // no resolution is claimed for a file whose size is only its pixels (S12d).
     // 4:4:4, unrequested and unwritable by any flag: `AGENTS.md` fixes it, and a
     // collage's hard colour edges are exactly what subsampling ruins (S0 measured
     // a metadata re-encode dropping 4:4:4 to 4:2:0 and 2.71 MB to 1.49 MB).
@@ -183,14 +159,6 @@ fn write_jpeg(writer: &mut BufWriter<File>, export: &Export<'_>) -> Result<(), F
             jpeg_encoder::ColorType::Rgb,
         )
         .map_err(Failure::Jpeg)
-}
-
-/// The PNG `pHYs` unit is the metre: `round(dpi * 1000 / 25.4)`, as the module
-/// docs freeze it.
-fn pixels_per_metre(dpi: f64) -> u32 {
-    (dpi * 1000.0 / 25.4)
-        .round()
-        .clamp(0.0, f64::from(u32::MAX)) as u32
 }
 
 /// What the encoder libraries report, before the path is known.
@@ -246,10 +214,4 @@ pub enum EncodeError {
         #[source]
         source: jpeg_encoder::EncodingError,
     },
-
-    #[error(
-        "{path}: resolution {dpi} cannot be written into a JPEG, whose JFIF header stores at \
-         most {MAX_JPEG_DPI} pixels per inch"
-    )]
-    JpegResolution { path: PathBuf, dpi: f64 },
 }

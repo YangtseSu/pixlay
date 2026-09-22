@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 use pixlay_core::{
-    CanvasSpec, Cell, CollageDoc, CropTransform, Point, Polygon, Project, Slot, Template, templates,
+    Cell, CollageDoc, CropTransform, PixelSize, Point, Polygon, Project, Slot, Template, templates,
 };
 
 /// `CARGO_BIN_EXE_<name>` is set by Cargo for integration tests.
@@ -96,7 +96,7 @@ fn write_project(dir: &Path, name: &str, fill: bool) -> PathBuf {
             },
         ],
     };
-    let mut doc = CollageDoc::new(CanvasSpec::new(120.0, 90.0), template);
+    let mut doc = CollageDoc::new(template);
     if fill {
         let photo = dir.join("photo.png");
         std::fs::write(&photo, include_bytes!("fixtures/photos/square.png")).expect("write photo");
@@ -140,7 +140,7 @@ fn help_and_version_succeed_on_stdout() {
         "--project",
         "--template",
         "--out",
-        "--dpi",
+        "--long-edge",
         "--preview-px",
         "--photo",
         "--dir",
@@ -197,8 +197,8 @@ fn the_template_smoke_path_renders_without_a_project() {
         "render",
         "--template",
         "mosaic-8-s14",
-        "--dpi",
-        "72",
+        "--long-edge",
+        "3370",
         "--out",
         out.to_str().unwrap(),
     ]);
@@ -211,7 +211,7 @@ fn the_template_smoke_path_renders_without_a_project() {
     assert_eq!(field(&output, "occupied"), "0");
     assert!(stderr(&output).is_empty(), "{}", stderr(&output));
 
-    // The declared canvas is 1189 x 891.75 mm; at 72 dpi that is 3370 x 2528 px.
+    // The smoke template has a 4:3 aspect, so a 3370 px long edge is 3370 x 2528 px.
     assert_eq!(field(&output, "out_w"), "3370");
     assert_eq!(field(&output, "out_h"), "2528");
     let image = image::open(&out).expect("output is a readable image");
@@ -232,16 +232,16 @@ fn a_project_renders_and_names_its_output() {
         "render",
         "--project",
         project.to_str().unwrap(),
-        "--dpi",
-        "150",
+        "--long-edge",
+        "708",
         "--out",
         out.to_str().unwrap(),
     ]);
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     assert_eq!(field(&output, "format"), "jpeg");
     assert_eq!(field(&output, "occupied"), "1");
-    // 120 x 90 mm at 150 dpi.
-    assert_eq!(field(&output, "out_w"), "709");
+    // The test document has a 4:3 aspect, so a 708 px long edge is 708 x 531 px.
+    assert_eq!(field(&output, "out_w"), "708");
     assert_eq!(field(&output, "out_h"), "531");
     assert!(out.is_file());
 
@@ -263,8 +263,6 @@ fn preview_px_sets_the_long_edge() {
         "render",
         "--template",
         "mosaic-8-s14",
-        "--dpi",
-        "300",
         "--preview-px",
         "800",
         "--out",
@@ -280,10 +278,10 @@ fn preview_px_sets_the_long_edge() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// The PNG `pHYs` chunk, as `(xppu, yppu, unit)`. Read from the file's own chunk
-/// stream, so a `--long-edge` assertion is about the export and not about the
+/// The PNG `pHYs` chunk, if the file has one. Read from the file's own chunk
+/// stream, so an assertion about the export is about the file and not about the
 /// report the same command printed.
-fn png_pixel_dimensions(path: &Path) -> (u32, u32, u8) {
+fn png_pixel_dimensions(path: &Path) -> Option<(u32, u32, u8)> {
     let bytes = std::fs::read(path).expect("read the PNG");
     assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n");
     let mut at = 8;
@@ -291,15 +289,15 @@ fn png_pixel_dimensions(path: &Path) -> (u32, u32, u8) {
         let length = u32::from_be_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
         if &bytes[at + 4..at + 8] == b"pHYs" {
             let data = &bytes[at + 8..at + 8 + length];
-            return (
+            return Some((
                 u32::from_be_bytes(data[0..4].try_into().unwrap()),
                 u32::from_be_bytes(data[4..8].try_into().unwrap()),
                 data[8],
-            );
+            ));
         }
         at += 12 + length;
     }
-    panic!("no pHYs chunk in {}", path.display());
+    None
 }
 
 /// The component sampling factors a JPEG declares in its `SOF0` — the record of
@@ -332,8 +330,8 @@ fn jpeg_sampling(path: &Path) -> Vec<(u8, u8)> {
 #[test]
 fn long_edge_is_exact_and_carries_the_resolution_it_works_out_to() {
     let dir = out_dir("long-edge");
-    // `mosaic-8-s14` is 4:3 on a 1189 x 891.75 mm canvas, so the long edge is the
-    // width and the short one is exactly 3/4 of it.
+    // `mosaic-8-s14` has a 4:3 aspect, so the long edge is the width and the
+    // short one is exactly 3/4 of it.
     let out = dir.join("long.png");
     let output = run(&[
         "render",
@@ -351,14 +349,14 @@ fn long_edge_is_exact_and_carries_the_resolution_it_works_out_to() {
     let image = image::open(&out).expect("a readable PNG").to_rgb8();
     assert_eq!((image.width(), image.height()), (9000, 6750));
 
-    // The resolution the file carries is the one the grid works out to:
-    // 9000 px over 1189 mm is 192.2624 dpi, i.e. 7569 px/m.
-    let reported: f64 = field(&output, "dpi").parse().unwrap();
+    // The file carries no resolution (S12d): the PNG has no `pHYs`, and the
+    // report names no resolution for the 9000 px grid.
+    assert!(png_pixel_dimensions(&out).is_none(), "no pHYs is written");
     assert!(
-        (reported - 9000.0 * 25.4 / 1189.0).abs() < 1e-6,
-        "{reported}"
+        stdout(&output)
+            .lines()
+            .all(|line| !line.starts_with("dpi = "))
     );
-    assert_eq!(png_pixel_dimensions(&out), (7569, 7569, 1));
 
     // A portrait canvas puts its exact edge on the other axis.
     let portrait = dir.join("portrait.png");
@@ -391,8 +389,8 @@ fn every_export_format_is_written_with_its_metadata() {
             "render",
             "--template",
             "grid-4-2x2",
-            "--dpi",
-            "72",
+            "--long-edge",
+            "2835",
             "--out",
             out.to_str().unwrap(),
         ]);
@@ -421,7 +419,11 @@ fn every_export_format_is_written_with_its_metadata() {
         let holds = |needle: &[u8]| bytes.windows(needle.len()).any(|window| window == needle);
         match format {
             "png" => {
-                assert_eq!(png_pixel_dimensions(&out), (2835, 2835, 1), "{name}");
+                // No `pHYs` (S12d): the file's size is its pixels.
+                assert!(
+                    png_pixel_dimensions(&out).is_none(),
+                    "{name} claims a resolution"
+                );
                 assert!(holds(b"iCCP"), "{name} carries no profile");
             }
             _ => {
@@ -473,16 +475,18 @@ fn the_export_modes_are_mutually_exclusive() {
         args
     }
     for flags in [
-        // Both size the output, and they disagree about what the number means.
-        &["--dpi", "300", "--long-edge", "1000"][..],
         // A preview is a smaller render of the export; a long edge *is* the size.
-        &["--long-edge", "1000", "--preview-px", "400"],
+        &["--long-edge", "1000", "--preview-px", "400"][..],
         // Out of range on both ends, and zero.
-        &["--long-edge", "0"],
-        &["--long-edge", "30001"],
-        &["--long-edge", "wide"],
+        &["--long-edge", "0"][..],
+        &["--long-edge", "30001"][..],
+        &["--long-edge", "wide"][..],
         // A flag this build no longer has (S12c removed the JPEG chroma request).
-        &["--chroma", "444"],
+        &["--chroma", "444"][..],
+        // Two more this build no longer has (S12d removed paper: no resolution to
+        // ask for, no sheet to set).
+        &["--dpi", "300"][..],
+        &["--sheet", "420"][..],
     ] {
         let output = run(&with_template(&out, flags));
         assert_eq!(code(&output), 1, "{flags:?}: {}", stderr(&output));
@@ -504,8 +508,8 @@ fn probe_reports_numbers_the_renderer_can_be_judged_by() {
         "probe",
         "--project",
         project.to_str().unwrap(),
-        "--dpi",
-        "150",
+        "--long-edge",
+        "1500",
     ]);
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     assert_eq!(field(&output, "status"), "ok");
@@ -534,7 +538,13 @@ fn probe_reports_numbers_the_renderer_can_be_judged_by() {
     // slots, and now it has to be measured: one antialiased pixel per seam pixel,
     // nothing foreign, and both interiors on their own palette color.
     let full = write_full_project(&dir, "full.pixlay");
-    let output = run(&["probe", "--project", full.to_str().unwrap(), "--dpi", "150"]);
+    let output = run(&[
+        "probe",
+        "--project",
+        full.to_str().unwrap(),
+        "--long-edge",
+        "1500",
+    ]);
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     assert_eq!(field(&output, "occupied"), "2");
     assert_eq!(field(&output, "slot.1.match"), "true");
@@ -549,8 +559,9 @@ fn probe_reports_numbers_the_renderer_can_be_judged_by() {
         "{rows} rows of {length} px"
     );
     assert_eq!(field(&output, "seam.0.foreign"), "0");
-    // The seam is the shared edge: the full height of the canvas.
-    assert!((field(&output, "seam.0.length_px").parse::<f64>().unwrap() - 531.0).abs() <= 1.0);
+    // The seam is the shared edge: the full height of the canvas (the probe runs
+    // at a 1500 px long edge on a 4:3 document, so the grid is 1500x1125).
+    assert!((field(&output, "seam.0.length_px").parse::<f64>().unwrap() - 1125.0).abs() <= 1.0);
     // One antialiased edge: about one blended pixel per seam pixel.
     let per_px: f64 = field(&output, "seam.0.per_px").parse().unwrap();
     assert!(per_px <= 2.0, "seam blend {per_px} px per seam px");
@@ -587,8 +598,8 @@ fn a_crop_below_the_covering_zoom_is_clamped_instead_of_leaving_white() {
         "probe",
         "--project",
         project.to_str().unwrap(),
-        "--dpi",
-        "150",
+        "--long-edge",
+        "1500",
     ]);
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     assert_eq!(field(&output, "status"), "ok");
@@ -611,8 +622,8 @@ fn a_probe_with_nothing_to_probe_fails_instead_of_passing_vacuously() {
         "probe",
         "--project",
         project.to_str().unwrap(),
-        "--dpi",
-        "150",
+        "--long-edge",
+        "1500",
     ]);
     assert_eq!(code(&output), 2, "an empty project must not pass the probe");
     assert_eq!(field(&output, "occupied"), "0");
@@ -633,8 +644,8 @@ fn json_output_parses_and_is_byte_stable() {
         "render",
         "--template",
         "mosaic-8-s14",
-        "--dpi",
-        "72",
+        "--long-edge",
+        "3370",
         "--out",
         dir.join("json.png").to_str().unwrap(),
         "--json",
@@ -643,15 +654,15 @@ fn json_output_parses_and_is_byte_stable() {
     let value: serde_json::Value = serde_json::from_str(&stdout(&output)).expect("valid JSON");
     assert_eq!(value["status"], "ok");
     assert_eq!(value["cells"], 8);
-    assert_eq!(value["out_w"], 3370);
+    assert_eq!(value["out_w"], 3370); // --long-edge 3370 on a 4:3 template
 
     // Same input, same bytes. The result carries no timestamps and no durations.
     let repeat = run(&[
         "render",
         "--template",
         "mosaic-8-s14",
-        "--dpi",
-        "72",
+        "--long-edge",
+        "3370",
         "--out",
         dir.join("json-again.png").to_str().unwrap(),
         "--json",
@@ -670,8 +681,8 @@ fn stats_adds_measurements_without_changing_the_rest() {
             "render".to_string(),
             "--template".to_string(),
             "mosaic-8-s14".to_string(),
-            "--dpi".to_string(),
-            "72".to_string(),
+            "--long-edge".to_string(),
+            "3370".to_string(),
             "--out".to_string(),
             out.display().to_string(),
         ];
@@ -730,8 +741,8 @@ fn locale_never_changes_stdout_or_stderr() {
                 "render",
                 "--template",
                 "mosaic-8-s14",
-                "--dpi",
-                "72",
+                "--long-edge",
+                "3370",
                 "--out",
                 out.to_str().expect("path"),
                 "--json",
@@ -792,6 +803,8 @@ fn exit_codes_are_fixed() {
         &["render", "--template", "mosaic-8-s14"],
         &["render", "--out", "/var/tmp/should-not-exist.png"],
         &["render", "--template", "mosaic-8-s14", "--out", "x.gif"],
+        // A flag this build no longer has: S12d removed paper, so there is no
+        // resolution to ask for.
         &[
             "render",
             "--template",
@@ -799,7 +812,8 @@ fn exit_codes_are_fixed() {
             "--out",
             "x.png",
             "--dpi",
-            "10",
+            "300",
+            // ^ S12d: no resolution to ask for; the flag is gone.
         ],
     ];
     for args in usage_cases {
@@ -864,8 +878,8 @@ fn exit_codes_are_fixed() {
         "render",
         "--template",
         "mosaic-8-s14",
-        "--dpi",
-        "72",
+        "--long-edge",
+        "3370",
         "--out",
         "/var/tmp/pixlay-does-not-exist/out.png",
     ]);
@@ -900,8 +914,8 @@ fn render_never_reads_stdin_or_needs_a_tty() {
             "render",
             "--template",
             "mosaic-8-s14",
-            "--dpi",
-            "72",
+            "--long-edge",
+            "3370",
             "--out",
             dir.join("out.png").to_str().unwrap(),
         ])
@@ -934,8 +948,8 @@ fn the_rendered_output_matches_what_draw_produces() {
         "render",
         "--project",
         project.to_str().unwrap(),
-        "--dpi",
-        "96",
+        "--long-edge",
+        "454",
         "--out",
         out.to_str().unwrap(),
     ]);
@@ -945,7 +959,7 @@ fn the_rendered_output_matches_what_draw_produces() {
     // wrapper over `pixlay_imaging` + `pixlay_render::draw`, not a second path.
     let loaded = Project::load(&project).expect("loads");
     let sources = loaded.sources().expect("sources");
-    let canvas = loaded.doc().canvas.pixel_size(96).expect("canvas size");
+    let canvas = PixelSize::for_long_edge(loaded.doc().template.aspect, 454).expect("canvas size");
     let bitmaps = pixlay_imaging::slot_bitmaps(loaded.doc(), canvas, &sources).expect("decode");
     let mut images = pixlay_render::Images::new();
     for bitmap in &bitmaps {
@@ -961,7 +975,8 @@ fn the_rendered_output_matches_what_draw_produces() {
             .expect("bitmap"),
         );
     }
-    let expected = pixlay_render::render_rgb8(loaded.doc(), &images, 96, 1.0, None).expect("draw");
+    let expected =
+        pixlay_render::render_rgb8(loaded.doc(), &images, canvas, 1.0, None).expect("draw");
     let actual = image::open(&out).expect("output").to_rgb8();
     assert_eq!(
         (actual.width(), actual.height()),
@@ -984,7 +999,7 @@ fn the_rendered_output_matches_what_draw_produces() {
 /// Rather than restate the example here (a copy would drift), this test extracts
 /// the `jsonc` block from the document, strips its `//` comments, and loads it.
 /// The example is expected to be a *valid document* under the current shape:
-/// `docVersion` 2, no `text`/`filter`/`grade`/`textFallback` key, a frame.
+/// `docVersion` 3, no `text`/`filter`/`grade`/`textFallback`/`canvas` key, a frame.
 /// The whole path with a real photo: decode, resample in linear light, place,
 /// clip, encode.
 ///
@@ -1026,14 +1041,14 @@ fn a_decoded_photo_fills_its_slot() {
         "render",
         "--project",
         path.to_str().unwrap(),
-        "--dpi",
-        "150",
+        "--long-edge",
+        "1500",
         "--out",
         out.to_str().unwrap(),
     ]);
     assert_eq!(code(&output), 0, "{}", stderr(&output));
 
-    let canvas = doc.canvas.pixel_size(150).expect("canvas size");
+    let canvas = PixelSize::for_long_edge(doc.template.aspect, 1500).expect("canvas size");
     let image = image::open(&out).expect("output").to_rgb8();
     assert_eq!(
         (image.width() as i32, image.height() as i32),
@@ -1093,14 +1108,6 @@ fn the_contract_example_is_a_valid_document() {
     assert!(
         (area - 1.0).abs() < 1e-12,
         "the example's slot areas sum to {area}, not 1.0"
-    );
-    // The canvas must match the template's declared aspect, which is what makes
-    // the example loadable rather than a hard error.
-    assert!(
-        (doc.canvas.aspect() - doc.template.aspect).abs() < 1e-6,
-        "canvas aspect {} vs template aspect {}",
-        doc.canvas.aspect(),
-        doc.template.aspect
     );
     assert_eq!(doc.cells.len(), doc.template.slots.len());
 }
@@ -1240,7 +1247,6 @@ fn init_writes_a_project_that_loads_back() {
     let doc = project.doc();
     let shipped = templates::get("mosaic-8-s14").expect("registered");
     assert_eq!(doc.template, shipped);
-    assert_eq!(doc.canvas.aspect(), doc.template.aspect);
     assert_eq!(doc.cells.len(), doc.template.slots.len());
     assert!(doc.cells.iter().all(|cell| cell.source.is_none()));
     assert_eq!(doc.doc_version, pixlay_core::DOC_VERSION);
@@ -1258,8 +1264,8 @@ fn init_writes_a_project_that_loads_back() {
         "render",
         "--project",
         path.to_str().unwrap(),
-        "--dpi",
-        "72",
+        "--long-edge",
+        "708",
         "--out",
         dir.join("new.png").to_str().unwrap(),
     ]);
@@ -1693,7 +1699,7 @@ fn save_reports_a_missing_project_and_a_newer_version() {
     let project = init_project(&dir, "newer.pixlay", "strip-2-2x1");
     let json = std::fs::read_to_string(&project)
         .expect("read")
-        .replace("\"docVersion\": 2", "\"docVersion\": 3");
+        .replace("\"docVersion\": 3", "\"docVersion\": 4");
     std::fs::write(&project, json).expect("write");
     let newer = run(&[
         "save",
@@ -1776,7 +1782,7 @@ fn hit_and_save_keep_the_usage_and_locale_rules() {
             path,
             "--out",
             "x.pixlay",
-            "--dpi",
+            "--long-edge",
             "300",
         ],
         vec!["templates", "--at", "0.5,0.5"],
@@ -1784,8 +1790,8 @@ fn hit_and_save_keep_the_usage_and_locale_rules() {
             "render",
             "--template",
             "strip-2-2x1",
-            "--dpi",
-            "72",
+            "--long-edge",
+            "1000",
             "--out",
             "x.png",
             "--at",
@@ -1964,8 +1970,8 @@ fn edit_stores_the_fit_of_what_was_asked_for() {
         "render",
         "--project",
         out.to_str().expect("utf-8"),
-        "--dpi",
-        "72",
+        "--long-edge",
+        "708",
         "--out",
         image.to_str().expect("utf-8"),
     ]);
@@ -2145,40 +2151,14 @@ fn edit_clears_a_cell_and_keeps_the_others() {
 }
 
 #[test]
-fn edit_sets_the_sheet_size_without_relaying_the_template() {
-    // S12c gave the window's export form one row fewer: the sheet size is a
-    // document field the form no longer shows, so this flag is how a physical size
-    // is chosen. The shape stays the template's — a canvas and a template have to
-    // agree on their aspect ratio — so only the long edge is set.
+fn edit_refuses_the_sheet_flag_it_no_longer_has() {
+    // S12d removed the document's whole physical size (ruling 17: the product
+    // has no concept of paper), so `--sheet` is a usage error — and one that
+    // names the flag it no longer takes, rather than an empty silence.
     let dir = out_dir("edit-sheet");
     let project = framing_project(&dir, "a.pixlay");
     let out = dir.join("a4.pixlay");
-    let before = CollageDoc::load(&project).expect("loads");
-
-    let output = run(&[
-        "edit",
-        "--project",
-        project.to_str().expect("utf-8"),
-        "--sheet",
-        "420",
-        "--out",
-        out.to_str().expect("utf-8"),
-    ]);
-    assert_eq!(code(&output), 0, "{}", stderr(&output));
-    assert_eq!(field(&output, "sheet_mm"), "420.000000");
-
-    let after = CollageDoc::load(&out).expect("loads");
-    assert_eq!(after.canvas.width_mm.max(after.canvas.height_mm), 420.0);
-    assert_eq!(
-        after.canvas.aspect(),
-        before.canvas.aspect(),
-        "only the long edge moves"
-    );
-    assert_eq!(after.template, before.template, "the layout is untouched");
-    assert_eq!(after.cells, before.cells);
-
-    // A sheet with no size, and one past `MAX_CANVAS_MM`, are usage errors.
-    for sheet in ["0", "2001"] {
+    for sheet in ["0", "420", "2001"] {
         let output = run(&[
             "edit",
             "--project",
@@ -2186,11 +2166,12 @@ fn edit_sets_the_sheet_size_without_relaying_the_template() {
             "--sheet",
             sheet,
             "--out",
-            dir.join("refused.pixlay").to_str().expect("utf-8"),
+            out.to_str().expect("utf-8"),
         ]);
         assert_eq!(code(&output), 1, "--sheet {sheet}: {}", stderr(&output));
         assert!(stderr(&output).contains("--sheet"), "{}", stderr(&output));
     }
+    assert!(!out.exists(), "a usage error writes nothing");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -2246,8 +2227,8 @@ fn edit_stores_the_frame_and_render_overrides_it() {
         "render",
         "--project",
         stored.to_str().expect("utf-8"),
-        "--dpi",
-        "72",
+        "--long-edge",
+        "1000",
         "--out",
         png.to_str().expect("utf-8"),
     ]);
@@ -2264,8 +2245,8 @@ fn edit_stores_the_frame_and_render_overrides_it() {
         "render",
         "--project",
         stored.to_str().expect("utf-8"),
-        "--dpi",
-        "72",
+        "--long-edge",
+        "1000",
         "--gap",
         "0.06",
         "--out",
@@ -2291,8 +2272,8 @@ fn edit_stores_the_frame_and_render_overrides_it() {
         "render",
         "--project",
         stored.to_str().expect("utf-8"),
-        "--dpi",
-        "72",
+        "--long-edge",
+        "1000",
         "--gap",
         "0.99",
         "--out",
@@ -2310,8 +2291,8 @@ fn edit_stores_the_frame_and_render_overrides_it() {
         "render",
         "--project",
         stored.to_str().expect("utf-8"),
-        "--dpi",
-        "72",
+        "--long-edge",
+        "1000",
         "--radius",
         "1",
         "--out",
@@ -2455,8 +2436,8 @@ fn edit_keeps_the_usage_and_locale_rules() {
             &out_path,
             "--gap",
             "0.01",
-            "--dpi",
-            "72",
+            "--long-edge",
+            "1000",
         ],
         vec![
             "edit",
@@ -2483,8 +2464,8 @@ fn edit_keeps_the_usage_and_locale_rules() {
             "render",
             "--template",
             "strip-2-2x1",
-            "--dpi",
-            "72",
+            "--long-edge",
+            "1000",
             "--out",
             "x.png",
             "--slot",
@@ -2789,9 +2770,8 @@ fn thumb_writes_a_preview_at_the_requested_long_edge() {
     // The grid, read back from the file rather than from the report.
     let preview = image::open(&out).expect("open the preview").to_rgb8();
     assert_eq!(preview.dimensions(), (100, 50));
-    // And the resolution the preview carries: 72 dpi as the PNG `pHYs` chunk, i.e.
-    // 2835 pixels per metre, unit 1.
-    assert_eq!(png_pixel_dimensions(&out), (2835, 2835, 1));
+    // And no resolution is claimed: the preview PNG has no `pHYs` (S12d).
+    assert!(png_pixel_dimensions(&out).is_none());
     assert_eq!(
         std::fs::metadata(&out).expect("stat").len().to_string(),
         field(&output, "bytes")
@@ -3094,8 +3074,8 @@ fn scan_and_thumb_keep_the_usage_and_locale_rules() {
             "render",
             "--template",
             "mosaic-8-s14",
-            "--dpi",
-            "72",
+            "--long-edge",
+            "3370",
             "--out",
             "x.png",
             "--px",
@@ -3370,7 +3350,7 @@ fn gesture_refuses_what_it_cannot_measure() {
             &path,
             "--grid",
             "400",
-            "--dpi",
+            "--long-edge",
             "300",
         ],
         vec![

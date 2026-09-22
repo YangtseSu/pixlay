@@ -1,6 +1,4 @@
-//! The utility pane: template, photo, framing and export — the sheet size is one
-//! of the export rows, because a physical size only means something where the
-//! pixels are written.
+//! The utility pane: template, photo, framing and export.
 //!
 //! HIG `patterns/containers/utility-panes`: a vertical panel beside the main
 //! view, hidden with `F9`, overlaying the content when the window is too narrow
@@ -31,7 +29,17 @@ use pixlay_core::templates;
 use crate::a11y;
 use crate::export::Settings;
 use crate::i18n::{fill, gettext, ngettext};
-use crate::window::{DEFAULT_EXPORT_DPI, EditorWindow};
+use crate::window::{DEFAULT_EXPORT_PX, EditorWindow};
+
+/// Smallest long edge the export form offers, in pixels. A floor for the row,
+/// not a limit of the format: any positive grid is valid, and a minimum below
+/// the picker's own `thumb` grid would make an export smaller than a preview.
+pub const MIN_EXPORT_PX: u32 = 256;
+
+/// Largest long edge the export form offers, in pixels: `12000² = 144 MP`, under
+/// the 200 MP pixel budget (`MAX_CANVAS_PIXELS`) for a square grid — so every
+/// template aspect the row can produce is inside the budget, whatever the shape.
+pub const MAX_EXPORT_PX: u32 = 12000;
 
 pub struct Sidebar {
     pub root: gtk::ScrolledWindow,
@@ -163,9 +171,8 @@ impl Sidebar {
         framing_group.add(&reset_row);
 
         // Three rows, because the form answers three questions (S12c): which
-        // format, how large a picture, and where. The sheet size used to be a row
-        // here; it is a document field, and the CLI's `edit --sheet` is where it is
-        // set, so the window has one quality option instead of a sizing mode.
+        // format, how large a picture, and where. The quality row is the one size
+        // parameter S12d leaves — a pixel count, which is how large the file is.
         let format_combo = adw::ComboRow::builder()
             .title(gettext("Format"))
             .model(&string_list(["JPEG", "PNG"]))
@@ -173,15 +180,15 @@ impl Sidebar {
         a11y::label(&format_combo, &gettext("Export format"));
         let export_size = spin_row(
             gettext("Quality"),
-            &gettext("Export resolution in dots per inch"),
-            72.0,
-            600.0,
-            1.0,
+            &gettext("Export long edge in pixels"),
+            f64::from(MIN_EXPORT_PX),
+            f64::from(MAX_EXPORT_PX),
+            64.0,
             0,
         );
         // A spin button otherwise starts at the bottom of its range, which would
-        // make 72 dpi a new window's export resolution.
-        export_size.set_value(f64::from(DEFAULT_EXPORT_DPI));
+        // make the row's minimum a new window's export size.
+        export_size.set_value(f64::from(DEFAULT_EXPORT_PX));
         let export_path = adw::ActionRow::builder()
             .title(gettext("File"))
             .subtitle(gettext("Not chosen yet"))
@@ -266,7 +273,7 @@ impl Sidebar {
         self.updating.set(false);
     }
 
-    /// Lists the templates whose aspect ratio matches the canvas.
+    /// Lists the templates whose aspect ratio matches the document's own.
     fn update_templates(&self, doc: &pixlay_core::CollageDoc) {
         let wanted: Vec<String> = templates::names()
             .into_iter()
@@ -308,7 +315,7 @@ impl Sidebar {
     /// holds.
     pub fn settings(&self, path: PathBuf) -> Settings {
         Settings {
-            dpi: self.export_size.value().round() as u32,
+            long_edge: self.export_size.value().round() as u32,
             format: match self.format_combo.selected() {
                 1 => pixlay_imaging::encode::Format::Png,
                 _ => pixlay_imaging::encode::Format::Jpeg,
@@ -324,7 +331,7 @@ impl Sidebar {
     /// uses the same call to set a size before exporting from the background.
     pub fn show_settings(&self, settings: &Settings) {
         self.updating.set(true);
-        self.export_size.set_value(f64::from(settings.dpi));
+        self.export_size.set_value(f64::from(settings.long_edge));
         self.format_combo.set_selected(match settings.format {
             pixlay_imaging::encode::Format::Jpeg => 0,
             pixlay_imaging::encode::Format::Png => 1,

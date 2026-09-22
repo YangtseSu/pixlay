@@ -35,9 +35,7 @@ use gtk4::glib::subclass::prelude::ObjectSubclassIsExt as _;
 use gtk4::prelude::*;
 use libadwaita as adw;
 
-use pixlay_core::{
-    CanvasSpec, CollageDoc, Command, CoreError, CropTransform, PixelSize, Project, templates,
-};
+use pixlay_core::{CollageDoc, Command, CoreError, CropTransform, PixelSize, Project, templates};
 use pixlay_imaging::gesture_grid;
 use pixlay_render::Images;
 
@@ -53,17 +51,20 @@ use crate::state::Editor;
 /// so the main path starts with a layout that does not need ten photos.
 pub const DEFAULT_TEMPLATE: &str = "mosaic-5-hero";
 
-/// The long edge of a new document's sheet, in millimetres (A4's).
-pub const DEFAULT_LONG_EDGE_MM: f64 = 297.0;
-
-/// The resolution a new export form starts at, in dots per inch.
+/// The long edge a new export form starts at, in pixels: the one size
+/// parameter (S12d), shared with the CLI's own default (`render --long-edge`,
+/// `docs/CONTRACT.md` §5).
 ///
-/// The CLI's own default (`render --dpi`, `docs/CONTRACT.md` §5) and what the form
-/// goes back to whenever the size mode returns to a resolution. The form has to be
-/// seeded with it: a `GtkSpinButton` starts at its adjustment's *lower* bound, so
-/// without this a new window would export at 72 dpi (the bottom of the range) —
-/// 842x631 px for the default A4 sheet.
-pub const DEFAULT_EXPORT_DPI: u32 = 300;
+/// 4000 px: a square grid of it is 16 MP, an eighth of the 200 MP pixel budget
+/// (measured 2026-09-20, `docs/CONTRACT.md` §8), so the default never touches the
+/// limit whatever the template's shape. The form has to be seeded with it: a
+/// `GtkSpinButton` starts at its adjustment's *lower* bound, so without this a
+/// new window would export at the row's minimum.
+///
+/// The row's own bounds live beside the row (`MIN_EXPORT_PX` / `MAX_EXPORT_PX` in
+/// `crate::sidebar`): the maximum is 12000 because `12000² = 144 MP < 200 MP`,
+/// so every template aspect stays inside the budget.
+pub const DEFAULT_EXPORT_PX: u32 = 4000;
 
 /// How long a live gesture waits for quiet before it becomes an undo step.
 ///
@@ -172,10 +173,7 @@ glib::wrapper! {
 /// The document a window starts on.
 pub fn default_document() -> CollageDoc {
     let template = templates::get(DEFAULT_TEMPLATE).expect("the default template is registered");
-    CollageDoc::new(
-        CanvasSpec::with_ratio(template.aspect, DEFAULT_LONG_EDGE_MM),
-        template,
-    )
+    CollageDoc::new(template)
 }
 
 impl EditorWindow {
@@ -805,13 +803,8 @@ impl EditorWindow {
         let Some(template) = templates::get(name) else {
             return;
         };
-        let long_edge = {
-            let doc = self.document();
-            doc.canvas.width_mm.max(doc.canvas.height_mm)
-        };
         let _ = self.apply(Command::SetTemplate {
             template: template.clone(),
-            canvas: CanvasSpec::with_ratio(template.aspect, long_edge),
         });
         self.select(None);
     }
@@ -1027,7 +1020,7 @@ impl EditorWindow {
         let mut settings = match self.imp().sidebar.get() {
             Some(sidebar) => sidebar.settings(PathBuf::new()),
             None => Settings {
-                dpi: DEFAULT_EXPORT_DPI,
+                long_edge: DEFAULT_EXPORT_PX,
                 format: pixlay_imaging::encode::Format::Jpeg,
                 path: PathBuf::new(),
             },

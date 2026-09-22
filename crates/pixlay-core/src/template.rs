@@ -7,7 +7,7 @@ use crate::geometry::{EPSILON, Point, Polygon};
 use crate::{MAX_SLOTS, MIN_SLOTS};
 
 /// Tolerance between a slot's declared area and the area of its outline.
-/// 1e-6 of the canvas is ~0.01 px on an A0 sheet at 300 dpi.
+/// 1e-6 of a sheet edge is 0.014 px on the 14043-px reference grid.
 pub const AREA_TOLERANCE: f64 = 1e-6;
 
 /// One template cell: where it is and how much of the canvas it covers.

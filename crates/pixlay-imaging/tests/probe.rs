@@ -19,11 +19,12 @@
 
 use std::path::PathBuf;
 
-use pixlay_core::{CanvasSpec, Cell, CollageDoc, Polygon, Slot, Template};
+use pixlay_core::{Cell, CollageDoc, PixelSize, Polygon, Slot, Template};
 use pixlay_imaging::Rgb8View;
 use pixlay_imaging::probe::{palette, probe};
 
-const DPI: u32 = 150;
+/// Long edge of the grid the probe tests run on, in pixels.
+const LONG_EDGE: u32 = 709;
 
 /// A two-slot document with the left cell occupied and the right one empty: the
 /// shape every probe question is about.
@@ -45,7 +46,7 @@ fn doc() -> CollageDoc {
             },
         ],
     };
-    let mut doc = CollageDoc::new(CanvasSpec::new(120.0, 90.0), template);
+    let mut doc = CollageDoc::new(template);
     doc.cells[0] = Cell {
         source: Some(PathBuf::from("photo.png")),
         crop: Default::default(),
@@ -58,7 +59,7 @@ fn doc() -> CollageDoc {
 /// short of the slot's boundary, so the seam between the two slots is a hard edge
 /// with nothing blended into it — the way a correct render leaves it.
 fn flat(doc: &CollageDoc, paint_left: bool) -> (Vec<u8>, i32, i32) {
-    let canvas = doc.canvas.pixel_size(DPI).expect("canvas size");
+    let canvas = PixelSize::for_long_edge(doc.template.aspect, LONG_EDGE).expect("canvas size");
     let color = palette(0);
     let mut data = vec![255u8; canvas.width as usize * canvas.height as usize * 3];
     if paint_left {
@@ -87,7 +88,7 @@ fn the_interior_probe_fails_when_a_slot_is_not_covered() {
     let doc = doc();
 
     let painted = flat(&doc, true);
-    let good = probe(&doc, &view(&painted), DPI);
+    let good = probe(&doc, &view(&painted));
     assert_eq!(good.interiors.len(), 1, "the filled cell must be sampled");
     assert!(
         good.ok(),
@@ -99,7 +100,7 @@ fn the_interior_probe_fails_when_a_slot_is_not_covered() {
     // probe exists to catch, and S3's clamp is what keeps a real document from
     // producing it.
     let nothing = flat(&doc, false);
-    let blank = probe(&doc, &view(&nothing), DPI);
+    let blank = probe(&doc, &view(&nothing));
     assert!(!blank.ok(), "an empty slot must not pass");
     assert!(!blank.interiors[0].matches());
     assert_eq!(blank.interiors[0].actual, [255, 255, 255]);

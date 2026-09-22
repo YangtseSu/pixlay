@@ -253,7 +253,6 @@ pub fn save_png(path: &Path, image: &Image) {
         path,
         &pixlay_imaging::encode::Export {
             format: pixlay_imaging::encode::Format::Png,
-            dpi: 96.0,
             image: pixlay_imaging::Rgb8View {
                 width: *width,
                 height: *height,

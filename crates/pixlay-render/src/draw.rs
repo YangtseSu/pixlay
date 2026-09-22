@@ -25,7 +25,7 @@ pub struct Target<'a> {
     /// Output pixels per canvas pixel. `1.0` renders one output pixel per canvas
     /// pixel; previews use `preview_px / long_edge_px`.
     pub scale: f64,
-    /// Full canvas size in canvas pixels, from `CanvasSpec::pixel_size(dpi)`.
+    /// Full canvas size in canvas pixels, from `PixelSize::for_long_edge`.
     pub canvas_px: PixelSize,
     /// Horizontal stripe of the canvas to draw, or `None` for all of it.
     pub band: Option<Band>,
@@ -282,26 +282,11 @@ fn outline_path(ctx: &Context, outline: &Polygon, canvas: PixelSize) {
 /// scaled by `scale`.
 ///
 /// A thin wrapper: it allocates the surface, builds the context and calls
-/// [`draw`]. Previews and exports differ only in `scale` and `band`.
+/// [`draw`]. Previews and exports differ only in `scale` and `band`. The grid is
+/// the caller's to size (`PixelSize::for_long_edge`), which keeps the caller's
+/// arithmetic and the renderer's the same arithmetic — `draw` places every slot
+/// in these pixels.
 pub fn render_surface(
-    doc: &CollageDoc,
-    images: &Images,
-    dpi: u32,
-    scale: f64,
-    band: Option<Band>,
-) -> Result<ImageSurface, RenderError> {
-    render_surface_sized(doc, images, doc.canvas.pixel_size(dpi)?, scale, band)
-}
-
-/// The same, with the canvas pixel grid given directly.
-///
-/// A resolution is an export parameter, not a renderer concept, and the two
-/// export modes produce grids no single DPI reproduces:
-/// `CanvasSpec::pixel_size` rounds both edges from a DPI, while
-/// `CanvasSpec::pixel_size_for_long_edge` makes one edge exact. Taking the grid
-/// rather than the DPI is also what keeps the caller's arithmetic and the
-/// renderer's the same arithmetic — `draw` places every slot in these pixels.
-pub fn render_surface_sized(
     doc: &CollageDoc,
     images: &Images,
     canvas_px: PixelSize,
@@ -420,28 +405,16 @@ fn over_white(channel: u32, alpha: u32) -> u8 {
 pub fn render_rgb8(
     doc: &CollageDoc,
     images: &Images,
-    dpi: u32,
-    scale: f64,
-    band: Option<Band>,
-) -> Result<Rgb8Image, RenderError> {
-    let surface = render_surface(doc, images, dpi, scale, band)?;
-    rgb8(&surface)
-}
-
-/// [`render_surface_sized`] followed by [`rgb8`].
-pub fn render_rgb8_sized(
-    doc: &CollageDoc,
-    images: &Images,
     canvas_px: PixelSize,
     scale: f64,
     band: Option<Band>,
 ) -> Result<Rgb8Image, RenderError> {
-    let surface = render_surface_sized(doc, images, canvas_px, scale, band)?;
+    let surface = render_surface(doc, images, canvas_px, scale, band)?;
     rgb8(&surface)
 }
 
 /// Output pixels for `canvas_px` at `scale`, rounding half away from zero — the
-/// same rule `CanvasSpec::pixel_size` uses for its own rounding.
+/// same rule `PixelSize::for_long_edge` uses for its own rounding.
 pub fn output_px(canvas_px: i32, scale: f64) -> i32 {
     (f64::from(canvas_px) * scale).round().max(1.0) as i32
 }

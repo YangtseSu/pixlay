@@ -301,10 +301,10 @@ impl Grid {
     /// `doc`.
     ///
     /// The comparison is S7's, minus the canvas-wide filter it used to carry
-    /// (S12c removed it), and it is the honest one: same template geometry, same
-    /// canvas, and the slot's own cell and source unchanged. The grid is not
-    /// compared here because the caller only asks a set whose grid is the one
-    /// being built.
+    /// (S12c removed it) and minus the canvas itself (S12d removed that too):
+    /// same template geometry, and the slot's own cell and source unchanged. The
+    /// grid is not compared here because the caller only asks a set whose grid is
+    /// the one being built.
     fn reuses(
         &self,
         doc: &CollageDoc,
@@ -312,7 +312,7 @@ impl Grid {
         modified: &[Option<SystemTime>],
         slot: usize,
     ) -> Option<&SlotBitmap> {
-        let same_shape = self.doc.template == doc.template && self.doc.canvas == doc.canvas;
+        let same_shape = self.doc.template == doc.template;
         let same_cell = self.doc.cells.get(slot) == doc.cells.get(slot)
             && self.sources.get(slot) == sources.get(slot)
             && self.modified.get(slot) == modified.get(slot);

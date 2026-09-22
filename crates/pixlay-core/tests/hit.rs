@@ -14,33 +14,29 @@
 //! a cut template's slots touch the canvas border, so the pixel outside *that*
 //! edge is outside every slot and the answer is `None`, not the neighbour.
 //!
-//! "1 px" is a physical quantity and needs a resolution to mean anything, so the
-//! sweep fixes one: the canvas the samples are measured on is the template's own
-//! aspect ratio at a 200 mm long edge, at 300 dpi. Normalized coordinates are
+//! "1 px" needs a grid to mean anything, so the sweep fixes one: the samples are
+//! measured on the template's own aspect ratio at a 2362 px long edge
+//! (`SWEEP_LONG_EDGE`). Normalized coordinates are
 //! stretched anisotropically onto that grid, so an offset of one pixel is
 //! `1/width` in x and `1/height` in y — the offsets below are computed in pixel
 //! space and converted back, which is what makes them one pixel and not "one
 //! normalized unit that happens to be a pixel on one axis".
 
 use pixlay_core::templates;
-use pixlay_core::{CanvasSpec, PixelSize, Point, Polygon, Slot, Template};
+use pixlay_core::{PixelSize, Point, Polygon, Slot, Template};
 
-/// Resolution the sweep's one pixel is measured at.
-const DPI: u32 = 300;
-
-/// Long edge of the canvas the sweep measures on, in millimetres. Small enough
-/// to keep the pixel counts readable, large enough that one pixel is far above
-/// float noise (1e-4 of a canvas edge against `EPSILON = 1e-9`).
-const CANVAS_MM: f64 = 200.0;
+/// Long edge of the grid the sweep measures on, in pixels. Large enough that one
+/// pixel is far above the geometry's own noise, small enough that the quarter of
+/// a million samples stay fast.
+const SWEEP_LONG_EDGE: u32 = 2362;
 
 /// Samples taken along each edge of each slot.
 const PER_EDGE: usize = 9;
 
-/// The canvas the sweep measures a template's geometry on.
-fn canvas_px(aspect: f64) -> (CanvasSpec, PixelSize) {
-    let canvas = CanvasSpec::with_ratio(aspect, CANVAS_MM);
-    let px = canvas.pixel_size(DPI).expect("a 200 mm canvas at 300 dpi");
-    (canvas, px)
+/// The grid the sweep measures a template's geometry on: the template's own
+/// aspect at the sweep's long edge.
+fn canvas_px(aspect: f64) -> PixelSize {
+    PixelSize::for_long_edge(aspect, SWEEP_LONG_EDGE).expect("a grid inside the budget")
 }
 
 /// A point in pixel space.
@@ -198,7 +194,7 @@ fn a_point_one_pixel_from_a_boundary_matches_the_analytic_answer() {
     let mut slots = 0u64;
 
     for template in templates::all() {
-        let (_, px) = canvas_px(template.aspect);
+        let px = canvas_px(template.aspect);
         for (index, slot) in template.slots.iter().enumerate() {
             slots += 1;
             for (a, b) in slot.outline.edges() {
@@ -447,7 +443,7 @@ fn a_rotated_slot_is_hit_exactly() {
         // 1 px sample: a point one pixel along the diagonal toward the centre is
         // inside, and the corner itself lies on the boundary and is therefore
         // unspecified.
-        let (_, px) = canvas_px(1.0);
+        let px = canvas_px(1.0);
         let centre_px = to_px(CENTRE, px);
         for corner in &outline.points {
             let (cx, cy) = to_px(*corner, px);

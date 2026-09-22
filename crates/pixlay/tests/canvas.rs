@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use gtk4::prelude::*;
 use pixlay::canvas::{self, MARGIN};
-use pixlay_core::{CanvasSpec, CropTransform, templates};
+use pixlay_core::{CropTransform, PixelSize, templates};
 
 /// The long edge the test renders at, in pixels. Small enough to stay fast and to
 /// leave the canvas its own space beside the utility pane, large enough that a
@@ -40,8 +40,7 @@ fn the_canvas_draws_what_the_cli_writes() {
     // the comparison is between two renders rather than between two roundings.
     let project = support::artifact("canvas.pixlay");
     let template = templates::get("mosaic-5-hero").expect("the template is in the library");
-    let mut doc =
-        pixlay_core::CollageDoc::new(CanvasSpec::with_ratio(template.aspect, 297.0), template);
+    let mut doc = pixlay_core::CollageDoc::new(template);
     for (slot, name) in [
         (0usize, "landscape.jpg"),
         (1, "portrait.jpg"),
@@ -63,11 +62,8 @@ fn the_canvas_draws_what_the_cli_writes() {
     window
         .open_path(&project)
         .expect("the window opens the test project");
-    let grid = window
-        .document()
-        .canvas
-        .pixel_size_for_long_edge(LONG_EDGE)
-        .expect("a valid grid");
+    let grid = PixelSize::for_long_edge(window.document().template.aspect, LONG_EDGE)
+        .expect("a grid inside the budget");
 
     // Pin the canvas widget to exactly the grid's size plus its margin: the widget
     // is what asks for bitmaps, and asking for this grid is what makes the two

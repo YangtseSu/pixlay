@@ -8,8 +8,8 @@
 //! S6's):
 //!
 //! ```text
-//! pixlay-render render    --project <file.pixlay> --dpi <n> --out <file>
-//! pixlay-render render    --template <name> --dpi <n> --out <file>   # no photos
+//! pixlay-render render    --project <file.pixlay> --long-edge <n> --out <file>
+//! pixlay-render render    --template <name> --long-edge <n> --out <file>   # no photos
 //! pixlay-render render    --project <file.pixlay> --long-edge <px> --out <file>
 //! pixlay-render probe     --project <file.pixlay>
 //! pixlay-render image     --photo <file>

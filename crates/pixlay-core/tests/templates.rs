@@ -354,7 +354,6 @@ fn the_matrix_is_grouped_by_aspect_ratio() {
         );
         for template in &matching {
             assert_eq!(template.aspect, aspect, "{}: wrong group", template.name);
-            pixlay_core::CanvasSpec::with_ratio(aspect, 1000.0);
             let doc = templates::document(template);
             doc.validate()
                 .unwrap_or_else(|error| panic!("{}: {error}", template.name));

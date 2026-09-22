@@ -36,7 +36,7 @@ use std::time::Duration;
 use gtk4::prelude::*;
 
 use pixlay::canvas::{Gesture, MARGIN};
-use pixlay_core::{CanvasSpec, Command, CropTransform, templates};
+use pixlay_core::{Command, CropTransform, templates};
 use pixlay_imaging::gesture_grid;
 
 /// The canvas grid this test works at, in pixels: small, so the whole test is a
@@ -53,8 +53,7 @@ fn a_live_gesture_refines_into_the_resting_grids_own_pixels() {
         .into_iter()
         .find(|template| template.slots.len() == 2)
         .expect("the library has a two-slot layout");
-    let mut doc =
-        pixlay_core::CollageDoc::new(CanvasSpec::with_ratio(template.aspect, 297.0), template);
+    let mut doc = pixlay_core::CollageDoc::new(template);
     doc.cells[0].source = Some(support::photo("square.png"));
     doc.cells[1].source = Some(support::photo("ratio-4-3.png"));
     let project = support::artifact("gesture.pixlay");

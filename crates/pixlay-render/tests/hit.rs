@@ -17,10 +17,11 @@
 //! geometry and must not follow the photo: a rotated photo still fills its whole
 //! slot, so the answer may not change.
 
-use pixlay_core::{CanvasSpec, CollageDoc, CropTransform, PixelSize, Point, Rgba8, templates};
+use pixlay_core::{CollageDoc, CropTransform, PixelSize, Point, Rgba8, templates};
 use pixlay_render::{Bitmap, Images, Rgb8Image, render_rgb8};
 
-const DPI: u32 = 96;
+/// Long edge of the grid the hit sweep measures on, in pixels.
+const LONG_EDGE: u32 = 454;
 
 /// The templates the sweep runs over: a cut template and the one with a gutter.
 const TEMPLATES: [&str; 2] = [templates::SMOKE_TEMPLATE, "grid-4-2x2g"];
@@ -40,7 +41,7 @@ const COLORS: [Rgba8; 8] = [
 
 fn doc(name: &str, rotation_deg: f64) -> CollageDoc {
     let template = templates::get(name).unwrap_or_else(|| panic!("template {name}"));
-    let mut doc = CollageDoc::new(CanvasSpec::with_ratio(template.aspect, 120.0), template);
+    let mut doc = CollageDoc::new(template);
     for cell in &mut doc.cells {
         cell.crop = CropTransform {
             rotation_deg,
@@ -51,7 +52,7 @@ fn doc(name: &str, rotation_deg: f64) -> CollageDoc {
 }
 
 fn canvas_px(doc: &CollageDoc) -> PixelSize {
-    doc.canvas.pixel_size(DPI).expect("canvas size")
+    PixelSize::for_long_edge(doc.template.aspect, LONG_EDGE).expect("canvas size")
 }
 
 /// One flat bitmap per slot, at the size the slot *displays* it: sized from the
@@ -140,7 +141,8 @@ fn every_pixel_the_renderer_paints_with_a_slot_colour_hits_that_slot() {
         for rotation_deg in [0.0, 30.0] {
             let doc = doc(name, rotation_deg);
             let canvas = canvas_px(&doc);
-            let image = render_rgb8(&doc, &images(&doc, canvas), DPI, 1.0, None).expect("renders");
+            let image =
+                render_rgb8(&doc, &images(&doc, canvas), canvas, 1.0, None).expect("renders");
             let agreement = disagreements(&doc, &image);
             assert!(
                 agreement.wrong == 0,
@@ -166,7 +168,7 @@ fn every_pixel_the_renderer_paints_with_a_slot_colour_hits_that_slot() {
             total_pixels += pixels;
         }
     }
-    // The sweep is not allowed to be a handful of pixels: at 120 mm and 96 dpi the
+    // The sweep is not allowed to be a handful of pixels: at a 454 px long edge the
     // two templates and the two framings are a quarter of a million samples.
     assert!(
         total_exact > 100_000,
@@ -182,7 +184,7 @@ fn the_gutter_belongs_to_no_slot_in_the_rendered_image() {
     // every y.
     let doc = doc("grid-4-2x2g", 0.0);
     let canvas = canvas_px(&doc);
-    let image = render_rgb8(&doc, &images(&doc, canvas), DPI, 1.0, None).expect("renders");
+    let image = render_rgb8(&doc, &images(&doc, canvas), canvas, 1.0, None).expect("renders");
     let mut samples = 0u64;
     for y in 0..image.height {
         let point = Point::new(0.5, (f64::from(y) + 0.5) / f64::from(image.height));

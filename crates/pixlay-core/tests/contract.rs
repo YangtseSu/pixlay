@@ -4,8 +4,8 @@
 use std::path::PathBuf;
 
 use pixlay_core::{
-    CanvasSpec, Cell, CollageDoc, CropTransform, DOC_VERSION, Point, Polygon, Project, Rgba8,
-    Template,
+    Cell, CollageDoc, CropTransform, DOC_VERSION, MAX_LONG_EDGE_PX, PixelSize, Point, Polygon,
+    Project, Rgba8, Template,
 };
 
 fn temp_dir(name: &str) -> PathBuf {
@@ -41,10 +41,7 @@ fn two_slot_template() -> Template {
 }
 
 fn two_slot_doc() -> CollageDoc {
-    CollageDoc::new(
-        CanvasSpec::with_ratio(4.0 / 3.0, 120.0),
-        two_slot_template(),
-    )
+    CollageDoc::new(two_slot_template())
 }
 
 fn close(a: f64, b: f64) {
@@ -84,8 +81,6 @@ fn serde_round_trip_is_field_identical() {
     // renamed field would still round-trip through this crate's own types.
     for key in [
         "\"docVersion\"",
-        "\"canvas\"",
-        "\"widthMm\"",
         "\"template\"",
         "\"version\"",
         "\"slots\"",
@@ -100,10 +95,18 @@ fn serde_round_trip_is_field_identical() {
     ] {
         assert!(json.contains(key), "{key} missing from {json}");
     }
-    // The shape after the S12c purity cut: what the document does *not* carry is as
-    // much of the contract as what it does, and a field that quietly came back
-    // would fail here rather than at a user's project file.
-    for gone in ["\"text\"", "\"textFallback\"", "\"filter\"", "\"grade\""] {
+    // The shape after the S12c purity cut and S12d's pixels-only cut: what the
+    // document does *not* carry is as much of the contract as what it does, and a
+    // field that quietly came back would fail here rather than at a user's project
+    // file.
+    for gone in [
+        "\"text\"",
+        "\"textFallback\"",
+        "\"filter\"",
+        "\"grade\"",
+        "\"canvas\"",
+        "\"widthMm\"",
+    ] {
         assert!(!json.contains(gone), "{gone} is back in {json}");
     }
     let outline = serde_json::to_string(&Polygon::rect(0.05, 0.05, 0.5, 0.95)).expect("serializes");
@@ -166,32 +169,10 @@ fn older_versions_are_refused_with_an_actionable_message() {
 }
 
 #[test]
-fn a_canvas_whose_aspect_contradicts_its_template_is_rejected() {
-    // The template's geometry is normalized, so it is stretched onto whatever
-    // canvas is declared. A mismatch silently distorts the layout and nothing
-    // downstream can see it.
-    let mut doc = two_slot_doc();
-    doc.canvas = CanvasSpec::new(160.0, 90.0); // 16:9 against a 4:3 template
-    let err = doc
-        .validate()
-        .expect_err("aspect mismatch must be rejected");
-    assert!(
-        err.to_string()
-            .contains("does not match the template aspect"),
-        "{err}"
-    );
-
-    // A rounding-level difference is fine: canvases are authored in millimetres.
-    let mut doc = two_slot_doc();
-    doc.canvas = CanvasSpec::new(120.000_000_1, 90.0);
-    doc.validate()
-        .expect("millimetre rounding is not a mismatch");
-}
-
-#[test]
 fn a_project_from_the_removed_shape_is_refused_by_version_not_by_field() {
-    // A version-1 project is a project with `grade`, `filter`, `text` and
-    // `textFallback` in it. `deny_unknown_fields` would name `grade` while parsing,
+    // A version-2 project is the shape S12c wrote: `grade`, `filter`, `text` and
+    // `textFallback` are gone from it, but it still carries the `canvas` field
+    // S12d removed. `deny_unknown_fields` would name `canvas` while parsing,
     // which tells a user nothing about what to do; reading the version first is
     // what turns it into the actionable "rebuild the project with this version".
     let doc = two_slot_doc();
@@ -199,14 +180,14 @@ fn a_project_from_the_removed_shape_is_refused_by_version_not_by_field() {
     let older = current
         .replace(
             &format!("\"docVersion\": {DOC_VERSION}"),
-            "\"docVersion\": 1",
+            "\"docVersion\": 2",
         )
         .replacen(
-            "\"crop\":",
-            "\"grade\": { \"factor\": 1.1, \"saturation\": 0.9, \"delta\": -0.1 },\n      \"crop\":",
+            "\"template\":",
+            "\"canvas\": { \"widthMm\": 120.0, \"heightMm\": 90.0 },\n  \"template\":",
             1,
         );
-    let err = CollageDoc::from_json(&older).expect_err("a version-1 document is refused");
+    let err = CollageDoc::from_json(&older).expect_err("a version-2 document is refused");
     assert!(
         err.to_string().contains("rebuild the project"),
         "the refusal must be actionable, got: {err}"
@@ -223,7 +204,7 @@ fn unknown_json_fields_are_rejected() {
     let json = doc
         .to_json()
         .expect("serializes")
-        .replace("\"canvas\": {", "\"canvas\": {\n      \"nonsense\": 1,");
+        .replace("\"template\":", "\"nonsense\": 1,\n  \"template\":");
     let err = CollageDoc::from_json(&json).expect_err("unknown field must be rejected");
     assert!(err.to_string().contains("nonsense"), "{err}");
 }
@@ -272,111 +253,39 @@ fn wrong_slot_area_is_rejected() {
     assert!(err.to_string().contains("declares area 0.5"), "{err}");
 }
 
+/// The one size parameter there is (S12d): the long edge is exact, the other
+/// edge keeps the template's aspect, and the pixel budget is the binding limit.
 #[test]
-fn canvas_limits_and_rounding() {
-    // A4 at 300 dpi is the rounding reference in docs/CONTRACT.md §2.
-    let a4 = CanvasSpec::A4_PORTRAIT.pixel_size(300).expect("A4@300dpi");
-    assert_eq!((a4.width, a4.height), (2480, 3508));
+fn grid_for_long_edge() {
+    // The rounding reference in docs/CONTRACT.md §2.
+    let grid = PixelSize::for_long_edge(4.0 / 3.0, 4000).expect("a 4:3 grid");
+    assert_eq!((grid.width, grid.height), (4000, 3000));
     assert_eq!(
-        CanvasSpec::A0_PORTRAIT.pixel_size(300).unwrap().pixels(),
-        139_489_119
+        PixelSize::for_long_edge(3.0 / 4.0, 4000).unwrap().pixels(),
+        12_000_000
     );
-    // Half away from zero: 100 mm at 300 dpi is 1181.1 px.
+    // Half away from zero: 3 px over an aspect of 2 gives a short edge of 1.5.
     assert_eq!(
-        CanvasSpec::new(100.0, 100.0).pixel_size(300).unwrap().width,
-        1181
+        PixelSize::for_long_edge(2.0, 3).unwrap(),
+        PixelSize {
+            width: 3,
+            height: 2
+        }
     );
-    assert_eq!(
-        CanvasSpec::new(100.0, 100.0).pixel_size(150).unwrap().width,
-        591
-    );
+    // A square stays exactly square.
+    let square = PixelSize::for_long_edge(1.0, 1000).expect("a square grid");
+    assert_eq!((square.width, square.height), (1000, 1000));
+    assert_eq!(square.pixels(), 1_000_000);
 
-    for dpi in [71, 601, 0] {
-        let err = CanvasSpec::A4_PORTRAIT
-            .pixel_size(dpi)
-            .expect_err("dpi must be limited");
-        assert!(err.to_string().contains("dpi"), "{dpi}: {err}");
+    for edge in [0, MAX_LONG_EDGE_PX + 1] {
+        let err = PixelSize::for_long_edge(1.0, edge).expect_err("the edge must be limited");
+        assert!(err.to_string().contains("long edge"), "{edge}: {err}");
     }
 
-    // A0 at 600 dpi would be 558 MP, over the 200 MP budget.
-    let err = CanvasSpec::A0_PORTRAIT
-        .pixel_size(600)
-        .expect_err("canvas pixel budget");
-    assert!(err.to_string().contains("557976342 pixels"), "{err}");
-
-    assert!(CanvasSpec::new(0.0, 100.0).validate().is_err());
-    assert!(CanvasSpec::new(f64::NAN, 100.0).validate().is_err());
-    assert!(CanvasSpec::new(5000.0, 100.0).validate().is_err());
-}
-
-/// The pixel-count export mode (S6): the long edge is exact, the other edge keeps
-/// the ratio, and the resolution the file then carries is derived from the grid.
-#[test]
-fn a_long_edge_is_exact_and_the_other_edge_keeps_the_ratio() {
-    let square = CanvasSpec::SQUARE;
-    let pixel = square
-        .pixel_size_for_long_edge(1000)
-        .expect("a square grid");
-    assert_eq!((pixel.width, pixel.height), (1000, 1000));
-
-    // A4 landscape: 297 x 210 mm. 1000 px on the long edge, and
-    // round(210 / 297 * 1000) = 707 on the short one.
-    let pixel = CanvasSpec::A4_LANDSCAPE
-        .pixel_size_for_long_edge(1000)
-        .expect("landscape");
-    assert_eq!((pixel.width, pixel.height), (1000, 707));
-
-    // The same canvas portrait puts the exact edge on the other axis.
-    let pixel = CanvasSpec::A4_PORTRAIT
-        .pixel_size_for_long_edge(1000)
-        .expect("portrait");
-    assert_eq!((pixel.width, pixel.height), (707, 1000));
-
-    // The rounding rule is half away from zero, the same as `pixel_size`'s:
-    // 210 / 595 * 1000 = 352.94, and 1000 is exact either way.
-    let pixel = CanvasSpec::new(595.0, 210.0)
-        .pixel_size_for_long_edge(1000)
-        .expect("an A-series long edge");
-    assert_eq!((pixel.width, pixel.height), (1000, 353));
-
-    // A0 landscape at 16000 px: 16000 x 11317 (round(841 / 1189 * 16000)), and the
-    // resolution the grid works out to is 341.8 dpi.
-    let a0 = CanvasSpec::A0_LANDSCAPE
-        .pixel_size_for_long_edge(16_000)
-        .expect("well inside the budget");
-    assert_eq!((a0.width, a0.height), (16000, 11317));
-    assert!((CanvasSpec::A0_LANDSCAPE.dpi_for(a0) - 16000.0 * 25.4 / 1189.0).abs() < 1e-9);
-
-    // The flag's range and the canvas budget are two different limits and both
-    // apply: 30000 is inside the range, and a 4:3 canvas at that edge is 636.6 MP,
-    // over the 200 MP budget. The budget is what refuses it, and the message says
-    // how much it was.
-    let err = CanvasSpec::A0_LANDSCAPE
-        .pixel_size_for_long_edge(pixlay_core::MAX_LONG_EDGE_PX)
-        .expect_err("over the canvas budget");
-    assert!(err.to_string().contains("636600000 pixels"), "{err}");
-
-    // A resolution in physical mode is echoed, not derived: an A4 at 300 dpi is
-    // 2480 x 3508 px, which is 300.01 dpi on the long edge and 299.96 on the short
-    // one, and the file still says 300 — that is the number the user asked for.
-    let a4 = CanvasSpec::A4_PORTRAIT.pixel_size(300).expect("A4@300dpi");
-    assert!(CanvasSpec::A4_PORTRAIT.dpi_for(a4) > 300.0);
-
-    // The range, and the canvas budget the grid still has to respect: a square
-    // canvas at the maximum edge is 900 MP.
-    for pixels in [0, pixlay_core::MAX_LONG_EDGE_PX + 1] {
-        let err = square
-            .pixel_size_for_long_edge(pixels)
-            .expect_err("outside the range");
-        assert!(err.to_string().contains("long edge"), "{pixels}: {err}");
-    }
-    let err = square
-        .pixel_size_for_long_edge(20000)
-        .expect_err("over the canvas budget");
-    assert!(err.to_string().contains("400000000 pixels"), "{err}");
-    // Exactly at the budget is inside it (14142^2 = 199,996,164).
-    let pixel = square.pixel_size_for_long_edge(14142).expect("inside");
-    assert_eq!(pixel.pixels(), 199_996_164);
+    // The budget is what binds a square request: 30000² = 900 MP, past the 200 MP
+    // budget even though the edge itself is inside `MAX_LONG_EDGE_PX`.
+    let err = PixelSize::for_long_edge(1.0, 30000).expect_err("canvas pixel budget");
+    assert!(err.to_string().contains("900000000 pixels"), "{err}");
 }
 
 #[test]
