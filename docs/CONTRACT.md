@@ -848,8 +848,12 @@ Read on the plan's own subject — the verification project, at the editor's own
 5.5 ms against a 16.7 ms frame. Read on a realistic photo — 12 to 24 MP, which is what the product's users
 pick — it does **not**: ~200 ms per step, and the coarse grid and the caches between them only bought a factor
 of ~2.4 (the same cell cost `decode` 171 ms + `resample` 289 ms before them). That is the fork ruling 1
-(2026-09-22) reserved, and its ruling is recorded in `docs/2026-09-22-STEPS.md` §S12; the S-numbers here stay
-citable for whatever that ruling decides, because the numbers are the same either way.
+(2026-09-22) reserved, and it was ruled the same day:
+**the preview's future is a preview-grade source, not a GPU renderer** — a cached, preview-sized reduction per
+photo that the preview's bitmaps are resampled from, inside the one renderer (`docs/2026-09-22-STEPS.md`,
+"S12 · Result" and the step "S12b"). So `draw`, `resample` and the export's quality path stay as this
+document describes them, and the preview's pixels stay `draw`'s; the GPU preview path is **not** written, and
+"do not replace Cairo with GPU rendering" needs no amendment.
 
 ## 9. The window (S7), and the stages added after it
 
