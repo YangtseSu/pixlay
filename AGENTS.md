@@ -303,20 +303,29 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
   stages: `AdwNavigationView` whose root is the picker — a `GtkGridView` + `GtkMultiSelection` over the
   folder, an ordered list of the picked photos, and a `GtkPicture` preview pane — and whose
   pushed page is the editor, so `AdwHeaderBar` gets the back button from the view itself. The 2026-09-22
-  ruling (`docs/2026-09-22-STEPS.md`, `S13 · Ruling`) fixed that stage's arrangement, and **S13b
-  implemented it**: the thumbnails are the bottom of the page, the picked list runs down the right edge,
-  the cell is 256 px (gthumb's own default), a picked cell is shown by a highlight rather than the
-  platform's check box — the app's only stylesheet, `crates/pixlay/src/style.css`, and a deviation
-  recorded in `docs/HIG-REVIEW.md` §3 — and order changes by dragging a row or by
-  `Ctrl+Up`/`Ctrl+Down`. **A tile is decoded only for a cell that is on screen** (S13b): GTK's item
-  manager binds far more items than it shows, and the number is a constant of GTK rather than a
-  statement about the folder (`docs/CONTRACT.md` §9). The editor's
+  ruling fixed that stage's arrangement, S13b implemented it, and **the ruling of the same day, "the picker,
+  as gthumb has it", re-ruled it** (S13c implements the correction): the media area takes the vast majority
+  of the page, the thumbnails are **one row along its bottom, spanning the full width**, the picked list runs
+  down the right edge **at the media area's own height** and switches the preview when a row is clicked, a
+  **status bar** closes the window with gthumb's four fields (picked/total · pixels · size · zoom), the cell
+  is **128 logical px** (gthumb's `thumbnail-size` of 256 is in *device* px, so S13b's 256 *logical* cells
+  were twice the app they were copied from), the pane's decode is **the size it draws**, and a picked cell is
+  shown by a highlight rather than the platform's check box — the app's only stylesheet,
+  `crates/pixlay/src/style.css`, and a deviation recorded in `docs/HIG-REVIEW.md` §3 — and order changes by
+  dragging a row or by `Ctrl+Up`/`Ctrl+Down`. **A tile is decoded only for a cell that is on screen**
+  (S13b): GTK's item manager binds far more items than it shows, and the number is a constant of GTK rather
+  than a statement about the folder (`docs/CONTRACT.md` §9). **The header bar's controls follow HIG
+  `patterns/containers/header-bars` and the two references**: primary and navigation actions at the *start*,
+  the heading in the centre, a primary menu at the *end*. The editor's
   per-cell buttons arrive in S15 as a `GtkOverlay` + `GtkFixed`. None of those is custom-drawn, so the
   shell keeps exactly one.
 - **Styling**: use only libadwaita style classes and CSS variables; hard-coded colors and spacing
-  are forbidden (they break dark mode and high contrast). App styling **follows the system**
-  (`AdwStyleManager` stays at its default; never force light or dark), and v1 ships no per-app style
-  switch. The canvas and the export are **always opaque and independent of the UI theme** — the
+  are forbidden (they break dark mode and high contrast). **The app is dark by default** — ruled
+  2026-09-22, superseding "never force light or dark": HIG `guidelines/ui-styling` recommends the dark style
+  by default for "apps which display rich visual content like images or video", and both reference apps do
+  exactly that (gthumb `Adw.ColorScheme.FORCE_DARK`, `Application.vala:676`; loupe `PreferDark`,
+  `application.rs:76-79`). v1 ships **no per-app style switch** (neither reference app has one), and the
+  canvas and the export stay style-independent because they are document content, not styling. The canvas and the export are **always opaque and independent of the UI theme** — the
   backdrop is document content (white unless the document's own frame says otherwise), not styling
   (see "Hard constraints").
 - **Keyboard**: standard shortcuts per HIG `reference/keyboard`; `Alt+*`, `Super+*` and
@@ -331,8 +340,9 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
 - **Deliberate deviations (do not fix, not bugs)**:
   - no GNOME Shell search provider, no notification workflow — the same discipline as the "not doing"
     list;
-  - no per-app style preference (light / dark / system): it would lengthen the main path, and
-    "follow the system" already covers how users express "I want dark";
+  - no per-app style preference (light / dark / system) — amended 2026-09-22: the app is **dark by
+    default**, as HIG recommends for one that displays rich visual content, and neither reference app offers
+    the switch; storing a preference would also need a settings file, which ruling 8 forbids;
 
   - **the phone's chrome, not its capability** (ruled 2026-09-22, replacing "no phone-style layout"):
     the picker-first flow came from mobile galleries, but its capability is built with desktop idioms

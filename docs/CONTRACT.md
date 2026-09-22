@@ -915,11 +915,17 @@ without looking at a widget:
   configuration file (ruling 8). The listing is `pixlay_imaging::list_folder`, the same function the
   CLI's `scan` walks with, so the grid and a listing of the same folder cannot disagree about which
   files are photos or in what order.
-- **Its shape is the 2026-09-22 ruling's, and S13b implemented it** (`docs/2026-09-22-STEPS.md`,
-  `S13 · Ruling`): the preview above, the thumbnails the bottom of the page, the picked list down the
-  right edge — two `GtkPaned`s, one vertical inside one horizontal, whose two positions are kept for the
-  session (a `thread_local`, not a configuration file) — and the cell is `TILE_SIZE` = 256 px, twice
-  S13's 128 and gthumb's own default `thumbnail-size`. A picked cell is shown by a **highlight**, not by
+- **Its shape is S13b's today, and the second ruling of 2026-09-22 re-ruled it** (`docs/2026-09-22-STEPS.md`,
+  "the picker, as gthumb has it"; S13c implements it, and until that step lands what is built is what the
+  bullets below describe). S13b's shape was: the preview above, the thumbnails the bottom of the page, the
+  picked list down the right edge — two `GtkPaned`s whose positions are kept for the session — with the cell
+  at `TILE_SIZE` = 256 px. **The ruled shape is**: the media area taking the vast majority of the page, the
+  thumbnails **one row along its bottom, spanning the full width**, the picked list down the right edge **at
+  the media area's own height** and switching the preview when a row is clicked, a **status bar** with
+  gthumb's four fields (`picked / total` · pixels · size · zoom %), the cell at **128** logical px (gthumb's
+  `thumbnail-size` default of 256 is *device* px — measured off the reference: 250 device = 125 logical on a
+  2× display), the pane's decode **the size it draws**, and the app **dark by default** (HIG
+  `guidelines/ui-styling`; gthumb `Application.vala:676`, loupe `application.rs:76-79`). A picked cell is shown by a **highlight**, not by
   the platform's check box: `.picker-cell` / `.picked` in `crates/pixlay/src/style.css`, the app's only
   stylesheet, installed on the display at startup and using the theme's `--accent-bg-color` and nothing
   literal. It is a deliberate deviation from HIG `patterns/containers/selection-mode`, recorded in
