@@ -304,8 +304,10 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
   folder, an ordered list of the picked photos, and a `GtkPicture` preview pane — and whose
   pushed page is the editor, so `AdwHeaderBar` gets the back button from the view itself. The 2026-09-22
   ruling fixed that stage's arrangement, S13b implemented it, and **the ruling of the same day, "the picker,
-  as gthumb has it", re-ruled it** (S13c implements the correction): the media area takes the vast majority
-  of the page, the thumbnails are **one row along its bottom, spanning the full width**, the picked list runs
+  as gthumb has it", re-ruled it** — S13c landed the correction on 2026-09-23: the media area takes the vast
+  majority of the page (80.5 % of the band above the status bar at 1100x760, the reference's own being 88 %),
+  the thumbnails are **one row along its bottom, spanning the full width** (a horizontally-reflowing
+  `GtkGridView`, one item per vertical slice), the picked list runs
   down the right edge **at the media area's own height** and switches the preview when a row is clicked, a
   **status bar** closes the window with gthumb's four fields (picked/total · pixels · size · zoom), the cell
   is **128 logical px** (gthumb's `thumbnail-size` of 256 is in *device* px, so S13b's 256 *logical* cells
