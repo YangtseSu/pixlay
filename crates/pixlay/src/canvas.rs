@@ -27,7 +27,11 @@
 //! moves it by a hundred pixels rather than by a hundred pixels scaled by
 //! whatever zoom was stored. Each motion sends a whole command through
 //! [`EditorWindow::gesture`], which keeps it pending; the command that reaches the
-//! undo stack is the one from the end of the gesture.
+//! undo stack is the one from the end of the gesture. While one is pending the
+//! canvas draws at a coarser grid ([`pixlay_imaging::gesture_grid`]) and the release
+//! refines it (S12); a control that produces a single finished step sends
+//! [`Gesture::Step`] instead, and is drawn at the resting grid, because one frame
+//! the user is meant to look at is worth the pixels.
 
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -40,6 +44,7 @@ use gtk4::glib;
 use gtk4::prelude::*;
 
 use pixlay_core::{CollageDoc, CropTransform, PixelSize, Point, Slot};
+use pixlay_imaging::GESTURE_STEP_DEG;
 use pixlay_render::{Images, RenderError, Target, draw};
 
 use crate::a11y;
@@ -266,6 +271,10 @@ fn draw_outline(
 pub enum Gesture {
     /// A whole new transform, already fitted to what the user is looking at.
     Crop { slot: usize, crop: CropTransform },
+    /// The same, from a control that produces one *finished* step rather than a
+    /// stream of them (the keyboard, the zoom spin row): it is committed at once
+    /// and the canvas is never coarsened for it (S12).
+    Step { slot: usize, crop: CropTransform },
     /// The gesture ended: commit the pending command.
     End,
 }
@@ -432,7 +441,11 @@ fn add_scroll(area: &gtk::DrawingArea, window: &EditorWindow) {
                 .current_event_state()
                 .contains(gdk::ModifierType::CONTROL_MASK);
             let next = if control {
-                let step = if up { 1.0 } else { -1.0 };
+                let step = if up {
+                    GESTURE_STEP_DEG
+                } else {
+                    -GESTURE_STEP_DEG
+                };
                 // The angle is free (S11): no cap, and the value is wrapped into
                 // (-180, 180] so a long spin cannot walk the number away.
                 CropTransform {
@@ -526,8 +539,9 @@ fn add_keys(area: &gtk::DrawingArea, window: &EditorWindow) {
             let Some(crop) = next else {
                 return glib::Propagation::Proceed;
             };
-            window.gesture(Gesture::Crop { slot, crop });
-            window.gesture(Gesture::End);
+            // A key press is one finished step, not a gesture in flight: it is
+            // committed — and drawn — at the resting grid.
+            window.gesture(Gesture::Step { slot, crop });
             glib::Propagation::Stop
         }
     ));

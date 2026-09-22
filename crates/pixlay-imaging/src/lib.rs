@@ -55,6 +55,7 @@ pub mod exif;
 pub mod icc;
 pub mod layout;
 pub mod linear;
+pub mod preview;
 pub mod probe;
 pub mod resample;
 pub mod thumb;
@@ -69,6 +70,9 @@ pub use encode::{Chroma, Export, Format};
 pub use error::ImagingError;
 pub use layout::{REGION_GUARD_PX, SlotBitmap, slot_bitmap, slot_bitmaps};
 pub use linear::{LinearRgb16, LinearRgba16};
+pub use preview::{
+    Built, GESTURE_GRID_SCALE, GESTURE_STEP_DEG, MAX_SOURCE_BYTES, Preview, gesture_grid,
+};
 pub use probe::{ProbeReport, Rgb8View, probe};
 pub use resample::{Region, resample};
 pub use thumb::{Thumbnail, thumbnail};

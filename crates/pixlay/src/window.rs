@@ -39,6 +39,7 @@ use pixlay_core::{
     CanvasSpec, CollageDoc, Command, CoreError, CropTransform, PixelSize, Project, TextLayer,
     templates,
 };
+use pixlay_imaging::gesture_grid;
 use pixlay_render::Images;
 
 use crate::a11y;
@@ -87,6 +88,9 @@ mod imp {
         pub requested: Cell<Option<PixelSize>>,
         pub decoder: RefCell<Option<Decoder>>,
         pub generation: Cell<u64>,
+        /// Files the decoding thread has decoded since the window opened; the
+        /// tests hold the gesture path to it (S12).
+        pub decoded: Cell<u64>,
         pub selection: Cell<Option<usize>>,
         pub guides: Cell<bool>,
         pub canvas: OnceCell<gtk::DrawingArea>,
@@ -119,6 +123,7 @@ mod imp {
                 requested: Cell::new(None),
                 decoder: RefCell::new(None),
                 generation: Cell::new(0),
+                decoded: Cell::new(0),
                 selection: Cell::new(None),
                 guides: Cell::new(false),
                 canvas: OnceCell::new(),
@@ -526,6 +531,25 @@ impl EditorWindow {
         self.imp().selection.get()
     }
 
+    /// The grid a decode is in flight for, if one is.
+    ///
+    /// The tests' handle on which grid the canvas is asking for — the coarse one
+    /// while a gesture is live, the resting one otherwise. A reply is built for the
+    /// grid it was requested at, so this is the grid the next bitmaps will be.
+    pub fn requested_grid(&self) -> Option<PixelSize> {
+        self.imp().requested.get()
+    }
+
+    /// Files the decoding thread has decoded since the window opened.
+    ///
+    /// The tests' handle on S12's central claim — a live gesture never touches the
+    /// disk — and nothing else reads it: the count is a fact about the worker, and
+    /// the window itself has no use for it. A superseded build's decodes count too,
+    /// because the disk was touched all the same.
+    pub fn decoded_sources(&self) -> u64 {
+        self.imp().decoded.get()
+    }
+
     pub fn guides(&self) -> bool {
         self.imp().guides.get()
     }
@@ -596,7 +620,28 @@ impl EditorWindow {
                 // which is why they do not need a signal of their own either.
                 self.schedule_commit();
             }
+            // A step that arrives finished: the keyboard, the zoom spin row. It is
+            // one frame the user is meant to look at, so it is committed at once
+            // and never coarsened (S12).
+            Gesture::Step { slot, crop } => self.gesture_step(slot, crop),
             Gesture::End => self.commit(),
+        }
+    }
+
+    /// One edit that arrives already finished: fitted, applied, committed, drawn
+    /// at the resting grid.
+    fn gesture_step(&self, slot: usize, crop: CropTransform) {
+        let fitted = self.fit_for(slot, crop);
+        if self
+            .imp()
+            .editor
+            .borrow_mut()
+            .begin(Command::SetCrop { slot, crop: fitted })
+            .is_ok()
+        {
+            self.commit();
+        } else {
+            self.canvas_widget().queue_draw();
         }
     }
 
@@ -617,7 +662,10 @@ impl EditorWindow {
     fn live(&self, command: Command) {
         if self.imp().editor.borrow_mut().begin(command).is_ok() {
             self.canvas_widget().queue_draw();
-            let grid = self.images().0;
+            // The gesture is live, so this is the grid a gesture draws at: the
+            // document is moving, and a frame that keeps up is worth more than a
+            // sharp one. The release refines it (S12).
+            let grid = self.gesture_aware_grid(self.resting_grid());
             self.request_decode(grid);
         }
     }
@@ -628,11 +676,13 @@ impl EditorWindow {
             timer.remove();
         }
         self.imp().guides.set(false);
-        if self.imp().editor.borrow_mut().commit() {
-            self.refresh_document();
-        } else {
-            self.canvas_widget().queue_draw();
-        }
+        self.imp().editor.borrow_mut().commit();
+        // Committed or not, the canvas goes back to the resting grid: a gesture
+        // that ended where it started still drew *coarse* frames, and a refused
+        // command must not leave those on screen. The build is a re-use when the
+        // command was refused (`Editor::commit` refuses one that changes nothing),
+        // and the refinement itself when it was not.
+        self.refresh_document();
     }
 
     fn schedule_commit(&self) {
@@ -689,8 +739,7 @@ impl EditorWindow {
                     ..crop
                 },
             );
-            self.gesture(Gesture::Crop { slot, crop: next });
-            self.commit();
+            self.gesture(Gesture::Step { slot, crop: next });
         }
     }
 
@@ -1245,12 +1294,27 @@ impl EditorWindow {
     /// The grid the widget would like; asks for a decode when it changed.
     pub fn request_grid_for(&self, width: i32, height: i32) {
         let aspect = self.document().template.aspect;
-        let wanted = canvas::preferred_grid(aspect, width, height);
+        let wanted = self.gesture_aware_grid(canvas::preferred_grid(aspect, width, height));
         let (current, _) = self.images();
         if wanted == current || self.imp().requested.get() == Some(wanted) {
             return;
         }
         self.request_decode(wanted);
+    }
+
+    /// The grid the canvas rests at: the widget's own, whatever a gesture is doing.
+    fn resting_grid(&self) -> PixelSize {
+        let area = self.canvas_widget();
+        canvas::preferred_grid(self.document().template.aspect, area.width(), area.height())
+    }
+
+    /// The resting grid, or the coarse one a live gesture draws at.
+    fn gesture_aware_grid(&self, resting: PixelSize) -> PixelSize {
+        if self.imp().editor.borrow().gesture_live() {
+            gesture_grid(resting)
+        } else {
+            resting
+        }
     }
 
     fn requested_grid_reset(&self) {
@@ -1279,6 +1343,12 @@ impl EditorWindow {
     }
 
     fn on_decoded(&self, reply: Reply) {
+        // Counted for *every* reply, stale ones included: the count is about what
+        // the decoding thread did, and a superseded build decoded the same file
+        // whether or not its bitmaps were accepted.
+        self.imp()
+            .decoded
+            .set(self.imp().decoded.get() + reply.decodes);
         if reply.generation != self.imp().generation.get() {
             // A stale reply: the document moved on while this was decoding.
             return;
@@ -1381,7 +1451,10 @@ impl EditorWindow {
 
     /// The same, plus new bitmaps: what every document edit calls.
     pub fn refresh_document(&self) {
-        let grid = self.images().0;
+        // A committed document is drawn at the resting grid: this is where a
+        // gesture's coarse frame is refined, and where every edit made outside a
+        // gesture lands.
+        let grid = self.resting_grid();
         self.refresh();
         self.request_decode(grid);
     }

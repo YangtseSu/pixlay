@@ -11,15 +11,26 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use pixlay_core::{PixelSize, Project, TextValues};
-use pixlay_imaging::{Chroma, Export, Format, Rgb8View, SlotBitmap, icc};
+use pixlay_imaging::preview::GESTURE_STEP_DEG;
+use pixlay_imaging::{Chroma, Export, Format, Preview, Rgb8View, SlotBitmap, gesture_grid, icc};
 use pixlay_render::Images;
 
 use crate::args::{
-    self, Command, EditArgs, HitArgs, ImageArgs, InitArgs, ProbeArgs, RenderArgs, SaveArgs,
-    ScanArgs, Size, Source, TemplatesArgs, TextArgs, ThumbArgs, USAGE,
+    self, Command, EditArgs, GestureArgs, HitArgs, ImageArgs, InitArgs, ProbeArgs, RenderArgs,
+    SaveArgs, ScanArgs, Size, Source, TemplatesArgs, TextArgs, ThumbArgs, USAGE,
 };
 use crate::report::Report;
 use crate::stats;
+
+/// How long one step of a live gesture has to fit in, in milliseconds.
+///
+/// `1000 / 60`: a step is one frame of a gesture the user is dragging, and a step
+/// that misses a frame at 60 Hz is one they can see. It is the threshold ruling 1
+/// (2026-09-22) hands the decision to — below it the preview keeps the single
+/// cairo renderer, above it the preview gains a second, GPU one with the
+/// divergence risk that ruling accepted — so the constant names a frame rate
+/// rather than a target somebody picked.
+pub const GESTURE_STEP_BUDGET_MS: f64 = 1000.0 / 60.0;
 
 /// Exit codes, as the contract fixes them.
 pub const EXIT_SUCCESS: u8 = 0;
@@ -57,6 +68,7 @@ pub fn run(argv: &[OsString]) -> Result<u8, Failure> {
         Command::Edit(args) => edit_project(args),
         Command::Hit(args) => hit(args),
         Command::Save(args) => save_project(args),
+        Command::Gesture(args) => gesture(args),
     }
 }
 
@@ -983,6 +995,190 @@ fn thumb(args: ThumbArgs) -> Result<u8, Failure> {
     );
     emit(&report, args.json);
     Ok(EXIT_SUCCESS)
+}
+
+/// `gesture`: one live framing step, measured (S12).
+///
+/// The stutter this step exists for is architectural: a wheel notch or a drag
+/// produces one step every few milliseconds, and every one of them used to decode
+/// the photo it framed and resample it from scratch. The probe drives the same
+/// [`Preview`] the window's decoding thread drives, on the project it is given, and
+/// splits the cost the way the problem splits:
+///
+/// * `open` — the document as a window opens on it, at the resting grid: every
+///   occupied cell decoded and built once. That is the cost the product always
+///   paid, and it is not what a gesture pays.
+/// * `cold` — the first step of a live gesture, at the grid a gesture draws at
+///   ([`gesture_grid`]). The sources are warm by then and the grid is not, so this
+///   is the one-off a release and a fresh gesture start pay.
+/// * `warm` — every step after it: one cell rebuilt, a frame either way.
+/// * `refine` — the release: the resting grid again, rebuilt from the warmed
+///   sources, which is what makes the released frame a real render instead of an
+///   upscaled one.
+///
+/// The step is a *straightening* one, [`GESTURE_STEP_DEG`] further per step,
+/// because it is the most per-step work the editor can be asked for: a rotation
+/// grows the region the cell shows, and since S11 the clamp pays for the angle with
+/// zoom instead of reducing it. A number that fits the frame budget here fits it
+/// for a pan or a zoom too.
+///
+/// What it does **not** measure: the cairo blit of the finished bitmaps and the
+/// widget's own paint. Those are the window's, and a windowless command cannot
+/// reach them; what it measures is the half that used to re-decode.
+fn gesture(args: GestureArgs) -> Result<u8, Failure> {
+    let project =
+        Project::load(&args.project).map_err(|error| Failure::Failed(error.to_string()))?;
+    let sources = project
+        .sources()
+        .map_err(|error| Failure::Failed(error.to_string()))?;
+    let doc = project.doc().clone();
+
+    let occupied: Vec<usize> = sources
+        .iter()
+        .enumerate()
+        .filter_map(|(slot, source)| source.is_some().then_some(slot))
+        .collect();
+    if occupied.is_empty() {
+        return Err(Failure::Failed(format!(
+            "{}: the document has no photo to gesture on",
+            args.project.display()
+        )));
+    }
+    let slot = match args.slot {
+        Some(slot) if occupied.contains(&slot) => slot,
+        Some(slot) => {
+            return Err(Failure::Usage(format!(
+                "--slot {slot} has no photo (occupied cells: {})",
+                occupied
+                    .iter()
+                    .map(usize::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )));
+        }
+        None => occupied[0],
+    };
+
+    // The grid the window rests at, and the grid it draws at while a gesture is
+    // live — the editor's own two (`pixlay_imaging::gesture_grid`).
+    let resting = preview_grid(args.grid, doc.canvas.aspect());
+    let moving = gesture_grid(resting);
+
+    let mut preview = Preview::new();
+    let watch = stats::Stopwatch::start();
+    let build = |preview: &mut Preview, doc: &pixlay_core::CollageDoc, grid: PixelSize| {
+        let step = stats::Stopwatch::start();
+        let built = preview.build(doc, &sources, grid);
+        (built, step.elapsed().as_secs_f64() * 1000.0)
+    };
+    // One cell framed one step further, the way a straightening gesture frames it.
+    // The *request* is what moves; the fit the pipeline draws with is recomputed
+    // from it on every build, exactly as the window's is.
+    let frame = |step: u32| {
+        let mut framed = doc.clone();
+        framed.cells[slot].crop = pixlay_core::CropTransform {
+            rotation_deg: doc.cells[slot].crop.rotation_deg + GESTURE_STEP_DEG * f64::from(step),
+            ..doc.cells[slot].crop
+        }
+        .normalized();
+        framed
+    };
+
+    let (open, open_ms) = build(&mut preview, &doc, resting);
+    let mut failed = open.failed.clone();
+    let (cold, cold_ms) = build(&mut preview, &frame(1), moving);
+    failed.extend(cold.failed.iter().cloned());
+    let mut warm_ms = Vec::with_capacity(args.steps as usize - 1);
+    let mut warm_decodes = 0;
+    for step in 2..=args.steps {
+        let (built, ms) = build(&mut preview, &frame(step), moving);
+        warm_ms.push(ms);
+        warm_decodes += built.decodes;
+        failed.extend(built.failed.iter().cloned());
+    }
+    let (refined, refine_ms) = build(&mut preview, &frame(args.steps), resting);
+    failed.extend(refined.failed.iter().cloned());
+    let total = watch.elapsed();
+
+    if !failed.is_empty() {
+        // A step cannot be timed on a cell that does not render, and a sequence
+        // with a hole in it describes nothing.
+        return Err(Failure::Failed(format!(
+            "{}: {}",
+            args.project.display(),
+            failed
+                .iter()
+                .map(|(slot, reason)| format!("slot {slot}: {reason}"))
+                .collect::<Vec<_>>()
+                .join("; ")
+        )));
+    }
+
+    // The *median* step, not the mean: the mean of 24 steps on a busy machine is a
+    // number about the machine, and the question is what a step costs. The worst
+    // one is printed as `warm_max_ms` rather than hidden.
+    let mut sorted = warm_ms.clone();
+    sorted.sort_by(|a, b| a.partial_cmp(b).expect("no NaN in a duration"));
+    let warm_median = sorted[sorted.len() / 2];
+    let warm_max = sorted[sorted.len() - 1];
+    // The verdict is about the steady state: an occasional scheduler hiccup is
+    // printed rather than judged, and a gesture's first step is a one-off
+    // (`cold_ms`).
+    let verdict = if warm_median <= GESTURE_STEP_BUDGET_MS {
+        "pipeline_holds"
+    } else {
+        "gpu_preview"
+    };
+
+    let mut report = Report::new();
+    report.text("command", "gesture");
+    report.text("template", doc.template.name.clone());
+    report.int("version", i64::from(doc.template.version));
+    report.int("slots", doc.cells.len() as i64);
+    report.int("occupied", occupied.len() as i64);
+    report.int("slot", slot as i64);
+    report.int("steps", i64::from(args.steps));
+    report.float("step_deg", GESTURE_STEP_DEG);
+    report.int("grid_w", i64::from(resting.width));
+    report.int("grid_h", i64::from(resting.height));
+    report.int("gesture_w", i64::from(moving.width));
+    report.int("gesture_h", i64::from(moving.height));
+    report.int("open_decodes", open.decodes as i64);
+    report.int("cold_decodes", cold.decodes as i64);
+    report.int("warm_decodes", warm_decodes as i64);
+    report.int("refine_decodes", refined.decodes as i64);
+    report.float("budget_ms", GESTURE_STEP_BUDGET_MS);
+    report.text("verdict", verdict);
+    if args.stats {
+        report.float("open_ms", open_ms);
+        report.float("cold_ms", cold_ms);
+        report.float("warm_ms", warm_median);
+        report.float("warm_max_ms", warm_max);
+        report.float("refine_ms", refine_ms);
+    }
+    add_stats(&mut report, args.stats, total, None, "none");
+    emit(&report, args.json);
+    Ok(EXIT_SUCCESS)
+}
+
+/// The resting canvas grid `--grid` names: its long edge is exactly the pixels
+/// asked for, and the other edge follows the canvas's own ratio.
+fn preview_grid(long_edge: u32, aspect: f64) -> PixelSize {
+    let long = long_edge as i32;
+    let short = (f64::from(long_edge) / aspect.max(f64::MIN_POSITIVE))
+        .round()
+        .max(1.0) as i32;
+    if aspect >= 1.0 {
+        PixelSize {
+            width: long,
+            height: short,
+        }
+    } else {
+        PixelSize {
+            width: short,
+            height: long,
+        }
+    }
 }
 
 fn probe(args: ProbeArgs) -> Result<u8, Failure> {

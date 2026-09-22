@@ -128,6 +128,12 @@ impl Source {
         self.depth
     }
 
+    /// How many bytes these samples occupy — what a cache holding one decoded
+    /// photo costs (`crate::preview` budgets its sources in exactly this).
+    pub(crate) fn bytes(&self) -> usize {
+        self.data.len()
+    }
+
     /// The file's own MIME type, as the loader detected it (`image/jpeg`).
     pub fn mime(&self) -> &str {
         &self.mime

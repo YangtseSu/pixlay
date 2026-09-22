@@ -29,7 +29,16 @@ use pixlay::{EditorWindow, i18n};
 pub type Image = (i32, i32, Vec<u8>);
 
 /// How long a check waits for the background pipeline before giving up.
-pub const WAIT: Duration = Duration::from_secs(60);
+///
+/// It has to cover two different waits, and both are "something is coming, not
+/// something is broken": the decoding thread's reply, and — in [`snapshot`] — the
+/// frame a widget needs before GSK can hand its pixels over. Measured 2026-09-22:
+/// with a release build of the A0 render tests running at the same time, **60 s is
+/// not enough for the second of those** — `mainpath.rs` timed out in `snapshot`
+/// twice while such a build ran alongside it, and the same test finishes in 10-12 s
+/// on an idle machine. Three minutes is the fix for that; a timeout that fires must
+/// still mean "hung", and on this machine it does.
+pub const WAIT: Duration = Duration::from_secs(180);
 
 /// Makes sure this process can talk to a display, re-running the whole binary
 /// under `xvfb-run` when it cannot.

@@ -164,6 +164,16 @@ impl Editor {
         self.pending = None;
     }
 
+    /// Whether a gesture is in flight.
+    ///
+    /// The canvas asks this to decide which grid it draws at: while a gesture is
+    /// live the document is moving, so the frames are coarse and the release is
+    /// refined (S12). It is a question about the *pending* command and nothing
+    /// else — a committed edit is not a gesture.
+    pub fn gesture_live(&self) -> bool {
+        self.pending.is_some()
+    }
+
     /// The document the canvas draws: the committed one, plus the gesture in
     /// flight when there is one.
     pub fn display_doc(&self) -> CollageDoc {

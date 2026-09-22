@@ -32,6 +32,19 @@ pub const MAX_PREVIEW_PX: i32 = 20000;
 /// (`docs/CONTRACT.md` §5).
 pub const MAX_THUMB_PX: u32 = 8192;
 
+/// Steps one `gesture` sequence has by default: enough that the median is a
+/// median, few enough that the command stays a second on a small photo (measured
+/// 2026-09-22: 59 warm steps of the verify project at a 1600-px grid are 0.4 s;
+/// the same on a 24 MP photo are 11 s, which is a measurement somebody asked for).
+pub const DEFAULT_GESTURE_STEPS: u32 = 60;
+
+/// Steps a `gesture` sequence may have at all. The first step is the cold one and
+/// the rest are warm, so two is the shortest sequence that has both.
+pub const MIN_GESTURE_STEPS: u32 = 2;
+
+/// Most steps one `gesture` sequence may have: a minute of a 60 Hz gesture.
+pub const MAX_GESTURE_STEPS: u32 = 3600;
+
 /// Extensions `scan` treats as photos.
 ///
 /// The decoders this build links read more formats than these — the loaders
@@ -68,6 +81,7 @@ USAGE:
     pixlay-render text   --project <file.pixlay> [--json]
     pixlay-render templates [--aspect <ratio>] [--json]
     pixlay-render init --template <name> --out <file.pixlay> [--photo <p>...] [--json]
+    pixlay-render gesture --project <file.pixlay> --grid <px> [--slot <i>] [--steps <n>] [--json]
     pixlay-render edit   --project <file.pixlay> --out <file.pixlay> [EDIT OPTIONS] [--json]
     pixlay-render hit    --project <file.pixlay> --at <x>,<y> [--json]
     pixlay-render hit    --template <name> --at <x>,<y> [--json]
@@ -137,6 +151,29 @@ THUMB OPTIONS:
                         edge keeps the photo's ratio, at least 1 pixel.
     --out <file>        Preview file, .png / .jpg / .jpeg / .tif / .tiff.
                         Required, and written at 72 dpi (a screen-sized image).
+
+GESTURE OPTIONS:
+    --project <file>    Project to measure a live gesture on. Required, and every
+                        occupied cell must decode: the number is about one step,
+                        not about an unreadable file.
+    --grid <px>         Long edge of the resting canvas grid, 1..=20000. Required:
+                        the grid the window draws at is what the step costs, and
+                        the editor computes it from its own size
+                        (`crates/pixlay`'s canvas widget). The gesture grid is
+                        half of it, as the editor's is.
+    --slot <i>          The cell the gesture frames. Default: the first occupied
+                        one. A cell with no photo cannot be framed.
+    --steps <n>         Steps in one gesture, 2..=3600. Default 60. The first step
+                        is the cold one (the gesture grid built from scratch), the
+                        rest are warm, and `warm_ms` is their median.
+    The gesture is the straightening one: each step turns the cell by
+    `step_deg` further, which is the most expensive per-step work the editor does
+    (a rotation grows the region the cell shows, and the clamp pays for the angle
+    with zoom). The report carries the counts either way; `--stats` adds the
+    measured times, and `verdict` says whether the warm step fit in one 60 Hz
+    frame. The exit code is 0 whatever the verdict: the measurement is the result,
+    and an exit code that moved with the host's speed would make the same input's
+    result depend on the machine.
 
 TEXT OPTIONS:
     --project <file>    Project whose text layers to report. Required. Each
@@ -209,7 +246,8 @@ EDIT OPTIONS:
 COMMON OPTIONS:
     --json              Print one JSON object instead of key = value lines.
     --stats             Add measured fields: ms, peak_rss_mb, icc. `render`
-                        adds encode_ms as well; `probe` does not encode.
+                        adds encode_ms as well; `gesture` adds its four phase
+                        times and the worst warm step; `probe` does not encode.
     -h, --help          Print this help.
     -V, --version       Print the version.
 
@@ -238,6 +276,7 @@ pub enum Command {
     Edit(EditArgs),
     Hit(HitArgs),
     Save(SaveArgs),
+    Gesture(GestureArgs),
     Help,
     Version,
 }
@@ -352,6 +391,19 @@ pub struct TextArgs {
     pub json: bool,
 }
 
+/// `gesture`: one live framing step, measured (S12).
+pub struct GestureArgs {
+    pub project: PathBuf,
+    /// Long edge of the resting canvas grid, 1..=`MAX_PREVIEW_PX`.
+    pub grid: u32,
+    /// The cell the gesture frames. `None` takes the first occupied one.
+    pub slot: Option<usize>,
+    /// Steps in the sequence, 2..=`MAX_GESTURE_STEPS`.
+    pub steps: u32,
+    pub stats: bool,
+    pub json: bool,
+}
+
 pub struct ProbeArgs {
     pub project: PathBuf,
     pub dpi: u32,
@@ -406,6 +458,8 @@ struct Flags {
     dir: Option<PathBuf>,
     recursive: bool,
     px: Option<u32>,
+    grid: Option<u32>,
+    steps: Option<u32>,
     gap: Option<f64>,
     radius: Option<f64>,
     border: Option<Rgba8>,
@@ -465,9 +519,10 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
         ],
         "hit" => &["project", "template", "at"],
         "save" => &["project", "out"],
+        "gesture" => &["project", "grid", "slot", "steps", "stats"],
         _ => &[],
     };
-    let present: [(&'static str, bool); 22] = [
+    let present: [(&'static str, bool); 24] = [
         ("project", flags.project.is_some()),
         ("template", flags.template.is_some()),
         ("out", flags.out.is_some()),
@@ -481,6 +536,8 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
         ("dir", flags.dir.is_some()),
         ("recursive", flags.recursive),
         ("px", flags.px.is_some()),
+        ("grid", flags.grid.is_some()),
+        ("steps", flags.steps.is_some()),
         ("gap", flags.gap.is_some()),
         ("radius", flags.radius.is_some()),
         ("border-color", flags.border.is_some()),
@@ -542,6 +599,8 @@ fn reason(name: &str, flag: &str) -> &'static str {
         (_, "dir") => "only `scan` lists a directory",
         (_, "recursive") => "only `scan` descends into subdirectories",
         (_, "px") => "only `thumb` sizes a preview",
+        (_, "grid") => "only `gesture` measures at a grid",
+        (_, "steps") => "only `gesture` runs a sequence of steps",
         (
             "probe" | "image" | "scan" | "thumb" | "text" | "templates" | "init" | "hit" | "save",
             "gap" | "radius" | "border-color",
@@ -569,7 +628,7 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
         .ok_or_else(|| Failure::Usage("subcommand must be valid UTF-8".to_string()))?;
     let subcommand = match head {
         "render" | "probe" | "image" | "text" | "templates" | "init" | "edit" | "hit" | "save"
-        | "scan" | "thumb" => head,
+        | "scan" | "thumb" | "gesture" => head,
         "--help" | "-h" | "help" => return Ok(Command::Help),
         "--version" | "-V" | "version" => return Ok(Command::Version),
         other if other.starts_with('-') => {
@@ -688,6 +747,30 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                     )));
                 }
                 set_once(&mut flags.px, pixels, "px")?;
+            }
+            "grid" => {
+                let raw = number(&value("grid")?, "grid")?;
+                let pixels = u32::try_from(raw).map_err(|_| {
+                    Failure::Usage(format!("--grid must be a positive integer, got {raw}"))
+                })?;
+                if !(1..=MAX_PREVIEW_PX as u32).contains(&pixels) {
+                    return Err(Failure::Usage(format!(
+                        "--grid {pixels} is outside 1..={MAX_PREVIEW_PX}"
+                    )));
+                }
+                set_once(&mut flags.grid, pixels, "grid")?;
+            }
+            "steps" => {
+                let raw = number(&value("steps")?, "steps")?;
+                let steps = u32::try_from(raw).map_err(|_| {
+                    Failure::Usage(format!("--steps must be a positive integer, got {raw}"))
+                })?;
+                if !(MIN_GESTURE_STEPS..=MAX_GESTURE_STEPS).contains(&steps) {
+                    return Err(Failure::Usage(format!(
+                        "--steps {steps} is outside {MIN_GESTURE_STEPS}..={MAX_GESTURE_STEPS}"
+                    )));
+                }
+                set_once(&mut flags.steps, steps, "steps")?;
             }
             "aspect" => {
                 let raw = value("aspect")?;
@@ -812,6 +895,22 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                 .ok_or_else(|| Failure::Usage("text needs --project".to_string()))?;
             Ok(Command::Text(TextArgs {
                 project,
+                json: flags.json,
+            }))
+        }
+        "gesture" => {
+            let project = flags.project.ok_or_else(|| {
+                Failure::Usage("gesture needs --project <file.pixlay>".to_string())
+            })?;
+            let grid = flags
+                .grid
+                .ok_or_else(|| Failure::Usage("gesture needs --grid <px>".to_string()))?;
+            Ok(Command::Gesture(GestureArgs {
+                project,
+                grid,
+                slot: flags.slot,
+                steps: flags.steps.unwrap_or(DEFAULT_GESTURE_STEPS),
+                stats: flags.stats,
                 json: flags.json,
             }))
         }

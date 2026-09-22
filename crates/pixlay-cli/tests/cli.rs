@@ -3453,3 +3453,322 @@ fn scan_and_thumb_keep_the_usage_and_locale_rules() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn gesture_measures_a_step_without_decoding_it() {
+    let dir = out_dir("gesture");
+    let project = write_full_project(&dir, "two.pixlay");
+    let path = project.to_str().unwrap().to_string();
+
+    // A short sequence: the counts and the relation are what this test is about,
+    // and 60 steps would only make it slow (`DEFAULT_GESTURE_STEPS` is what a
+    // real measurement uses).
+    let output = run(&[
+        "gesture",
+        "--project",
+        &path,
+        "--grid",
+        "400",
+        "--steps",
+        "6",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert!(stderr(&output).is_empty(), "{}", stderr(&output));
+
+    // The field set is the contract, and the split of the sequence into
+    // open/cold/warm/refine is what the four decode counts report.
+    let report = stdout(&output);
+    let fields: Vec<&str> = report
+        .lines()
+        .map(|line| line.split_once(" = ").expect("key = value").0)
+        .collect();
+    assert_eq!(
+        fields,
+        vec![
+            "budget_ms",
+            "cold_decodes",
+            "command",
+            "gesture_h",
+            "gesture_w",
+            "grid_h",
+            "grid_w",
+            "occupied",
+            "open_decodes",
+            "refine_decodes",
+            "slot",
+            "slots",
+            "step_deg",
+            "steps",
+            "template",
+            "verdict",
+            "version",
+            "warm_decodes",
+        ]
+    );
+    assert_eq!(field(&output, "command"), "gesture");
+    assert_eq!(field(&output, "template"), "test-2");
+    assert_eq!(field(&output, "slots"), "2");
+    assert_eq!(field(&output, "occupied"), "2");
+    assert_eq!(field(&output, "slot"), "0");
+    assert_eq!(field(&output, "steps"), "6");
+    assert_eq!(field(&output, "step_deg"), "1.000000");
+    // The resting grid is the one asked for, at the template's own aspect, and the
+    // grid a gesture draws at is half of it in each direction.
+    assert_eq!(field(&output, "grid_w"), "400");
+    assert_eq!(field(&output, "grid_h"), "300");
+    assert_eq!(field(&output, "gesture_w"), "200");
+    assert_eq!(field(&output, "gesture_h"), "150");
+    // S12's central claim, as a count: opening the document decodes its photos, and
+    // **no step of the gesture after that decodes anything at all**. A warm step
+    // that still re-decoded its photo would show a number here, and this is the
+    // assertion that would catch a cache that quietly stopped working.
+    assert_eq!(field(&output, "open_decodes"), "2");
+    assert_eq!(field(&output, "cold_decodes"), "0");
+    assert_eq!(field(&output, "warm_decodes"), "0");
+    assert_eq!(field(&output, "refine_decodes"), "0");
+    assert_eq!(field(&output, "budget_ms"), "16.666667");
+    // The verdict is the warm median against that budget: the test asserts the
+    // relation, not a value, so it holds on a slow machine and a fast one.
+    assert!(
+        ["pipeline_holds", "gpu_preview"].contains(&field(&output, "verdict").as_str()),
+        "{}",
+        field(&output, "verdict")
+    );
+
+    // `--stats` adds the measurements, and the verdict is what the warm *median*
+    // is compared against (`warm_max_ms` is reported, not judged).
+    let measured = run(&[
+        "gesture",
+        "--project",
+        &path,
+        "--grid",
+        "400",
+        "--steps",
+        "6",
+        "--stats",
+        "--json",
+    ]);
+    assert_eq!(code(&measured), 0, "{}", stderr(&measured));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&measured)).expect("json");
+    for key in [
+        "ms",
+        "open_ms",
+        "cold_ms",
+        "warm_ms",
+        "warm_max_ms",
+        "refine_ms",
+        "peak_rss_mb",
+    ] {
+        assert!(
+            json[key].as_f64().unwrap_or_default() > 0.0,
+            "{key} = {}",
+            json[key]
+        );
+    }
+    assert!(
+        json["warm_max_ms"].as_f64().expect("warm_max_ms")
+            >= json["warm_ms"].as_f64().expect("warm_ms"),
+        "the worst step cannot be better than the median"
+    );
+    let holds = json["warm_ms"].as_f64().expect("warm_ms") <= 16.666_667;
+    assert_eq!(
+        json["verdict"].as_str().expect("verdict"),
+        if holds {
+            "pipeline_holds"
+        } else {
+            "gpu_preview"
+        }
+    );
+    // The counts do not move when the timings are asked for.
+    assert_eq!(json["warm_decodes"].as_i64(), Some(0));
+    assert_eq!(json["open_decodes"].as_i64(), Some(2));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn gesture_refuses_what_it_cannot_measure() {
+    let dir = out_dir("gesture-refusals");
+    let project = write_full_project(&dir, "two.pixlay");
+    let path = project.to_str().unwrap().to_string();
+
+    // Usage errors: exit 1, stdout empty, stderr naming the problem.
+    for args in [
+        vec!["gesture"],
+        vec!["gesture", "--grid", "400"],
+        vec!["gesture", "--project", &path],
+        vec!["gesture", "--project", &path, "--grid", "0"],
+        vec!["gesture", "--project", &path, "--grid", "20001"],
+        vec![
+            "gesture",
+            "--project",
+            &path,
+            "--grid",
+            "400",
+            "--steps",
+            "1",
+        ],
+        vec![
+            "gesture",
+            "--project",
+            &path,
+            "--grid",
+            "400",
+            "--steps",
+            "4000",
+        ],
+        vec![
+            "gesture",
+            "--project",
+            &path,
+            "--grid",
+            "400",
+            "--slot",
+            "9",
+        ],
+        vec![
+            "gesture",
+            "--project",
+            &path,
+            "--grid",
+            "400",
+            "--out",
+            "x.png",
+        ],
+        vec![
+            "gesture",
+            "--project",
+            &path,
+            "--grid",
+            "400",
+            "--dpi",
+            "300",
+        ],
+        vec![
+            "gesture",
+            "--project",
+            &path,
+            "--grid",
+            "400",
+            "--slots",
+            "2",
+        ],
+        // The flags belong to `gesture` alone.
+        vec![
+            "render",
+            "--template",
+            "mosaic-8-s14",
+            "--grid",
+            "400",
+            "--out",
+            "x.png",
+        ],
+        vec!["scan", "--dir", ".", "--grid", "400"],
+        vec!["probe", "--project", &path, "--steps", "10"],
+    ] {
+        let output = run(&args);
+        assert_eq!(code(&output), 1, "{args:?}: {}", stderr(&output));
+        assert!(stdout(&output).is_empty(), "{args:?} wrote to stdout");
+        assert!(!stderr(&output).is_empty(), "{args:?} said nothing");
+    }
+
+    // A cell with no photo cannot be framed, and the message names the slots that
+    // can.
+    let half = write_project(&dir, "half.pixlay", true);
+    let output = run(&[
+        "gesture",
+        "--project",
+        half.to_str().unwrap(),
+        "--grid",
+        "400",
+        "--slot",
+        "1",
+    ]);
+    assert_eq!(code(&output), 1, "{}", stderr(&output));
+    assert!(stdout(&output).is_empty());
+    assert!(stderr(&output).contains("--slot 1"), "{}", stderr(&output));
+
+    // A document with nothing to gesture on, and a project that is not there, are
+    // failures to produce a result: exit 2.
+    let empty = dir.join("empty.pixlay");
+    let created = run(&[
+        "init",
+        "--template",
+        "mosaic-5-hero",
+        "--out",
+        empty.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&created), 0, "{}", stderr(&created));
+    for args in [
+        vec![
+            "gesture",
+            "--project",
+            empty.to_str().unwrap(),
+            "--grid",
+            "400",
+        ],
+        vec![
+            "gesture",
+            "--project",
+            dir.join("absent.pixlay").to_str().unwrap(),
+            "--grid",
+            "400",
+        ],
+    ] {
+        let output = run(&args);
+        assert_eq!(code(&output), 2, "{args:?}: {}", stderr(&output));
+        assert!(stdout(&output).is_empty(), "{args:?} wrote to stdout");
+        assert!(!stderr(&output).is_empty(), "{args:?} said nothing");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn gesture_keeps_the_usage_and_locale_rules() {
+    let dir = out_dir("gesture-locale");
+    let project = write_full_project(&dir, "two.pixlay");
+    let path = project.to_str().unwrap().to_string();
+
+    // The report is the same under every locale. The measured fields are the
+    // documented exception (`--stats`), so the byte-identical claim is made on the
+    // shape without them — which is also the shape the counts live in.
+    let mut listed = Vec::new();
+    for (lang, all) in [
+        ("C", "C"),
+        ("zh_CN.UTF-8", "zh_CN.UTF-8"),
+        ("de_DE.UTF-8", "de_DE.UTF-8"),
+    ] {
+        let gesture = run_in(
+            &[
+                "gesture",
+                "--project",
+                &path,
+                "--grid",
+                "400",
+                "--steps",
+                "6",
+                "--json",
+            ],
+            None,
+            Some((lang, all)),
+        );
+        assert_eq!(code(&gesture), 0, "{lang}: {}", stderr(&gesture));
+        assert!(gesture.stderr.is_empty(), "{lang}: {}", stderr(&gesture));
+        listed.push(gesture.stdout.clone());
+    }
+    assert!(
+        listed.iter().all(|stdout| stdout == &listed[0]),
+        "gesture changed under a locale: {}",
+        String::from_utf8_lossy(&listed[1])
+    );
+
+    // `--help` documents the flags this command takes, including the required one.
+    let help = run(&["--help"]);
+    assert_eq!(code(&help), 0);
+    for flag in ["--grid", "--slot", "--steps", "gesture"] {
+        assert!(
+            stdout(&help).contains(flag),
+            "--help does not mention {flag}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

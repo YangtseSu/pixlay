@@ -478,6 +478,27 @@ three on both commands, and the difference between them is scope:
 | what `edit` reports | `template`, `version`, `cells`, `photos`, the frame's three fields, `bytes`, and — when `--slot` was given — `slot`, `occupied`, `zoom`, `offset`, `rotation_deg` |
 | no `--photo`, no `--dpi` | an edit changes a cell's framing and the document's frame; which photos and how big an export are other commands' questions |
 
+**S12 added one subcommand and no flags to the others.** `gesture` is the ruler for what one step of a live
+gesture costs, which is the number ruling 1 (2026-09-22) hands the preview's fate to. It drives the same
+[`pixlay_imaging::Preview`] the window's decoding thread drives and prints what that build did, split the way
+the problem splits:
+
+| Item | Rule |
+|---|---|
+| shape | `command`, `template`, `version`, `slots`, `occupied`, `slot`, `steps`, `step_deg`, `grid_w`, `grid_h`, `gesture_w`, `gesture_h`, `open_decodes`, `cold_decodes`, `warm_decodes`, `refine_decodes`, `budget_ms`, `verdict` |
+| `--project` | required, and **every occupied cell must decode**: a step that cannot be timed is exit 2 naming the cells, because a sequence with a hole in it describes nothing |
+| `--grid <px>` | required: the long edge of the **resting** canvas grid, 1..=20000. The report's `grid_*` is that grid and `gesture_*` is the one a live gesture draws at (`gesture_grid`, half of it), so the two the editor uses are both visible |
+| `--slot <i>` | the cell the gesture frames; default the first occupied one. A slot with no photo is exit 1 naming the occupied ones (`--slot` past the cell count is exit 1 as well, as on `edit`) |
+| `--steps <n>` | 2..=3600, default 60. **Step 1 is the cold one** (the gesture grid built from scratch) and `warm_ms` is the **median** of the rest: a mean over 60 steps on a busy machine is a number about the machine |
+| the four phases | `open` — the document as a window opens on it, at the resting grid (every occupied cell decoded and built); `cold` — the first step of a live gesture, at the gesture grid (sources warm, that grid cold); `warm` — every step after it (one cell rebuilt); `refine` — the release, the resting grid again. Their decode counts are reported separately for exactly that reason |
+| the step | a *straightening* one, 1 degree further per step: a rotation grows the region the cell shows and since S11 the clamp pays for the angle with zoom, so it is the most per-step work the editor can be asked for |
+| `verdict` | `pipeline_holds` when the warm median is ≤ `budget_ms` = **16.666667** (one frame at 60 Hz), `gpu_preview` otherwise. **The exit code is 0 either way**: the measurement is the result, and an exit code that moved with the host's speed would make the same input's answer depend on the machine |
+| stability | the *counts* are stable and locale-independent; the *times* are measurements and only appear with `--stats` (`ms`, `open_ms`, `cold_ms`, `warm_ms`, `warm_max_ms`, `refine_ms`, `peak_rss_mb`, `icc = none`), which is the same exception §5 already makes for `--stats` |
+| what it does not measure | the cairo blit of the finished bitmaps and the widget's own paint. Those are the window's, and a windowless command cannot reach them; what it measures is the half that used to re-decode |
+
+`step_deg` is `pixlay_imaging::preview::GESTURE_STEP_DEG`, the same constant the canvas's Ctrl+scroll
+straightening uses, so the thing measured and the thing used cannot drift apart.
+
 Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wall clock, with compositing and encoding reported separately.
 
 `probe`'s threshold constants (the sources are commented in the code):
@@ -727,6 +748,109 @@ Two changes were measured against the build before them, and neither costs anyth
 
 Every threshold constant in the tests annotates this source, so a change in the numbers can be discovered.
 
+### S12 (2026-09-22, `--release`, this machine)
+
+The step's number, and the reason it is not one number. `pixlay-render gesture` on the verification project
+(`verify.pixlay`, seven photos of 0.35–0.72 MP each) and on the same layout with **24 MP** photos
+(6000x4000, one file in every cell), two runs each:
+
+| Item | verify project | 24 MP photos |
+|---|---|---|
+| grid 780 (780x585; gesture 390x293) — the editor's canvas at its default window, measured 2026-09-22, is **768x576** for this document, so this grid is that one within 2% | `open` 160/167 ms (7 decodes), `cold` 42/74, **`warm` 5.48/6.13 ms** (max 6.1/10.6), `refine` 8.95/9.00, peak 42.4 MB, `pipeline_holds` | `open` 2151/2604 ms (1 decode — eight cells, one file), `cold` 1567/2381, **`warm` 199.9/306.8 ms** (max 242/366), `refine` 182/274, peak 175.2 MB, `gpu_preview` |
+| grid 1600 (1600x1200; gesture 800x600) | `open` 212/192, `cold` 79.4/79.7, **`warm` 11.98/11.92** (max 13.6/13.8), `refine` 27.4/28.3, peak 72.5 MB, `pipeline_holds` | `open` 2726/2686, `cold` 2393/2363, **`warm` 321.1/319.5** (max 374/370), `refine` 307/201, peak 175.2 MB, `gpu_preview` |
+| grid 3840 (3840x2880; gesture 1920x1440) | `open` 577/572, `cold` 158, **`warm` 34.38/33.90** (max 37.0/37.6), `refine` 122.3/123.0, peak 258.7 MB, `gpu_preview` | — |
+
+Read together, those columns say one thing: **the cost of one cell's bitmap follows the source's resolution,
+not the output grid.** `resample` widens its kernel with the downscale ratio (S4), so a cell that shows a
+quarter of a 24 MP photo reads ~24 MP of source taps whatever size the preview grid is — which is why the
+coarse grid buys almost nothing there (one cell: **283 ms at the gesture grid against 289 ms at the resting
+one**) while it halved the same cell for the small sources (**9.5 ms → 7.5 ms** at a 1600-px grid). The
+`cold` column is the decode leaving the gesture path: it is the *only* phase of the 24 MP sequence that pays
+for a file, and it pays 1.6–2.4 s for it.
+
+- **The caches do what they claim.** `open_decodes = 7` for the seven distinct files of the verify project
+  (its eighth cell re-uses one), `cold_decodes = 0`, `warm_decodes = 0`, `refine_decodes = 0`: after the
+  document is open, **no step of any gesture touches the disk**, at every grid and for either photo size.
+  The count is taken over *every* reply, superseded ones included, because a superseded build decoded the
+  file all the same.
+- **The coarse grid is what the canvas asks for.** `gesture_w/h` is exactly half of `grid_w/h` at every size
+  (390x293 of 780x585, 1920x1440 of 3840x2880). The GUI test reads the *request* rather than the reply for
+  that claim — every step of a live drag asks for the coarse grid and the release asks for the resting one —
+  because a reply is built for the grid it was asked for (asserted byte-for-byte in the imaging tests) and
+  *when* it lands is a fact about the machine, not about the canvas.
+- **The refinement leaves no trace.** `crates/pixlay/tests/gesture.rs` drives a drag at a pinned 400-px
+  canvas (twelve steps, each asserting the grid it asks for), then the release, and compares the canvas
+  against **the same document drawn in one edit at rest**: **RMSE 0.0000 over 335,808 pixels**. Zero is the claim (the same function at the same grid), not a
+  threshold — and the same test asserts the burst of drag steps does not move the bitmaps without the main
+  context being iterated, which is "the UI never waits for the decoder" in the only form a test can hold it.
+- **The caches' cost, for the record**: the whole probe at grid 780 peaks at **42.4 MB** with the verify
+  project and **175.2 MB** with 24 MP photos in a 2:3 layout (`Preview::MAX_SOURCE_BYTES` is 512 MiB; nine
+  12 MP photos are 439 MB, and the verify project's seven are 15.7 MB).
+- **Two runs of the same command differ by up to 50%** (34.4 vs 33.9 ms at grid 3840 is 1%; 199.9 vs
+  306.8 ms at 24 MP is 53%; 321.1 vs 319.5 ms for the 24 MP/grid-1600 pair is 0.5%). The median over 59 steps removes the mean's sensitivity to
+  one slow frame, not the machine's own variance, so every number in this block is quoted as the runs it came
+  from rather than as a single figure.
+
+- **The export path is untouched, and proven so.** The same verification document rendered by the **S11
+  build** (a detached worktree at `dd94a3d`) and by this one is **byte-identical**: md5
+  `b1c8bbb88243eac43fe70d9c9b75455e`, 9,216,300 bytes, from both. The S11 record's own md5 (`b28abd…`,
+  measured in that session) does **not** reproduce here even with the S11 build itself, so what moved those
+  bytes is outside the repository — the machine took a package update between the two sessions — and the two
+  builds agreeing with each other is the claim this step needs. A render with text in it is not comparable
+  byte for byte across a library update; a render against a *pinned* font (`FONTCONFIG_FILE`, as
+  `pixlay-render`'s text tests do) is.
+- **A harness wait was raised, and why.** `crates/pixlay/tests/support/mod.rs::WAIT` is 180 s instead of 60:
+  it covers the decoding thread's reply *and* the frame [`snapshot`] waits for before GSK will hand a widget's
+  pixels over, and a machine busy with another heavy job can miss 60 s of frames (observed 2026-09-22:
+  `mainpath.rs` — a test S12 does not touch — timed out in `snapshot` twice while a release build of the A0
+  render tests ran alongside it, and the same test takes 10-12 s on an idle machine; `cargo test --workspace`
+  on its own was green in every run). A timeout that fires still means "hung".
+- **The `AGENTS.md` verification entry**, unchanged code as above: 14043x10532, **ms 6791** + `encode_ms`
+  1809, **`peak_rss_mb` 1641**, 9,216,300 bytes, `text = 1`, `occupied = 8`, `gap = 0.000000`, `radius =
+  0.000000`, `border = 255,255,255` — inside the S10/S11 spread for the same document. The image was looked
+  at (a downscale of `/var/tmp/a.jpg`): eight cells filled, the `{date}` layer reading `2019:07:14 10:32:00`
+  at the bottom, no seam or corner artefact.
+
+**Decisions this step made** (recorded here because each one is a shape later steps build on):
+
+- **The caches live in `pixlay-imaging::preview`, not in the window.** The window's decoding thread and the
+  CLI's `gesture` probe are then the *same* build, which is the only way the number can be about the window
+  (`AGENTS.md`: nothing may be possible only in the GUI) — and it lets the caches be tested without a display.
+- **The bitmap identity includes the source file's modification time**, which S7's rule did not: without it a
+  photo edited in another program kept its old bitmap until the user touched that cell, and "a stale cache is a
+  wrong picture" is the one thing this cache may never be. The price is one `stat` per occupied cell per build,
+  measured 2026-09-22 at **2 µs for eight files** against a 30–110 ms decode.
+- **The source cache keys on path **and** modification time, with the file's own identity read by the caller
+  once per build.** A file that changed is decoded again; a file replaced while reproducing the same
+  modification time is not detected, and the module says so rather than implying otherwise.
+- **The cache keeps at least its newest entry**, even when that entry alone is over budget: dropping it would
+  re-decode on every motion, which is the cost the cache exists to remove. A source larger than the whole
+  budget is decoded and *not* kept (there is nowhere to put it), which is the only case where a lookup
+  re-decodes.
+- **The gesture grid is half the resting one, and a discrete step never coarsens.** A key press or the zoom
+  spin row is one frame the user is meant to look at, so it is committed and drawn at the resting grid
+  (`Gesture::Step`); a drag, a wheel and a slider are streams, and those are drawn coarse and refined when
+  they end.
+- **The verdict is computed from the warm median and does not move the exit code.** The counts and the grids
+  are stable output; the times appear only with `--stats`.
+- **No new dependency, no `Cargo.lock` change** (`cargo update --workspace` locked 0 packages).
+
+- **What a preview-grade source would buy, measured.** The same 24 MP photo, pre-reduced to the same layout at
+  several sizes, stepped at grid 780: **1024 px → `warm` 7.44 ms** (max 8.28, `pipeline_holds`), **1560 px →
+  15.65 ms** (max 17.96, holds by 1 ms), **2048 px → 39.08 ms** (max 46.25, `gpu_preview`), and the original
+  6000 px → 199.9 ms. The reduction's own size is what decides it, not the original's: a source at or below
+  ~1.5x the preview grid is inside the frame budget, and one at 2.5x is not. This is the measurement the fork's
+  ruling reads next to the 200 ms above; it is not a decision S12 made.
+
+### What S12's number says about the preview's future
+
+Read on the plan's own subject — the verification project, at the editor's own grid — the pipeline **holds**:
+5.5 ms against a 16.7 ms frame. Read on a realistic photo — 12 to 24 MP, which is what the product's users
+pick — it does **not**: ~200 ms per step, and the coarse grid and the caches between them only bought a factor
+of ~2.4 (the same cell cost `decode` 171 ms + `resample` 289 ms before them). That is the fork ruling 1
+(2026-09-22) reserved, and its ruling is recorded in `docs/2026-09-22-STEPS.md` §S12; the S-numbers here stay
+citable for whatever that ruling decides, because the numbers are the same either way.
+
 ## 9. The window (S7), and the stages added after it
 
 The GUI is the fifth consumer of the same document, and what it adds is interaction. Its
@@ -759,11 +883,25 @@ command. The library and the gallery are **not** renderers of the document — a
   just-resized widget waits for its new bitmaps the previous grid is drawn with a uniform
   preview scale — a scale of the whole canvas, in the sense `Target::scale` already has it,
   replaced as soon as the decode lands.
+- **A live gesture draws coarse, and the release refines it** (S12). While a gesture is pending the
+  canvas asks for `pixlay_imaging::gesture_grid(resting)` — half the resting grid on each edge — and
+  a control that produces one *finished* step (`Gesture::Step`: a key press, the zoom spin row) is
+  drawn at the resting grid instead, because one frame the user is meant to look at is worth the
+  pixels. What the release draws is the resting grid's own render, not an upscaled gesture frame:
+  measured, the refined canvas equals the same document drawn in one edit at rest at **RMSE 0**
+  (335,808 pixels).
+- **The preview keeps what it can reuse** (S12). `pixlay_imaging::Preview` — the same type the CLI's
+  `gesture` probe drives — holds decoded sources keyed by path and modification time (budgeted by
+  `MAX_SOURCE_BYTES`, least recently used evicted) and **one bitmap set per grid** (at most two: the
+  resting one and the coarse one), carrying over every cell whose cell, source, source identity,
+  template, canvas and filter are unchanged. A step of a gesture therefore rebuilds one cell and
+  touches no disk at all; the window counts the decodes the worker reports
+  (`EditorWindow::decoded_sources`) and the GUI test holds a whole drag to zero of them.
 - **Background work, one thread each.** Decoding (`decode.rs`) and exporting (`export.rs`) run
   on their own threads and hand plain data back through `MainContext::invoke`, because a GTK
   object may not leave the main thread. Decode requests are coalesced (latest wins) so a drag
-  costs one decode at a time, and the worker keeps the previous result and re-decodes only the
-  slots whose cell, source, grid, template or filter changed. An export reports progress, which
+  costs one build at a time, and the re-use of what a gesture does not change is
+  `pixlay_imaging::Preview`'s (S12, above). An export reports progress, which
   the window shows in a progress bar rather than a modal.
 - **The accelerator table is data** (`crates/pixlay/src/app.rs::ACCELERATORS`): the bindings, the
   shortcuts dialog and the HIG test all read it, so they cannot drift. No binding uses
