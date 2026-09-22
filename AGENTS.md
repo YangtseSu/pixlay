@@ -301,8 +301,12 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
   document itself. A custom-drawn widget is the exception and needs a stated reason. **S13 replaced the
   utility pane** (`AdwOverlaySplitView` + `AdwPreferencesPage` + `F9`, ruling 18) with a sequence of
   stages: `AdwNavigationView` whose root is the picker — a `GtkGridView` + `GtkMultiSelection` over the
-  folder, an ordered tray of real buttons along the bottom, and a `GtkPicture` preview pane — and whose
-  pushed page is the editor, so `AdwHeaderBar` gets the back button from the view itself. The editor's
+  folder, an ordered list of the picked photos, and a `GtkPicture` preview pane — and whose
+  pushed page is the editor, so `AdwHeaderBar` gets the back button from the view itself. **The 2026-09-22
+  ruling (`docs/2026-09-22-STEPS.md`, `S13 · Ruling`) fixes that stage's arrangement and S13b implements
+  it**: the thumbnails are the bottom of the page, the picked list runs down the right edge, the cell is
+  256 px (gthumb's own default), a picked cell is shown by a highlight rather than the platform's check
+  box, and order changes by dragging a row or by `Ctrl+Up`/`Ctrl+Down`. The editor's
   per-cell buttons arrive in S15 as a `GtkOverlay` + `GtkFixed`. None of those is custom-drawn, so the
   shell keeps exactly one.
 - **Styling**: use only libadwaita style classes and CSS variables; hard-coded colors and spacing
@@ -329,8 +333,10 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
   - **the phone's chrome, not its capability** (ruled 2026-09-22, replacing "no phone-style layout"):
     the picker-first flow came from mobile galleries, but its capability is built with desktop idioms
     — a `GtkGridView` with selection mode and a header-bar Next button, not a tap-and-hold bottom
-    sheet. The ordered tray along the bottom stays because it is where selection *order* is visible and
-    re-orderable, and order is cell order: that is a desktop need, not a copied control.
+    sheet. The ordered list of picked photos stays because it is where selection *order* is visible and
+    re-orderable, and order is cell order: that is a desktop need, not a copied control. Its place on the
+    page is the 2026-09-22 ruling's business (it moved from the bottom to the right edge, `S13 · Ruling`),
+    not this one's.
 - HIG `patterns/containers/selection-mode` **applies from the picker stage on**: the picker *is* a
   collection view with multi-select batch operations, so the row in `docs/HIG-REVIEW.md` was flipped
   from "not applicable" when that became true. On the canvas the page's own advice still holds — "when
@@ -434,9 +440,10 @@ not a criterion — a visual conclusion must become a number (a probe) in the CL
   table; the numbers above stay as the S3 record.
 - Seam behavior re-measured (2026-09-20): blended pixels on shared edges / seam length ≈ 1.08,
   **identical** at A0 and at 1/5 size → the blend width is one physical pixel and independent of
-  output resolution, with no strong bleeding. **Remaining question: this 1 px seam is visible in a
-  low-resolution preview, while at a 300 dpi export 1 px ≈ 0.085 mm and is invisible.** Preview and
-  export share one path; whether to accept this seam still needs a decision.
+  output resolution, with no strong bleeding. **Ruled 2026-09-22 (human): the seam is accepted** — the
+  product is the exported image, and at 300 dpi one pixel is 0.085 mm and invisible; a preview an eighth
+  of that size shows the same pixel proportionally larger, and it is the same renderer's
+  (`docs/2026-09-22-STEPS.md`, `S13 · Ruling`).
 
 ## AUR discipline
 

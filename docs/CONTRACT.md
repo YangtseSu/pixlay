@@ -917,19 +917,35 @@ without looking at a widget:
   files are photos or in what order.
 - **The pick is ordered, and the order is the click order.** A `GtkMultiSelection` is a set, so the
   ordered list is the picker's own (`pixlay_core::Selection`, the policy `init --photo` shares): the
-  tray is where that order is visible, re-orderable (`move_photo`) and truncatable (`remove_at`), and
+  picked list is where that order is visible, re-orderable and truncatable, and
   `Picker::document` is the one place the pick becomes a document. The cell's click *toggles* — the
   picker claims the gesture, because GTK's own row handling replaces a multi-selection on a plain click
   (`gtklistfactorywidget.c`: `modify = Ctrl held`) — and a pick past the cap is refused with a visible
   report rather than truncated (ruling 3).
-- **A tile and the preview are `pixlay_imaging::thumbnail` pixels**, at `TILE_PX` (256) and `PREVIEW_PX`
-  (1024) long edges — the same function the CLI's `thumb` writes to a file. Measured (S13's own test):
+- **The stage's shape was ruled on 2026-09-22** (`docs/2026-09-22-STEPS.md`, `S13 · Ruling`) and **S13b
+  implements it**: the thumbnails are the bottom of the page and the picked list runs down the right edge,
+  the cell is `TILE_SIZE` = 256 px (twice S13's 128, which is gthumb's own default `thumbnail-size`), a
+  picked cell is shown by a highlight and **not** by a check mark — a deliberate deviation from HIG
+  `patterns/containers/selection-mode`, recorded in `docs/HIG-REVIEW.md` §3 — and order changes by dragging
+  a row or by `Ctrl+Up`/`Ctrl+Down` on the focused row, with a remove button at the row's right and no other
+  button in the list. Until S13b lands, the shapes the bullets below describe as measured are S13's.
+- **A tile and the preview are `pixlay_imaging::thumbnail` pixels** — the same function the CLI's `thumb`
+  writes to a file. S13 built the tile at `TILE_PX` (256) against a 128 px cell and the preview at a constant
+  `PREVIEW_PX` (1024) long edge; **the 2026-09-22 ruling replaces both** (S13b): the cell is 256 px and the
+  tile is built at the cell's *device* pixels (256 x the scale factor), and the preview is built at the
+  pane's own device long edge, rounded up to 128 px steps and capped at `PREVIEW_MAX_PX` (2048) — 2048
+  because a pane-sized decode costs 229 ms at 1024, 593 ms at 2048 and 1112 ms at 3840 on a 3840x2160
+  display, which is what this machine has (measured 2026-09-22, `S13 · Ruling`). Measured (S13's own test):
   the preview pane's pixels against `pixlay-render thumb --px 1024` of the same photo differ by **RMSE
   0.0218** over 1024x768 pixels (threshold 6), which is the 8-bit PNG round trip, not a second resampler.
 - **Tiles are built on one worker thread** (`thumbs.rs`) and cross back as plain bytes through
   `MainContext::invoke`; a folder listing therefore returns before any decode happens, and the grid
   fills progressively. Measured (S13, debug profile): 14 tiles at 256 px in **5.6 s**, 13 of them
-  painted into bound cells when the snapshot was taken.
+  painted into bound cells when the snapshot was taken. **The 2026-09-22 ruling changes what is asked for,
+  not how it is built** (S13b): a tile is requested for a cell that is bound and dropped when that cell
+  unbinds, with a bounded bootstrap, instead of S13's one request per listed file at folder open — gthumb's
+  own policy (`src/FileGrid.vala`, `src/Thumbnailer.vala`), which is what keeps a folder of thousands of
+  photos from queueing thousands of decodes.
 - **The stage has no zoom of its own**: the preview is `Contain`-fitted (ruling 2's "fit and zoom" is
   the photo filling the pane), and magnification is the editor's business.
 - **The export form's state lives in the window** (`EditorWindow::set_export_settings` /
