@@ -107,9 +107,11 @@ Measurement rules that go with it:
   commit). Do not batch several steps into one commit.
 - **Pushing requires the user's explicit permission first.** Without it, commit only and never
   push: do not `git push` on your own initiative and do not change remote configuration.
-- **End every commit message with `🤖`** (on its own line). The criterion is whether the change
+- **End every commit message's first line with `🤖`.** The criterion is whether the change
   **contains AI-generated or AI-modified content** — anything touched by AI carries it, and at this
-  stage AI writes all the code, so in practice every commit carries it.
+  stage AI writes all the code, so in practice every commit carries it. It sits at the end of the
+  title line (e.g. `S12d: Pixels only 🤖`) rather than on its own line, so `git log --oneline`
+  shows it without hiding any message.
 - **Messages are English** (see "Language conventions"). First line format:
   `<step>: <what changed>`, e.g. `S2: Freeze template geometry and invariant tests`. Non-step
   changes (docs, CI) use the `docs:` / `chore:` prefix.

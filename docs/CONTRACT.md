@@ -564,7 +564,7 @@ eight photos and one `{date}` layer on a 14043x10532 A0 sheet, per format:
 | a missing photo | the slot is reported, the window notices it, its bitmap drops out and the export is refused (asserted) — the contract's "visible, not silent" is a claim with a test |
 | the real app | `target/debug/pixlay` runs under the session's Wayland for as long as it is left alone, with nothing on stderr; the window the tests draw is `/var/tmp/pixlay-s7/window.png` |
 | the strings | `po/POTFILES` = the crate's 11 source files; `xgettext --language=Rust` finds **77** msgids after S12c removed the Text and Colour groups |
-| the layout | utility pane 380 px maximum beside the canvas; at the minimum window size (480x360) the sheet is still drawn in full and the pane is still allocated (asserted) |
+| the layout | no utility pane since ruling 18 (S13): at the minimum window size (480x360) the sheet is still drawn in full (asserted) |
 | a display, or none | the four GUI test binaries are one test each and run on the session's display; with none they re-run themselves under `xvfb-run` (pinning `GTK_IM_MODULE=gtk-im-context-simple` and `NO_AT_BRIDGE=1`, because GTK's `im-ibus` module recurses without a session bus), and the whole suite is green headlessly |
 
 ### S9 (2026-09-22, `--release`, this machine)

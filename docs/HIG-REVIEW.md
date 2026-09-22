@@ -26,11 +26,11 @@ Chapters read page by page for S7: `reference/keyboard`, `guidelines/adaptive`, 
 | `guidelines/ui-styling` | `window.rs` (libadwaita containers and rows only), `canvas.rs`, test `tests/hig.rs::check_colour_schemes` | no hard-coded colours anywhere in the shell: the canvas overlays are drawn with the widget's own theme colour (`Widget::color()`), everything else is a libadwaita style class or a stock widget. The app follows the system style (`AdwStyleManager` untouched), starts under both forced schemes, and **the canvas pixels are byte-identical under both** (asserted) |
 | `guidelines/accessibility` | test `tests/hig.rs::check_accessible_names` + "section 2" of this file | every interactive control has an accessible name — set explicitly, or derived by GTK from the control's own label; the check walks the widget tree and accepts both, since GTK names a `GtkButton` from its `GtkLabel`. High contrast / large text / screen reader / OSK are visual steps (section 2) |
 | `guidelines/keyboard` | `app.rs` (`ACCELERATORS`), `canvas.rs` (arrow keys, `+`/`-`, `0`, `Enter`, `Delete`), test `tests/hig.rs::check_shortcuts` | every action has a keyboard path: the actions the table binds are checked against `GtkApplication::accels_for_action`, and every other action is on a focusable control. The canvas is focusable and pans, zooms, resets, chooses a photo and clears a slot from the keyboard |
-| `reference/keyboard` | same test | the required set for this product (`Ctrl+Q`, `Ctrl+W`, `Ctrl+O`, `Ctrl+S`, `Shift+Ctrl+S`, `Ctrl+Z`, `Shift+Ctrl+Z`, `Ctrl+?`, `Ctrl+N`, `F9`) is present, and nothing binds the system's own combinations (`Alt+*`, `Super+*`, `Ctrl+Alt+*`) — both asserted against the one table the dialog and the bindings share |
-| `guidelines/adaptive` | `window.rs` (the shell), test `tests/hig.rs::check_adaptive_minimum` | `AdwOverlaySplitView` overlays the utility pane on the canvas when the window is too narrow; at the minimum window size the sheet is still drawn in full inside the canvas and the pane is still allocated — asserted |
+| `reference/keyboard` | same test | the required set for this product (`Ctrl+Q`, `Ctrl+W`, `Ctrl+O`, `Ctrl+S`, `Shift+Ctrl+S`, `Ctrl+Z`, `Shift+Ctrl+Z`, `Ctrl+?`, `Ctrl+N`) is present — `F9` left with the pane (ruling 18, S13) — and nothing binds the system's own combinations (`Alt+*`, `Super+*`, `Ctrl+Alt+*`) — both asserted against the one table the dialog and the bindings share |
+| `guidelines/adaptive` | `window.rs` (the shell), test `tests/hig.rs::check_adaptive_minimum` | no utility pane since ruling 18 (S13): at the minimum window size the sheet is still drawn in full inside the canvas — asserted; the `AdwOverlaySplitView` overlay behaviour the old row described left with the pane |
 | `guidelines/writing-style` | every string in `crates/pixlay/src`, `po/pixlay.pot` | header capitalization on buttons, menu items and tooltips; sentence capitalization on row, slider and combo labels; an ellipsis exactly where the action asks for more input (`Open…`, `Save as…`, `Choose photo…`); no `i.e.`/`e.g.`; no pronouns; no trailing periods outside explanatory body text. The wording itself is a visual step (section 2), and whether a string missed its `gettext` call is only checkable by eye (the extractor cannot see what nobody wrapped) |
-| `patterns/containers/utility-panes` | `sidebar.rs`, `window.rs` | the editing controls live in a utility pane (`AdwOverlaySplitView`), toggled with `F9` so it can be hidden while looking at the collage, and it overlays rather than squeezes the canvas when narrow |
-| `patterns/feedback` (index) | `window.rs`, `export.rs` | reversible feedback goes through `AdwToast` ("Saved …", "Exported …", a failed decode); the missing-photo case is an `AdwBanner` with a button that selects the slot; export progress is a `GtkProgressBar` in the bottom bar, never a modal dialog; the one dialog is the unsaved-changes confirmation on close |
+| `patterns/containers/utility-panes` | — | **not applicable since ruling 18** (S13 removes the pane): a linear three-minute flow owns its controls per stage — tray, gallery, floating buttons, dialogs — and a permanent panel would be a second surface for every one of those decisions |
+| `patterns/feedback` (index) | `window.rs`, `export.rs` | reversible feedback goes through `AdwToast` ("Saved …", "Exported …", a failed decode); the missing-photo case is an `AdwBanner` with a button that selects the slot; export progress is a `GtkProgressBar` in the bottom bar, never a modal dialog; the dialogs are the unsaved-changes confirmation on close plus `Export…` and `Frame…` (ruling 18), both `AdwDialog` rows rather than permanent controls |
 | `patterns/containers/selection-mode` | the picker (the plan's S13), test `tests/hig.rs` | **Applies from the picker stage on** (flipped 2026-09-22): the photo picker *is* a collection view with multi-select batch operations, so it is built in selection mode — a cell's selection is a toggle with the platform's own checkmark, `Ctrl+A` selects all, a selection past the cap is reported rather than truncated, the batch action is the header bar's Next button (carrying the count), and `Esc` leaves selection mode. The canvas is unaffected: this page's own advice ("when editing is the primary interaction there should be no separate edit mode") still governs it, and it has no mode of its own |
 
 ## 2. Visual steps
@@ -40,7 +40,7 @@ the canvas is **content** and the interface is **styling**, and the two must not
 
 1. **High contrast mode** (GTK Inspector or the system accessibility settings): every UI element renders normally; canvas pixels are unchanged.
 2. **Large text** (system accessibility settings): every label stays readable and is not truncated; canvas pixels are unchanged (the canvas is document content and does not scale with the interface's font size).
-3. **Keyboard-only**: walk "pick a template → place photos → adjust framing → export" with the keyboard alone; the focus order is logical;
+3. **Keyboard-only**: walk "pick photos → pick a layout → adjust framing → export from the dialog" with the keyboard alone; the focus order is logical;
    `F10` opens the menu, `Esc` closes overlays, `Tab` covers every control.
 4. **Screen reader**: every control is read out, the accessible name is accurate and short; it stays operable with the monitor off.
 5. **Touch / on-screen keyboard (OSK)**: the project name and the export path can be typed entirely with the OSK.
@@ -60,7 +60,7 @@ S15. Run the app (`cargo run --release -p pixlay`, or the installed `pixlay` aft
 2. *Next*: the header bar's Next button carries the count; press it.
 3. *Pick a layout*: every candidate is the user's own photos in that layout; pick one, and add or remove a photo if the count is wrong.
 4. *Adjust framing*: select a cell, drag inside it to move the photo, scroll to zoom, rotate by any angle (there is no cap), replace or clear a cell from the floating buttons, and set the frame's gap / radius / colour.
-5. *Export*: press `Export` (the path is asked for once), and the progress bar in the bottom bar runs to the toast with the file's name and size.
+5. *Export*: press `Export…`, pick format and quality, choose the path once, and the progress bar in the bottom bar runs to the toast with the file's name and size.
 
 The retired plan's script — `pick a template → place photos → adjust framing → export`, which began on a
 template list and an empty sheet — is in `docs/archive/2026-09-20-STEPS.md`. Its walk was **voided** on
@@ -96,6 +96,6 @@ Still unread, and read when their steps need them:
 
 - `principles`, `resources`
 - `guidelines`: `app-naming` (S16), `app-icons` (S16), `ui-icons`, `typography`
-- `patterns/controls/*`
+- `patterns/controls/*`, and `patterns/containers/dialogs` (the `Export…`/`Frame…` dialogs of ruling 18)
 - the per-page details of `patterns/feedback/*` (only the index has been read)
 - the UI colors under `reference/`
