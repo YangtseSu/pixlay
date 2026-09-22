@@ -18,7 +18,7 @@
 //! command writes into a *copy* of the document, and the copy is validated before
 //! it becomes current. A command that would leave the document outside the
 //! contract — a zoom past `MAX_ZOOM`, a canvas that no longer matches the
-//! template, a text layer naming a slot that does not exist — is refused and
+//! template, a slot the template does not have — is refused and
 //! changes nothing, which is the same all-or-nothing rule loading a file
 //! follows.
 
@@ -28,17 +28,15 @@ use crate::canvas::CanvasSpec;
 use crate::crop::CropTransform;
 use crate::doc::CollageDoc;
 use crate::error::CoreError;
-use crate::grade::{FilterPreset, Grade};
 use crate::template::Template;
-use crate::text::{TextFallback, TextLayer};
 
 /// One edit to a document.
 ///
 /// Deliberately small: it covers what v1 lets a user change — which photo a slot
-/// shows, how it is framed and graded, the canvas-wide filter, the text layers,
-/// and the canvas size. It is not a serialization format (nothing writes a
-/// command to disk, and no version tracks it), and it is not an editing language:
-/// a command does one thing, and the GUI sends a sequence of them.
+/// shows, how it is framed, the template and the canvas size. It is not a
+/// serialization format (nothing writes a command to disk, and no version tracks
+/// it), and it is not an editing language: a command does one thing, and the GUI
+/// sends a sequence of them.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
     /// Point a cell at a photo, or empty it (`None`), which renders the slot
@@ -57,47 +55,18 @@ pub enum Command {
     /// gets drawn is the request's fit (`CropTransform::fit`), which `draw`
     /// recomputes, so a request that would leave the cell uncovered is still a legal
     /// document.
-    SetCrop {
-        slot: usize,
-        crop: CropTransform,
-    },
-    /// Replace one cell's per-slot grading (S4).
-    SetGrade {
-        slot: usize,
-        grade: Grade,
-    },
-    /// Replace the canvas-wide one-click filter (S4).
-    SetFilter {
-        filter: FilterPreset,
-    },
-    /// Insert a text layer at `index`; `index == the layer count` appends.
-    InsertText {
-        index: usize,
-        layer: TextLayer,
-    },
-    /// Replace the text layer at `index`.
-    SetText {
-        index: usize,
-        layer: TextLayer,
-    },
-    RemoveText {
-        index: usize,
-    },
+    SetCrop { slot: usize, crop: CropTransform },
     /// Replace the document's template geometry and its canvas in one step (S7).
     ///
     /// A template change is not a relayout of the same document: it changes the
-    /// slot count, so it resizes `cells` and can invalidate a text layer's
-    /// `sourceSlot`. The two halves travel together because a canvas and a
-    /// template must agree on their aspect ratio ([`CollageDoc::validate`]), so a
-    /// caller that sent them separately would have to pass through an invalid
-    /// document between the two commands.
+    /// slot count, so it resizes `cells`. The two halves travel together because a
+    /// canvas and a template must agree on their aspect ratio
+    /// ([`CollageDoc::validate`]), so a caller that sent them separately would have
+    /// to pass through an invalid document between the two commands.
     ///
-    /// Retention: the first `min(old, new)` cells keep their photos, framing and
-    /// grades — a template with more slots appends empty ones, a smaller one
-    /// drops the tail — and a layer naming a slot the new template does not have
-    /// loses its `sourceSlot` (it keeps its text; the tokens that need a photo
-    /// then resolve against the document's fallback, contract §1). Nothing else
-    /// about a layer changes, and the whole command is one undo step.
+    /// Retention: the first `min(old, new)` cells keep their photos and framing —
+    /// a template with more slots appends empty ones, a smaller one drops the
+    /// tail — and the whole command is one undo step.
     ///
     /// S6.5 deliberately had no such command ("choosing a template is how a
     /// document starts"); S7's template picker is what it is for, because a user
@@ -107,17 +76,10 @@ pub enum Command {
         template: Template,
         canvas: CanvasSpec,
     },
-    /// Replace the document's `{date}` fallback, which is what a text layer reads
-    /// when the slot's photo carries no EXIF date (docs/CONTRACT.md §1).
-    SetTextFallback {
-        fallback: TextFallback,
-    },
     /// Resize the canvas. The aspect ratio still has to match the template's
     /// (`CollageDoc::validate`), which is what makes this a resize of the same
     /// layout rather than a relayout.
-    SetCanvas {
-        canvas: CanvasSpec,
-    },
+    SetCanvas { canvas: CanvasSpec },
 }
 
 impl Command {
@@ -149,57 +111,15 @@ impl Command {
             Self::SetCrop { slot, crop } => {
                 cell_mut(doc, *slot)?.crop = crop.normalized();
             }
-            Self::SetGrade { slot, grade } => {
-                cell_mut(doc, *slot)?.grade = *grade;
-            }
-            Self::SetFilter { filter } => doc.filter = *filter,
-            Self::InsertText { index, layer } => {
-                let layers = doc.text.len();
-                if *index > layers {
-                    return Err(CoreError::NoSuchTextLayer {
-                        index: *index,
-                        layers,
-                    });
-                }
-                doc.text.insert(*index, layer.clone());
-            }
-            Self::SetText { index, layer } => {
-                let layers = doc.text.len();
-                let target = doc.text.get_mut(*index).ok_or(CoreError::NoSuchTextLayer {
-                    index: *index,
-                    layers,
-                })?;
-                *target = layer.clone();
-            }
-            Self::RemoveText { index } => {
-                let layers = doc.text.len();
-                if *index >= layers {
-                    return Err(CoreError::NoSuchTextLayer {
-                        index: *index,
-                        layers,
-                    });
-                }
-                doc.text.remove(*index);
-            }
             Self::SetTemplate { template, canvas } => {
                 doc.template = template.clone();
                 doc.canvas = *canvas;
                 // One cell per slot, in template order: `resize` keeps the cells
-                // that still exist (with their photos, framing and grades) and
-                // appends defaults for new slots.
+                // that still exist (with their photos and framing) and appends
+                // defaults for new slots.
                 let slots = template.slots.len();
                 doc.cells.resize(slots, crate::Cell::default());
-                // A layer that named a slot the new template does not have keeps
-                // its text and loses the reference: dropping the layer would
-                // silently delete a user's watermark, and leaving the index would
-                // make the document invalid.
-                for layer in &mut doc.text {
-                    if layer.source_slot.is_some_and(|slot| slot >= slots) {
-                        layer.source_slot = None;
-                    }
-                }
             }
-            Self::SetTextFallback { fallback } => doc.text_fallback = fallback.clone(),
             Self::SetCanvas { canvas } => doc.canvas = *canvas,
         }
         Ok(())

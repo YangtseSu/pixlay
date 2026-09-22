@@ -9,7 +9,6 @@
 
 use std::path::{Path, PathBuf};
 
-use pixlay_core::Grade;
 use pixlay_imaging::linear::{LinearRgb16, LinearRgba16};
 use pixlay_imaging::{Region, Sampler, Source, resample, transfer};
 
@@ -273,123 +272,6 @@ fn a_sixteen_bit_intermediate_is_not_an_eight_bit_one() {
     assert!(
         broken > 16,
         "an 8-bit linear intermediate should lose codes, lost {broken}"
-    );
-}
-
-#[test]
-fn the_grade_is_applied_in_linear_light_and_in_the_contracts_order() {
-    // Exposure, then warmth, then saturation (`docs/CONTRACT.md` §4), on linear
-    // samples. The numbers are computed by hand from that order.
-    let mid_grey = LinearRgb16::from_srgb8(1, 1, &[128, 128, 128]);
-    let linear_grey = transfer::from_fixed(mid_grey.pixel(0, 0)[1]);
-
-    // Warmth only: red times 1.25, blue times 0.75, green untouched.
-    let mut warm = mid_grey.clone();
-    warm.apply(&Grade {
-        delta: 0.25,
-        ..Grade::IDENTITY
-    });
-    let pixel = warm.pixel(0, 0);
-    let close = |value: u16, expected: f64| (transfer::from_fixed(value) - expected).abs() <= 0.002;
-    assert!(close(pixel[0], linear_grey * 1.25), "{pixel:?}");
-    assert!(close(pixel[1], linear_grey), "{pixel:?}");
-    assert!(close(pixel[2], linear_grey * 0.75), "{pixel:?}");
-
-    // Exposure is a multiplier on linear light, so twice the exposure is twice
-    // the linear value — not twice the code value.
-    let mut exposed = mid_grey.clone();
-    exposed.apply(&Grade {
-        factor: 2.0,
-        ..Grade::IDENTITY
-    });
-    assert!(close(exposed.pixel(0, 0)[1], (linear_grey * 2.0).min(1.0)));
-
-    // Saturation 0 is the linear luminance of the exposed pixel, which for grey is
-    // the grey itself.
-    let mut mono = mid_grey.clone();
-    mono.apply(&Grade {
-        saturation: 0.0,
-        ..Grade::IDENTITY
-    });
-    assert!(close(mono.pixel(0, 0)[1], linear_grey));
-}
-
-#[test]
-fn the_identity_grade_changes_nothing_at_all() {
-    // The contract's identity criterion, as an equality: `factor = 1, s = 1,
-    // delta = 0` is pixel-identical to the input. The implementation returns
-    // without touching a sample, so this holds bit for bit rather than within a
-    // tolerance — and the second half shows the comparison can fail.
-    let source = Source::decode(&fixture("ratio-4-3.png")).expect("decodes");
-    let mut srgb = Vec::with_capacity(800 * 600 * 3);
-    for y in 0..600 {
-        for x in 0..800 {
-            let pixel = source.pixel(x, y);
-            for sample in &pixel[..3] {
-                srgb.push((sample >> 8) as u8);
-            }
-        }
-    }
-    let mut buffer = LinearRgb16::from_srgb8(800, 600, &srgb);
-    let before = buffer.to_srgb8();
-    buffer.apply(&Grade::IDENTITY);
-    assert_eq!(
-        buffer.to_srgb8(),
-        before,
-        "the identity grade changed pixels"
-    );
-    assert_eq!(
-        before, srgb,
-        "the decoder's own pixels are the identity image"
-    );
-
-    // A grade that is not the identity does change them, and in the direction the
-    // sign says.
-    let mut brighter = LinearRgb16::from_srgb8(800, 600, &srgb);
-    brighter.apply(&Grade {
-        factor: 1.25,
-        ..Grade::IDENTITY
-    });
-    let after = brighter.to_srgb8();
-    assert_ne!(after, before);
-    let mean = |data: &[u8]| data.iter().map(|v| f64::from(*v)).sum::<f64>() / data.len() as f64;
-    assert!(
-        mean(&after) > mean(&before) + 5.0,
-        "factor 1.25 must brighten: {} vs {}",
-        mean(&after),
-        mean(&before)
-    );
-}
-
-#[test]
-fn every_filter_preset_is_a_grade_of_the_document() {
-    // The presets are data (core), the arithmetic is here: this pins that the two
-    // halves agree, and that each preset does what its name says.
-    let mut mono = LinearRgb16::from_srgb8(1, 1, &[200, 40, 40]);
-    mono.apply(&pixlay_core::FilterPreset::Mono.grade());
-    let pixel = mono.pixel(0, 0);
-    assert_eq!(
-        (pixel[0], pixel[1], pixel[2]),
-        (pixel[0], pixel[0], pixel[0]),
-        "mono is not grey: {pixel:?}"
-    );
-
-    let warm = |preset| {
-        let mut buffer = LinearRgb16::from_srgb8(1, 1, &[128, 128, 128]);
-        buffer.apply(&preset);
-        buffer.to_srgb8()
-    };
-    let neutral = warm(pixlay_core::FilterPreset::None.grade());
-    let warm_cast = warm(pixlay_core::FilterPreset::Warm.grade());
-    let cool_cast = warm(pixlay_core::FilterPreset::Cool.grade());
-    assert_eq!(neutral, vec![128, 128, 128]);
-    assert!(
-        warm_cast[0] > neutral[0] && warm_cast[2] < neutral[2],
-        "{warm_cast:?}"
-    );
-    assert!(
-        cool_cast[0] < neutral[0] && cool_cast[2] > neutral[2],
-        "{cool_cast:?}"
     );
 }
 

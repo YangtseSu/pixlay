@@ -17,9 +17,7 @@
 
 use std::path::{Path, PathBuf};
 
-use pixlay_core::{
-    CanvasSpec, CollageDoc, Command, CropTransform, FilterPreset, Grade, History, templates,
-};
+use pixlay_core::{CanvasSpec, CollageDoc, Command, CropTransform, History, templates};
 use pixlay_imaging::SlotBitmap;
 use pixlay_render::{Bitmap, Images, Rgb8Image, render_rgb8};
 
@@ -101,7 +99,7 @@ fn photo(slot: usize) -> PathBuf {
     })
 }
 
-/// Every command kind but the text ones, in an order that stays valid.
+/// Every command kind, in an order that stays valid.
 fn sequence() -> Vec<Command> {
     vec![
         Command::SetCrop {
@@ -111,17 +109,6 @@ fn sequence() -> Vec<Command> {
                 offset: (0.3, -0.2),
                 rotation_deg: 15.0,
             },
-        },
-        Command::SetGrade {
-            slot: 0,
-            grade: Grade {
-                factor: 1.3,
-                saturation: 0.5,
-                delta: -0.2,
-            },
-        },
-        Command::SetFilter {
-            filter: FilterPreset::Cool,
         },
         // Placing a photo in a slot that was empty, and emptying one that was not.
         Command::SetSource {

@@ -1,5 +1,5 @@
 {
-  "docVersion": 1,
+  "docVersion": 2,
   "canvas": {
     "widthMm": 1189.0,
     "heightMm": 891.75
@@ -197,11 +197,6 @@
           0.0
         ],
         "rotationDeg": 0.0
-      },
-      "grade": {
-        "factor": 1.0,
-        "saturation": 1.0,
-        "delta": 0.0
       }
     },
     {
@@ -213,11 +208,6 @@
           0.0
         ],
         "rotationDeg": 0.0
-      },
-      "grade": {
-        "factor": 1.0,
-        "saturation": 1.0,
-        "delta": 0.0
       }
     },
     {
@@ -229,11 +219,6 @@
           0.0
         ],
         "rotationDeg": 0.0
-      },
-      "grade": {
-        "factor": 1.0,
-        "saturation": 1.0,
-        "delta": 0.0
       }
     },
     {
@@ -245,11 +230,6 @@
           0.0
         ],
         "rotationDeg": 0.0
-      },
-      "grade": {
-        "factor": 1.0,
-        "saturation": 1.0,
-        "delta": 0.0
       }
     },
     {
@@ -261,11 +241,6 @@
           0.0
         ],
         "rotationDeg": 0.0
-      },
-      "grade": {
-        "factor": 1.0,
-        "saturation": 1.0,
-        "delta": 0.0
       }
     },
     {
@@ -277,11 +252,6 @@
           0.0
         ],
         "rotationDeg": 0.0
-      },
-      "grade": {
-        "factor": 1.0,
-        "saturation": 1.0,
-        "delta": 0.0
       }
     },
     {
@@ -293,11 +263,6 @@
           0.0
         ],
         "rotationDeg": 0.0
-      },
-      "grade": {
-        "factor": 1.0,
-        "saturation": 1.0,
-        "delta": 0.0
       }
     },
     {
@@ -309,40 +274,9 @@
           0.0
         ],
         "rotationDeg": 0.0
-      },
-      "grade": {
-        "factor": 1.0,
-        "saturation": 1.0,
-        "delta": 0.0
       }
     }
   ],
-  "text": [
-    {
-      "content": "{date}",
-      "mode": {
-        "kind": "free",
-        "position": [
-          0.5,
-          0.985
-        ],
-        "anchor": "bottomCenter"
-      },
-      "sizeRel": 0.022,
-      "rotationDeg": 0.0,
-      "color": {
-        "r": 0,
-        "g": 0,
-        "b": 0,
-        "a": 255
-      },
-      "sourceSlot": 5
-    }
-  ],
-  "filter": "none",
-  "textFallback": {
-    "date": "2026-09-21"
-  },
   "frame": {
     "gapRel": 0.0,
     "radiusRel": 0.0,

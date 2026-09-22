@@ -15,9 +15,7 @@
 //! only quantization in the whole pipeline is [`LinearRgb16::to_argb32`] at the
 //! end; everything in between is 16-bit or finer.
 
-use pixlay_core::Grade;
-
-use crate::transfer::{LUMA, from_fixed, linear_to_srgb8, to_fixed};
+use crate::transfer::{from_fixed, linear_to_srgb8, to_fixed};
 
 /// Premultiplied linear RGBA, 16 bits per channel.
 #[derive(Clone, Debug)]
@@ -134,39 +132,6 @@ impl LinearRgb16 {
             width,
             height,
             data,
-        }
-    }
-
-    /// Applies a grade in linear light: exposure, then warmth, then saturation.
-    ///
-    /// The order is the one the contract fixes (docs/CONTRACT.md §4). The
-    /// identity grade returns without touching a sample — that is what makes
-    /// "factor = 1, s = 1, delta = 0 is pixel-identical" an equality instead of a
-    /// tolerance, which matters because every other step of the pipeline is
-    /// exact too.
-    pub fn apply(&mut self, grade: &Grade) {
-        if grade.is_identity() {
-            return;
-        }
-        let (factor, saturation, delta) = (grade.factor, grade.saturation, grade.delta);
-        let (warm_red, warm_blue) = (1.0 + delta, 1.0 - delta);
-        for pixel in self.data.as_chunks_mut::<3>().0 {
-            // Exposure and warmth first, clamped to the range the sensor could
-            // have captured: a saturation control operates on what is visible,
-            // and an unclamped exposure would let it darken a blown highlight.
-            let mut rgb = [0.0f64; 3];
-            for channel in 0..3 {
-                rgb[channel] = from_fixed(pixel[channel]) * factor;
-            }
-            rgb[0] = (rgb[0] * warm_red).clamp(0.0, 1.0);
-            rgb[1] = rgb[1].clamp(0.0, 1.0);
-            rgb[2] = (rgb[2] * warm_blue).clamp(0.0, 1.0);
-
-            let luma = LUMA[0] * rgb[0] + LUMA[1] * rgb[1] + LUMA[2] * rgb[2];
-            for channel in 0..3 {
-                pixel[channel] =
-                    to_fixed((luma + saturation * (rgb[channel] - luma)).clamp(0.0, 1.0));
-            }
         }
     }
 

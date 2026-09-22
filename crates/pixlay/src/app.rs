@@ -195,7 +195,7 @@ pub fn about_dialog() -> adw::AboutDialog {
     dialog.set_issue_url("https://github.com/YangtseSu/pixlay/issues");
     dialog.set_license_type(gtk::License::Gpl30);
     dialog.set_comments(&gettext(
-        "Make a collage out of two to ten photos and export it for printing.",
+        "Make a collage out of two to nine photos and export it for printing.",
     ));
     dialog
 }

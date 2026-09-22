@@ -15,6 +15,9 @@
 //!
 //! `generate.py` in the same directory produced these files; regenerate with
 //! `python3 crates/pixlay-cli/tests/fixtures/generate.py`.
+//!
+//! The pinned test font and its fontconfig configuration left with S12c, together
+//! with the text layers that needed them.
 
 use std::path::{Path, PathBuf};
 
@@ -137,72 +140,6 @@ fn the_verification_project_loads_and_its_photos_exist() {
 
     // Since S5 the entry command exercises text as well: one layer, whose date
     // comes from the EXIF-bearing photo, so the render carries a real date and not
-    // the stored fallback.
-    assert_eq!(doc.text.len(), 1, "verify.pixlay lost its text layer");
-    assert_eq!(doc.text[0].content, "{date}");
-    assert_eq!(doc.text[0].source_slot, Some(5));
-    assert_eq!(
-        doc.cells[5].source.as_deref(),
-        Some(Path::new("photos/dated.jpg")),
-        "the layer's slot must be the photo that carries a date"
-    );
-}
-
-/// S5's own fixture: a free caption, a free `{date}` and a tiled watermark.
-///
-/// Both of S5's forms have to be in one file, because "free placement and a tiled
-/// watermark both produce an image" is a statement about a document that has both.
-#[test]
-fn the_text_project_loads_and_shows_both_forms() {
-    let path = fixture_dir().join("text.pixlay");
-    let project =
-        Project::load(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
-    let doc = project.doc();
-    let sources = project.sources().expect("every photo exists");
-    assert_eq!(sources.len(), 8);
-
-    assert_eq!(doc.text.len(), 3, "the text fixture changed shape");
-    let modes: Vec<&str> = doc
-        .text
-        .iter()
-        .map(|layer| match layer.mode {
-            pixlay_core::TextMode::Free { .. } => "free",
-            pixlay_core::TextMode::Tiled { .. } => "tiled",
-        })
-        .collect();
-    assert_eq!(modes, vec!["free", "free", "tiled"]);
-    // The caption has to wrap: a one-line caption measures nothing about kinsoku.
-    assert!(doc.text[0].content.chars().count() > 30);
-    // The date layer names the photo with the date, and the document also stores a
-    // fallback — so a render showing 2019 proves the EXIF value won.
-    assert_eq!(doc.text[1].source_slot, Some(5));
-    assert_eq!(
-        doc.cells[5].source.as_deref(),
-        Some(Path::new("photos/dated.jpg"))
-    );
-    assert_eq!(doc.text_fallback.date, "2026-09-21");
-}
-
-/// The pinned test font (`crates/pixlay-cli/tests/fixtures/fonts/generate.py`).
-///
-/// It is what makes the text renders reproducible, so it has to be committed and
-/// to still be a font: a regeneration that produced an empty file would otherwise
-/// only show up as text that silently stopped being drawn.
-#[test]
-fn the_test_font_is_committed() {
-    let bytes = read("fonts/pixlay-test-sans.otf");
-    assert!(
-        bytes.len() > 10_000,
-        "the subset font shrank to {} bytes",
-        bytes.len()
-    );
-    // "OTTO": CFF outlines, which is what Noto Sans CJK SC has — the extension
-    // follows the outlines, not the other way round.
-    assert_eq!(&bytes[..4], b"OTTO", "not a CFF-flavoured OpenType font");
-    assert!(
-        fixture_dir().join("fonts/OFL.txt").is_file(),
-        "the subset carries the SIL OFL, which requires shipping the license"
-    );
 }
 
 #[test]

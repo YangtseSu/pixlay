@@ -170,7 +170,7 @@ fn every_slot_region_holds_what_the_slot_shows() {
     }
     assert_eq!(
         studied,
-        152 * framings.len(),
+        142 * framings.len(),
         "the sweep must cover every slot (S10 grew the library from 64)"
     );
 }
@@ -206,7 +206,7 @@ fn a_flat_photo_fills_its_whole_bitmap_at_every_framing() {
     ];
     let mut cases: Vec<(&str, usize)> = templates::names().iter().map(|name| (*name, 0)).collect();
     cases.push(("mosaic-8-s14", 6));
-    cases.push(("strip-10-10x1", 9));
+    cases.push(("strip-9-9x1", 8));
 
     let mut bitmaps = 0;
     for (name, slot) in cases {
@@ -313,14 +313,16 @@ fn a_ramp_photo_lands_at_the_place_the_framing_names() {
 #[test]
 fn a_narrow_slot_holds_only_the_part_of_the_photo_it_shows() {
     // The buffer ladder's claim (`docs/CONTRACT.md` §4): the bitmap is as large as
-    // the slot, not as large as the displayed photo. A slot in the ten-column
-    // strip needs its photo magnified 6x for a 4:3 source, so passing the whole
-    // displayed photo would allocate six times the memory to show a tenth of it.
+    // the slot, not as large as the displayed photo. A pane of the nine-column
+    // strip is 1/16 of the canvas wide and needs its photo magnified 6x for a 4:3
+    // source (the ten-column strip this test used until S12c had the same pane), so
+    // passing the whole displayed photo would allocate six times the memory to show
+    // a fraction of it.
     let source = Ramp {
         width: 4000,
         height: 3000,
     };
-    let doc = document("strip-10-10x1");
+    let doc = document("strip-9-9x1");
     let canvas = canvas_px(&doc);
     let bitmap = slot_bitmap(&doc, &source, 0, canvas).expect("bitmap");
     let display_px = bitmap.display.0 * bitmap.display.1;
@@ -333,8 +335,8 @@ fn a_narrow_slot_holds_only_the_part_of_the_photo_it_shows() {
         bitmap.display,
         100.0 * region_px / display_px
     );
-    // A slot is 1/10 of the canvas wide, so the region it shows is about a tenth
-    // of the displayed width; the guard band and the rounding are the slack.
+    // The pane is 1/16 of the canvas wide, so the region it shows is a fraction of
+    // the displayed width; the guard band and the rounding are the slack.
     assert!(
         region_px < 0.25 * display_px,
         "the bitmap holds {region_px} px of a {display_px} px photo"

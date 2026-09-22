@@ -228,9 +228,10 @@ pub trait Sampler {
 
     /// The file's EXIF block, when there is one.
     ///
-    /// Text layers substitute `{date}` from it (S5, `pixlay-render`): asking the
-    /// decoder that already has the file beats decoding it a second time, and a
-    /// synthetic sampler — the probe's flat content — has no file and says `None`.
+    /// The decoder is the only stage holding the file's bytes, so the EXIF date the
+    /// CLI reports (`image`, `scan`) is read from here rather than from a second
+    /// open; a synthetic sampler — the probe's flat content — has no file and says
+    /// `None`.
     fn exif(&self) -> Option<&[u8]> {
         None
     }

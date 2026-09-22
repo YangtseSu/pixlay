@@ -1,11 +1,13 @@
 # Pixlay
 
 A Linux-native collage tool. Pick 2–9 photos, pick a layout, adjust, export. Regular and irregular
-templates; per-slot framing (pan / zoom / rotation by any angle); per-slot color grading plus a
-one-click global filter; a canvas frame (gap / corner radius / colour); canvas-level text layers (free
-placement, with a tiled watermark as one of their modes, supporting `{date}` and other EXIF-driven
-fields); export of high-resolution finished images (physical size + DPI, or a specified long edge in
-pixels).
+templates; per-slot framing (pan / zoom / rotation by any angle); a canvas frame (gap / corner radius /
+colour); export of high-resolution finished images (PNG at physical size + DPI, or a specified long
+edge in pixels, or JPEG).
+**The product is only a collage** (ruled 2026-09-22, S12c): it places photos and frames them. It has no
+colour grading, no text layer, no watermark and no date stamp — S4's per-slot grade and one-click filter
+and S5's canvas-level text layers were built and then removed, because none of them is on the main path
+and the text layer was the one feature whose pixels depended on the host's installed fonts.
 GPL-3.0-or-later · Rust · GTK4 + libadwaita shell · Cairo canvas · target platform Arch/AUR.
 
 **Scope criterion: the shortest main path.** "Open → pick 2–9 photos → pick a layout → adjust →
@@ -38,9 +40,9 @@ from an empty sheet (`docs/2026-09-22-UX-DIRECTION.md`).*
 Of the last two: the second one produces a real image, and you must look at it directly.
 **If you cannot see the image, do not judge whether the render is correct.**
 The project is `crates/pixlay-cli/tests/fixtures/verify.pixlay`: eight photos on `mosaic-8-s14`
-(JPEG, PNG, a 16-bit PNG, a HEIC, one carrying EXIF Orientation=6, one carrying a date) and, since
-S5, one `{date}` text layer reading that photo's EXIF date, so the command exercises decode,
-resample, the clamp, `draw`, the text layout and the encoder in one run. Until S3 the
+(JPEG, PNG, a 16-bit PNG, a HEIC, one carrying EXIF Orientation=6, one carrying a date), so the command
+exercises decode, resample, the clamp, `draw` and the encoder in one run. It carries no text layer any
+more: S12c removed them, and the document is a `docVersion`-2 file. Until S3 the
 command used `--template mosaic-8-s14`, which renders every cell empty and is now a *white sheet*:
 the flag is a geometry smoke (it checks that the template loads and the output path works), not an
 image to judge. `mosaic-8-s14` has been valid since S1 and, since S2, is emitted by the template
@@ -209,9 +211,9 @@ at `Cargo.lock` diffs during review.
 - **Preview and export must call the same `render::draw(doc, target)`.** A second renderer is
   forbidden.
   *Rationale: the product is the exported image, and two renderers necessarily diverge — measured:
-  the same CJK text measured identically in two engines and still differed by 14.6% of pixels.*
+  two engines measuring the same string identically and still differing by 14.6% of pixels.*
 - **All resampling belongs upstream; the canvas only blits and clips.** Decoding, downsampling,
-  rotation interpolation and grading all happen in `pixlay-imaging`; Cairo receives bitmaps that are
+  rotation interpolation and the colour conversion all happen in `pixlay-imaging`; Cairo receives bitmaps that are
   already the right size. *Rationale: this keeps Cairo's weak filtering (bilinear + mipmap only)
   out of the finished product.*
 - **Encoding and metadata happen in one pass.** Chroma subsampling, ICC and DPI must live in the
@@ -228,13 +230,13 @@ at `Cargo.lock` diffs during review.
   rounding rules and the per-format field list are in `docs/CONTRACT.md` §5.
 - **The evaluation order is frozen** and must not be reordered:
   `decode + color normalization → geometry (crop / arbitrary rotation) → per-slot
-  grading → global filter → slot compositing → canvas decoration → text layers → output transform`
+  slot compositing → canvas decoration → output transform`
   *Rationale: operations that change the coordinate system must run first, and content layers
-  positioned relative to the canvas must run last. Counterexample: add a watermark and then rotate —
-  the watermark rotates too and gets blurred by interpolation.*
+  positioned relative to the canvas must run last. Counterexample: draw the frame's gaps and then
+  composite the photos — the photos would paint straight over the gaps.*
   *Ruled 2026-09-22: flip and quarter turns left the product, so the geometry stage is
   `crop → arbitrary rotation`; and "canvas decoration" is what the frame (gap / corner radius /
-  colour) is drawn in — after the slots, before the text (`docs/CONTRACT.md` §4).*
+  colour) is drawn in — after the slots, and it is the last stage (`docs/CONTRACT.md` §4).*
 - **Composite onto an opaque backdrop, white by default.** Source alpha is always flattened, so an
   export is never transparent; whatever a photo does not cover — the frame's gaps, a rounded corner,
   an empty slot — shows the document's own `frame.color`, which defaults to white.
@@ -318,8 +320,7 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
     list;
   - no per-app style preference (light / dark / system): it would lengthen the main path, and
     "follow the system" already covers how users express "I want dark";
-  - large-text mode **must not** scale canvas text layers: that is document content, and preview and
-    export must stay pixel-identical;
+
   - **the phone's chrome, not its capability** (ruled 2026-09-22, replacing "no phone-style layout"):
     the picker-first flow came from mobile galleries, but its capability is built with desktop idioms
     — a `GtkGridView` with selection mode and a header-bar Next button, not a tap-and-hold bottom
@@ -360,8 +361,8 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
 ## Module boundaries
 
     pixlay-core     CollageDoc, templates, geometry, framing transforms, command history, the selection policy. Must not depend on gtk / cairo
-    pixlay-imaging  decoding (glycin), resampling, grading, EXIF, color spaces, preview thumbnails, encoding (PNG/JPEG/TIFF). Must not depend on gtk or cairo
-    pixlay-render   the single draw(doc, target), Cairo + pangocairo. Must not depend on gtk
+    pixlay-imaging  decoding (glycin), resampling, EXIF, color spaces, preview thumbnails, encoding (PNG/JPEG). Must not depend on gtk or cairo
+    pixlay-render   the single draw(doc, target), on Cairo. Must not depend on gtk
     pixlay-cli      windowless render entry point, automation and verification tooling, and the AI's operating surface. Must not depend on gtk4
     pixlay          gtk4 + libadwaita shell and interaction
 
@@ -384,7 +385,6 @@ not a criterion — a visual conclusion must become a number (a probe) in the CL
   to exactly 1.0
 - framing: for any (rotation, zoom, offset) combination, the clamped photo covers the entire visible
   cell — the slot, narrowed by the document's frame (`docs/CONTRACT.md` §1)
-- grading identity: with `factor=1`, `s=1`, `Δ=0` the output is **pixel-identical** to the input
 - render consistency: the same composition at `2N` and `N`, downsampled, stays below the RMSE
   threshold (measured 2.62/255; threshold 6)
 - encoding: physical-size mode must carry DPI + ICC, and chroma subsampling must match the request
@@ -396,7 +396,7 @@ not a criterion — a visual conclusion must become a number (a probe) in the CL
 - A0@300dpi on Cairo (9933×14043, 139.5 MP) has been **re-measured and passes** (S0, 2026-09-20; the
   formal criterion is the in-repo probe, not a one-off script): 185 ms for 2 slots and 551 ms for
   10, peak `VmHWM` 941 MB compositing and 1340 MB including encoding (budget 2.5 GB), PNG and JPEG
-  both emit 9933×14043, and the white-base / seam / text criteria are all green. Numbers in
+  both emit 9933×14043, and the white-base and seam criteria are all green. Numbers in
   `docs/completed/2026-09-20-STEPS-done.md` under "S0 result".
   **Ruling (2026-09-20): Cairo stays** — "do not replace Cairo with GPU rendering" remains in force.
 - glycin in a non-Flatpak environment: **settled by measurement (S4, 2026-09-21) — the sandboxed
@@ -409,18 +409,6 @@ not a criterion — a visual conclusion must become a number (a probe) in the CL
   plain async executor — they complete only while a glib `MainContext` is being iterated, which
   `pixlay-imaging::driver` therefore provides on one private thread. Numbers and reasoning in
   `docs/completed/2026-09-20-STEPS-done.md` "S4 · decisions" 1 and `docs/CONTRACT.md` §4.1.
-- Pango's CJK line-breaking and punctuation squeezing: **settled by measurement (S5, 2026-09-21)**.
-  Kinsoku is Pango's own and is correct — over four CJK paragraphs at six widths, no line starts
-  with `、。，．：；？！）”` and none ends with `（“`, and `他他他说。他` at a four-em width breaks
-  `他他他 / 说。他`, i.e. the breaker pulls the break back one character rather than starting a line
-  with the mark (`pixlay-render/tests/text/measure.rs`).
-  **Squeezing it does not do**: `。，` advances two full ems, exactly like two isolated marks, and no
-  layout option changes that. `pixlay-render` therefore implements the rule itself — in a run of
-  consecutive CJK punctuation every mark but the last is asked for the font's OpenType `halt`
-  (half-width) feature, so `。”` costs 1.5 em while a lone `。` keeps its blank — and what a
-  compressed mark *looks* like stays the font's decision (a font without `halt` does not compress).
-  The one part of JLREQ left out is trimming a mark that ends a line, which is in
-  `docs/CONTRACT.md` §6 as a non-goal.
 - The conservative clamp for irregular slots — computed from a circumscribed axis-aligned rectangle,
   allowing slight white slivers — is **not needed and not used**: S3's clamp tests the outline's own
   vertices, which is exact for a concave slot too (a rectangle contains a polygon iff it contains its
@@ -466,11 +454,10 @@ policy: track the latest": latest stable only, no upper pin.
 | `image` 0.25.10 | `pixlay-cli` (**dev only** since S6) | It was S1's encoder stand-in and S6 replaced it (`pixlay_imaging::encode` writes the DPI and the ICC profile that this crate's writers leave at their defaults). What it is still for: the CLI's **tests** read renders back with `image::open` (PNG/JPEG/TIFF) and write flat photos to render against, and `pixlay-cli/tests/fixtures/generate.py` produced the fixtures | Not a production dependency any more, so the shipped binary no longer links it |
 | `glycin` 4.0.0 | `pixlay-imaging` | The decoding backend, measured against the in-process alternative (S4): the sandboxed loader is the only one of the two that decodes HEIC and AVIF, and it works with an empty environment | Pulls `glib`/`gio` and, through `cfg(target_os = "linux")`, `libseccomp` / `bubblewrap` / `fontconfig` / the distro's loader packages — this is what S8's `depends` must name |
 | `glib` 0.22 / `gio` 0.22 | `pixlay-imaging` | The decode is driven on a private `MainContext`: a glycin frame request only completes while one is iterated (measured: every frame hung under a plain executor until glycin's own 60 s limit). `glib`'s `futures` feature provides `MainContext::block_on`; `gio::File` is glycin's own input type | Already in the tree with `glycin`; named here because the API is used directly |
-| `pangocairo` 0.22.9 | `pixlay-render` | Canvas-level text: a `pango::Layout` drawn through `pangocairo` is the only way shaped text reaches a cairo context. The family is the system's `sans-serif`; the tests pin the committed subset under `crates/pixlay-cli/tests/fixtures/fonts/` with `FONTCONFIG_FILE` | Pulls `pango` + `pango-sys` alongside the `cairo`/`glib` S4 already had, and Arch's `pango` 1.58.2 is in the GTK stack S7 links anyway |
-
 |`gtk4` 0.11.5 + `libadwaita` 0.9.2|`pixlay`|The shell: the window, the rows, the utility pane and the dialogs. The `gtk_v4_10` / `v1_8` feature levels are the lowest that carry `GtkFileDialog` and `GtkColorDialogButton` (4.10 dropped the deprecated chooser dialogs) and `AdwDialog` / `AdwToastOverlay` / `AdwShortcutsDialog`|System gtk4 4.24 / libadwaita 1.10 through pkg-config; GTK already depends on cairo, pango and gdk-pixbuf, so the download set grows by the bindings alone. Linked by `pixlay` only — the other four crates must not name it|
 |`gettext-rs` 0.8.0 (`gettext-system`)|`pixlay`|i18n, as the plan of 2026-09-20 decided before S7 (`docs/archive/2026-09-20-STEPS.md`): the same gettext toolchain GTK and libadwaita use for their own copy, so `.po`, the `.desktop` file and AppStream metainfo (S16) all go through one pipeline. `po/POTFILES` and `po/pixlay.pot` are committed|Tiny; `gettext-sys` links the system `libintl` rather than building a private copy. Only `pixlay` depends on it, which is what the language conventions require|
 
-`pangocairo` was a temporary S0 spike dependency, left with the spike (and with the spike's use of
-`cairo-rs/png`), and came back in S5 — registered in the table above, where it says what it is for now.
+`pangocairo` was a temporary S0 spike dependency, came back in S5 for the canvas text layers, and left
+again with them in S12c (along with the pinned test font and the `FONTCONFIG_FILE` machinery the tests
+used); the spike's own use of `cairo-rs/png` went with the spike.
 `gtk4` + `libadwaita` + `gettext-rs` were added by S7, the first step that has a window at all.

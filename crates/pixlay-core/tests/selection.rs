@@ -10,7 +10,7 @@
 use std::path::PathBuf;
 
 use pixlay_core::{
-    CanvasSpec, Cell, CollageDoc, CropTransform, Grade, MAX_PHOTOS, MIN_PHOTOS, Removed, Selection,
+    CanvasSpec, Cell, CollageDoc, CropTransform, MAX_PHOTOS, MIN_PHOTOS, Removed, Selection,
     SelectionError, last_photo, remove_last, templates,
 };
 
@@ -79,9 +79,10 @@ fn push_refuses_the_tenth_photo_and_names_the_bound() {
     // The refusal changed nothing.
     assert_eq!(selection.len(), MAX_PHOTOS);
 
-    // Nine is the cap even when a ten-slot layout exists in the library: the
-    // ceiling is the selection's rule, not the library's.
-    assert!(templates::get("strip-10-10x1").is_some());
+    // Since S12c the library stops at nine too, so the ceiling is one number in
+    // two places: a ten-photo selection is refused, and no ten-slot layout exists
+    // to be offered or to load.
+    assert!(templates::get("strip-10-10x1").is_none());
     assert_eq!(
         Selection::new((0..10).map(|_| photo("x")).collect()).expect_err("refused"),
         SelectionError::PhotoCount {
@@ -154,14 +155,6 @@ fn layouts_are_exactly_the_templates_with_that_many_slots() {
         let listed: Vec<String> = layouts.into_iter().map(|template| template.name).collect();
         assert_eq!(listed, expected, "{count} photos");
     }
-    // `strip-10-10x1` is in the library and can never be offered: there is no
-    // ten-photo selection to ask for it.
-    assert!(
-        selection(MAX_PHOTOS)
-            .layouts()
-            .iter()
-            .all(|template| template.name != "strip-10-10x1")
-    );
     // An empty selection offers nothing: no layout has zero slots.
     assert!(Selection::default().layouts().is_empty());
 }
@@ -186,17 +179,12 @@ fn pop_and_remove_drop_photos_in_order_or_by_index() {
 #[test]
 fn remove_last_clears_only_the_last_occupied_cell() {
     let mut doc = occupied("strip-4-4x1");
-    // Framing and grading that a removal must not disturb: cell 0 keeps both, and
+    // Framing that a removal must not disturb: cell 0 keeps it, and
     // cell 1 is emptied on its own so the batch control has a *hole* to deal with.
     doc.cells[0].crop = CropTransform {
         zoom: 2.0,
         offset: (0.3, -0.2),
         rotation_deg: 12.0,
-    };
-    doc.cells[0].grade = Grade {
-        factor: 1.2,
-        saturation: 0.8,
-        delta: -0.1,
     };
     let before = doc.clone();
     doc.cells[1] = Cell::default();
@@ -210,7 +198,6 @@ fn remove_last_clears_only_the_last_occupied_cell() {
     assert!(doc.cells[3].source.is_none(), "the last cell is cleared");
     // Everything else is untouched — including the cell that was already empty.
     assert_eq!(doc.cells[0].crop, before.cells[0].crop);
-    assert_eq!(doc.cells[0].grade, before.cells[0].grade);
     assert_eq!(doc.cells[2].source, Some(photo("cell2")));
     assert!(doc.cells[1].source.is_none());
 
@@ -222,17 +209,12 @@ fn remove_last_clears_only_the_last_occupied_cell() {
 #[test]
 fn restore_puts_the_cell_back_where_it_was() {
     let mut doc = occupied("grid-4-2x2");
-    // A grade and a framing on the cell that is about to leave, so "restored in
-    // place" means the *contents* came back, not just a source path.
+    // A framing on the cell that is about to leave, so "restored in place" means
+    // the *contents* came back, not just a source path.
     doc.cells[1].crop = CropTransform {
         zoom: 3.0,
         offset: (-0.4, 0.6),
         rotation_deg: -22.5,
-    };
-    doc.cells[1].grade = Grade {
-        factor: 0.9,
-        saturation: 1.4,
-        delta: 0.2,
     };
     let before = doc.clone();
     let removed = remove_last(&mut doc).expect("there is a photo to drop");

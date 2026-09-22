@@ -18,9 +18,7 @@ use std::time::Duration;
 
 use gtk4::prelude::*;
 use pixlay::canvas::{self, MARGIN};
-use pixlay_core::{
-    Anchor, CanvasSpec, CropTransform, Point, Rgba8, TextLayer, TextMode, templates,
-};
+use pixlay_core::{CanvasSpec, CropTransform, templates};
 
 /// The long edge the test renders at, in pixels. Small enough to stay fast and to
 /// leave the canvas its own space beside the utility pane, large enough that a
@@ -53,24 +51,13 @@ fn the_canvas_draws_what_the_cli_writes() {
     ] {
         doc.cells[slot].source = Some(support::photo(name));
     }
-    // A rotated slot and a caption: both are content the two paths have to agree
-    // about, and both go through code the plain case does not reach.
+    // A rotated slot: content the two paths have to agree about, and code the
+    // plain case does not reach.
     doc.cells[2].crop = CropTransform {
         zoom: 1.4,
         offset: (0.15, -0.1),
         rotation_deg: 12.0,
     };
-    doc.text.push(TextLayer {
-        content: "{date} — {filename}".to_string(),
-        mode: TextMode::Free {
-            position: Point::new(0.5, 0.94),
-            anchor: Anchor::BottomCenter,
-        },
-        size_rel: 0.04,
-        rotation_deg: 0.0,
-        color: Rgba8::BLACK,
-        source_slot: Some(3),
-    });
     doc.save(&project).expect("the test project is written");
 
     window

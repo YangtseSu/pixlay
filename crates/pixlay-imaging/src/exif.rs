@@ -1,10 +1,12 @@
 //! The one EXIF field the product reads out of a photo: when it was taken.
 //!
-//! S5's text layers substitute `{date}`, and the contract fixes the semantics: the
-//! value of EXIF `DateTimeOriginal` **verbatim, with no timezone conversion**
-//! (`docs/CONTRACT.md` §1, "Text layers"). That is why this module
-//! returns a `String` and not a date type: parsing it would mean choosing a
-//! timezone, and the ruling is that there is no choice to make.
+//! It was written for S5's `{date}` text layer, which S12c removed; what is left
+//! is the machine surface — `scan` and `image` report the date next to a photo's
+//! size and mime type, so a picker can show it and a caller can sort by it. The
+//! contract fixes the semantics anyway: the value of EXIF `DateTimeOriginal`
+//! **verbatim, with no timezone conversion** (`docs/CONTRACT.md` §5, "`image`").
+//! That is why this module returns a `String` and not a date type: parsing it
+//! would mean choosing a timezone, and there is no choice to make.
 //!
 //! Orientation is deliberately *not* read here. glycin reports which rotation it
 //! applied and has already applied it to the pixels (`crate::decode`), so a second
@@ -15,19 +17,18 @@
 //! ASCII, count-bounded. It reads only what it needs and never allocates a copy of
 //! the block.
 
-/// The EXIF tag whose value `{date}` renders.
+/// The EXIF tag this module reads.
 pub const DATE_TIME_ORIGINAL: u16 = 0x9003;
 
 /// `DateTimeOriginal` as EXIF stores it (`2019:07:14 10:32:00`), verbatim.
 ///
-/// `None` when the file has no EXIF block, no such tag, or a value that is not
-/// the format EXIF specifies — the caller then falls back to the project's own
-/// string (contract §1, `textFallback`).
+/// `None` when the file has no EXIF block, no such tag, or a value that is not the
+/// format EXIF specifies — a listing then simply has no date for that row.
 pub fn date_time_original(exif: &[u8]) -> Option<String> {
     let value = ascii_tag(exif, DATE_TIME_ORIGINAL)?;
     // EXIF writes `YYYY:MM:DD HH:MM:SS`; anything else is treated as absent rather
-    // than rendered as-is, because a wrong-looking date in a watermark is worse
-    // than the documented fallback.
+    // than reported as-is, because a wrong-looking date in a listing is worse than
+    // an empty field.
     let bytes = value.as_bytes();
     if bytes.len() < 19
         || bytes[4] != b':'

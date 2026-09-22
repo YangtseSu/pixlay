@@ -78,7 +78,6 @@ USAGE:
     pixlay-render image  --photo <file> [--json]
     pixlay-render scan   --dir <path> [--recursive] [--json]
     pixlay-render thumb  --photo <file> --px <n> --out <file> [--json]
-    pixlay-render text   --project <file.pixlay> [--json]
     pixlay-render templates [--aspect <ratio>] [--json]
     pixlay-render init --template <name> --out <file.pixlay> [--photo <p>...] [--json]
     pixlay-render gesture --project <file.pixlay> --grid <px> [--slot <i>] [--steps <n>] [--json]
@@ -175,12 +174,6 @@ GESTURE OPTIONS:
     and an exit code that moved with the host's speed would make the same input's
     result depend on the machine.
 
-TEXT OPTIONS:
-    --project <file>    Project whose text layers to report. Required. Each
-                        layer's `{date}` / `{filename}` / `{index}` is resolved the
-                        way `render` resolves it, so a token's actual text can be
-                        read without rendering the project.
-
 TEMPLATES OPTIONS:
     --aspect <ratio>    List only the templates authored for this canvas shape,
                         as W:H (4:3) or a decimal (1.333333). Omit to list all.
@@ -270,7 +263,6 @@ pub enum Command {
     Image(ImageArgs),
     Scan(ScanArgs),
     Thumb(ThumbArgs),
-    Text(TextArgs),
     Templates(TemplatesArgs),
     Init(InitArgs),
     Edit(EditArgs),
@@ -386,11 +378,6 @@ pub struct ThumbArgs {
     pub json: bool,
 }
 
-pub struct TextArgs {
-    pub project: PathBuf,
-    pub json: bool,
-}
-
 /// `gesture`: one live framing step, measured (S12).
 pub struct GestureArgs {
     pub project: PathBuf,
@@ -502,7 +489,6 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
         "image" => &["photo"],
         "scan" => &["dir", "recursive", "stats"],
         "thumb" => &["photo", "px", "out", "stats"],
-        "text" => &["project"],
         "templates" => &["aspect"],
         "init" => &["template", "out", "photo"],
         "edit" => &[
@@ -566,10 +552,6 @@ fn reason(name: &str, flag: &str) -> &'static str {
         ("render", "photo") => "render takes photos from a project, not from --photo",
         ("probe", "photo") => "probe takes photos from a project",
         ("image", "project") => "image decodes one file; use --photo",
-        ("text", "photo") => "text reads the project's layers and their slots",
-        ("text", "dpi") => "text renders nothing; size is a fraction of the canvas",
-        ("text", "preview-px") => "text renders nothing",
-        ("text", "template") => "text reads a project",
         ("image", "dpi") => "image decodes at the file's own size",
         ("image", "out") => "image writes no file",
         ("image", "template") => "image decodes one file; use --photo",
@@ -578,8 +560,6 @@ fn reason(name: &str, flag: &str) -> &'static str {
         ("probe", "preview-px") => "probe always renders at full size",
         ("probe", "long-edge") => "probe always renders at full size",
         ("probe", "chroma") => "probe writes no file to subsample",
-        ("text", "long-edge") => "text renders nothing; size is a fraction of the canvas",
-        ("text", "chroma") => "text renders nothing",
         ("image", "long-edge") => "image decodes at the file's own size",
         ("image", "chroma") => "image writes no file",
         ("thumb", "dpi") => "thumb writes a screen-sized preview, not a print",
@@ -589,7 +569,7 @@ fn reason(name: &str, flag: &str) -> &'static str {
         ("init", "long-edge") => "init only writes the project file",
         ("init", "chroma") => "init only writes the project file",
         ("probe", "aspect") => "probe filters no template list",
-        ("render" | "probe" | "image" | "text", "at") => {
+        ("render" | "probe" | "image", "at") => {
             "only `hit` tests one point; the other commands work on a whole document"
         }
         // The flags that belong to exactly one subcommand, whatever the caller
@@ -602,7 +582,7 @@ fn reason(name: &str, flag: &str) -> &'static str {
         (_, "grid") => "only `gesture` measures at a grid",
         (_, "steps") => "only `gesture` runs a sequence of steps",
         (
-            "probe" | "image" | "scan" | "thumb" | "text" | "templates" | "init" | "hit" | "save",
+            "probe" | "image" | "scan" | "thumb" | "templates" | "init" | "hit" | "save",
             "gap" | "radius" | "border-color",
         ) => "only `render` and `edit` take the frame",
         (_, "slot" | "rotate" | "zoom" | "offset" | "clear") => {
@@ -627,8 +607,8 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
         .to_str()
         .ok_or_else(|| Failure::Usage("subcommand must be valid UTF-8".to_string()))?;
     let subcommand = match head {
-        "render" | "probe" | "image" | "text" | "templates" | "init" | "edit" | "hit" | "save"
-        | "scan" | "thumb" | "gesture" => head,
+        "render" | "probe" | "image" | "templates" | "init" | "edit" | "hit" | "save" | "scan"
+        | "thumb" | "gesture" => head,
         "--help" | "-h" | "help" => return Ok(Command::Help),
         "--version" | "-V" | "version" => return Ok(Command::Version),
         other if other.starts_with('-') => {
@@ -886,15 +866,6 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                 px,
                 out,
                 stats: flags.stats,
-                json: flags.json,
-            }))
-        }
-        "text" => {
-            let project = flags
-                .project
-                .ok_or_else(|| Failure::Usage("text needs --project".to_string()))?;
-            Ok(Command::Text(TextArgs {
-                project,
                 json: flags.json,
             }))
         }

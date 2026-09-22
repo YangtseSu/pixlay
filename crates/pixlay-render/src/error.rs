@@ -35,10 +35,4 @@ pub enum RenderError {
 
     #[error("cannot read pixels from a {format} surface")]
     SurfaceFormat { format: String },
-
-    /// A tiled layer so small that drawing it would never finish. `validate`
-    /// refuses such a document, so reaching this means an in-memory document was
-    /// mutated past its limits — the renderer does not hang on one either.
-    #[error("tiled text step ({x}, {y}) asks for more than {max} tiles")]
-    TooManyTiles { x: f64, y: f64, max: usize },
 }

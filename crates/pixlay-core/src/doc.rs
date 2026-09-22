@@ -8,9 +8,7 @@ use crate::canvas::CanvasSpec;
 use crate::crop::{CropFit, CropTransform};
 use crate::error::CoreError;
 use crate::frame::Frame;
-use crate::grade::{FilterPreset, Grade};
 use crate::template::Template;
-use crate::text::{TextFallback, TextLayer};
 use crate::{ASPECT_TOLERANCE, DOC_VERSION, DOC_VERSION_MIN};
 
 /// What one slot shows.
@@ -23,12 +21,6 @@ pub struct Cell {
     pub source: Option<PathBuf>,
     #[serde(default)]
     pub crop: CropTransform,
-    /// Per-slot color grading, applied in linear light after the photo has been
-    /// placed. The default is the identity, so a document written before grading
-    /// existed loads unchanged and "adding a field does not bump the version"
-    /// holds (docs/CONTRACT.md §1, version policy).
-    #[serde(default)]
-    pub grade: Grade,
 }
 
 impl Default for Cell {
@@ -36,7 +28,6 @@ impl Default for Cell {
         Self {
             source: None,
             crop: CropTransform::IDENTITY,
-            grade: Grade::IDENTITY,
         }
     }
 }
@@ -54,17 +45,6 @@ pub struct CollageDoc {
     pub template: Template,
     /// One cell per slot, in template order.
     pub cells: Vec<Cell>,
-    /// Canvas-level text layers, painted in vector order: a later layer draws over
-    /// an earlier one, and all of them draw over every cell.
-    #[serde(default)]
-    pub text: Vec<TextLayer>,
-    /// The one-click canvas-wide filter. A preset expands to a [`Grade`] applied
-    /// to every slot after its own grade (docs/CONTRACT.md §4); `none` is the
-    /// default, so this field costs a project nothing until it is used.
-    #[serde(default)]
-    pub filter: FilterPreset,
-    #[serde(default)]
-    pub text_fallback: TextFallback,
     /// The canvas frame (S11): the gap between cells, their corner radius, and the
     /// colour the canvas is painted with where no photo covers it.
     ///
@@ -84,9 +64,6 @@ impl CollageDoc {
             canvas,
             template,
             cells,
-            text: Vec::new(),
-            filter: FilterPreset::None,
-            text_fallback: TextFallback::default(),
             frame: Frame::default(),
         }
     }
@@ -145,10 +122,6 @@ impl CollageDoc {
         }
         for cell in &self.cells {
             cell.crop.validate()?;
-            cell.grade.validate()?;
-        }
-        for (index, layer) in self.text.iter().enumerate() {
-            layer.validate(index, self.template.slots.len())?;
         }
         Ok(())
     }
@@ -162,6 +135,32 @@ impl CollageDoc {
     /// ±45° cap allowed is already inside it, so a project written before
     /// 2026-09-22 loads unchanged.
     pub fn from_json(json: &str) -> Result<Self, CoreError> {
+        // The version is read on its own first. `deny_unknown_fields` means a
+        // document from another format hits "unknown field" while it is being
+        // parsed — before `validate` ever sees it — so the message a user got would
+        // name a key instead of telling them the file is from another version.
+        // Since S12c that is the normal case for a version-1 project (it carries
+        // `grade`, `filter`, `text` and `textFallback`), and the version policy
+        // promises an actionable refusal rather than a field error.
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct VersionProbe {
+            doc_version: u32,
+        }
+        let probe: VersionProbe = serde_json::from_str(json)?;
+        if probe.doc_version > DOC_VERSION {
+            return Err(CoreError::VersionTooNew {
+                found: probe.doc_version,
+                supported: DOC_VERSION,
+            });
+        }
+        if probe.doc_version < DOC_VERSION_MIN {
+            return Err(CoreError::VersionUnsupported {
+                found: probe.doc_version,
+                supported: DOC_VERSION,
+            });
+        }
+
         let mut doc: Self = serde_json::from_str(json)?;
         doc.normalize();
         doc.validate()?;

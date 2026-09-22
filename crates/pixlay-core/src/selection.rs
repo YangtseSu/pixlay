@@ -17,9 +17,10 @@
 //!   the tray legitimately holds zero or one photo while the user is still
 //!   picking, and a tenth is refused with a message rather than truncated.
 //! * **the count filter.** The layouts a selection can use are the library's
-//!   templates with exactly that many slots ([`Selection::layouts`]) — which is
-//!   also why `strip-10-10x1` stays in the library and never appears in the
-//!   picker: the ceiling is 9, so a ten-slot layout is never a candidate.
+//!   templates with exactly that many slots ([`Selection::layouts`]) — the picker
+//!   offers a layout exactly when it has as many slots as the user picked photos,
+//!   and since S12c the library itself stops at nine, so no layout exists that the
+//!   picker could not offer.
 //! * **the batch rule (LIFO).** [`remove_last`] clears the last *occupied* cell
 //!   and nothing else, and the [`Removed`] it hands back puts that cell back
 //!   where it was. A single cell can be cleared on its own (ruling 7), so "the
@@ -38,9 +39,11 @@ use crate::templates;
 /// Fewest photos a collage can be made of.
 pub const MIN_PHOTOS: usize = 2;
 
-/// Most photos a picker offers. The library's own limit is `MAX_SLOTS` (10,
-/// `strip-10-10x1`), but the product's cap is 9 (ruling 3); a document may still
-/// hold ten slots, because a project written by another build must load.
+/// Most photos a collage can be made of (ruling 3).
+///
+/// The format's own ceiling ([`MAX_SLOTS`](crate::MAX_SLOTS)) is the same number
+/// since S12c: the ten-slot recipe was the only layout above nine, and removing it
+/// left one limit instead of two.
 pub const MAX_PHOTOS: usize = 9;
 
 /// Why a selection cannot do what was asked of it.
@@ -116,7 +119,7 @@ impl Selection {
 
     /// Drops the last photo — the LIFO half of the batch control, on the
     /// selection. The document-side half is [`remove_last`], which also keeps the
-    /// cell's framing and grade so they can come back.
+    /// cell's framing so it can come back.
     pub fn pop(&mut self) -> Option<PathBuf> {
         self.photos.pop()
     }
@@ -185,7 +188,7 @@ pub fn last_photo(doc: &CollageDoc) -> Option<usize> {
 pub struct Removed {
     /// The cell index it was taken from.
     pub slot: usize,
-    /// The cell as it was: photo, framing and grade.
+    /// The cell as it was: photo and framing.
     pub cell: Cell,
 }
 
@@ -213,8 +216,8 @@ impl Removed {
 
 /// Clears the last occupied cell and returns what it held.
 ///
-/// Nothing else moves: the other cells keep their photo, framing and grade, and
-/// the removed cell's own framing and grade travel out with it, so a later
+/// Nothing else moves: the other cells keep their photo and framing, and the
+/// removed cell's own framing travels out with it, so a later
 /// [`Removed::restore`] is the exact inverse rather than a re-placement with
 /// defaults.
 pub fn remove_last(doc: &mut CollageDoc) -> Option<Removed> {

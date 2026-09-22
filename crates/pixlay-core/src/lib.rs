@@ -7,7 +7,7 @@
 //! The v1 contract frozen by S1 (review copy: `docs/CONTRACT.md`):
 //!
 //! * [`CollageDoc`] is the whole document — canvas, frozen template geometry,
-//!   one [`Cell`] per slot, and canvas-level [`TextLayer`]s. It is the only shape
+//!   one [`Cell`] per slot, and the frame around them. It is the only shape
 //!   ever serialized to `.pixlay`, and it embeds its template geometry so the
 //!   layout of a saved project cannot change under it.
 //! * Documents carry `docVersion`; a file written by a newer version is rejected
@@ -30,11 +30,9 @@ mod doc;
 mod error;
 mod frame;
 mod geometry;
-mod grade;
 mod history;
 mod selection;
 mod template;
-mod text;
 
 /// The template library: name to frozen geometry.
 ///
@@ -47,23 +45,23 @@ pub use canvas::{CanvasSpec, MAX_CANVAS_MM, MM_PER_INCH, PixelSize};
 pub use crop::{CropFit, CropTransform, DisplayRegion};
 pub use doc::{Cell, CollageDoc, Project, relative_to};
 pub use error::CoreError;
-pub use frame::{Frame, MAX_FRAME_REL};
+pub use frame::{Frame, MAX_FRAME_REL, Rgba8};
 pub use geometry::{EPSILON, Point, Polygon, Rect};
-pub use grade::{
-    FilterPreset, GRADE_DELTA_RANGE, GRADE_FACTOR_RANGE, GRADE_SATURATION_RANGE, Grade,
-};
 pub use history::{Command, History};
 pub use selection::{
     MAX_PHOTOS, MIN_PHOTOS, Removed, Selection, SelectionError, last_photo, remove_last,
 };
 pub use template::{AREA_TOLERANCE, SharedEdge, Slot, Template};
-pub use text::{
-    Anchor, Rgba8, TextFallback, TextLayer, TextMode, TextToken, TextTokenUse, TextValues,
-    scan_tokens, tiled_grid,
-};
 
 /// Version of the document format this build reads and writes.
-pub const DOC_VERSION: u32 = 1;
+///
+/// **2 since S12c**: the purity cut removed the `text`, `textFallback`, `filter`
+/// and per-cell `grade` fields, which is the one change the policy below says
+/// bumps this number. A version-1 project is refused with `VersionUnsupported`
+/// instead of a `serde` unknown-field error, and there is no migration: a
+/// version-1 file is a file this build cannot express (the ruling of 2026-09-22,
+/// `docs/2026-09-22-STEPS.md`).
+pub const DOC_VERSION: u32 = 2;
 
 /// Oldest `docVersion` this build reads.
 ///
@@ -73,7 +71,7 @@ pub const DOC_VERSION: u32 = 1;
 /// alters an existing field's meaning or removes one bumps it, and projects from
 /// the old version are then refused with an actionable message. There is no
 /// migration by decision (S1 review, 2026-09-20).
-pub const DOC_VERSION_MIN: u32 = 1;
+pub const DOC_VERSION_MIN: u32 = 2;
 
 /// Tolerance when comparing the canvas aspect with the template's declared
 /// aspect. Both are authored separately, so an exact comparison would reject a
@@ -81,8 +79,11 @@ pub const DOC_VERSION_MIN: u32 = 1;
 pub const ASPECT_TOLERANCE: f64 = 1e-6;
 
 /// Smallest and largest slot count a template may declare.
+///
+/// The ceiling was 10 while `strip-10-10x1` shipped; S12c removed that recipe, so
+/// the format's cap and the picker's ([`MAX_PHOTOS`]) are the same number again.
 pub const MIN_SLOTS: usize = 2;
-pub const MAX_SLOTS: usize = 10;
+pub const MAX_SLOTS: usize = 9;
 
 /// DPI range accepted by the render and export boundary.
 pub const MIN_DPI: u32 = 72;

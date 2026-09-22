@@ -92,31 +92,6 @@ pub enum CoreError {
     #[error("slot {slot} already holds a photo; restoring would overwrite it")]
     SlotOccupied { slot: usize },
 
-    /// A command named a text layer the document does not have. `index` equal to
-    /// the layer count is a valid *insert* position (it appends), so this only
-    /// fires past the end.
-    #[error("text layer {index} does not exist; the document has {layers} text layers")]
-    NoSuchTextLayer { index: usize, layers: usize },
-
     #[error("canvas would be {pixels} pixels; the limit is {max}")]
     CanvasTooLarge { pixels: u64, max: u64 },
-
-    #[error("text layer {layer} uses unknown token {{{token}}}; v1 knows {known}")]
-    UnknownTextToken {
-        layer: usize,
-        token: String,
-        known: &'static str,
-    },
-
-    /// A tiled layer's step must be positive in both components or the tiling
-    /// never terminates. There is no upper bound, so this is its own error rather
-    /// than an `OutOfRange` whose range would be misleading.
-    #[error("tiled text step must be positive in both components, got ({x}, {y})")]
-    InvalidTiledStep { x: f64, y: f64 },
-
-    /// The step has no upper *bound*, but a small one asks for an unbounded amount
-    /// of work. Refused at load time so the document is rejected where the user can
-    /// still do something about it.
-    #[error("tiled text step ({x}, {y}) asks for more than {max} tiles")]
-    TooManyTiles { x: f64, y: f64, max: usize },
 }

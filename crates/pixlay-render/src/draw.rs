@@ -14,7 +14,6 @@ use pixlay_core::{CollageDoc, CropTransform, Frame, PixelSize, Polygon, Slot};
 
 use crate::bitmap::{Bitmap, Images};
 use crate::error::RenderError;
-use crate::text;
 
 /// Where and at what size a document is drawn.
 ///
@@ -139,10 +138,6 @@ pub fn draw(doc: &CollageDoc, images: &Images, target: &Target) -> Result<(), Re
             &doc.frame,
         )?;
     }
-
-    // Text last: it is a canvas-level content layer, so it covers the cells and a
-    // photo's framing can never move it (docs/CONTRACT.md §4, S5).
-    text::draw_layers(ctx, doc, images, target.canvas_px)?;
 
     ctx.restore()?;
     Ok(())

@@ -7,17 +7,16 @@
 use std::ffi::OsString;
 use std::io::Write;
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use pixlay_core::{PixelSize, Project, TextValues};
+use pixlay_core::{PixelSize, Project};
 use pixlay_imaging::preview::GESTURE_STEP_DEG;
 use pixlay_imaging::{Chroma, Export, Format, Preview, Rgb8View, SlotBitmap, gesture_grid, icc};
 use pixlay_render::Images;
 
 use crate::args::{
     self, Command, EditArgs, GestureArgs, HitArgs, ImageArgs, InitArgs, ProbeArgs, RenderArgs,
-    SaveArgs, ScanArgs, Size, Source, TemplatesArgs, TextArgs, ThumbArgs, USAGE,
+    SaveArgs, ScanArgs, Size, Source, TemplatesArgs, ThumbArgs, USAGE,
 };
 use crate::report::Report;
 use crate::stats;
@@ -62,7 +61,6 @@ pub fn run(argv: &[OsString]) -> Result<u8, Failure> {
         Command::Image(args) => image(args),
         Command::Scan(args) => scan(args),
         Command::Thumb(args) => thumb(args),
-        Command::Text(args) => text(args),
         Command::Templates(args) => list_templates(args),
         Command::Init(args) => init_project(args),
         Command::Edit(args) => edit_project(args),
@@ -147,7 +145,6 @@ fn save_project(args: SaveArgs) -> Result<u8, Failure> {
     report.int("version", i64::from(doc.template.version));
     report.text("aspect", ratio_label(doc.template.aspect));
     report.int("cells", doc.cells.len() as i64);
-    report.int("text", doc.text.len() as i64);
     report.int("bytes", bytes as i64);
     emit(&report, args.json);
     Ok(EXIT_SUCCESS)
@@ -565,7 +562,6 @@ fn render(args: RenderArgs) -> Result<u8, Failure> {
     }
     report.int("cells", doc.cells.len() as i64);
     report.int("occupied", images.len() as i64);
-    report.int("text", doc.text.len() as i64);
     // The frame the render used, always: with `--gap`/`--radius`/`--border-color`
     // it is this run's override, otherwise the document's own, and a caller that
     // cannot see which of the two it got cannot measure a frame.
@@ -607,130 +603,8 @@ fn decode_slots(
     let mut images = Images::new();
     for bitmap in bitmaps {
         images.insert(bitmap.slot, render_bitmap(&bitmap)?);
-        // The decode already saw the file, so `{date}` and `{filename}` cost
-        // nothing extra here (`pixlay_render::Images`).
-        images.set_text_values(
-            bitmap.slot,
-            slot_values(
-                sources.get(bitmap.slot).and_then(Option::as_ref),
-                bitmap.date.clone(),
-            ),
-        );
     }
     Ok(images)
-}
-
-/// What one slot tells a text layer: the file name the project points at, and the
-/// date the decoder found in it.
-fn slot_values(source: Option<&PathBuf>, date: Option<String>) -> TextValues {
-    TextValues {
-        date,
-        filename: source
-            .and_then(|path| path.file_name())
-            .map(|name| name.to_string_lossy().into_owned()),
-    }
-}
-
-/// `text`: every layer's content, with its tokens resolved.
-///
-/// `{date}`, `{filename}` and `{index}` come from a slot's photo, so the machine
-/// surface needs a way to read what they resolve to without rendering a project
-/// and reading pixels back — this is S5's `image`. Only the slots a layer actually
-/// names are decoded, and each of those once.
-fn text(args: TextArgs) -> Result<u8, Failure> {
-    let project =
-        Project::load(&args.project).map_err(|error| Failure::Failed(error.to_string()))?;
-    let doc = project.doc().clone();
-    let sources = project
-        .sources()
-        .map_err(|error| Failure::Failed(error.to_string()))?;
-
-    let mut decoded: BTreeMap<usize, TextValues> = BTreeMap::new();
-    for slot in doc.text.iter().filter_map(|layer| layer.source_slot) {
-        if decoded.contains_key(&slot) {
-            continue;
-        }
-        let source = sources.get(slot).and_then(Option::as_ref);
-        let date = match source {
-            Some(path) => {
-                let decoded = pixlay_imaging::Source::decode(path)
-                    .map_err(|error| Failure::Failed(error.to_string()))?;
-                decoded
-                    .exif()
-                    .and_then(pixlay_imaging::exif::date_time_original)
-            }
-            None => None,
-        };
-        decoded.insert(slot, slot_values(source, date));
-    }
-
-    let mut report = Report::new();
-    report.text("status", "ok");
-    report.text("command", "text");
-    report.int("count", doc.text.len() as i64);
-    for (index, layer) in doc.text.iter().enumerate() {
-        let values = layer
-            .source_slot
-            .and_then(|slot| decoded.get(&slot))
-            .cloned()
-            .unwrap_or_default();
-        let prefix = report.row("text", index);
-        report.text(
-            &format!("{prefix}.content"),
-            layer.resolve(&values, &doc.text_fallback),
-        );
-        report.text(&format!("{prefix}.mode"), mode_name(layer));
-        report.float(&format!("{prefix}.size_rel"), layer.size_rel);
-        report.float(&format!("{prefix}.rotation_deg"), layer.rotation_deg);
-        if let Some(slot) = layer.source_slot {
-            report.int(&format!("{prefix}.source_slot"), slot as i64);
-        }
-        match layer.mode {
-            pixlay_core::TextMode::Free { position, anchor } => {
-                report.text(
-                    &format!("{prefix}.position"),
-                    format!("{:.4},{:.4}", position.x, position.y),
-                );
-                report.text(&format!("{prefix}.anchor"), anchor_name(anchor));
-            }
-            pixlay_core::TextMode::Tiled { step } => {
-                report.text(
-                    &format!("{prefix}.step"),
-                    format!("{:.4},{:.4}", step.0, step.1),
-                );
-                // The grid the renderer draws, so the tile cap is visible here
-                // instead of only in a render that never finishes.
-                if let Some((columns, rows)) = pixlay_core::tiled_grid(step) {
-                    report.int(&format!("{prefix}.tiles"), (columns * rows) as i64);
-                }
-            }
-        }
-    }
-    emit(&report, args.json);
-    Ok(EXIT_SUCCESS)
-}
-
-fn mode_name(layer: &pixlay_core::TextLayer) -> &'static str {
-    match layer.mode {
-        pixlay_core::TextMode::Free { .. } => "free",
-        pixlay_core::TextMode::Tiled { .. } => "tiled",
-    }
-}
-
-/// The anchor as the document spells it, so the report round-trips into a project.
-fn anchor_name(anchor: pixlay_core::Anchor) -> &'static str {
-    use pixlay_core::Anchor;
-    match anchor {
-        Anchor::TopLeft => "topLeft",
-        Anchor::TopCenter => "topCenter",
-        Anchor::TopRight => "topRight",
-        Anchor::CenterLeft => "centerLeft",
-        Anchor::Center => "center",
-        Anchor::CenterRight => "centerRight",
-        Anchor::BottomLeft => "bottomLeft",
-        Anchor::BottomCenter => "bottomCenter",
-        Anchor::BottomRight => "bottomRight",
-    }
 }
 
 /// Wraps one decoded slot for the renderer, keeping the region it holds.
@@ -1206,17 +1080,6 @@ fn probe(args: ProbeArgs) -> Result<u8, Failure> {
         .sources()
         .map_err(|error| Failure::Failed(error.to_string()))?;
     let doc = project.doc().clone();
-    // The probe's questions are about pixels *it* painted: an interior sample is
-    // "the colour of this slot" and a background sample is "white". A text layer
-    // paints over both, and a probe cannot tell a watermark from a wrong photo —
-    // so it refuses the document rather than answering about it.
-    if !doc.text.is_empty() {
-        return Err(Failure::Failed(format!(
-            "probe cannot judge a document with {} text layer(s): its samples assume \
-             nothing is painted over the slots",
-            doc.text.len()
-        )));
-    }
 
     let stopwatch = stats::Stopwatch::start();
     let full = doc

@@ -55,13 +55,6 @@ pub const REGION_GUARD_PX: f64 = 3.0;
 /// One slot's bitmap, ready for `pixlay_render::Bitmap::from_argb32_region`.
 #[derive(Clone, Debug)]
 pub struct SlotBitmap {
-    /// EXIF `DateTimeOriginal` of the file this bitmap came from, verbatim.
-    ///
-    /// The decoder is the only stage that has seen the file, so the one field a
-    /// text layer needs from a photo travels out with the pixels instead of
-    /// costing a second decode (S5, `{date}`). `None` for a file with no usable
-    /// date, which is what makes a layer fall back to the document's own string.
-    pub date: Option<String>,
     /// Cell index this bitmap belongs to.
     pub slot: usize,
     pub width: u32,
@@ -151,7 +144,6 @@ pub(crate) fn flat_bitmap(
     }
     Ok(SlotBitmap {
         slot: slot_index,
-        date: None,
         width: texels.2 as u32,
         height: texels.3 as u32,
         origin: (f64::from(texels.0), f64::from(texels.1)),
@@ -160,7 +152,7 @@ pub(crate) fn flat_bitmap(
     })
 }
 
-/// Resamples, grades and quantizes one decoded photo for one slot.
+/// Resamples and quantizes one decoded photo for one slot.
 ///
 /// The framing comes from [`CropTransform::fit`], exactly as the renderer takes
 /// it: sizing the bitmap from the *stored request* instead of the fit would leave
@@ -172,10 +164,7 @@ pub fn slot_bitmap(
     slot_index: usize,
     canvas_px: pixlay_core::PixelSize,
 ) -> Result<SlotBitmap, ImagingError> {
-    // The cell is needed for its own grade below; `fitted_crop` reads the same
-    // cell for the framing.
-    let cell = doc
-        .cells
+    doc.cells
         .get(slot_index)
         .ok_or(ImagingError::MissingCell { slot: slot_index })?;
     let slot = doc
@@ -201,14 +190,12 @@ pub fn slot_bitmap(
             texels,
         },
     );
-    // Flatten onto white, then grade: the grade acts on what the slot shows.
-    let mut rgb = linear.over_white();
-    rgb.apply(&cell.grade);
-    rgb.apply(&doc.filter.grade());
+    // Flatten onto white — and stop there: since S12c there is no colour stage
+    // after the resample, so what the slot shows is what the photo was.
+    let rgb = linear.over_white();
 
     Ok(SlotBitmap {
         slot: slot_index,
-        date: source.exif().and_then(crate::exif::date_time_original),
         width: texels.2 as u32,
         height: texels.3 as u32,
         origin: (f64::from(texels.0), f64::from(texels.1)),

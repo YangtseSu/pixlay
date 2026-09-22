@@ -108,27 +108,6 @@ pub fn run(
         )
         .map_err(|error| error.to_string())?;
         images.insert(slot, render_bitmap);
-        if let Some(date) = bitmap.date {
-            images.set_text_values(
-                slot,
-                pixlay_core::TextValues {
-                    date: Some(date),
-                    filename: path
-                        .file_name()
-                        .map(|name| name.to_string_lossy().into_owned()),
-                },
-            );
-        } else {
-            images.set_text_values(
-                slot,
-                pixlay_core::TextValues {
-                    date: None,
-                    filename: path
-                        .file_name()
-                        .map(|name| name.to_string_lossy().into_owned()),
-                },
-            );
-        }
         done += 1;
         progress(Progress::Decoding {
             done,

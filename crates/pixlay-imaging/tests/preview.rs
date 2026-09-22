@@ -70,7 +70,6 @@ fn document(sources: &[Option<PathBuf>]) -> CollageDoc {
         *cell = Cell {
             source: source.clone(),
             crop: CropTransform::IDENTITY,
-            grade: Default::default(),
         };
     }
     doc

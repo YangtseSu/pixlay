@@ -224,7 +224,7 @@ fn every_framing_covers_its_cell() {
     }
 
     // The sweep is only evidence if it actually reaches the branches: 27
-    // templates and 152 slots of the shipped library.
+    // templates and 142 slots of the shipped library.
     eprintln!("unframed sweep: {checked} framings, {panned} pan-clamped");
     assert!(
         checked > 100_000,
@@ -364,6 +364,7 @@ fn the_covering_zoom_is_bounded_for_every_slot_shape() {
     }
     eprintln!("worst over every slot, angle and photo aspect: {overall} ({overall_at})");
     // Measured 2026-09-22 (S11), worst covering zoom per photo aspect, over all 152
+    // (142 since S12c dropped the ten-slot recipe; the worst pane is unchanged)
     // shipped slots and every whole degree: 0.5 → 9.06, 0.8 → 9.06, 1 → 9.06,
     // 4:3 → 12.07, 1.5 → 13.58, 2.4 → **21.73**. Every one of them is
     // `strip-9-9x1`'s 1/16-wide pane, whose *upright* floor is already 21.6 with a
@@ -646,12 +647,14 @@ fn the_fit_follows_the_slot_shape() {
 #[test]
 fn an_elongated_slot_keeps_its_rotation() {
     // An elongated slot is where the retired degradation limit mattered: the
-    // ten-column strip is 0.125 x 1.0 of a 16:9 canvas, so a 4:3 photo covers it
-    // upright at `4/3 * 16/9 / (16/9 * 0.125) = 6x` — and at 45 degrees it needs
-    // *less* (5.19x), because a narrow slot fits a rotated photo better than an
-    // upright one. With the cap gone there is nothing to reduce in any case, and
-    // this pins both halves: the angle is kept and the zoom is what the shape asks.
-    let template = templates::get("strip-10-10x1").expect("the strip template");
+    // nine-column strip's first pane is 0.125 x 1.0 of a 16:9 canvas, so a 4:3
+    // photo covers it upright at `4/3 * 16/9 / (16/9 * 0.125) = 6x` — and at 45
+    // degrees it needs *less* (5.19x), because a narrow slot fits a rotated photo
+    // better than an upright one. With the cap gone there is nothing to reduce in
+    // any case, and this pins both halves: the angle is kept and the zoom is what
+    // the shape asks. (`strip-10-10x1` used to be the fixture here; S12c removed
+    // that recipe and this pane has the same shape.)
+    let template = templates::get("strip-9-9x1").expect("the strip template");
     let photo_aspect = 4.0 / 3.0;
     let slot = &template.slots[0];
     let frame = Frame::default();

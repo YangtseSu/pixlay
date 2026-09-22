@@ -1,6 +1,6 @@
 [package]
 name = "pixlay-render"
-description = "The single rendering path: draw(doc, target) on Cairo and pangocairo."
+description = "The single rendering path: draw(doc, target) on Cairo."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -15,7 +15,6 @@ workspace = true
 [dependencies]
 pixlay-core = { path = "../pixlay-core" }
 cairo-rs = "0.22.9"
-pangocairo = "0.22.9"
 thiserror = "2.0"
 
 [dev-dependencies]

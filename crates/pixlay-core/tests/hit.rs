@@ -184,8 +184,9 @@ fn every_slot_contains_its_own_centroid() {
         }
     }
     // A canary, not a derived number: if a template left the library the sweep
-    // would cover less and still pass. S10 grew it from 64 slots to 152.
-    assert_eq!(slots, 152, "the library's slot count changed");
+    // would cover less and still pass. S10 grew it from 64 slots to 152, and
+    // S12c removed `strip-10-10x1`'s ten.
+    assert_eq!(slots, 142, "the library's slot count changed");
     assert_eq!(inside, slots);
 }
 
@@ -270,7 +271,7 @@ fn a_point_one_pixel_from_a_boundary_matches_the_analytic_answer() {
     }
 
     assert_eq!(
-        slots, 152,
+        slots, 142,
         "the library's slot count changed (S10 grew it from 64)"
     );
     assert!(

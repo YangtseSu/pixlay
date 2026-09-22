@@ -94,9 +94,9 @@ const R_2_3: f64 = 2.0 / 3.0;
 /// three layouts per count, in at least two aspect families**, because a gallery
 /// that offers one candidate is not a choice
 /// (`docs/2026-09-22-STEPS.md`, S10; asserted by
-/// `crates/pixlay-core/tests/templates.rs`). Ten still ships exactly the one
-/// template it shipped with: no picker reaches it, and its layout is frozen data
-/// like every other member's.
+/// `crates/pixlay-core/tests/templates.rs`). Since S12c the library stops at nine
+/// slots: `strip-10-10x1` was the only member above the picker's cap, and it left
+/// with the purity ruling, so `MAX_SLOTS` and `MAX_PHOTOS` are one number.
 static RECIPES: &[Recipe] = &[
     // Two rows on a portrait canvas. The simplest layout there is, and the
     // portrait counterpart of `strip-2-2x1`: the picker offers one or the other
@@ -452,8 +452,8 @@ static RECIPES: &[Recipe] = &[
             rect(11, 11, 16, 16),
         ],
     },
-    // Nine columns on a wide canvas: six 2/16 panes, then 1/16, 1/16, 2/16 — the
-    // same way `strip-10-10x1` splits its odd middle panes.
+    // Nine columns on a wide canvas: six 2/16 panes, then 1/16, 1/16, 2/16, which
+    // is how an odd number of panes splits on a dyadic lattice.
     Recipe {
         name: "strip-9-9x1",
         version: 1,
@@ -489,27 +489,6 @@ static RECIPES: &[Recipe] = &[
             rect(12, 8, 16, 12),
             rect(8, 12, 12, 16),
             rect(12, 12, 16, 16),
-        ],
-    },
-    // Ten columns. A ten-way vertical split cannot be equal on a dyadic
-    // lattice, so the panes are 2/16 wide with four 1/16 panes in the middle —
-    // which is also what a real ten-photo strip looks like.
-    Recipe {
-        name: "strip-10-10x1",
-        version: 1,
-        aspect: R_16_9,
-        grid: 16,
-        slots: &[
-            rect(0, 0, 2, 16),
-            rect(2, 0, 4, 16),
-            rect(4, 0, 6, 16),
-            rect(6, 0, 8, 16),
-            rect(8, 0, 10, 16),
-            rect(10, 0, 12, 16),
-            rect(12, 0, 13, 16),
-            rect(13, 0, 14, 16),
-            rect(14, 0, 15, 16),
-            rect(15, 0, 16, 16),
         ],
     },
 ];

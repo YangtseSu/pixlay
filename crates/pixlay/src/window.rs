@@ -36,8 +36,7 @@ use gtk4::prelude::*;
 use libadwaita as adw;
 
 use pixlay_core::{
-    CanvasSpec, CollageDoc, Command, CoreError, CropTransform, PixelSize, Project, TextLayer,
-    templates,
+    CanvasSpec, CollageDoc, Command, CoreError, CropTransform, PixelSize, Project, templates,
 };
 use pixlay_imaging::gesture_grid;
 use pixlay_render::Images;
@@ -47,7 +46,7 @@ use crate::canvas::{self, Gesture};
 use crate::decode::{Decoder, Reply};
 use crate::export::{self, Event, Progress, Report, Settings, Size};
 use crate::i18n::{fill, gettext, ngettext};
-use crate::sidebar::{GradePart, Sidebar};
+use crate::sidebar::Sidebar;
 use crate::state::Editor;
 
 /// The template a new document starts from: 4:3 like an album page, five slots,
@@ -490,20 +489,6 @@ impl EditorWindow {
                 }
             }),
         );
-        add(
-            "add-text",
-            true,
-            Box::new(|window| {
-                window.add_text();
-            }),
-        );
-        add(
-            "remove-text",
-            false,
-            Box::new(|window| {
-                window.remove_text();
-            }),
-        );
 
         self.insert_action_group("win", Some(&group));
         *self.imp().actions.borrow_mut() = actions;
@@ -764,23 +749,6 @@ impl EditorWindow {
         self.schedule_commit();
     }
 
-    pub fn set_grade_part(&self, part: GradePart, value: f64) {
-        let Some(slot) = self.selection() else {
-            return;
-        };
-        let doc = self.document();
-        let Some(cell) = doc.cells.get(slot) else {
-            return;
-        };
-        let mut grade = cell.grade;
-        match part {
-            GradePart::Exposure => grade.factor = value,
-            GradePart::Saturation => grade.saturation = value,
-            GradePart::Warmth => grade.delta = value,
-        }
-        let _ = self.apply(Command::SetGrade { slot, grade });
-    }
-
     pub fn reset_framing(&self, slot: usize) {
         let _ = self.apply(Command::SetCrop {
             slot,
@@ -1008,103 +976,6 @@ impl EditorWindow {
                 }
             ),
         );
-    }
-
-    // ---- text layers ------------------------------------------------------
-
-    pub fn add_text(&self) {
-        let layer = TextLayer {
-            content: gettext("Text"),
-            mode: pixlay_core::TextMode::Free {
-                position: pixlay_core::Point::new(0.5, 0.9),
-                anchor: pixlay_core::Anchor::BottomCenter,
-            },
-            size_rel: 0.03,
-            rotation_deg: 0.0,
-            color: pixlay_core::Rgba8::BLACK,
-            source_slot: None,
-        };
-        let index = self.document().text.len();
-        if self.apply(Command::InsertText { index, layer }).is_ok()
-            && let Some(sidebar) = self.imp().sidebar.get()
-        {
-            sidebar.select_layer(Some(index));
-            self.select_text(Some(index));
-        }
-    }
-
-    pub fn remove_text(&self) {
-        let Some(index) = self
-            .imp()
-            .sidebar
-            .get()
-            .and_then(|sidebar| sidebar.selected_layer())
-        else {
-            return;
-        };
-        if self.apply(Command::RemoveText { index }).is_ok()
-            && let Some(sidebar) = self.imp().sidebar.get()
-        {
-            let remaining = self.document().text.len();
-            let next = if remaining == 0 {
-                None
-            } else {
-                Some(index.min(remaining - 1))
-            };
-            sidebar.select_layer(next);
-            self.select_text(next);
-        }
-    }
-
-    pub fn select_text(&self, index: Option<usize>) {
-        if let Some(sidebar) = self.imp().sidebar.get() {
-            sidebar.select_layer(index);
-        }
-        if let Some(sidebar) = self.imp().sidebar.get() {
-            sidebar.update(self);
-        }
-    }
-
-    /// Rewrites the selected layer through `edit`, as one command.
-    pub fn edit_text(&self, edit: impl FnOnce(&mut TextLayer)) {
-        self.rewrite_text(edit);
-    }
-
-    /// The same, but reading the sidebar's controls, which is what every editor
-    /// row does when it changes.
-    pub fn edit_text_from_controls(&self) {
-        self.rewrite_text(|_| ());
-    }
-
-    fn rewrite_text(&self, edit: impl FnOnce(&mut TextLayer)) {
-        let Some(index) = self
-            .imp()
-            .sidebar
-            .get()
-            .and_then(|sidebar| sidebar.selected_layer())
-        else {
-            return;
-        };
-        let doc = self.document();
-        let Some(current) = doc.text.get(index).cloned() else {
-            return;
-        };
-        let mut layer = match self.imp().sidebar.get() {
-            Some(sidebar) => sidebar.text_controls(),
-            None => current.clone(),
-        };
-        // The word the user typed is what they typed; the controls only carry the
-        // rest of the layer.
-        layer.content = current.content.clone();
-        edit(&mut layer);
-        if layer == current {
-            return;
-        }
-        if self.apply(Command::SetText { index, layer }).is_ok()
-            && let Some(sidebar) = self.imp().sidebar.get()
-        {
-            sidebar.update(self);
-        }
     }
 
     // ---- export -----------------------------------------------------------
@@ -1360,20 +1231,6 @@ impl EditorWindow {
         let mut images = Images::new();
         for bitmap in reply.bitmaps {
             let slot = bitmap.slot;
-            let date = bitmap.date.clone();
-            let values = pixlay_core::TextValues {
-                date,
-                filename: self
-                    .imp()
-                    .editor
-                    .borrow()
-                    .doc()
-                    .cells
-                    .get(slot)
-                    .and_then(|cell| cell.source.as_ref())
-                    .and_then(|source| source.file_name())
-                    .map(|name| name.to_string_lossy().into_owned()),
-            };
             match pixlay_render::Bitmap::from_argb32_region(
                 bitmap.width as i32,
                 bitmap.height as i32,
@@ -1383,7 +1240,6 @@ impl EditorWindow {
             ) {
                 Ok(bitmap) => {
                     images.insert(slot, bitmap);
-                    images.set_text_values(slot, values);
                 }
                 Err(error) => glib::g_warning!("pixlay", "a decoded bitmap was refused: {error}"),
             }
@@ -1470,11 +1326,10 @@ impl EditorWindow {
                 self.selection()
                     .and_then(|slot| doc.cells.get(slot))
                     .is_some_and(|cell| cell.source.is_some()),
-                !doc.text.is_empty(),
                 doc.cells.iter().any(|cell| cell.source.is_some()),
             )
         };
-        let (undo, redo, selected, _has_photo, has_text, has_any_photo) = state;
+        let (undo, redo, selected, _has_photo, has_any_photo) = state;
         for action in self.imp().actions.borrow().iter() {
             let enabled = match action.name().as_str() {
                 "undo" => undo,
@@ -1482,8 +1337,6 @@ impl EditorWindow {
                 "save" | "save-as" => true,
                 "export" | "choose-export-path" => has_any_photo,
                 "add-photo" | "clear-photo" | "reset-framing" => selected,
-                "add-text" => true,
-                "remove-text" => has_text,
                 _ => action.is_enabled(),
             };
             action.set_enabled(enabled);

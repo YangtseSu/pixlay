@@ -1,8 +1,8 @@
 //! The canvas frame: the gap between cells, their corner radius, and the backdrop.
 //!
 //! The frame is the canvas **decoration** stage of the frozen evaluation order
-//! (`AGENTS.md`): it sits after the slots are composited and before the text
-//! layers, and it is the one stage that paints *around* the photos instead of
+//! (`AGENTS.md`): it sits after the slots are composited and before the output
+//! transform, and it is the one stage that paints *around* the photos instead of
 //! inside them. Three fields, three jobs:
 //!
 //! * `gap_rel` takes half of itself off every side of a cell, which is what makes
@@ -11,9 +11,8 @@
 //! * `color` is what the canvas is painted with where no photo covers it — the
 //!   gaps, the corners, an empty cell, and everything outside the slots.
 //!
-//! **Both lengths are fractions of the canvas height**, like a text layer's
-//! `sizeRel`, so a frame is resolution-independent and a preview shows exactly
-//! what an export does.
+//! **Both lengths are fractions of the canvas height**, so a frame is
+//! resolution-independent and a preview shows exactly what an export does.
 //!
 //! # What the frame changes about the framing clamp
 //!
@@ -51,7 +50,30 @@ use serde::{Deserialize, Serialize};
 use crate::error::CoreError;
 use crate::geometry::{Polygon, Rect};
 use crate::template::Slot;
-use crate::text::Rgba8;
+
+/// A straight (non-premultiplied) colour with an alpha channel.
+///
+/// The frame's backdrop is the only colour a document has: with the text layers
+/// gone (S12c) there is nothing else to paint, and the type lives here because
+/// this is the only field that holds one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Rgba8 {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    /// `255` is fully opaque.
+    pub a: u8,
+}
+
+impl Rgba8 {
+    pub const BLACK: Self = Self::rgb(0, 0, 0);
+    pub const WHITE: Self = Self::rgb(255, 255, 255);
+
+    pub const fn rgb(r: u8, g: u8, b: u8) -> Self {
+        Self { r, g, b, a: 255 }
+    }
+}
 
 /// Largest `gapRel` / `radiusRel` the format accepts, as a fraction of the canvas
 /// height.

@@ -11,10 +11,7 @@
 
 use std::path::{Path, PathBuf};
 
-use pixlay_core::{
-    Anchor, CanvasSpec, Cell, CollageDoc, CropTransform, DOC_VERSION, FilterPreset, Grade, Point,
-    Project, Rgba8, TextLayer, TextMode, templates,
-};
+use pixlay_core::{CanvasSpec, Cell, CollageDoc, CropTransform, DOC_VERSION, Project, templates};
 
 fn temp_dir(name: &str) -> PathBuf {
     // Artifacts go to disk, never to tmpfs (`AGENTS.md`, measurement rules).
@@ -39,26 +36,8 @@ fn document() -> CollageDoc {
             offset: (0.25, -0.4),
             rotation_deg: -12.5,
         },
-        grade: Grade {
-            factor: 1.2,
-            saturation: 0.85,
-            delta: -0.1,
-        },
     };
     doc.cells[1].source = Some(PathBuf::from("/absolute/b.png"));
-    doc.filter = FilterPreset::Warm;
-    doc.text.push(TextLayer {
-        content: "{date} #{index}".to_string(),
-        mode: TextMode::Free {
-            position: Point::new(0.5, 0.9),
-            anchor: Anchor::BottomCenter,
-        },
-        size_rel: 0.03,
-        rotation_deg: 6.0,
-        color: Rgba8::BLACK,
-        source_slot: Some(0),
-    });
-    doc.text_fallback.date = "2026-09-21".to_string();
     doc
 }
 

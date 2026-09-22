@@ -39,11 +39,11 @@ Follow the "Testing for Accessibility" of HIG `guidelines/accessibility` item by
 the canvas is **content** and the interface is **styling**, and the two must not affect each other (see `AGENTS.md` "Composite onto opaque white").
 
 1. **High contrast mode** (GTK Inspector or the system accessibility settings): every UI element renders normally; canvas pixels are unchanged.
-2. **Large text** (system accessibility settings): every label stays readable and is not truncated; canvas pixels are unchanged (text layers are document content and do not scale with the font size).
+2. **Large text** (system accessibility settings): every label stays readable and is not truncated; canvas pixels are unchanged (the canvas is document content and does not scale with the interface's font size).
 3. **Keyboard-only**: walk "pick a template → place photos → adjust framing → export" with the keyboard alone; the focus order is logical;
    `F10` opens the menu, `Esc` closes overlays, `Tab` covers every control.
 4. **Screen reader**: every control is read out, the accessible name is accurate and short; it stays operable with the monitor off.
-5. **Touch / on-screen keyboard (OSK)**: text-layer content and the export path can be typed entirely with the OSK.
+5. **Touch / on-screen keyboard (OSK)**: the project name and the export path can be typed entirely with the OSK.
 6. **S15 additions** (the step that walks the re-routed path):
    - the "three-minute main path": the scripted step list below, timed by hand;
    - the copy: is any label wrapped, truncated or unclear, and does a squeezed row read as intended? (The strings themselves are checked mechanically; the look is not.);
@@ -80,7 +80,7 @@ picker reads, whether the framing and rotation gestures feel right, and whether 
 | GNOME Shell search provider, notification workflow | Not doing | the same discipline as the "Not doing" list: add no feature that does not serve the main path |
 | Phone-style layout — the *chrome*, not the capability (2026-09-22) | the capability is built with desktop idioms; the chrome is not copied | the picker-first flow came from mobile galleries, and `GtkGridView` + selection mode + a header-bar Next is the same capability read on the Arch desktop. The ordered tray along the bottom stays because selection *order* is cell order and re-ordering it is a desktop need — it is the one thing the phone's strip and this tray genuinely share |
 | Per-app style preference (light / dark / system, pick one of the three) | Not doing | the shortest main path; "follow the system" already covers how a user expresses "I want dark" |
-| Large-text mode acting on canvas text layers | Not applied | preview and export must be from the same source, pixel by pixel; text layers are document content |
+| Large-text mode acting on the canvas | Not applied | preview and export must be from the same source, pixel by pixel; the canvas is document content, not interface |
 | access keys (`Alt+` mnemonics) | Not doing | this application has no menu bar |
 
 ## 4. Chapters not yet read page by page (read them and backfill section 1 as the plan's UI steps start)

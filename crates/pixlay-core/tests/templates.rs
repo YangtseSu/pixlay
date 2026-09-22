@@ -442,8 +442,13 @@ fn the_smoke_template_is_frozen_by_name_and_version() {
 
 /// The templates that had shipped before S10, each with [`fingerprint`] of its
 /// geometry. S10 could add layouts but not move one, and these are how that lasts.
+///
+/// `strip-10-10x1` was the twelfth row until S12c removed that recipe and moved
+/// `DOC_VERSION` to 2: the name is not in the library any more, so a fingerprint
+/// for it would be a row no build could check, and the project-compatibility
+/// break it stands for is the version bump rather than a moved geometry.
 #[rustfmt::skip]
-const SHIPPED_BEFORE_S10: [(&str, u64); 12] = [
+const SHIPPED_BEFORE_S10: [(&str, u64); 11] = [
     ("strip-2-1x2", 8542848068752417087),
     ("strip-2-2x1", 12797188679629256609),
     ("strip-3-3x1", 1976477295676291470),
@@ -455,7 +460,6 @@ const SHIPPED_BEFORE_S10: [(&str, u64); 12] = [
     ("mosaic-7-t4b3", 18222112623581619225),
     ("mosaic-8-s14", 1804114584250607058),
     ("grid-9-3x3", 14137598548244331905),
-    ("strip-10-10x1", 11821882746657861092),
 ];
 
 /// FNV-1a 64 over the source the generator emits for one template, from its table

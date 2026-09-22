@@ -11,8 +11,7 @@
 use std::path::PathBuf;
 
 use pixlay_core::{
-    Anchor, CanvasSpec, Cell, CollageDoc, Command, CoreError, CropTransform, FilterPreset, Grade,
-    History, Point, Rgba8, TextFallback, TextLayer, TextMode, templates,
+    CanvasSpec, Cell, CollageDoc, Command, CoreError, CropTransform, History, templates,
 };
 
 fn document() -> CollageDoc {
@@ -20,22 +19,7 @@ fn document() -> CollageDoc {
     CollageDoc::new(CanvasSpec::with_ratio(template.aspect, 297.0), template)
 }
 
-fn caption(content: &str, source_slot: Option<usize>) -> TextLayer {
-    TextLayer {
-        content: content.to_string(),
-        mode: TextMode::Free {
-            position: Point::new(0.5, 0.9),
-            anchor: Anchor::BottomCenter,
-        },
-        size_rel: 0.03,
-        rotation_deg: 0.0,
-        color: Rgba8::BLACK,
-        source_slot,
-    }
-}
-
-/// One command of every kind this build has, in an order that stays valid
-/// (insert before set before remove).
+/// One command of every kind this build has, in an order that stays valid.
 fn sequence() -> Vec<Command> {
     vec![
         Command::SetSource {
@@ -50,44 +34,12 @@ fn sequence() -> Vec<Command> {
                 rotation_deg: 12.0,
             },
         },
-        Command::SetGrade {
-            slot: 0,
-            grade: Grade {
-                factor: 1.25,
-                saturation: 0.8,
-                delta: -0.15,
-            },
-        },
-        Command::SetFilter {
-            filter: FilterPreset::Warm,
-        },
-        Command::InsertText {
-            index: 0,
-            layer: caption("{date} #{index}", Some(0)),
-        },
-        Command::InsertText {
-            index: 1,
-            layer: caption("second", None),
-        },
-        Command::SetText {
-            index: 0,
-            layer: caption("{filename}", Some(0)),
-        },
-        Command::SetTextFallback {
-            fallback: TextFallback {
-                date: "2026-09-21".to_string(),
-            },
-        },
         Command::SetCanvas {
             canvas: CanvasSpec::with_ratio(4.0 / 3.0, 420.0),
         },
         Command::SetSource {
             slot: 7,
             source: Some(PathBuf::from("photos/b.png")),
-        },
-        Command::RemoveText { index: 1 },
-        Command::SetFilter {
-            filter: FilterPreset::None,
         },
         // Last, because it resizes the cells: the commands before it stay valid,
         // and the walk still visits one state per command kind.
@@ -173,9 +125,9 @@ fn a_command_that_would_break_the_contract_changes_nothing() {
     let initial = document();
     let mut history = History::new(initial.clone()).expect("a valid document");
     history
-        .apply(Command::InsertText {
-            index: 0,
-            layer: caption("kept", Some(0)),
+        .apply(Command::SetSource {
+            slot: 0,
+            source: Some(PathBuf::from("photos/kept.jpg")),
         })
         .expect("applies");
 
@@ -212,16 +164,6 @@ fn a_command_that_would_break_the_contract_changes_nothing() {
             },
         ),
         (
-            "a grade outside its range",
-            Command::SetGrade {
-                slot: 0,
-                grade: Grade {
-                    factor: 99.0,
-                    ..Grade::IDENTITY
-                },
-            },
-        ),
-        (
             "a slot the template does not have",
             Command::SetSource {
                 slot: 99,
@@ -229,48 +171,10 @@ fn a_command_that_would_break_the_contract_changes_nothing() {
             },
         ),
         (
-            "a text layer past the end",
-            Command::RemoveText { index: 7 },
-        ),
-        (
-            "an insert position past the end",
-            Command::InsertText {
-                index: 7,
-                layer: caption("x", None),
-            },
-        ),
-        (
-            "replacing a layer that does not exist",
-            Command::SetText {
-                index: 4,
-                layer: caption("x", None),
-            },
-        ),
-        (
-            "a text layer naming a slot that does not exist",
-            Command::InsertText {
-                index: 1,
-                layer: caption("{index}", Some(99)),
-            },
-        ),
-        (
-            "a text position off the canvas",
-            Command::SetText {
-                index: 0,
-                layer: TextLayer {
-                    mode: TextMode::Free {
-                        position: Point::new(1.5, 0.5),
-                        anchor: Anchor::Center,
-                    },
-                    ..caption("x", None)
-                },
-            },
-        ),
-        (
-            "an unknown token",
-            Command::SetText {
-                index: 0,
-                layer: caption("{nonsense}", None),
+            "a template the library does not have",
+            Command::SetTemplate {
+                template: templates::get("mosaic-5-hero").expect("registered"),
+                canvas: CanvasSpec::with_ratio(16.0 / 9.0, 297.0),
             },
         ),
     ];
@@ -295,7 +199,7 @@ fn a_command_that_would_break_the_contract_changes_nothing() {
         );
         assert_eq!(history.doc(), &{
             let mut expected = document();
-            expected.text.push(caption("kept", Some(0)));
+            expected.cells[0].source = Some(PathBuf::from("photos/kept.jpg"));
             expected
         });
     }
@@ -309,52 +213,49 @@ fn a_command_that_would_break_the_contract_changes_nothing() {
         }),
         Err(CoreError::NoSuchSlot { slot: 8, slots: 8 })
     ));
-    assert!(matches!(
-        history.apply(Command::RemoveText { index: 1 }),
-        Err(CoreError::NoSuchTextLayer {
-            index: 1,
-            layers: 1
-        })
-    ));
 
     // And the history still works: a valid command after all those refusals
     // lands on the state the document really had.
     history
-        .apply(Command::SetFilter {
-            filter: FilterPreset::Mono,
+        .apply(Command::SetSource {
+            slot: 1,
+            source: Some(PathBuf::from("photos/after.jpg")),
         })
         .expect("applies");
-    assert_eq!(history.doc().filter, FilterPreset::Mono);
+    assert_eq!(
+        history.doc().cells[1].source,
+        Some(PathBuf::from("photos/after.jpg"))
+    );
     assert_eq!(history.undo_depth(), undo + 1);
 }
 
 #[test]
 fn a_command_after_an_undo_forks_the_redo_path() {
     let mut history = History::new(document()).expect("a valid document");
-    let first = Command::SetFilter {
-        filter: FilterPreset::Warm,
+    let first = Command::SetCanvas {
+        canvas: CanvasSpec::with_ratio(4.0 / 3.0, 420.0),
     };
-    let second = Command::SetFilter {
-        filter: FilterPreset::Cool,
+    let second = Command::SetCanvas {
+        canvas: CanvasSpec::with_ratio(4.0 / 3.0, 594.0),
     };
     history.apply(first.clone()).expect("applies");
-    let warm = history.doc().clone();
+    let wide = history.doc().clone();
     history.apply(second.clone()).expect("applies");
 
     assert!(history.undo());
-    assert_eq!(history.doc(), &warm);
+    assert_eq!(history.doc(), &wide);
     assert_eq!(history.redo_depth(), 1);
 
     // A different command from here: the undone one is no longer reachable.
     history
-        .apply(Command::SetFilter {
-            filter: FilterPreset::Mono,
+        .apply(Command::SetCanvas {
+            canvas: CanvasSpec::with_ratio(4.0 / 3.0, 297.0),
         })
         .expect("applies");
     assert_eq!(history.redo_depth(), 0, "the redo path must be forked");
     assert!(!history.redo());
     assert!(history.undo());
-    assert_eq!(history.doc(), &warm, "undo still walks the real history");
+    assert_eq!(history.doc(), &wide, "undo still walks the real history");
 }
 
 #[test]
@@ -391,13 +292,7 @@ fn a_swapped_photo_keeps_the_framing_it_had() {
             source: None,
         })
         .expect("applies");
-    assert_eq!(history.doc().cells[3], {
-        Cell {
-            source: None,
-            crop,
-            grade: Grade::IDENTITY,
-        }
-    });
+    assert_eq!(history.doc().cells[3], Cell { source: None, crop });
 }
 
 #[test]
@@ -480,20 +375,7 @@ fn a_template_change_keeps_the_photos_it_can_and_never_leaves_a_dangling_slot() 
             },
         })
         .expect("applies");
-    // Two layers: one naming a slot that survives, one naming a slot that does not.
-    history
-        .apply(Command::InsertText {
-            index: 0,
-            layer: caption("first", Some(4)),
-        })
-        .expect("applies");
-    history
-        .apply(Command::InsertText {
-            index: 1,
-            layer: caption("second", Some(7)),
-        })
-        .expect("applies");
-
+    // A layer-free document: the retention rule that matters now is the cells'.
     // `mosaic-5-hero` is 4:3 like the canvas, with five slots.
     let template = templates::get("mosaic-5-hero").expect("registered");
     let canvas = CanvasSpec::with_ratio(template.aspect, 297.0);
@@ -516,20 +398,14 @@ fn a_template_change_keeps_the_photos_it_can_and_never_leaves_a_dangling_slot() 
     assert_eq!(doc.cells[0].crop.zoom, 1.6, "and their framing");
     assert_eq!(doc.cells[4].source, Some(PathBuf::from("photos/b.png")));
     assert_eq!(
-        doc.text[0].source_slot,
-        Some(4),
-        "a layer whose slot survives keeps it"
+        doc.cells[5..].len(),
+        0,
+        "the tail is dropped, not carried over"
     );
-    assert_eq!(
-        doc.text[1].source_slot, None,
-        "a layer whose slot is gone keeps its text and loses the reference"
-    );
-    assert_eq!(doc.text[1].content, "second");
     doc.validate().expect("the result is a valid document");
 
     // And it is one undo step, like every other command.
-    assert_eq!(history.undo_depth(), 6);
+    assert_eq!(history.undo_depth(), 4);
     assert!(history.undo());
     assert_eq!(history.doc().cells.len(), 8);
-    assert_eq!(history.doc().text[1].source_slot, Some(7));
 }

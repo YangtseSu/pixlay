@@ -4,8 +4,8 @@
 use std::path::PathBuf;
 
 use pixlay_core::{
-    Anchor, CanvasSpec, Cell, CollageDoc, CropTransform, DOC_VERSION, Point, Polygon, Project,
-    Rgba8, Template, TextLayer, TextMode, TextToken, scan_tokens,
+    CanvasSpec, Cell, CollageDoc, CropTransform, DOC_VERSION, Point, Polygon, Project, Rgba8,
+    Template,
 };
 
 fn temp_dir(name: &str) -> PathBuf {
@@ -64,11 +64,6 @@ fn serde_round_trip_is_field_identical() {
             offset: (0.1, -0.2),
             rotation_deg: -172.5,
         },
-        grade: pixlay_core::Grade {
-            factor: 1.2,
-            saturation: 0.8,
-            delta: -0.15,
-        },
     };
     doc.frame = pixlay_core::Frame {
         gap_rel: 0.02,
@@ -80,31 +75,6 @@ fn serde_round_trip_is_field_identical() {
             a: 255,
         },
     };
-    doc.text.push(TextLayer {
-        content: "trip {date} #{index}".to_string(),
-        mode: TextMode::Free {
-            position: Point::new(0.5, 0.9),
-            anchor: Anchor::BottomCenter,
-        },
-        size_rel: 0.02,
-        rotation_deg: 6.0,
-        color: Rgba8::BLACK,
-        source_slot: Some(0),
-    });
-    doc.text.push(TextLayer {
-        content: "{filename}".to_string(),
-        mode: TextMode::Tiled { step: (0.3, 0.15) },
-        size_rel: 0.01,
-        rotation_deg: 30.0,
-        color: Rgba8 {
-            r: 10,
-            g: 20,
-            b: 30,
-            a: 128,
-        },
-        source_slot: None,
-    });
-    doc.text_fallback.date = "2026-09-20".to_string();
     doc.validate().expect("document is valid");
 
     let json = doc.to_json().expect("serializes");
@@ -124,13 +94,17 @@ fn serde_round_trip_is_field_identical() {
         "\"crop\"",
         "\"zoom\"",
         "\"rotationDeg\"",
-        "\"text\"",
-        "\"textFallback\"",
         "\"frame\"",
         "\"gapRel\"",
         "\"radiusRel\"",
     ] {
         assert!(json.contains(key), "{key} missing from {json}");
+    }
+    // The shape after the S12c purity cut: what the document does *not* carry is as
+    // much of the contract as what it does, and a field that quietly came back
+    // would fail here rather than at a user's project file.
+    for gone in ["\"text\"", "\"textFallback\"", "\"filter\"", "\"grade\""] {
+        assert!(!json.contains(gone), "{gone} is back in {json}");
     }
     let outline = serde_json::to_string(&Polygon::rect(0.05, 0.05, 0.5, 0.95)).expect("serializes");
     assert_eq!(
@@ -215,6 +189,35 @@ fn a_canvas_whose_aspect_contradicts_its_template_is_rejected() {
 }
 
 #[test]
+fn a_project_from_the_removed_shape_is_refused_by_version_not_by_field() {
+    // A version-1 project is a project with `grade`, `filter`, `text` and
+    // `textFallback` in it. `deny_unknown_fields` would name `grade` while parsing,
+    // which tells a user nothing about what to do; reading the version first is
+    // what turns it into the actionable "rebuild the project with this version".
+    let doc = two_slot_doc();
+    let current = doc.to_json().expect("serializes");
+    let older = current
+        .replace(
+            &format!("\"docVersion\": {DOC_VERSION}"),
+            "\"docVersion\": 1",
+        )
+        .replacen(
+            "\"crop\":",
+            "\"grade\": { \"factor\": 1.1, \"saturation\": 0.9, \"delta\": -0.1 },\n      \"crop\":",
+            1,
+        );
+    let err = CollageDoc::from_json(&older).expect_err("a version-1 document is refused");
+    assert!(
+        err.to_string().contains("rebuild the project"),
+        "the refusal must be actionable, got: {err}"
+    );
+    assert!(
+        !err.to_string().contains("unknown field"),
+        "the version has to be read before the fields, got: {err}"
+    );
+}
+
+#[test]
 fn unknown_json_fields_are_rejected() {
     let doc = two_slot_doc();
     let json = doc
@@ -227,7 +230,9 @@ fn unknown_json_fields_are_rejected() {
 
 #[test]
 fn slot_count_outside_the_limits_is_rejected() {
-    for count in [0, 1, 11] {
+    // 10 is in the list because it *was* legal: `strip-10-10x1` shipped ten slots
+    // until S12c removed it together with the product's above-nine range.
+    for count in [0, 1, 10, 11] {
         let mut doc = two_slot_doc();
         doc.template.slots = (0..count)
             .map(|_| pixlay_core::Slot {
@@ -238,7 +243,7 @@ fn slot_count_outside_the_limits_is_rejected() {
         doc.cells = vec![Cell::default(); count];
         let err = doc.validate().expect_err("slot count must be limited");
         assert!(
-            err.to_string().contains("slots; the limit is 2..=10"),
+            err.to_string().contains("slots; the limit is 2..=9"),
             "{count}: {err}"
         );
     }
@@ -734,120 +739,6 @@ fn shared_edges_are_found_and_bounded() {
     assert_eq!(seams.len(), 1);
     close_point(seams[0].from, Point::new(0.5, 0.5));
     close_point(seams[0].to, Point::new(0.5, 0.95));
-}
-
-#[test]
-fn text_tokens_are_scanned_and_unknown_ones_rejected() {
-    let uses = scan_tokens("{date} {filename} {index}").expect("known tokens");
-    assert_eq!(
-        uses.iter().map(|use_| use_.token).collect::<Vec<_>>(),
-        vec![TextToken::Date, TextToken::Filename, TextToken::Index]
-    );
-    assert_eq!(
-        &"{date} {filename} {index}"[uses[0].start..uses[0].end],
-        "{date}"
-    );
-    // Not tokens: braces around non-alphabetic text, and an unclosed brace.
-    assert!(scan_tokens("{2 of 3} and {").expect("literal").is_empty());
-    assert_eq!(scan_tokens("{Date}").unwrap_err(), "Date");
-
-    let layer = TextLayer {
-        content: "{exposure}".to_string(),
-        mode: TextMode::Free {
-            position: Point::new(0.5, 0.5),
-            anchor: Anchor::Center,
-        },
-        size_rel: 0.05,
-        rotation_deg: 0.0,
-        color: Rgba8::BLACK,
-        source_slot: None,
-    };
-    let mut doc = two_slot_doc();
-    doc.text.push(layer.clone());
-    let err = doc.validate().expect_err("unknown token");
-    assert!(err.to_string().contains("{exposure}"), "{err}");
-
-    // Text sizes are normalized fractions of the canvas height, and 0 is not a
-    // size.
-    doc.text[0].content = "{date}".to_string();
-    doc.validate().expect("known token");
-    doc.text[0].size_rel = 0.0;
-    assert!(doc.validate().is_err());
-    doc.text[0].size_rel = 0.05;
-    doc.text[0].source_slot = Some(7);
-    assert!(doc.validate().is_err());
-    doc.text[0].source_slot = None;
-}
-
-/// A free layer is placed in normalized canvas coordinates, so a position outside
-/// `[0,1]` is off the canvas. Before this was checked, such a document loaded and
-/// `draw` refused it for an unrelated reason (the S5 text gate), which hid the
-/// real defect until S5 wired text up.
-#[test]
-fn text_position_must_be_on_the_canvas() {
-    let layer = |position: Point| TextLayer {
-        content: "hello".to_string(),
-        mode: TextMode::Free {
-            position,
-            anchor: Anchor::Center,
-        },
-        size_rel: 0.05,
-        rotation_deg: 0.0,
-        color: Rgba8::BLACK,
-        source_slot: None,
-    };
-
-    let mut doc = two_slot_doc();
-    doc.text.push(layer(Point::new(0.5, 0.9)));
-    doc.validate().expect("inside the canvas");
-    // The corners are on the canvas: the bound is inclusive.
-    doc.text[0] = layer(Point::new(0.0, 1.0));
-    doc.validate().expect("the canvas corners are allowed");
-
-    for position in [
-        Point::new(5.0, 5.0),
-        Point::new(-0.01, 0.5),
-        Point::new(0.5, 1.01),
-        Point::new(f64::NAN, 0.5),
-    ] {
-        doc.text[0] = layer(position);
-        let err = doc.validate().expect_err("position off the canvas");
-        assert!(
-            err.to_string().contains("text position"),
-            "{position:?}: {err}"
-        );
-    }
-}
-
-/// The tiled step's only precondition is "both components > 0 and finite": a step
-/// of 0 or a negative value would never terminate the tiling. The error is its own
-/// variant because there is no upper bound to name.
-#[test]
-fn tiled_step_must_be_positive() {
-    let layer = |step: (f64, f64)| TextLayer {
-        content: "wm".to_string(),
-        mode: TextMode::Tiled { step },
-        size_rel: 0.05,
-        rotation_deg: 0.0,
-        color: Rgba8::BLACK,
-        source_slot: None,
-    };
-
-    let mut doc = two_slot_doc();
-    doc.text.push(layer((0.25, 0.25)));
-    doc.validate().expect("a normal tiled watermark");
-    // Large steps are legitimate: one tile per canvas is a legal, if sparse,
-    // watermark. There is deliberately no upper bound.
-    doc.text[0] = layer((4.0, 4.0));
-    doc.validate().expect("a sparse tiling is allowed");
-
-    for step in [(0.0, 0.25), (0.25, -1.0), (f64::NAN, 0.25)] {
-        doc.text[0] = layer(step);
-        let err = doc
-            .validate()
-            .expect_err("step must be positive and finite");
-        assert!(err.to_string().contains("step"), "{step:?}: {err}");
-    }
 }
 
 #[test]

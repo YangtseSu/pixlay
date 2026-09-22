@@ -19,7 +19,7 @@
 
 use std::path::PathBuf;
 
-use pixlay_core::{CanvasSpec, Cell, CollageDoc, Grade, Polygon, Slot, Template};
+use pixlay_core::{CanvasSpec, Cell, CollageDoc, Polygon, Slot, Template};
 use pixlay_imaging::Rgb8View;
 use pixlay_imaging::probe::{palette, probe};
 
@@ -49,7 +49,6 @@ fn doc() -> CollageDoc {
     doc.cells[0] = Cell {
         source: Some(PathBuf::from("photo.png")),
         crop: Default::default(),
-        grade: Grade::IDENTITY,
     };
     doc
 }
