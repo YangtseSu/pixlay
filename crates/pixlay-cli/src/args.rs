@@ -44,22 +44,6 @@ pub const MIN_GESTURE_STEPS: u32 = 2;
 /// Most steps one `gesture` sequence may have: a minute of a 60 Hz gesture.
 pub const MAX_GESTURE_STEPS: u32 = 3600;
 
-/// Extensions `scan` treats as photos.
-///
-/// The decoders this build links read more formats than these — the loaders
-/// carry GIF, BMP, TGA, DDS and more, and an SVG is not a photo at all — and a
-/// listing has to decide *before* it decodes, because reporting every file it
-/// cannot read would turn a folder's README into an error row. So this is the
-/// photo list: the formats a camera, a phone and a screenshot produce. A file
-/// with another extension is not listed and not reported, and `image` / `render`
-/// still accept one when named directly.
-///
-/// `USAGE` documents the same list for the user; the test in
-/// `crates/pixlay-cli/tests/cli.rs` fails if the two drift apart.
-pub const PHOTO_EXTENSIONS: &[&str] = &[
-    "jpg", "jpeg", "png", "heic", "heif", "avif", "jxl", "webp", "tif", "tiff",
-];
-
 /// The one size parameter: what `render` uses when `--long-edge` is not given,
 /// and what `probe` measures at, and what the window's export form starts at
 /// (the GUI's own copy is in `crates/pixlay/src/window.rs`).

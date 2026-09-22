@@ -18,6 +18,21 @@ use pixlay_imaging::encode::{Export, Format, write};
 use pixlay_imaging::{Rgb8View, Source, slot_bitmap};
 use pixlay_render::{Bitmap, Images, render_rgb8};
 
+/// Smallest long edge the export form offers, in pixels.
+///
+/// A floor for the form, not a limit of the format: any positive grid is valid,
+/// and a minimum below the picker's own preview grid would let an export come out
+/// smaller than the picture the user approved.
+pub const MIN_EXPORT_PX: u32 = 256;
+
+/// Largest long edge the export form offers, in pixels.
+///
+/// `12000² = 144 MP`, inside the 200 MP pixel budget (`MAX_CANVAS_PIXELS`) for a
+/// square grid, so every template aspect the form can produce is inside the
+/// budget whatever the shape. The CLI's own range is wider (`--long-edge` follows
+/// `MAX_LONG_EDGE_PX`) because it is a machine surface, not a form.
+pub const MAX_EXPORT_PX: u32 = 12000;
+
 /// What the export form asks for.
 ///
 /// Three fields, because the form has three controls (S12c): the format, **one**

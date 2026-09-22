@@ -9,11 +9,14 @@
 //!
 //! HIG `reference/keyboard`: the required set for an app with files and an undo
 //! stack is `Ctrl+Q` / `Ctrl+W` / `Ctrl+O` / `Ctrl+S` / `Shift+Ctrl+S` / `Ctrl+Z` /
-//! `Shift+Ctrl+Z` / `Ctrl+?`, plus `F9` for a utility pane (`patterns/containers/utility-panes`)
-//! and `Ctrl+N` for a new item. Everything else on that page belongs to features
-//! this product does not have (print, send, preferences, help), and the
-//! system-reserved combinations (`Alt+*`, `Super+*`, `Ctrl+Alt+*`) are used
-//! nowhere — a test asserts both halves.
+//! `Shift+Ctrl+Z` / `Ctrl+?`, plus `Ctrl+N` for a new item. Everything else on
+//! that page belongs to features this product does not have (print, send,
+//! preferences, help), and the system-reserved combinations (`Alt+*`, `Super+*`,
+//! `Ctrl+Alt+*`) are used nowhere — a test asserts both halves.
+//!
+//! `F9` left with the utility pane in S13 (ruling 18): the shell is a sequence of
+//! stages, each with its own controls, so there is no permanent panel for a key to
+//! toggle.
 
 use adw::prelude::*;
 use gtk4 as gtk;
@@ -42,20 +45,11 @@ pub const ACCELERATORS: &[(&str, &str)] = &[
     ("win.undo", "<Control>z"),
     ("win.redo", "<Control><Shift>z"),
     ("win.reset-framing", "<Control>0"),
-    ("win.toggle-sidebar", "F9"),
 ];
 
 /// How the shortcuts dialog groups them (HIG `reference/keyboard`, "Sections").
 pub const SHORTCUT_SECTIONS: &[(&str, &[&str])] = &[
-    (
-        "General",
-        &[
-            "app.shortcuts",
-            "win.toggle-sidebar",
-            "win.close",
-            "app.quit",
-        ],
-    ),
+    ("General", &["app.shortcuts", "win.close", "app.quit"]),
     (
         "Collage",
         &[
@@ -90,7 +84,6 @@ pub fn shortcut_title(action: &str) -> String {
         "win.undo" => gettext("Undo"),
         "win.redo" => gettext("Redo"),
         "win.reset-framing" => gettext("Reset the framing"),
-        "win.toggle-sidebar" => gettext("Show or hide the editing controls"),
         _ => String::new(),
     }
 }

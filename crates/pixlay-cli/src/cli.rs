@@ -644,9 +644,8 @@ fn scan(args: ScanArgs) -> Result<u8, Failure> {
             args.dir.display()
         )));
     }
-    let mut paths = Vec::new();
-    collect_photos(&args.dir, args.recursive, &mut paths)?;
-    paths.sort();
+    let paths = pixlay_imaging::list_folder(&args.dir, args.recursive)
+        .map_err(|error| Failure::Failed(error.to_string()))?;
 
     let mut report = Report::new();
     report.text("status", "ok");
@@ -678,43 +677,6 @@ fn scan(args: ScanArgs) -> Result<u8, Failure> {
     add_stats(&mut report, args.stats, stopwatch.elapsed(), None, "none");
     emit(&report, args.json);
     Ok(EXIT_SUCCESS)
-}
-
-/// Every photo file under `dir`, appended to `out`.
-///
-/// Only real directories are descended into: a symlink that points at its own
-/// parent would otherwise make `--recursive` run forever, and following links is
-/// not what "the photos in this folder" means.
-fn collect_photos(dir: &Path, recursive: bool, out: &mut Vec<PathBuf>) -> Result<(), Failure> {
-    let entries = std::fs::read_dir(dir)
-        .map_err(|error| Failure::Failed(format!("{}: {error}", dir.display())))?;
-    for entry in entries {
-        let entry =
-            entry.map_err(|error| Failure::Failed(format!("{}: {error}", dir.display())))?;
-        let path = entry.path();
-        let kind = entry
-            .file_type()
-            .map_err(|error| Failure::Failed(format!("{}: {error}", path.display())))?;
-        if kind.is_dir() {
-            if recursive {
-                collect_photos(&path, recursive, out)?;
-            }
-            continue;
-        }
-        if is_photo(&path) {
-            out.push(path);
-        }
-    }
-    Ok(())
-}
-
-/// Whether `scan` treats a file as a photo: its extension is one of
-/// `args::PHOTO_EXTENSIONS`, case-insensitively (a camera writes `.JPG`).
-fn is_photo(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .map(|extension| extension.to_ascii_lowercase())
-        .is_some_and(|extension| args::PHOTO_EXTENSIONS.contains(&extension.as_str()))
 }
 
 /// What one file is, as far as the grid is concerned.

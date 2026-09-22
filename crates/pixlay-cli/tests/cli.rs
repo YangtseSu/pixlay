@@ -3138,10 +3138,12 @@ fn scan_and_thumb_keep_the_usage_and_locale_rules() {
     );
 
     // `--help` documents the extensions `scan` actually accepts: the two lists
-    // are the user's only way to find out why a folder came back empty.
+    // are the user's only way to find out why a folder came back empty. The list
+    // itself lives in `pixlay-imaging` since S13, because the picker's library
+    // grid walks the same folder and the two surfaces must agree.
     let help = run(&["--help"]);
     assert_eq!(code(&help), 0);
-    for extension in pixlay_cli::args::PHOTO_EXTENSIONS {
+    for extension in pixlay_imaging::PHOTO_EXTENSIONS {
         assert!(
             stdout(&help).contains(&format!(".{extension}")),
             "--help does not mention .{extension}"

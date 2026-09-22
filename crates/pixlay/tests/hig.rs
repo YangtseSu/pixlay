@@ -3,10 +3,17 @@
 //! One test: GTK lives on one thread (see `support`). What is checked here is the
 //! part of `docs/HIG-REVIEW.md` section 1 that a machine can answer — the
 //! accelerator table against `reference/keyboard`, accessible names
-//! (`guidelines/accessibility`), the adaptive minimum (`guidelines/adaptive`), the
-//! two colour schemes (`guidelines/ui-styling`), the about dialog's metadata — and
-//! the step's own criterion that the interface is English when the locale is
-//! missing, `C`, or unknown.
+//! (`guidelines/accessibility`), the picker's selection mode
+//! (`patterns/containers/selection-mode`, which applies from S13 on), the adaptive
+//! minimum (`guidelines/adaptive`), the two colour schemes
+//! (`guidelines/ui-styling`), the about dialog's metadata — and the step's own
+//! criterion that the interface is English when the locale is missing, `C`, or
+//! unknown.
+//!
+//! **Both stages are checked, in the order a user meets them**: the window opens
+//! on the picker (S13), so the picker's own criteria run first and the editor's
+//! (canvas, colour schemes) run after a project is opened, which is what puts the
+//! editor page on screen.
 
 mod support;
 
@@ -16,14 +23,15 @@ use std::time::Duration;
 use gtk4::prelude::*;
 use libadwaita as adw;
 
+use pixlay::window::Stage;
 use pixlay::{APP_ID, app, canvas, i18n, window::EditorWindow};
 
 /// The accelerator combinations HIG `reference/keyboard` requires *for the
 /// features this product has*: quit, close, open, save, save as, undo, redo, the
-/// shortcuts dialog, a new item, and `F9` for the utility pane
-/// (`patterns/containers/utility-panes`). Print, send, preferences and help belong
-/// to features v1 does not have.
-const REQUIRED: [&str; 10] = [
+/// shortcuts dialog, and a new item. Print, send, preferences, help and the
+/// utility pane's `F9` belong to features v1 does not have — `F9` left with the
+/// pane in S13 (ruling 18).
+const REQUIRED: [&str; 9] = [
     "<Control>q",
     "<Control>w",
     "<Control>o",
@@ -33,7 +41,6 @@ const REQUIRED: [&str; 10] = [
     "<Control><Shift>z",
     "<Control>question",
     "<Control>n",
-    "F9",
 ];
 
 #[test]
@@ -51,9 +58,30 @@ fn the_interface_meets_the_machine_checkable_hig() {
     let application = support::app();
     let window = support::window(&application);
 
+    // ---- stage 1: the picker ------------------------------------------------
     check_shortcuts(&application, &window, &mut failures);
     check_accessible_names(&window, &mut failures);
-    check_adaptive_minimum(&window, &mut failures);
+    check_picker(&window, &mut failures);
+    check_picker_minimum(&window, &mut failures);
+
+    // ---- stage 2: the editor ------------------------------------------------
+    // A project is what puts the editor's page on screen (and what the canvas
+    // needs to be allocated at all), so the canvas checks come after this.
+    let project = support::verify_project();
+    window
+        .open_path(&project)
+        .expect("the verification project opens");
+    assert_eq!(
+        window.stage(),
+        Stage::Editor,
+        "opening a collage shows the editor's stage"
+    );
+    assert!(
+        window.wait_for_idle(support::WAIT),
+        "the open decode finished"
+    );
+    check_accessible_names(&window, &mut failures);
+    check_editor_minimum(&window, &mut failures);
     check_colour_schemes(&window, &mut failures);
     check_about(&mut failures);
     check_language(&mut failures);
@@ -190,6 +218,7 @@ fn is_interactive(widget: &gtk4::Widget) -> bool {
         || widget.is::<gtk4::DrawingArea>()
         || widget.is::<gtk4::ColorDialogButton>()
         || widget.is::<gtk4::MenuButton>()
+        || widget.is::<gtk4::GridView>()
 }
 
 /// The class names of a widget's ancestors, for a failure message that can be
@@ -231,9 +260,124 @@ fn has_accessible_name(widget: &gtk4::Widget) -> bool {
         .any(|label| !label.label().is_empty())
 }
 
-/// At the minimum size the canvas is still drawn in full and the pane's controls
-/// are all still there (HIG `guidelines/adaptive`).
-fn check_adaptive_minimum(window: &EditorWindow, failures: &mut Vec<String>) {
+/// The picker is a collection view in selection mode (S13).
+///
+/// HIG `patterns/containers/selection-mode`, which the plan's review turned from
+/// "not applicable" into a criteria row: a grid whose model is a real
+/// multi-selection, a cell's selection shown by the platform's own check mark
+/// (`.selection-mode` on a `GtkCheckButton`), and the batch action in the header —
+/// the Next button, carrying the count and insensitive below the floor of two.
+fn check_picker(window: &EditorWindow, failures: &mut Vec<String>) {
+    let picker = window.picker().expect("the window has a picker stage");
+    // The fixture folder, so the check does not depend on what `~/Pictures` holds
+    // on the machine running the tests.
+    picker.open_folder(window, &support::fixtures().join("photos"));
+    window.pump(Duration::from_millis(300));
+
+    let model = picker.grid().model();
+    let multi = model
+        .as_ref()
+        .and_then(|model| model.downcast_ref::<gtk4::MultiSelection>());
+    if multi.is_none() {
+        failures.push(format!(
+            "the picker's grid is not backed by a GtkMultiSelection ({:?})",
+            model.as_ref().map(|model| model.type_().name().to_string())
+        ));
+    }
+
+    // The check mark is per cell and uses the platform's style class.
+    let checks: Vec<gtk4::Widget> =
+        support::descendants(picker.grid().upcast_ref::<gtk4::Widget>())
+            .into_iter()
+            .filter(|widget| {
+                widget.is::<gtk4::CheckButton>() && widget.has_css_class("selection-mode")
+            })
+            .collect();
+    if checks.is_empty() {
+        failures.push("no cell carries a .selection-mode check button".to_string());
+    }
+
+    // The count is the button's own text, and the floor of the product's 2–9 rule
+    // turns it off rather than letting Next open an empty collage.
+    let next = picker.next_button();
+    let label = next
+        .label()
+        .map(|label| label.to_string())
+        .unwrap_or_default();
+    if !label.contains('0') {
+        failures.push(format!(
+            "Next does not carry the count of picked photos (label is {label:?})"
+        ));
+    }
+    if next.is_sensitive() {
+        failures.push("Next is sensitive with nothing picked".to_string());
+    }
+    if picker.len() < 2 {
+        failures.push(format!(
+            "the fixture folder has {} photos, too few to check the picker with",
+            picker.len()
+        ));
+        return;
+    }
+    picker.toggle(window, 0);
+    if next.is_sensitive() {
+        failures.push("Next is sensitive with one photo picked".to_string());
+    }
+    picker.toggle(window, 1);
+    if !next.is_sensitive() {
+        failures.push("Next is insensitive with two photos picked".to_string());
+    }
+    let label = next
+        .label()
+        .map(|label| label.to_string())
+        .unwrap_or_default();
+    if !label.contains('2') {
+        failures.push(format!(
+            "Next does not show two picked photos (label is {label:?})"
+        ));
+    }
+    if picker.tray_widget().first_child().is_none() {
+        failures.push("the tray is empty with two photos picked".to_string());
+    }
+    picker.clear_selection();
+    if picker.selected_count() != 0 {
+        failures.push("Esc-equivalent clearing left photos picked".to_string());
+    }
+}
+
+/// At the minimum size the picker's own controls are all still usable
+/// (HIG `guidelines/adaptive`).
+///
+/// What the row used to assert — the utility pane — left with the pane in S13;
+/// what takes its place is the stage the window actually opens on.
+fn check_picker_minimum(window: &EditorWindow, failures: &mut Vec<String>) {
+    let minimum = window.size_request();
+    window.set_default_size(minimum.0, minimum.1);
+    window.pump(Duration::from_millis(500));
+    let picker = window.picker().expect("the window has a picker stage");
+    for (name, widget) in [
+        ("the photo grid", picker.grid().upcast::<gtk4::Widget>()),
+        (
+            "the preview pane",
+            picker.preview_widget().upcast::<gtk4::Widget>(),
+        ),
+        ("the tray", picker.tray_widget().upcast::<gtk4::Widget>()),
+    ] {
+        if widget.width() <= 0 || widget.height() <= 0 {
+            failures.push(format!(
+                "at the minimum size {}x{}, {name} is not allocated ({}x{})",
+                minimum.0,
+                minimum.1,
+                widget.width(),
+                widget.height()
+            ));
+        }
+    }
+}
+
+/// At the minimum size the sheet is still drawn in full inside the canvas
+/// (HIG `guidelines/adaptive`) — the editor's stage of the same rule.
+fn check_editor_minimum(window: &EditorWindow, failures: &mut Vec<String>) {
     let minimum = window.size_request();
     window.set_default_size(minimum.0, minimum.1);
     window.pump(Duration::from_millis(500));
@@ -261,14 +405,6 @@ fn check_adaptive_minimum(window: &EditorWindow, failures: &mut Vec<String>) {
             placement.origin.0,
             placement.origin.1,
         ));
-    }
-    let sidebar = window
-        .sidebar()
-        .expect("the window has a utility pane")
-        .root
-        .clone();
-    if sidebar.width() <= 0 || sidebar.height() <= 0 {
-        failures.push("the utility pane has no size at the minimum window size".to_string());
     }
 }
 
@@ -351,14 +487,16 @@ fn check_english() {
     let application = support::app();
     let window = support::window(&application);
     assert_eq!(
-        i18n::gettext("Untitled collage"),
-        "Untitled collage",
+        i18n::gettext("Pick photos"),
+        "Pick photos",
         "an untranslated msgid has to come back as itself"
     );
+    // The window opens on the picker's stage (S13), and its title is that stage's
+    // own source string.
     assert_eq!(
         window.title().map(|title| title.to_string()).as_deref(),
-        Some("Untitled collage"),
-        "the window title must be the English source string"
+        Some("Pick photos"),
+        "the window title must be the picker's English source string"
     );
     // The copy on screen is the English source string: every visible label of the
     // window, button labels included.
@@ -373,9 +511,18 @@ fn check_english() {
             visible.push(label.label().to_string());
         }
     }
-    // `Sheet size` was the export form's third row until S12c collapsed it into
-    // one quality option; `Quality` and `Format` are what the form has now.
-    for expected in ["Export", "Quality", "Format", "Template"] {
+    // The picker's own copy, and the editor's (whose header is built whether or
+    // not its page is the visible one). `Sheet size` and `Resolution` were the
+    // export form's rows before S12c/S12d collapsed them into one quality option;
+    // `Quality` and `Format` left the window in S13, when ruling 18 removed the
+    // pane that held them — S15's `Export…` dialog is where they come back.
+    for expected in [
+        "Pick photos",
+        "Nothing picked yet",
+        "Next (0)",
+        "Export",
+        "Export…",
+    ] {
         assert!(
             visible.iter().any(|label| label == expected),
             "the interface should read English; {expected:?} is missing from {visible:?}"

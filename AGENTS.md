@@ -297,11 +297,13 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
 - **Widgets**: use libadwaita containers and widgets by default (`AdwApplicationWindow` /
   `AdwToolbarView` / `AdwHeaderBar` / `AdwToast` / `AdwStatusPage` / `AdwAboutDialog` and so on). S7
   landed the shell as `AdwApplicationWindow` + `AdwToolbarView` + `AdwHeaderBar` + `AdwToastOverlay` +
-  `AdwBanner` + `AdwOverlaySplitView` + `AdwPreferencesPage`, with one custom-drawn widget — the
-  canvas, whose stated reason is that it draws the document itself. A custom-drawn widget is the
-  exception and needs a stated reason. The plan of 2026-09-22 adds `AdwNavigationView` (the picker
-  stage pushing the editor), a `GtkGridView` + `GtkMultiSelection` library, a `GtkPicture` preview and
-  a `GtkOverlay` + `GtkFixed` of per-cell buttons over the canvas — none of them custom-drawn, so the
+  `AdwBanner`, with one custom-drawn widget — the canvas, whose stated reason is that it draws the
+  document itself. A custom-drawn widget is the exception and needs a stated reason. **S13 replaced the
+  utility pane** (`AdwOverlaySplitView` + `AdwPreferencesPage` + `F9`, ruling 18) with a sequence of
+  stages: `AdwNavigationView` whose root is the picker — a `GtkGridView` + `GtkMultiSelection` over the
+  folder, an ordered tray of real buttons along the bottom, and a `GtkPicture` preview pane — and whose
+  pushed page is the editor, so `AdwHeaderBar` gets the back button from the view itself. The editor's
+  per-cell buttons arrive in S15 as a `GtkOverlay` + `GtkFixed`. None of those is custom-drawn, so the
   shell keeps exactly one.
 - **Styling**: use only libadwaita style classes and CSS variables; hard-coded colors and spacing
   are forbidden (they break dark mode and high contrast). App styling **follows the system**
@@ -459,7 +461,7 @@ policy: track the latest": latest stable only, no upper pin.
 | `image` 0.25.10 | `pixlay-cli` (**dev only** since S6) | It was S1's encoder stand-in and S6 replaced it (`pixlay_imaging::encode` writes the DPI and the ICC profile that this crate's writers leave at their defaults). What it is still for: the CLI's **tests** read renders back with `image::open` (PNG/JPEG) and write flat photos to render against, and `pixlay-cli/tests/fixtures/generate.py` produced the fixtures | Not a production dependency any more, so the shipped binary no longer links it |
 | `glycin` 4.0.0 | `pixlay-imaging` | The decoding backend, measured against the in-process alternative (S4): the sandboxed loader is the only one of the two that decodes HEIC and AVIF, and it works with an empty environment | Pulls `glib`/`gio` and, through `cfg(target_os = "linux")`, `libseccomp` / `bubblewrap` / `fontconfig` / the distro's loader packages — this is what S8's `depends` must name |
 | `glib` 0.22 / `gio` 0.22 | `pixlay-imaging` | The decode is driven on a private `MainContext`: a glycin frame request only completes while one is iterated (measured: every frame hung under a plain executor until glycin's own 60 s limit). `glib`'s `futures` feature provides `MainContext::block_on`; `gio::File` is glycin's own input type | Already in the tree with `glycin`; named here because the API is used directly |
-|`gtk4` 0.11.5 + `libadwaita` 0.9.2|`pixlay`|The shell: the window, the rows, the utility pane and the dialogs. The `gtk_v4_10` / `v1_8` feature levels are the lowest that carry `GtkFileDialog` and `GtkColorDialogButton` (4.10 dropped the deprecated chooser dialogs) and `AdwDialog` / `AdwToastOverlay` / `AdwShortcutsDialog`|System gtk4 4.24 / libadwaita 1.10 through pkg-config; GTK already depends on cairo, pango and gdk-pixbuf, so the download set grows by the bindings alone. Linked by `pixlay` only — the other four crates must not name it|
+|`gtk4` 0.11.5 + `libadwaita` 0.9.2|`pixlay`|The shell: the window, the two stages, the rows and the dialogs. The `gtk_v4_10` / `v1_8` feature levels are the lowest that carry `GtkFileDialog` and `GtkColorDialogButton` (4.10 dropped the deprecated chooser dialogs) and `AdwDialog` / `AdwToastOverlay` / `AdwShortcutsDialog`|System gtk4 4.24 / libadwaita 1.10 through pkg-config; GTK already depends on cairo, pango and gdk-pixbuf, so the download set grows by the bindings alone. Linked by `pixlay` only — the other four crates must not name it|
 |`gettext-rs` 0.8.0 (`gettext-system`)|`pixlay`|i18n, as the plan of 2026-09-20 decided before S7 (`docs/archive/2026-09-20-STEPS.md`): the same gettext toolchain GTK and libadwaita use for their own copy, so `.po`, the `.desktop` file and AppStream metainfo (S16) all go through one pipeline. `po/POTFILES` and `po/pixlay.pot` are committed|Tiny; `gettext-sys` links the system `libintl` rather than building a private copy. Only `pixlay` depends on it, which is what the language conventions require|
 
 `pangocairo` was a temporary S0 spike dependency, came back in S5 for the canvas text layers, and left

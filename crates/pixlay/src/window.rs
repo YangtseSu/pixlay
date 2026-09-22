@@ -1,20 +1,21 @@
-//! The window: the two panes, the actions, and everything that connects them.
+//! The window: the two stages, their actions, and everything that connects them.
 //!
 //! This is the only place in the GUI that knows about the document. The canvas
-//! draws what it is asked to draw, the sidebar emits commands, and both go through
+//! draws what it is asked to draw, the picker emits commands, and both go through
 //! the methods here — which is also what makes the whole main path reachable from
-//! a test without a pointer: `set_template`, `place_photo`, `set_crop`,
+//! a test without a pointer: `picker`, `open_document`, `place_photo`,
 //! `export_to` are the same calls the widgets make.
 //!
-//! The structure is the one libadwaita's own apps use (HIG `patterns/containers`):
+//! Since S13 the window is a **sequence of stages**, which is HIG's own shape for
+//! a multi-step task (`patterns/nav`) and the 2026-09-22 ruling's answer to "no
+//! parallel modes over one document":
 //!
 //! ```text
-//! AdwToolbarView          top: AdwHeaderBar, bottom: the export progress bar
-//!  └ AdwToastOverlay      short-lived feedback
-//!     └ GtkBox            the missing-photo banner above the content
-//!        └ AdwOverlaySplitView   a utility pane that overlays when narrow
-//!           ├ sidebar    (utility pane, F9)
-//!           └ canvas     (the document, drawn by pixlay_render::draw)
+//! AdwToastOverlay                      one place for every toast
+//!  └ AdwNavigationView
+//!     ├ AdwNavigationPage "picker"     the folder, the grid, the tray (S13)
+//!     └ AdwNavigationPage "editor"     the canvas, pushed by Next or Open…
+//!        └ AdwToolbarView              header / progress / banner + canvas
 //! ```
 //!
 //! Two rules the whole file obeys, both from `AGENTS.md`: a GTK object never
@@ -22,9 +23,14 @@
 //! through `MainContext::invoke`), and nothing here touches a pixel — the canvas
 //! hands the document to the renderer and the export hands it to
 //! `pixlay-imaging`.
+//!
+//! Theming the two stages: the window's own title follows the visible stage, so a
+//! header bar shows "Pick photos" on the picker and the document's name in the
+//! editor.
 
 use std::cell::{Cell, OnceCell, RefCell};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use adw::prelude::*;
@@ -44,8 +50,9 @@ use crate::canvas::{self, Gesture};
 use crate::decode::{Decoder, Reply};
 use crate::export::{self, Event, Progress, Report, Settings};
 use crate::i18n::{fill, gettext, ngettext};
-use crate::sidebar::Sidebar;
+use crate::picker::Picker;
 use crate::state::Editor;
+use crate::thumbs;
 
 /// The template a new document starts from: 4:3 like an album page, five slots,
 /// so the main path starts with a layout that does not need ten photos.
@@ -61,9 +68,9 @@ pub const DEFAULT_TEMPLATE: &str = "mosaic-5-hero";
 /// `GtkSpinButton` starts at its adjustment's *lower* bound, so without this a
 /// new window would export at the row's minimum.
 ///
-/// The row's own bounds live beside the row (`MIN_EXPORT_PX` / `MAX_EXPORT_PX` in
-/// `crate::sidebar`): the maximum is 12000 because `12000² = 144 MP < 200 MP`,
-/// so every template aspect stays inside the budget.
+/// The row's own bounds live beside the form's state (`MIN_EXPORT_PX` /
+/// `MAX_EXPORT_PX` in `crate::export`): the maximum is 12000 because
+/// `12000² = 144 MP < 200 MP`, so every template aspect stays inside the budget.
 pub const DEFAULT_EXPORT_PX: u32 = 4000;
 
 /// How long a live gesture waits for quiet before it becomes an undo step.
@@ -73,6 +80,19 @@ pub const DEFAULT_EXPORT_PX: u32 = 4000;
 /// short enough that the undo a user reaches for next is the gesture they just
 /// finished.
 pub const COMMIT_QUIET: Duration = Duration::from_millis(250);
+
+/// Which stage of the main path the window is showing (S13).
+///
+/// The stages are a sequence, not two modes over one document: the picker is the
+/// root page and the editor is pushed on top of it, so this is simply which page
+/// the navigation view is showing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stage {
+    /// Stages 1–2: the folder, the grid and the tray.
+    Picker,
+    /// Stages 3–7: the document itself.
+    Editor,
+}
 
 mod imp {
     use super::*;
@@ -94,16 +114,27 @@ mod imp {
         pub selection: Cell<Option<usize>>,
         pub guides: Cell<bool>,
         pub canvas: OnceCell<gtk::DrawingArea>,
-        pub sidebar: OnceCell<Sidebar>,
-        pub split: OnceCell<adw::OverlaySplitView>,
+        /// The two stages, and the picker behind the first of them (S13).
+        pub pages: OnceCell<adw::NavigationView>,
+        pub picker_page: OnceCell<adw::NavigationPage>,
+        pub editor_page: OnceCell<adw::NavigationPage>,
+        pub picker: OnceCell<Rc<Picker>>,
+        /// The picker's tile worker: one thread, many small pictures.
+        pub thumbs: OnceCell<Rc<thumbs::Thumbs>>,
         pub banner: OnceCell<adw::Banner>,
         pub toast: OnceCell<adw::ToastOverlay>,
         pub progress: OnceCell<gtk::ProgressBar>,
         pub progress_revealer: OnceCell<gtk::Revealer>,
         pub commit_timer: RefCell<Option<glib::SourceId>>,
-        pub export_path: RefCell<Option<PathBuf>>,
+        /// The export form's state, since ruling 18 removed the pane that held
+        /// it: the format, the one quality option (a long edge in pixels, S12d)
+        /// and the chosen path. S15's `Export…` dialog is the rows over this.
+        pub export: RefCell<Settings>,
         pub exporting: Cell<bool>,
         pub missing: RefCell<Vec<usize>>,
+        /// The last message a toast carried, for the tests: a refusal the user is
+        /// told about is a claim this layer can be held to.
+        pub last_toast: RefCell<Option<String>>,
         pub actions: RefCell<Vec<gio::SimpleAction>>,
     }
 
@@ -127,16 +158,24 @@ mod imp {
                 selection: Cell::new(None),
                 guides: Cell::new(false),
                 canvas: OnceCell::new(),
-                sidebar: OnceCell::new(),
-                split: OnceCell::new(),
+                pages: OnceCell::new(),
+                picker_page: OnceCell::new(),
+                editor_page: OnceCell::new(),
+                picker: OnceCell::new(),
+                thumbs: OnceCell::new(),
                 banner: OnceCell::new(),
                 toast: OnceCell::new(),
                 progress: OnceCell::new(),
                 progress_revealer: OnceCell::new(),
                 commit_timer: RefCell::new(None),
-                export_path: RefCell::new(None),
+                export: RefCell::new(Settings {
+                    long_edge: DEFAULT_EXPORT_PX,
+                    format: pixlay_imaging::encode::Format::Jpeg,
+                    path: PathBuf::new(),
+                }),
                 exporting: Cell::new(false),
                 missing: RefCell::new(Vec::new()),
+                last_toast: RefCell::new(None),
                 actions: RefCell::new(Vec::new()),
             }
         }
@@ -184,12 +223,10 @@ impl EditorWindow {
     fn build(&self) {
         let imp = self.imp();
 
-        // ---- header bar ---------------------------------------------------
-        let toggle = gtk::ToggleButton::builder()
-            .icon_name("sidebar-show-symbolic")
-            .tooltip_text(gettext("Show or hide the editing controls"))
-            .build();
-        a11y::label(&toggle, &gettext("Show or hide the editing controls"));
+        // ---- the editor page ------------------------------------------------
+        // The header of the stage the document lives in: history, saving and the
+        // export. `AdwNavigationView` adds the back button by itself, because this
+        // page is pushed on top of the picker (S13).
         let undo = icon_button("edit-undo-symbolic", &gettext("Undo"));
         undo.set_action_name(Some("win.undo"));
         let redo = icon_button("edit-redo-symbolic", &gettext("Redo"));
@@ -217,7 +254,6 @@ impl EditorWindow {
         a11y::label(&menu, &gettext("Main menu"));
 
         let header = adw::HeaderBar::new();
-        header.pack_start(&toggle);
         header.pack_end(&export);
         header.pack_end(&menu);
         header.pack_end(&save);
@@ -240,62 +276,58 @@ impl EditorWindow {
             .child(&progress)
             .build();
 
-        // ---- content -------------------------------------------------------
+        // ---- the editor page's content --------------------------------------
         let canvas = canvas::build(self);
-        let sidebar = Sidebar::build(self);
-        let split = adw::OverlaySplitView::builder()
-            .sidebar(&sidebar.root)
-            .content(&canvas)
-            .min_sidebar_width(300.0)
-            .max_sidebar_width(380.0)
-            .sidebar_width_fraction(0.28)
-            .build();
-        split.connect_show_sidebar_notify(glib::clone!(
-            #[weak]
-            toggle,
-            move |view: &adw::OverlaySplitView| {
-                toggle.set_active(view.shows_sidebar());
-            }
-        ));
-        toggle.connect_toggled(glib::clone!(
-            #[weak]
-            split,
-            move |button: &gtk::ToggleButton| {
-                split.set_show_sidebar(button.is_active());
-            }
-        ));
-
         // The banner's action is named once, here: its button exists from the
         // start, and a control with no label is a control a screen reader cannot
         // announce (`docs/HIG-REVIEW.md`, section 1).
         let banner = adw::Banner::new("");
         banner.set_button_label(Some(&gettext("Find it…")));
-        let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        content.append(&banner);
-        content.append(&split);
+        let editor_body = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        editor_body.append(&banner);
+        editor_body.append(&canvas);
+        let editor_view = adw::ToolbarView::new();
+        editor_view.add_top_bar(&header);
+        editor_view.add_bottom_bar(&progress_revealer);
+        editor_view.set_content(Some(&editor_body));
+        let editor_page =
+            adw::NavigationPage::with_tag(&editor_view, &gettext("Collage"), "editor");
 
+        // ---- the picker page ------------------------------------------------
+        let picker = Picker::build(self);
+        let picker_page =
+            adw::NavigationPage::with_tag(&picker.root(), &gettext("Pick photos"), "picker");
+
+        // ---- the shell ------------------------------------------------------
+        // A sequence of stages rather than two modes over one document (the
+        // 2026-09-22 ruling): the picker is the root, the editor is pushed on
+        // Next, and Back is how a user returns to the photos.
+        let pages = adw::NavigationView::new();
+        pages.add(&picker_page);
+        pages.add(&editor_page);
+        // One toast surface for both stages: the picker reports a refused pick
+        // and the editor reports a save or an export, and neither outlives the
+        // other.
         let toast = adw::ToastOverlay::new();
-        toast.set_child(Some(&content));
-        let toolbar = adw::ToolbarView::new();
-        toolbar.add_top_bar(&header);
-        toolbar.add_bottom_bar(&progress_revealer);
-        toolbar.set_content(Some(&toast));
+        toast.set_child(Some(&pages));
 
-        self.set_content(Some(&toolbar));
+        self.set_content(Some(&toast));
         self.set_title(Some(&gettext("Untitled collage")));
         self.set_default_size(1100, 760);
-        // The minimum the layout is designed for: the pane overlays the canvas
-        // below `min_sidebar_width` + a canvas of its own, which is what
-        // `AdwOverlaySplitView` is for (HIG `guidelines/adaptive`).
-        self.set_size_request(480, 360);
+        // The minimum the layout is designed for (HIG `guidelines/adaptive`): the
+        // picker's grid needs its column and the editor's canvas its own space,
+        // and below this the window would be showing neither.
+        self.set_size_request(560, 420);
 
         imp.canvas.set(canvas).ok();
-        imp.sidebar.set(sidebar).ok();
-        imp.split.set(split).ok();
+        imp.pages.set(pages).ok();
+        imp.picker_page.set(picker_page).ok();
+        imp.editor_page.set(editor_page).ok();
         imp.banner.set(banner.clone()).ok();
         imp.toast.set(toast).ok();
         imp.progress.set(progress).ok();
         imp.progress_revealer.set(progress_revealer).ok();
+        imp.picker.set(picker).ok();
 
         let banner_weak = self.downgrade();
         banner.connect_button_clicked(move |_banner| {
@@ -323,6 +355,21 @@ impl EditorWindow {
             });
         });
         *imp.decoder.borrow_mut() = Some(decoder);
+
+        // ---- the picker's tiles ---------------------------------------------
+        // A second worker, for a different question: the decoder above builds one
+        // document's bitmaps for one grid, while this one answers many independent
+        // "what does this file look like" requests for the picker's grid.
+        let sender = glib::SendWeakRef::from(self.downgrade());
+        let thumbs = thumbs::Thumbs::spawn(move |reply| {
+            let sender = sender.clone();
+            glib::MainContext::default().invoke(move || {
+                if let Some(window) = sender.upgrade() {
+                    window.on_thumb(reply);
+                }
+            });
+        });
+        imp.thumbs.set(Rc::new(thumbs)).ok();
 
         // ---- unsaved work ---------------------------------------------------
         let close_weak = self.downgrade();
@@ -478,15 +525,6 @@ impl EditorWindow {
                 }
             }),
         );
-        add(
-            "toggle-sidebar",
-            true,
-            Box::new(|window| {
-                if let Some(split) = window.imp().split.get() {
-                    split.set_show_sidebar(!split.shows_sidebar());
-                }
-            }),
-        );
 
         self.insert_action_group("win", Some(&group));
         *self.imp().actions.borrow_mut() = actions;
@@ -496,6 +534,65 @@ impl EditorWindow {
 
     pub fn canvas_widget(&self) -> gtk::DrawingArea {
         self.imp().canvas.get().expect("the canvas exists").clone()
+    }
+
+    /// The picker, for the tests and for the widgets that call into it.
+    pub fn picker(&self) -> Option<Rc<Picker>> {
+        self.imp().picker.get().cloned()
+    }
+
+    /// The picker's tile worker, if the window has one.
+    pub fn thumbs(&self) -> Option<Rc<thumbs::Thumbs>> {
+        self.imp().thumbs.get().cloned()
+    }
+
+    /// One tile or preview arrived from the picker's worker.
+    pub fn on_thumb(&self, reply: thumbs::Reply) {
+        if let Some(picker) = self.imp().picker.get() {
+            picker.on_reply(reply);
+        }
+    }
+
+    /// Whether the picker's stage is the one on screen.
+    pub fn stage(&self) -> Stage {
+        match self.imp().pages.get() {
+            Some(pages) if pages.visible_page_tag().as_deref() == Some("editor") => Stage::Editor,
+            _ => Stage::Picker,
+        }
+    }
+
+    /// Shows the picker: the flow's first stage, and where Back returns to.
+    pub fn show_picker(&self) {
+        let imp = self.imp();
+        if let (Some(pages), Some(page)) = (imp.pages.get(), imp.picker_page.get()) {
+            pages.pop_to_page(page);
+        }
+        self.refresh();
+    }
+
+    /// Pushes the editor's stage (the picker stays below it).
+    fn show_editor(&self) {
+        let imp = self.imp();
+        if let (Some(pages), Some(page)) = (imp.pages.get(), imp.editor_page.get())
+            && pages.visible_page() != Some(page.clone())
+        {
+            pages.push(page);
+        }
+    }
+
+    /// Opens `doc` in the editor's stage: what Next and opening a project both do.
+    pub fn open_document(&self, doc: CollageDoc) {
+        match Editor::new(doc) {
+            Ok(editor) => {
+                *self.imp().editor.borrow_mut() = editor;
+                self.select(None);
+                self.requested_grid_reset();
+                self.set_title(Some(&gettext("Untitled collage")));
+                self.show_editor();
+                self.refresh_document();
+            }
+            Err(error) => self.toast(&error.to_string()),
+        }
     }
 
     pub fn display_document(&self) -> CollageDoc {
@@ -809,13 +906,22 @@ impl EditorWindow {
         self.select(None);
     }
 
+    /// A new collage, which is the flow's first stage again.
+    ///
+    /// `Ctrl+N` used to hand the user an empty sheet of the default template; on
+    /// the re-routed path (ruling 12) a new collage starts by picking photos, so
+    /// this resets the document and shows the picker.
     pub fn new_document(&self) {
         match Editor::new(default_document()) {
             Ok(editor) => {
                 *self.imp().editor.borrow_mut() = editor;
+                if let Some(picker) = self.picker() {
+                    picker.clear_selection();
+                }
                 self.select(None);
-                self.refresh_document();
                 self.set_title(Some(&gettext("Untitled collage")));
+                self.show_picker();
+                self.refresh_document();
             }
             Err(error) => self.toast(&error.to_string()),
         }
@@ -857,6 +963,7 @@ impl EditorWindow {
                 *self.imp().editor.borrow_mut() = editor;
                 self.select(None);
                 self.requested_grid_reset();
+                self.show_editor();
                 self.refresh_document();
                 self.set_title(Some(&path.display().to_string()));
                 Ok(())
@@ -967,19 +1074,25 @@ impl EditorWindow {
     // ---- export -----------------------------------------------------------
 
     pub fn export(&self) {
-        let Some(path) = self.imp().export_path.borrow().clone() else {
+        let chosen = self.imp().export.borrow().path.clone();
+        if chosen.as_os_str().is_empty() {
             self.choose_export_path();
             return;
-        };
-        self.start_export(path);
+        }
+        self.start_export(chosen);
     }
 
+    /// Asks where the export goes and starts it.
+    ///
+    /// Since ruling 18 removed the pane that held the export form, choosing a
+    /// file is the last question the window asks, so it *starts* the export rather
+    /// than filling a row that no longer exists.
     pub fn choose_export_path(&self) {
         let window = self.clone();
         let format = self.export_settings().format;
         let filter = gtk::FileFilter::new();
         filter.set_name(Some(&gettext("Images")));
-        for pattern in ["*.jpg", "*.jpeg", "*.png", "*.tif", "*.tiff"] {
+        for pattern in ["*.jpg", "*.jpeg", "*.png"] {
             filter.add_pattern(pattern);
         }
         let filters = gio::ListStore::new::<gtk::FileFilter>();
@@ -1000,8 +1113,8 @@ impl EditorWindow {
                     if let Ok(file) = result
                         && let Some(path) = file.path()
                     {
-                        *window.imp().export_path.borrow_mut() = Some(path.clone());
-                        window.show_export_settings();
+                        window.imp().export.borrow_mut().path = path.clone();
+                        window.start_export(path);
                     }
                 }
             ),
@@ -1015,35 +1128,22 @@ impl EditorWindow {
     /// settings in two steps rather than passing a placeholder into the dialog's
     /// own suggestion (that circularity was a real defect, found by
     /// `tests/mainpath.rs`).
-    fn export_settings(&self) -> Settings {
-        let chosen = self.imp().export_path.borrow().clone();
-        let mut settings = match self.imp().sidebar.get() {
-            Some(sidebar) => sidebar.settings(PathBuf::new()),
-            None => Settings {
-                long_edge: DEFAULT_EXPORT_PX,
-                format: pixlay_imaging::encode::Format::Jpeg,
-                path: PathBuf::new(),
-            },
-        };
-        settings.path =
-            chosen.unwrap_or_else(|| PathBuf::from(suggested_export_name(self, settings.format)));
+    ///
+    /// Since ruling 18 removed the utility pane, this state *is* the export form:
+    /// the format and the one quality option live here, and S15's `Export…` dialog
+    /// is the rows over them.
+    pub fn export_settings(&self) -> Settings {
+        let mut settings = self.imp().export.borrow().clone();
+        if settings.path.as_os_str().is_empty() {
+            settings.path = PathBuf::from(suggested_export_name(self, settings.format));
+        }
         settings
     }
 
     /// Sets the export form's state, which is also what a test walks the
     /// background export with.
     pub fn set_export_settings(&self, settings: &Settings) {
-        *self.imp().export_path.borrow_mut() = Some(settings.path.clone());
-        if let Some(sidebar) = self.imp().sidebar.get() {
-            sidebar.show_settings(settings);
-        }
-    }
-
-    fn show_export_settings(&self) {
-        let settings = self.export_settings();
-        if let Some(sidebar) = self.imp().sidebar.get() {
-            sidebar.show_settings(&settings);
-        }
+        *self.imp().export.borrow_mut() = settings.clone();
     }
 
     /// Exports on a worker thread, with the progress bar in the bottom bar.
@@ -1081,8 +1181,7 @@ impl EditorWindow {
                 }
             });
         };
-        *self.imp().export_path.borrow_mut() = Some(settings.path.clone());
-        self.show_export_settings();
+        *self.imp().export.borrow_mut() = settings.clone();
         export::spawn(doc, sources.paths, settings, report);
     }
 
@@ -1276,14 +1375,56 @@ impl EditorWindow {
         }
     }
 
+    /// Waits until every listed photo has a tile or a reported refusal.
+    ///
+    /// The picker's counterpart of [`wait_for_idle`](Self::wait_for_idle), and the
+    /// same shape: pump the context the worker delivers into, and stop when there
+    /// is nothing left to arrive.
+    pub fn wait_for_tiles(&self, timeout: Duration) -> bool {
+        let context = glib::MainContext::default();
+        let deadline = Instant::now() + timeout;
+        loop {
+            while context.pending() {
+                context.iteration(false);
+            }
+            match self.picker() {
+                Some(picker) if picker.tiles_built() + picker.failures().len() >= picker.len() => {
+                    return true;
+                }
+                None => return false,
+                _ => {}
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(4));
+        }
+    }
+
+    /// Waits until the preview pane has decoded a photo.
+    pub fn wait_for_preview(&self, timeout: Duration) -> bool {
+        let context = glib::MainContext::default();
+        let deadline = Instant::now() + timeout;
+        loop {
+            while context.pending() {
+                context.iteration(false);
+            }
+            match self.picker() {
+                Some(picker) if picker.preview_pixels().is_some() => return true,
+                None => return false,
+                _ => {}
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(4));
+        }
+    }
+
     // ---- presentation -----------------------------------------------------
 
-    /// Rebuilds the pane, the title and the buttons from the document.
+    /// Rebuilds the title and the buttons from the document and the stage.
     pub fn refresh(&self) {
-        if let Some(sidebar) = self.imp().sidebar.get() {
-            sidebar.update(self);
-        }
-        self.show_export_settings();
         self.update_actions();
         self.update_title();
         self.update_banner();
@@ -1308,20 +1449,22 @@ impl EditorWindow {
                 editor.can_undo(),
                 editor.can_redo(),
                 self.selection().is_some(),
-                self.selection()
-                    .and_then(|slot| doc.cells.get(slot))
-                    .is_some_and(|cell| cell.source.is_some()),
                 doc.cells.iter().any(|cell| cell.source.is_some()),
             )
         };
-        let (undo, redo, selected, _has_photo, has_any_photo) = state;
+        let (undo, redo, selected, has_any_photo) = state;
+        // The document's own actions belong to the stage that shows the document:
+        // Save with the picker on screen would save a collage the user has not
+        // finished choosing (`AGENTS.md`: a document edit only happens through the
+        // editor's own page).
+        let editing = self.stage() == Stage::Editor;
         for action in self.imp().actions.borrow().iter() {
             let enabled = match action.name().as_str() {
                 "undo" => undo,
                 "redo" => redo,
-                "save" | "save-as" => true,
-                "export" | "choose-export-path" => has_any_photo,
-                "add-photo" | "clear-photo" | "reset-framing" => selected,
+                "save" | "save-as" => editing,
+                "export" => editing && has_any_photo,
+                "add-photo" | "clear-photo" | "reset-framing" => editing && selected,
                 _ => action.is_enabled(),
             };
             action.set_enabled(enabled);
@@ -1340,7 +1483,23 @@ impl EditorWindow {
             name
         };
         drop(editor);
-        self.set_title(Some(&title));
+        // The visible page decides what the header bar and the window are called:
+        // the picker is a titled page of its own, and the editor's page shows the
+        // document's name (S13).
+        match self
+            .imp()
+            .pages
+            .get()
+            .and_then(|pages| pages.visible_page_tag())
+        {
+            Some(tag) if tag.as_str() == "editor" => {
+                if let Some(page) = self.imp().editor_page.get() {
+                    page.set_title(&title);
+                }
+                self.set_title(Some(&title));
+            }
+            _ => self.set_title(Some(&gettext("Pick photos"))),
+        }
     }
 
     fn update_banner(&self) {
@@ -1365,11 +1524,21 @@ impl EditorWindow {
 
     /// Short feedback that does not need an answer (HIG `patterns/feedback`).
     pub fn toast(&self, message: &str) {
+        *self.imp().last_toast.borrow_mut() = Some(message.to_string());
         if let Some(overlay) = self.imp().toast.get() {
             overlay.add_toast(adw::Toast::new(message));
         } else {
             glib::g_warning!("pixlay", "{message}");
         }
+    }
+
+    /// The last message a toast carried, if any.
+    ///
+    /// The tests' handle on "a refusal is reported rather than applied silently"
+    /// (`AGENTS.md`: a visual conclusion has to become something a test can read,
+    /// and a toast is not a widget tree a test can walk).
+    pub fn last_toast(&self) -> Option<String> {
+        self.imp().last_toast.borrow().clone()
     }
 
     /// The window's current notice, when it has one: the banner text shown above
@@ -1382,11 +1551,6 @@ impl EditorWindow {
     /// The slots whose photo could not be found, in slot order.
     pub fn missing_photos(&self) -> Vec<usize> {
         self.imp().missing.borrow().clone()
-    }
-
-    /// The sidebar, for the tests and for the actions that put a value back.
-    pub fn sidebar(&self) -> Option<&Sidebar> {
-        self.imp().sidebar.get()
     }
 
     pub fn is_dirty(&self) -> bool {

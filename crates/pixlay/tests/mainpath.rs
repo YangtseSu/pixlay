@@ -1,4 +1,4 @@
-//! The main path, walked by machine: pick a template → place photos → adjust
+//! The main path, walked by machine: pick photos → Next → pick a layout → adjust
 //! framing → export.
 //!
 //! The step's human criterion is that a person can walk this in under three
@@ -8,14 +8,23 @@
 //! two things the criterion "normal under Wayland, with no blocking UI" means
 //! mechanically: the export call returns immediately and the work happens on
 //! another thread.
+//!
+//! **Re-routed 2026-09-22** (ruling 12): the path starts by picking photos in the
+//! picker stage, and the document only exists once Next has been pressed. The
+//! retired walk — "pick a template, then place photos into an empty sheet" — is in
+//! `docs/archive/2026-09-20-STEPS.md`; S13 rewrote this test for the path that
+//! replaced it.
 
 mod support;
 
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use pixlay::canvas::Gesture;
 use pixlay::export::Settings;
-use pixlay_core::{CollageDoc, CropTransform};
+use pixlay::window::Stage;
+
+use pixlay_core::{CollageDoc, Command, CropTransform, Project};
 use pixlay_imaging::encode::Format;
 
 #[test]
@@ -25,33 +34,116 @@ fn the_main_path_can_be_walked() {
     let window = support::window(&app);
     let started = Instant::now();
 
-    // ---- pick a template ------------------------------------------------
-    window.set_template("grid-4-2x2");
-    assert_eq!(window.document().template.name, "grid-4-2x2");
-    assert_eq!(window.document().cells.len(), 4, "four slots to fill");
-
-    // ---- place photos ----------------------------------------------------
-    window.select(Some(0));
-    window.place_photo(0, support::photo("landscape.jpg"));
-    // The other three arrive as a drop, which is the gesture the canvas handles:
-    // the pointer is over slot 0, and the drop fills the slots after it.
-    window.drop_files(
-        vec![
-            support::photo("portrait.jpg"),
-            support::photo("square.png"),
-            support::photo("dated.jpg"),
-        ],
-        Some(0),
-    );
-    let doc = window.document();
+    // ---- pick photos ------------------------------------------------------
+    // Stages 1–2: the window opens on the picker, and the fixture folder stands in
+    // for the user's own (the folder chooser's dialog is the only part this walk
+    // cannot drive).
     assert_eq!(
-        doc.cells
+        window.stage(),
+        Stage::Picker,
+        "the window opens on the picker's stage"
+    );
+    let picker = window.picker().expect("the window has a picker stage");
+    picker.open_folder(&window, &support::fixtures().join("photos"));
+    assert!(
+        picker.len() >= 4,
+        "the fixture folder has the photos this walk needs ({} found)",
+        picker.len()
+    );
+    // The four photos this walk uses, in the order they are picked — which is the
+    // order of the cells, and is asserted against the CLI's own `init --photo`
+    // below.
+    let wanted = ["landscape.jpg", "portrait.jpg", "square.png", "dated.jpg"];
+    let mut positions = Vec::new();
+    for name in wanted {
+        let index = picker
+            .files()
+            .iter()
+            .position(|path| path.ends_with(name))
+            .unwrap_or_else(|| panic!("{name} is not in the fixture folder"));
+        positions.push(index);
+    }
+    for position in &positions {
+        picker.toggle(&window, *position as u32);
+    }
+    let picked = picker.selection().photos().to_vec();
+    assert_eq!(picked.len(), 4, "four photos were picked");
+    assert!(
+        picked
+            .iter()
+            .zip(wanted)
+            .all(|(path, name)| path.ends_with(name)),
+        "the pick keeps the order the photos were clicked in: {picked:?}"
+    );
+    // Nothing is a document yet: the picker's stage is the user's, and Next is what
+    // turns a pick into one.
+    assert_eq!(
+        window
+            .document()
+            .cells
             .iter()
             .filter(|cell| cell.source.is_some())
             .count(),
-        4,
-        "every slot holds a photo"
+        0,
+        "picking photos does not touch the document"
     );
+
+    // ---- Next: the pick becomes a document --------------------------------
+    assert!(picker.can_continue(), "four photos are enough to continue");
+    picker.next(&window);
+    assert_eq!(
+        window.stage(),
+        Stage::Editor,
+        "Next moves to the editor's stage"
+    );
+    let doc = window.document();
+    assert_eq!(doc.cells.len(), 4, "the layout has a cell per photo");
+    assert!(
+        doc.cells
+            .iter()
+            .filter(|cell| cell.source.is_some())
+            .count()
+            == 4,
+        "every cell holds a photo"
+    );
+    // The tray's order and the CLI's argument order are one policy: the same four
+    // paths through `pixlay_core::Selection`, which is what `init --photo` uses.
+    let written = support::artifact("mainpath-init.pixlay");
+    let argv: Vec<std::ffi::OsString> = {
+        let mut argv: Vec<std::ffi::OsString> = ["init", "--template", &doc.template.name, "--out"]
+            .iter()
+            .map(std::ffi::OsString::from)
+            .collect();
+        argv.push(written.clone().into());
+        for path in &picked {
+            argv.push("--photo".into());
+            argv.push(path.clone().into());
+        }
+        argv
+    };
+    let status = pixlay_cli::cli::run(&argv).expect("the CLI writes the project");
+    assert_eq!(status, 0, "init --photo succeeds on the same selection");
+    // The CLI rebases each `source` relative to the project file (that is what
+    // makes a project movable) and a rebased path is joined lexically, so the two
+    // sides are compared as files rather than as spellings: the order is the claim.
+    let from_cli = Project::load(&written).expect("the CLI's project loads");
+    let resolved: Vec<PathBuf> = from_cli
+        .sources()
+        .expect("its photos resolve")
+        .into_iter()
+        .map(|source| same_file(&source.expect("every cell holds its photo")))
+        .collect();
+    let expected: Vec<PathBuf> = picked.iter().map(|path| same_file(path)).collect();
+    assert_eq!(
+        resolved, expected,
+        "the tray's order is the CLI's argument order, cell for cell"
+    );
+    assert_eq!(
+        from_cli.doc().cells.len(),
+        doc.cells.len(),
+        "and the same number of cells"
+    );
+
     assert!(
         window.wait_for_idle(support::WAIT),
         "the background decode finished"
@@ -107,15 +199,23 @@ fn the_main_path_can_be_walked() {
     assert_eq!(window.document().cells[1].crop, framed, "redo comes back");
 
     // ---- export ----------------------------------------------------------
+    // The export form's state, which ruling 18 moved out of the pane and S15's
+    // `Export…` dialog will show as its rows.
     let out = support::artifact("mainpath.jpg");
     let settings = Settings {
         long_edge: 1500,
         format: Format::Jpeg,
         path: out.clone(),
     };
+    window.set_export_settings(&settings);
+    let echoed = window.export_settings();
+    assert_eq!(
+        echoed.long_edge, 1500,
+        "the form's quality option is read back"
+    );
+    assert_eq!(echoed.format, Format::Jpeg, "and its format");
     // The background path: the call has to return while the work happens on the
     // export thread, or the window would be frozen for the whole render.
-    window.set_export_settings(&settings);
     let call = Instant::now();
     window.start_export(out.clone());
     let returned = call.elapsed();
@@ -166,6 +266,11 @@ fn the_main_path_can_be_walked() {
     other.open_path(&project).expect("the project reopens");
     assert_eq!(other.document(), window.document());
     assert!(!other.is_dirty(), "a freshly opened project is not dirty");
+    assert_eq!(
+        other.stage(),
+        Stage::Editor,
+        "opening a project lands on the editor's stage, not the picker"
+    );
 
     // ---- a photo that is not there ---------------------------------------
     // The contract's "a missing photo is visible, not silent": the slot renders
@@ -180,7 +285,7 @@ fn the_main_path_can_be_walked() {
         path: support::artifact("missing.jpg"),
     });
     window
-        .apply(pixlay_core::Command::SetSource {
+        .apply(Command::SetSource {
             slot: 2,
             source: Some(gone.clone()),
         })
@@ -220,4 +325,13 @@ fn the_main_path_can_be_walked() {
         "the whole walk, machine-driven, took {:?}; the window is {picture:?}",
         started.elapsed()
     );
+}
+
+/// The file a path names, resolved: `../../../…` and the path it points at are
+/// the same photo, and the claim under test is the *order*, not the spelling.
+///
+/// A path that cannot be resolved (it does not exist) is returned as it stands,
+/// so the failure still names what was looked for.
+fn same_file(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }

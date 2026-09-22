@@ -900,11 +900,41 @@ The GUI is the fifth consumer of the same document, and what it adds is interact
 contract is what a caller can rely on without looking at a widget:
 
 **Since the 2026-09-22 ruling the window is a sequence of stages** (`docs/2026-09-22-STEPS.md`,
-S13–S15): a picker (`AdwNavigationView`'s root page — a `GtkGridView` library, an ordered selection
-tray, a zoomable preview of the focused photo), a layout stage, and then the editor of S7. The
-invariants above are unchanged by the sequence: still one document, one renderer, one gesture per
-command. The library and the gallery are **not** renderers of the document — a candidate thumbnail is
-`render_rgb8` of the same drawn document at a smaller size, and S14's criteria hold it to that.
+S13–S15), and **S13 landed the first of them**: the picker is the `AdwNavigationView`'s root page and
+the editor of S7 is pushed on top of it, so a new window opens on photos rather than on an empty sheet.
+The layout stage of S14 will sit between them. The invariants above are unchanged by the sequence: still
+one document, one renderer, one gesture per command. The library and the gallery are **not** renderers of
+the document — a candidate thumbnail is `render_rgb8` of the same drawn document at a smaller size, and
+S14's criteria hold it to that.
+
+What the picker stage is, as of S13 (`crates/pixlay/src/picker.rs`), and what a caller may rely on
+without looking at a widget:
+
+- **It lists the session's folder and nothing else.** `XDG_PICTURES_DIR` (or `~/Pictures`) on the first
+  map, then whatever the folder chooser last picked — kept for the session, never written to a
+  configuration file (ruling 8). The listing is `pixlay_imaging::list_folder`, the same function the
+  CLI's `scan` walks with, so the grid and a listing of the same folder cannot disagree about which
+  files are photos or in what order.
+- **The pick is ordered, and the order is the click order.** A `GtkMultiSelection` is a set, so the
+  ordered list is the picker's own (`pixlay_core::Selection`, the policy `init --photo` shares): the
+  tray is where that order is visible, re-orderable (`move_photo`) and truncatable (`remove_at`), and
+  `Picker::document` is the one place the pick becomes a document. The cell's click *toggles* — the
+  picker claims the gesture, because GTK's own row handling replaces a multi-selection on a plain click
+  (`gtklistfactorywidget.c`: `modify = Ctrl held`) — and a pick past the cap is refused with a visible
+  report rather than truncated (ruling 3).
+- **A tile and the preview are `pixlay_imaging::thumbnail` pixels**, at `TILE_PX` (256) and `PREVIEW_PX`
+  (1024) long edges — the same function the CLI's `thumb` writes to a file. Measured (S13's own test):
+  the preview pane's pixels against `pixlay-render thumb --px 1024` of the same photo differ by **RMSE
+  0.0218** over 1024x768 pixels (threshold 6), which is the 8-bit PNG round trip, not a second resampler.
+- **Tiles are built on one worker thread** (`thumbs.rs`) and cross back as plain bytes through
+  `MainContext::invoke`; a folder listing therefore returns before any decode happens, and the grid
+  fills progressively. Measured (S13, debug profile): 14 tiles at 256 px in **5.6 s**, 13 of them
+  painted into bound cells when the snapshot was taken.
+- **The stage has no zoom of its own**: the preview is `Contain`-fitted (ruling 2's "fit and zoom" is
+  the photo filling the pane), and magnification is the editor's business.
+- **The export form's state lives in the window** (`EditorWindow::set_export_settings` /
+  `export_settings`), because ruling 18 removed the pane that used to hold it; S15's `Export…` dialog is
+  the rows over that state, and `MIN_EXPORT_PX` / `MAX_EXPORT_PX` (`export.rs`) are its bounds.
 
 - **One document at a time**, edited only through `Command` (`History` in `pixlay-core`): the
   window has no second edit path, and **one gesture is one command**, committed when the
@@ -944,15 +974,15 @@ command. The library and the gallery are **not** renderers of the document — a
   `PREVIEW_SOURCE_SCALE` (1.25) times the grid's long edge — the largest value that keeps the measured
   step inside the frame budget — or the photo itself when that is smaller; §4.1 has the shape and §8
   ("S12b") the numbers, including what it costs in fidelity.
-- **Background work, one thread each.** Decoding (`decode.rs`) and exporting (`export.rs`) run
-  on their own threads and hand plain data back through `MainContext::invoke`, because a GTK
-  object may not leave the main thread. Decode requests are coalesced (latest wins) so a drag
+- **Background work, one thread each.** Decoding (`decode.rs`), the picker's tiles (`thumbs.rs`) and
+  exporting (`export.rs`) run on their own threads and hand plain data back through
+  `MainContext::invoke`, because a GTK object may not leave the main thread. Decode requests are coalesced (latest wins) so a drag
   costs one build at a time, and the re-use of what a gesture does not change is
   `pixlay_imaging::Preview`'s (S12, above). An export reports progress, which
   the window shows in a progress bar rather than a modal.
 - **The accelerator table is data** (`crates/pixlay/src/app.rs::ACCELERATORS`): the bindings, the
   shortcuts dialog and the HIG test all read it, so they cannot drift. No binding uses
-  `Alt+*`, `Super+*` or `Ctrl+Alt+*`.
+  `Alt+*`, `Super+*` or `Ctrl+Alt+*`, and `F9` left the table with the utility pane (S13).
 - **Everything user-visible goes through gettext**, domain `pixlay`, source language English
   (`i18n.rs`); `po/POTFILES` lists this crate's sources, `po/pixlay.pot` is committed, and with
   no catalog — a missing, `C` or unknown locale — the msgs come back as the English source
@@ -964,5 +994,6 @@ command. The library and the gallery are **not** renderers of the document — a
 
 What the window does *not* do, by decision: no second renderer, no second document model, no
 **parallel** modes over one document (a sequential creation flow is not a mode — 2026-09-22's ruling),
-no per-window state that a saved project does not carry, and no translation
-files (S16 adds the language packs).
+no utility pane (ruling 18: the shell has one custom-drawn widget, the canvas, and every other control
+is a stock or libadwaita widget), no per-window state that a saved project does not carry, and no
+translation files (S16 adds the language packs).

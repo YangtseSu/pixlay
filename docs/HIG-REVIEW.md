@@ -5,12 +5,15 @@ every HIG section into the three tiers "machine-checkable criteria / visual crit
 clearly which chapters **have already been read page by page** and which have not.
 
 - Spec: <https://developer.gnome.org/hig/> (no version number, **not frozen**; cite URLs and section names)
-- The most recent page-by-page read of this file: **2026-09-21 (S7)**. At the start of every UI step (S7, S8), re-read the relevant chapters before updating this file.
+- The most recent page-by-page read of this file: **2026-09-22 (S13)**. At the start of every UI step (S7, S8, S13, …), re-read the relevant chapters before updating this file.
 - **Re-routed 2026-09-22**: the main path became `open → pick 2–9 photos → pick a layout → adjust →
   export` (`docs/2026-09-22-UX-DIRECTION.md`; the rulings are in `docs/2026-09-22-STEPS.md`). Two things
   in this file changed because of it — **`selection-mode` now applies** (the picker is a collection view)
-  and the phone-style deviation is narrower (the chrome, not the capability). The chapters the new stages
-  need are still listed in section 4 and are read when the picker stage starts.
+  and the phone-style deviation is narrower (the chrome, not the capability).
+- **S13 (2026-09-22) landed the picker stage and read the chapters it needed**: `patterns/containers/selection-mode`,
+  `patterns/nav`, `guidelines/navigation` and `guidelines/pointer-touch`. Their criteria are in the table below,
+  and the utility pane's row is now "not applicable" rather than "the chapters are unread" — the pane left the
+  shell in this step (ruling 18).
 - As soon as a chapter is read, write that chapter's criteria into the table above: whatever can be computed goes into the tests (`crates/pixlay/tests/hig.rs`),
   whatever can only be looked at goes into "section 2". **Do not let it pile up** — HIG changes, and letting it pile up is the same as re-reading it next time.
 
@@ -18,7 +21,14 @@ clearly which chapters **have already been read page by page** and which have no
 
 Chapters read page by page for S7: `reference/keyboard`, `guidelines/adaptive`, `guidelines/ui-styling`,
 `guidelines/accessibility`, `guidelines/writing-style`, `patterns/containers/utility-panes`, `patterns/feedback`
-(index). The rest of `patterns/containers` and `patterns/feedback` are still only their index pages (section 4).
+(index). Read for S13, when the picker stage (the first step whose widgets are new) landed:
+`patterns/containers/selection-mode`, `patterns/nav`, `guidelines/navigation`, `guidelines/pointer-touch`.
+The rest of `patterns/containers` and `patterns/feedback` are still only their index pages (section 4).
+
+*One reading note, so the next reader does not repeat the work:* `patterns/nav` and `guidelines/navigation`
+returned their page furniture but no prose when fetched on 2026-09-22 (the diagrams and the tables are rendered
+client-side), so the navigation criteria below come from `selection-mode`, `pointer-touch` and the libadwaita
+widget documentation (`AdwNavigationView`, `AdwHeaderBar`) instead of from that chapter's text.
 
 | HIG chapter | Landing point | Criteria |
 |---|---|---|
@@ -27,11 +37,13 @@ Chapters read page by page for S7: `reference/keyboard`, `guidelines/adaptive`, 
 | `guidelines/accessibility` | test `tests/hig.rs::check_accessible_names` + "section 2" of this file | every interactive control has an accessible name — set explicitly, or derived by GTK from the control's own label; the check walks the widget tree and accepts both, since GTK names a `GtkButton` from its `GtkLabel`. High contrast / large text / screen reader / OSK are visual steps (section 2) |
 | `guidelines/keyboard` | `app.rs` (`ACCELERATORS`), `canvas.rs` (arrow keys, `+`/`-`, `0`, `Enter`, `Delete`), test `tests/hig.rs::check_shortcuts` | every action has a keyboard path: the actions the table binds are checked against `GtkApplication::accels_for_action`, and every other action is on a focusable control. The canvas is focusable and pans, zooms, resets, chooses a photo and clears a slot from the keyboard |
 | `reference/keyboard` | same test | the required set for this product (`Ctrl+Q`, `Ctrl+W`, `Ctrl+O`, `Ctrl+S`, `Shift+Ctrl+S`, `Ctrl+Z`, `Shift+Ctrl+Z`, `Ctrl+?`, `Ctrl+N`) is present — `F9` left with the pane (ruling 18, S13) — and nothing binds the system's own combinations (`Alt+*`, `Super+*`, `Ctrl+Alt+*`) — both asserted against the one table the dialog and the bindings share |
-| `guidelines/adaptive` | `window.rs` (the shell), test `tests/hig.rs::check_adaptive_minimum` | no utility pane since ruling 18 (S13): at the minimum window size the sheet is still drawn in full inside the canvas — asserted; the `AdwOverlaySplitView` overlay behaviour the old row described left with the pane |
+| `guidelines/adaptive` | `window.rs` (the shell), tests `tests/hig.rs::check_picker_minimum` and `::check_editor_minimum` | no utility pane since ruling 18 (S13), so the two stages are checked instead: at the minimum window size the picker's grid, preview pane and tray are all allocated, and the sheet is still drawn in full inside the canvas — both asserted. The `AdwOverlaySplitView` overlay behaviour the old row described left with the pane |
 | `guidelines/writing-style` | every string in `crates/pixlay/src`, `po/pixlay.pot` | header capitalization on buttons, menu items and tooltips; sentence capitalization on row, slider and combo labels; an ellipsis exactly where the action asks for more input (`Open…`, `Save as…`, `Choose photo…`); no `i.e.`/`e.g.`; no pronouns; no trailing periods outside explanatory body text. The wording itself is a visual step (section 2), and whether a string missed its `gettext` call is only checkable by eye (the extractor cannot see what nobody wrapped) |
 | `patterns/containers/utility-panes` | — | **not applicable since ruling 18** (S13 removes the pane): a linear three-minute flow owns its controls per stage — tray, gallery, floating buttons, dialogs — and a permanent panel would be a second surface for every one of those decisions |
 | `patterns/feedback` (index) | `window.rs`, `export.rs` | reversible feedback goes through `AdwToast` ("Saved …", "Exported …", a failed decode); the missing-photo case is an `AdwBanner` with a button that selects the slot; export progress is a `GtkProgressBar` in the bottom bar, never a modal dialog; the dialogs are the unsaved-changes confirmation on close plus `Export…` and `Frame…` (ruling 18), both `AdwDialog` rows rather than permanent controls |
-| `patterns/containers/selection-mode` | the picker (the plan's S13), test `tests/hig.rs` | **Applies from the picker stage on** (flipped 2026-09-22): the photo picker *is* a collection view with multi-select batch operations, so it is built in selection mode — a cell's selection is a toggle with the platform's own checkmark, `Ctrl+A` selects all, a selection past the cap is reported rather than truncated, the batch action is the header bar's Next button (carrying the count), and `Esc` leaves selection mode. The canvas is unaffected: this page's own advice ("when editing is the primary interaction there should be no separate edit mode") still governs it, and it has no mode of its own |
+| `patterns/containers/selection-mode` | `picker.rs`, tests `tests/hig.rs::check_picker` and `tests/picker.rs` | **Applies from the picker stage on** (flipped 2026-09-22), and S13 landed it: a `GtkGridView` over the folder with a `GtkMultiSelection`, a cell whose click *toggles* it (the picker owns the click, because GTK's own row handling *replaces* a multi-selection on a plain click — measured in `gtklistfactorywidget.c`), the platform's own round check mark (`.selection-mode` on a `GtkCheckButton`, an indicator with `can-target = false` so the cell keeps the click), `Ctrl+A` selecting all, a selection past the cap **reported** rather than truncated, the batch action being the header bar's Next button (carrying the count, insensitive below two), and `Esc` clearing the pick. The canvas is unaffected: this page's own advice ("when editing is the primary interaction there should be no separate edit mode") still governs it, and it has no mode of its own |
+| `patterns/nav` + `guidelines/navigation` | `window.rs` (`AdwNavigationView`), `picker.rs`, `tests/mainpath.rs` | **a sequence, not two modes** (the 2026-09-22 ruling): the picker is the root page and the editor is pushed on it, so `AdwHeaderBar` gets the back button from the view itself, `Back` returns to the photos, and the window title follows the visible stage. `tests/mainpath.rs` asserts the stage after Next and after `Open…` |
+| `guidelines/pointer-touch` | `picker.rs`, `canvas.rs`, `tests/picker.rs` | click targets are `TILE_SIZE` (128 px) squares, well past the minimum; the picker's preview is a *pan* view by this page's own table (its picture is drawn `Contain`-fitted, so it never needs a zoom gesture in this stage); every pointer action on the grid has a keyboard path (arrows move the grid's focus, `Enter`/`Space` toggle through the platform's bindings, `Ctrl+A` and `Esc` are the picker's own keys); nothing is revealed on hover alone — the check mark is always visible |
 
 ## 2. Visual steps
 
