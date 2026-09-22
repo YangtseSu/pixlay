@@ -1,4 +1,5 @@
-/* The app's only stylesheet: what the picker's picked cells look like (S13b).
+/* The app's only stylesheet: what a picker cell looks like, and the status bar's
+ * padding (S13c).
  *
  * A picked cell is shown by a highlight, not by the platform's
  * `.selection-mode` check box: the 2026-09-22 ruling
@@ -9,19 +10,52 @@
  * Colours come from the theme's own variables and never from a literal:
  * `--accent-bg-color` is what libadwaita defines for both colour schemes and for
  * high contrast (measured on this machine: libadwaita 1.10's
- * `/org/gnome/Adwaita/styles/gtk.css` line 100 defines `--accent-bg-color`,
+ * `/usr/share/libadwaita-1` block defines `--accent-bg-color`,
  * `--accent-fg-color` and `--accent-color`), so the highlight follows the
- * system's accent and its contrast settings. The border is transparent — a
- * keyword, not a colour — while a cell is not picked, so the photo does not move
- * when the highlight appears, and the accent is used as a border rather than as a
- * fill so the photo stays the brightest thing in the cell.
+ * system's accent and its contrast settings; `--border-color` is libadwaita's own
+ * dimmed outline (`color-mix(in srgb, currentColor var(--border-opacity),
+ * transparent)`), which follows the theme's foreground and the cell's state.
+ *
+ * The geometry is the reference's *measured* one, not its stylesheet's: gthumb's
+ * `data/css/style.css` asks for `padding: 10px` on the grid and `margin: 10px` on
+ * every child, but its own window shows cells at a **250 device = 125 logical**
+ * pitch (`docs/2026-09-22-STEPS.md`, `S13c · What the reference actually
+ * measures`), i.e. touching. The margins are therefore zero and the outline is
+ * drawn *on* the cell: with gthumb's 10 px margins plus its 10 px padding a 128 px
+ * cell would make the strip 170 logical px tall, which puts the media area at 75 %
+ * of the band above the status bar — below the ruling's own measured 88 % and
+ * below S13c's own criterion of 80 %.
  */
 
 .picker-cell {
-  border: 3px solid transparent;
-  border-radius: 8px;
+  margin: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+}
+
+/* The strip's own item padding, which the theme sets to 3 px a side (`gridview >
+ * child { padding: 3px }` in GTK 4.24's base stylesheet, measured 2026-09-23: it is
+ * what makes the item 136 px tall where its cell is 130). Zeroing it is what the
+ * ruling's proportions need — 136 px of strip is 79.6 % of the band above the status
+ * bar and 130 is 80.9 % — and styling this node is what the reference does too:
+ * gthumb's own stylesheet carries `.thumbnail-grid { padding: 10px }` and
+ * `.thumbnail-grid > child { margin: 10px; border-radius: 10px; border: 1px solid
+ * …}` (`data/css/style.css:26-42`), i.e. the cell's geometry is the app's business
+ * and not the theme's. */
+.thumbnail-grid > child {
+  padding: 0;
 }
 
 .picker-cell.picked {
   border-color: var(--accent-bg-color);
+}
+
+/* gthumb's `.statusbar { padding: 4px }` (`data/css/style.css`), with the horizontal
+ * margin a window's edge wants and the band's own height: 24 px of content plus the
+ * padding is the reference's measured 32 px status band (`docs/2026-09-22-STEPS.md`,
+ * `S13c · What the reference actually measures`), and it keeps the bar a band even
+ * while its fields have nothing to say (an empty label has no height at all). */
+.statusbar {
+  padding: 4px 12px;
+  min-height: 24px;
 }

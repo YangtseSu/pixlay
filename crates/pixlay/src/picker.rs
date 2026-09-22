@@ -5,18 +5,28 @@
 //! `AdwNavigationView`; the editor of S7 is pushed on top of it when Next is
 //! pressed.
 //!
-//! # The shape (the 2026-09-22 ruling, `docs/2026-09-22-STEPS.md` `S13 · Ruling`)
+//! # The shape (the 2026-09-22 ruling "the picker, as gthumb has it")
 //!
-//! The preview is above, the thumbnails are the bottom of the page, and the picked
-//! list runs down the right edge — two `GtkPaned`s, whose positions are kept for
-//! the session. A cell is [`TILE_SIZE`] square, which is gthumb's own default
-//! (`data/schemas/org.gnome.gthumb.gschema.xml`, `thumbnail-size`), and a picked
-//! cell is shown by a **highlight** rather than by the platform's check box: the
-//! `.picker-cell` / `.picked` classes in the app's only stylesheet
-//! (`style.css`, installed by `app.rs`), which uses the theme's own
-//! `--accent-color` / `--accent-bg-color` and no literal colour. That is a
-//! deliberate deviation from HIG `patterns/containers/selection-mode`, recorded in
+//! Three bands, measured off the reference app's own window
+//! (`docs/2026-09-22-STEPS.md`, `S13c`): **the media area takes the vast majority**
+//! — the preview pane with the picked list down its right edge at the pane's own
+//! height — **one row of thumbnails spans the page's width** under it, and **a
+//! status bar closes the window** with gthumb's four fields (`picked / total`,
+//! the photo's pixels, its file size, the zoom). The picked list's divider is the
+//! session's ([`SPLITS`]); the strip is one cell tall because a 128 px cell is what
+//! gthumb's `thumbnail-size` of 256 *device* pixels measures on a 2× display.
+//!
+//! A cell is [`TILE_SIZE`] square and a picked cell is shown by a **highlight**
+//! rather than by the platform's check box: the `.picker-cell` / `.picked` classes
+//! in the app's only stylesheet (`style.css`, installed by `app.rs`), which uses
+//! the theme's own `--accent-bg-color` and no literal colour. That is a deliberate
+//! deviation from HIG `patterns/containers/selection-mode`, recorded in
 //! `docs/HIG-REVIEW.md` §3.
+//!
+//! The strip is a `GtkGridView` that reflows **horizontally** — GTK's own shape for
+//! a single-row, horizontally-scrolling filmstrip (the list base's orientation
+//! decides which axis the items flow along), with one item per vertical slice so
+//! the row stays single at any widget height.
 //!
 //! # What this module is, and what it deliberately is not
 //!
@@ -43,8 +53,9 @@
 //! A `GtkMultiSelection` is a *set*: it does not remember the order items were
 //! picked in, and the product's order *is* cell order. So the ordered list is
 //! this module's own (`pixlay_core::Selection`), the picked list down the right
-//! edge is where it is visible and re-orderable (a row drag, or `Ctrl+Up`/
-//! `Ctrl+Down` on the focused row — both end in [`Picker::move_row`]), and every
+//! edge is where it is visible, re-orderable (a row drag, or `Ctrl+Up`/
+//! `Ctrl+Down` on the focused row — both end in [`Picker::move_row`]) and
+//! **clickable: a row switches the pane to that photo** (ruling 21), and every
 //! change to the grid's selection is reconciled back into it — a photo already in
 //! the list keeps its place, a newly picked one is appended. That is also why the
 //! cell's click is handled here rather than left to GTK: the platform's own click
@@ -76,14 +87,29 @@
 //! built on one worker thread ([`crate::thumbs`]) and cross back as plain bytes
 //! through `MainContext::invoke`. No GTK object leaves the main thread.
 //!
-//! # The preview pane's own size
+//! # The preview pane's own size: the size it draws
 //!
 //! S13 decoded the pane's photo at a constant `PREVIEW_PX` = 1024 and fell back to
 //! painting the 256 px *tile* when it had no preview in hand, which is the blur the
-//! 2026-09-22 ruling called a defect. Both are gone: the pane is decoded at the
-//! pane's own device long edge (rounded up to [`PREVIEW_PX_STEP`] and capped at
-//! [`PREVIEW_MAX_PX`]), and it never paints a tile — while it waits it shows a
-//! spinner. The allocation it follows is observed where GTK4 allows it
+//! 2026-09-22 ruling called a defect; S13b decoded it at the pane's long edge and
+//! left the ruling's second defect in place — a portrait photo in a landscape pane
+//! was decoded at **1152 px** and drawn at **760 px**, 2.25× its own pixels
+//! (`S13c`'s measurements). Both are gone: the pane's photo is decoded at the long
+//! edge it is *drawn* at — the `Contain` fit of the pane's device size against the
+//! photo's own pixels ([`Picker::preview_px`]) — rounded up to
+//! [`PREVIEW_PX_STEP`] and capped at [`PREVIEW_MAX_PX`], and it never paints a
+//! tile: while it waits it shows a spinner.
+//!
+//! That fit needs the photo's own size before the decode, and the answer is free:
+//! every reply from the picture worker carries the decoded source's width and
+//! height ([`pixlay_imaging::Thumbnail`]), so a photo whose *tile* is on screen —
+//! which is every photo the grid can show — has its size known before the pane asks
+//! for it. A photo whose size is still unknown is decoded at the pane's own long
+//! edge (S13b's behaviour, the largest size the pane can use) and re-decoded at the
+//! fitted size the moment the answer arrives; the second decode happens once per
+//! photo, and only for a photo focused before its tile was.
+//!
+//! The allocation the pane follows is observed where GTK4 allows it
 //! (`GdkSurface::layout` for a window resize, `GtkPaned::position` for a divider
 //! drag, `GtkWidget::scale-factor` for a screen change: GTK4 has no `size-allocate`
 //! signal and no `width` property).
@@ -105,24 +131,26 @@ use pixlay_core::{CollageDoc, MAX_PHOTOS, MIN_PHOTOS, Selection, SelectionError}
 use pixlay_imaging::Thumbnail;
 
 use crate::a11y;
-use crate::i18n::{fill, gettext, ngettext};
+use crate::i18n::{fill, gettext};
 use crate::thumbs::Kind;
 use crate::window::EditorWindow;
 
 /// Size of one grid cell, in logical pixels.
 ///
-/// Square whatever the photo's aspect, so the grid does not re-flow as it fills.
-/// 256 is gthumb's own default (`data/schemas/org.gnome.gthumb.gschema.xml`,
-/// `thumbnail-size`, adjustable 128–512 in steps of 32) and it is what the
-/// 2026-09-22 ruling adopted (`docs/2026-09-22-STEPS.md`, `S13 · Ruling`), twice
-/// S13's 128. Well past the minimum click target HIG `guidelines/pointer-touch`
-/// asks of a click target.
-pub const TILE_SIZE: i32 = 256;
+/// Square whatever the photo's aspect, so the strip does not re-flow as it fills.
+/// 128 is gthumb's own size — its `thumbnail-size` default of 256
+/// (`data/schemas/org.gnome.gthumb.gschema.xml`) is in **device** pixels, and the
+/// reference's own cells measure 250 device = **125 logical** on a 2× display
+/// (measured off the two screenshots in `docs/2026-09-22-STEPS.md`, `S13c · What
+/// the reference actually measures`), which is why the 2026-09-22 ruling moved it
+/// back down from S13b's 256 *logical*. Well past the minimum click target HIG
+/// `guidelines/pointer-touch` asks of a click target.
+pub const TILE_SIZE: i32 = 128;
 
 /// Step the preview pane's decode is rounded up to, in pixels.
 ///
-/// The pane's size in device pixels *is* the request, rounded up so that dragging
-/// a divider re-decodes once per step rather than once per pixel.
+/// The pane's fitted size in device pixels *is* the request, rounded up so that
+/// dragging a divider re-decodes once per step rather than once per pixel.
 pub const PREVIEW_PX_STEP: u32 = 128;
 
 /// The pane's decode is never larger than this, in pixels.
@@ -135,15 +163,25 @@ pub const PREVIEW_PX_STEP: u32 = 128;
 /// (`docs/2026-09-22-STEPS.md`, `S13 · Ruling`).
 pub const PREVIEW_MAX_PX: u32 = 2048;
 
+/// How many fields the status bar has, in gthumb's order (`S13c`): the pick's
+/// count against the folder's, the photo's pixels, its file size, the zoom.
+pub const STATUS_FIELDS: usize = 4;
+
+/// The status bar's fields, as indices into [`Picker::status`].
+const STATUS_COUNT: usize = 0;
+const STATUS_PIXELS: usize = 1;
+const STATUS_SIZE: usize = 2;
+const STATUS_ZOOM: usize = 3;
+
 /// Bytes of decoded tiles kept in memory.
 ///
 /// Tiles are bounded by *bytes* rather than by count, because their size follows
-/// the screen: 256 px square is 0.2 MB, and the same cell on a 2x screen is 0.8 MB.
-/// 64 MB is a few hundred tiles — more than a screen's worth of scrolling history,
-/// which is what the cache is for (`S13 · Ruling`: "a bounded in-memory cache keeps
-/// a scrolled-back row instant") — and small enough to be irrelevant against the
-/// render budget measured in `docs/CONTRACT.md` §8 (A0 compositing peaks at
-/// 941 MB).
+/// the screen: a 128 px square is 0.05 MB, and the same cell on a 2× screen is
+/// 0.2 MB. 64 MB is many hundreds of tiles — far more than a strip's worth of
+/// scrolling history, which is what the cache is for (`S13 · Ruling`: "a bounded
+/// in-memory cache keeps a scrolled-back row instant") — and small enough to be
+/// irrelevant against the render budget measured in `docs/CONTRACT.md` §8 (A0
+/// compositing peaks at 941 MB).
 const TILE_CACHE_BYTES: usize = 64 * 1024 * 1024;
 
 /// Bytes of decoded previews kept in memory.
@@ -158,40 +196,41 @@ const PREVIEW_CACHE_BYTES: usize = 64 * 1024 * 1024;
 /// make.
 ///
 /// The bound the visible-first policy is held to (S13b's criterion 5): the cells
-/// that are *on screen* — four of them in the default 1100x760 window, whose
-/// 536x396 grid fits a 2x2 of 262 px cells — and never one per file. Measured
-/// 2026-09-22 (`--release`-sized decodes, debug test build): a 300-photo folder
-/// opened with **4** requests and scrolling to its 200th photo cost **7** more,
-/// against GTK's own 257 *bound* cells for the same folder. 64 is an order of
-/// magnitude above the observed count, which leaves a much larger window and a
-/// much taller screen room without the criterion becoming decorative.
+/// that are *on screen* — eight of them in the default 1100x760 window, whose
+/// strip fits a row of 130 px cells across its width — and never one per file.
+/// Measured 2026-09-22 (`--release`-sized decodes, debug test build): a 300-photo
+/// folder opened with **9** requests and scrolling to its 200th photo cost **4**
+/// more. 64 is several times the observed count, which leaves a much wider window
+/// and a much larger screen room without the criterion becoming decorative; the
+/// strip's own bound is GTK's, which creates at most `30 x max_columns` = 30 cells
+/// for it (`gtkgridview.c`, measured 2026-09-22).
 pub const TILE_REQUEST_MAX: usize = 64;
 
 /// The picked list's initial width, in pixels.
 ///
 /// HIG `guidelines/adaptive`: the list is a column of file names with a remove
 /// button, and 260 px is what a middle-ellipsized name of a typical length needs
-/// before the button. It is a starting position — the divider moves.
+/// before the button. It is the width the media area gives it on a fresh window —
+/// the divider moves, and where it is left is the session's.
 const PICKED_LIST_WIDTH: i32 = 260;
 
 /// The picked list's minimum width, in pixels, so the divider cannot hide it.
 const PICKED_LIST_MIN_WIDTH: i32 = 180;
 
-/// The vertical divider's initial position: the preview's height, in pixels.
-///
-/// At the default 1100x760 window this leaves the preview a little over half the
-/// page and the thumbnails strip below it.
-const ROWS_POSITION: i32 = 380;
-
 thread_local! {
-    /// The two divider positions the last picker left behind.
+    /// The divider position the last picker left behind, as `GtkPaned` means it:
+    /// **the media area's width**, since the pane is the paned's start child. The
+    /// picked list, its end child, gets the rest — which is what makes the list's
+    /// height the pane's by construction.
     ///
     /// A `GtkPaned` keeps its own position for as long as the widget exists, which
-    /// is the whole session for one window; this carries them to the *next* window,
+    /// is the whole session for one window; this carries it to the *next* window,
     /// whose picker is a new set of widgets. It is a session value by the
-    /// 2026-09-22 ruling ("both positions kept for the session") and not a
+    /// 2026-09-22 ruling ("its position is still the session's `SPLITS`") and not a
     /// configuration file (ruling 8: no config file), so it dies with the process.
-    static SPLITS: Cell<(i32, i32)> = const { Cell::new((PICKED_LIST_WIDTH, ROWS_POSITION)) };
+    /// `None` means no window has moved it yet: a fresh window starts at
+    /// [`PICKED_LIST_WIDTH`].
+    static SPLITS: Cell<Option<i32>> = const { Cell::new(None) };
 }
 
 /// The picker's widgets and its state.
@@ -234,6 +273,12 @@ pub struct Picker {
     previews: RefCell<Cache<(usize, u32)>>,
     /// Preview requests in flight, keyed the same way.
     preview_inflight: RefCell<HashSet<(u64, usize, u32)>>,
+    /// The photos' own pixel sizes, as every reply reports them (the decode has the
+    /// source in hand, so this costs nothing): the pane's fitted decode and the
+    /// status bar's zoom are both ratios against these. A photo whose size is not
+    /// known yet is decoded at the pane's own long edge and re-decoded at its fitted
+    /// size once the answer arrives.
+    sizes: RefCell<HashMap<usize, (u32, u32)>>,
     /// The preview on screen, and the photo it belongs to. `None` while the pane is
     /// waiting for one.
     shown: RefCell<Option<(PathBuf, Rc<Picture>, u32)>>,
@@ -254,25 +299,39 @@ pub struct Picker {
     store: gio::ListStore,
     /// The grid's selection. A set: membership only, never order.
     multi: gtk::MultiSelection,
-    /// The grid itself, for the widgets and the HIG checks that read it.
+    /// The grid itself, for the widgets and the HIG checks that read it. It reflows
+    /// horizontally, so the strip is one row.
     grid: gtk::GridView,
     /// The page's root widget.
     root: adw::ToolbarView,
+    /// The strip's scroller, for the geometry the ruling fixes (one row, the page's
+    /// full width).
+    strip: gtk::ScrolledWindow,
     /// The preview pane: the focused photo, or the empty state.
     preview: gtk::Picture,
     preview_stack: gtk::Stack,
-    /// The picked list and its placeholder, revealed while nothing is picked.
+    /// The picked list, whose placeholder says "nothing picked yet" while it is
+    /// empty.
     list: gtk::ListBox,
-    list_hint: gtk::Label,
-    /// The page's two dividers: `columns` is the picked list against the rest,
-    /// `rows` is the preview against the thumbnails.
+    /// The one divider: the picked list against the pane, so the list's height *is*
+    /// the pane's.
     columns: gtk::Paned,
-    rows: gtk::Paned,
-    /// Next, which carries the count.
+    /// The header bar, whose slots the ruled chrome fixes (the folder button at the
+    /// start, the heading in the centre, the menu and Next at the end).
+    header: adw::HeaderBar,
+    /// The primary menu (`picker_menu`), whose model the chrome check reads.
+    menu: gtk::MenuButton,
+    /// The status bar: the page's bottom bar, the last band.
+    status_bar: gtk::Box,
+    /// Next, which carries the count, and the content object that carries it — the
+    /// label has to go on the content, because `GtkButton::set_label` *replaces* the
+    /// button's child (`gtkbutton.c`) and would destroy the icon.
     next: gtk::Button,
-    /// The folder and its photo count, under the header.
-    status: gtk::Label,
-    /// The page's own title widget, so the subtitle can show the count too.
+    next_content: adw::ButtonContent,
+    /// The status bar's four fields, in gthumb's order (`STATUS_*`).
+    status: [gtk::Label; STATUS_FIELDS],
+    /// The page's own title widget: the heading in the header's centre, with the
+    /// folder as its subtitle (gthumb keeps the location there too).
     title: adw::WindowTitle,
 }
 
@@ -319,7 +378,7 @@ impl Picture {
 ///
 /// Two of them live in the picker — the grid's tiles and the pane's previews — and
 /// both are bounded by **bytes**, not by entries: a preview at 2048 px is 9.4 MB
-/// and a tile at 256 px is 0.2 MB, so counting entries would mean nothing. The
+/// and a tile at 128 px is 0.05 MB, so counting entries would mean nothing. The
 /// oldest entry is evicted first, least recently used: a row scrolled back *to* is
 /// what a cache is for, and a row scrolled past is what it can afford to lose.
 struct Cache<K: Eq + std::hash::Hash + Clone> {
@@ -395,15 +454,30 @@ impl Picker {
         let store = gio::ListStore::new::<gio::File>();
         let multi = gtk::MultiSelection::new(Some(store.clone()));
 
+        // The strip: one row along the page's bottom, spanning its full width (the
+        // 2026-09-22 ruling). A `GtkGridView` told to reflow **horizontally** is
+        // exactly that — the list base's orientation decides which axis the items
+        // flow along, so a horizontal grid puts column after column along x and
+        // scrolls along x — and `max_columns(1)` keeps it a *single* row: GTK takes
+        // the items per vertical slice to be `height / cell`, clamped to
+        // `[min_columns, max_columns]` (`gtkgridview.c`, `compute_n_columns`), so 1
+        // is one row at any height. It also caps the cells GTK keeps around the
+        // anchor at `30 x max_columns` (`gtk_grid_view_init`), which is what makes
+        // the strip's own bound small.
         let grid = gtk::GridView::builder()
             .model(&multi)
-            .min_columns(2)
-            .max_columns(8)
+            .orientation(gtk::Orientation::Horizontal)
+            .min_columns(1)
+            .max_columns(1)
             .single_click_activate(false)
             .enable_rubberband(true)
             .build();
-        grid.set_vexpand(true);
-        grid.set_hexpand(true);
+        grid.set_vexpand(false);
+        grid.set_hexpand(false);
+        // The grid's own style class, for the one rule that sizes its items
+        // (`.thumbnail-grid > child`, `style.css`) — and the name the reference uses
+        // for the same node (`gthumb/data/css/style.css:26-42`).
+        grid.add_css_class("thumbnail-grid");
         a11y::label(&grid, &gettext("Photos"));
 
         let factory = gtk::SignalListItemFactory::new();
@@ -468,28 +542,37 @@ impl Picker {
         ));
         grid.set_factory(Some(&factory));
 
-        // The keyboard path, on the grid so it works wherever the grid has focus:
-        // Enter (and the platform's own bindings) toggle through the model, and
-        // these two are the picker's own keys.
+        // The keyboard path, on the grid so it works wherever the strip has focus:
+        // `Esc` clears the pick, and `Enter` and `Space` both *toggle* the focused
+        // cell — `Enter` through GTK's own `list.activate-item`, which emits the
+        // grid's `activate` signal (S13 claimed this in a comment and answered
+        // neither), and `Space` through the list item's `listitem.select`. `Ctrl+A`
+        // is not bound here: `GtkListBase` already binds it to `list.select-all`
+        // (`gtklistbase.c:1389`), and the model's own answer is enough — the picker
+        // reconciles the changed selection and reports the cap. Two bindings for one
+        // key meant the second fired on a selection that was already capped.
+        grid.connect_activate(glib::clone!(
+            #[weak]
+            window,
+            move |_, position| {
+                if let Some(picker) = window.picker() {
+                    picker.toggle(&window, position);
+                }
+            }
+        ));
         let keys = gtk::EventControllerKey::new();
         keys.connect_key_pressed(glib::clone!(
             #[weak]
             window,
             #[upgrade_or]
             glib::Propagation::Proceed,
-            move |_, key, _, state| {
+            move |_, key, _, _| {
                 let Some(picker) = window.picker() else {
                     return glib::Propagation::Proceed;
                 };
                 match key {
                     gdk::Key::Escape => {
-                        picker.clear_selection();
-                        glib::Propagation::Stop
-                    }
-                    gdk::Key::a | gdk::Key::A
-                        if state.contains(gdk::ModifierType::CONTROL_MASK) =>
-                    {
-                        picker.select_all();
+                        picker.clear_selection(&window);
                         glib::Propagation::Stop
                     }
                     _ => glib::Propagation::Proceed,
@@ -498,21 +581,12 @@ impl Picker {
         ));
         grid.add_controller(keys);
 
-        let grid_scroller = gtk::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk::PolicyType::Never)
-            .vexpand(true)
-            .hexpand(true)
+        let strip = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Automatic)
+            .vscrollbar_policy(gtk::PolicyType::Never)
             .child(&grid)
             .build();
-        a11y::label(&grid_scroller, &gettext("Photos"));
-
-        let status = gtk::Label::builder()
-            .xalign(0.0)
-            .ellipsize(gtk::pango::EllipsizeMode::Middle)
-            .build();
-        status.add_css_class("dim-label");
-        status.add_css_class("caption");
-        status.set_visible(false);
+        a11y::label(&strip, &gettext("Photos"));
 
         // ---- the preview ----------------------------------------------------
         let preview = gtk::Picture::builder()
@@ -529,14 +603,18 @@ impl Picker {
             ))
             .build();
         // The pane waits behind a spinner rather than painting the cell's tile:
-        // a 256 px tile stretched over the pane is the blur the 2026-09-22 ruling
+        // a 128 px tile stretched over the pane is the blur the 2026-09-22 ruling
         // called a defect (`S13 · Ruling`).
         let loading = gtk::Spinner::builder()
             .halign(gtk::Align::Center)
             .valign(gtk::Align::Center)
             .build();
         let preview_stack = gtk::Stack::new();
-        preview_stack.set_transition_type(gtk::StackTransitionType::Crossfade);
+        // No crossfade: measured 2026-09-23, a transition that is still running
+        // paints *both* children at a partial opacity, and in a window snapshot the
+        // pane came out empty while the widget held the photo — the picture has to be
+        // drawn because it is there, not because an animation finished.
+        preview_stack.set_transition_type(gtk::StackTransitionType::None);
         preview_stack.add_named(&empty, Some("empty"));
         preview_stack.add_named(&loading, Some("loading"));
         preview_stack.add_named(&preview, Some("photo"));
@@ -560,6 +638,10 @@ impl Picker {
             .build();
         list_hint.add_css_class("dim-label");
         list_hint.add_css_class("caption");
+        // The hint is the list's own placeholder rather than a sibling above it: a
+        // sibling would take height from the list, and the ruling's arrangement is
+        // that the list *is* the media area's height (S13c).
+        list.set_placeholder(Some(&list_hint));
 
         let list_scroller = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
@@ -568,53 +650,63 @@ impl Picker {
             .build();
         a11y::label(&list_scroller, &gettext("Picked photos"));
 
-        let picked = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        // The paned's end child, and nothing else in it: whatever else lived here
+        // would come out of the list's height.
+        let picked = gtk::Box::new(gtk::Orientation::Vertical, 0);
         picked.set_size_request(PICKED_LIST_MIN_WIDTH, -1);
-        picked.set_margin_top(6);
-        picked.set_margin_bottom(6);
         picked.set_margin_start(12);
         picked.set_margin_end(12);
-        picked.append(&list_hint);
         picked.append(&list_scroller);
 
-        // ---- the two dividers -----------------------------------------------
-        // The shape the 2026-09-22 ruling fixes: the preview above, the thumbnails
-        // the bottom of the page, and the picked list down the right edge. Both
-        // positions are the session's (`SPLITS`), and both are followed, because
-        // either one changes the pane the preview is decoded for.
-        let splits = SPLITS.with(Cell::get);
-        let rows = gtk::Paned::builder()
-            .orientation(gtk::Orientation::Vertical)
+        // ---- the one divider ------------------------------------------------
+        // The shape the 2026-09-22 ruling fixes: the media area takes the page's
+        // majority, and the picked list runs down its right edge **at the pane's own
+        // height** — which is what putting it in the paned's end slot means, so the
+        // two cannot disagree. Its position is the session's (`SPLITS`).
+        let columns = gtk::Paned::builder()
+            .orientation(gtk::Orientation::Horizontal)
             .start_child(&preview_stack)
-            .end_child(&grid_scroller)
-            .position(splits.1)
-            // The extra space a taller window gets goes to the thumbnails, which
-            // are the browsing surface; the preview keeps the height it was given.
-            .resize_start_child(false)
+            .end_child(&picked)
+            .position(split_position(window))
+            // The extra space a wider window gets goes to the media area, which is
+            // the surface the ruling makes the majority: `GtkPaned` grows the start
+            // child only, and the end child keeps the width it was given
+            // (`gtkpaned.c`: `resize_start_child && !resize_end_child` → the end
+            // child's own request, the start child the rest).
+            .resize_start_child(true)
+            .resize_end_child(false)
             .shrink_start_child(true)
             // `shrink-end-child` **must** be true, and this is the trap of putting a
             // scrolled list in a paned: a `GtkScrolledWindow`'s *natural* size is its
             // whole content, and with the property left at its default the paned's
-            // own minimum becomes that height. The scroller is then allocated all
-            // 300 photos' worth of rows, GTK counts every one of them as visible,
-            // and the visible-first policy asks for the whole folder — measured
-            // 2026-09-22: 257 tile requests for a 300-photo folder, against 12 for
-            // the same folder with this set.
-            .shrink_end_child(true)
-            .build();
-        let columns = gtk::Paned::builder()
-            .orientation(gtk::Orientation::Horizontal)
-            .start_child(&rows)
-            .end_child(&picked)
-            .position(splits.0)
-            .resize_start_child(true)
-            .shrink_start_child(true)
-            // The same reason as the divider below: the picked list is a scrolled
-            // list, and its natural width is its widest row.
+            // own minimum becomes that width. The list is then allocated all of its
+            // content, and the pane beside it loses the space the ruling gives it.
             .shrink_end_child(true)
             .build();
 
+        // ---- the status bar -------------------------------------------------
+        // gthumb's own four fields, in its order (`S13c`), in the cluster shape it
+        // uses: `GthStatus` is `spacing 24` and right-aligned in the bottom bar
+        // (`data/ui/browser.ui:382-391`), and the bar itself is `padding: 4px`. What
+        // each field shows is `update_status_line`'s; this is where they live.
+        let statusbar = gtk::Box::new(gtk::Orientation::Horizontal, 24);
+        statusbar.add_css_class("statusbar");
+        statusbar.set_halign(gtk::Align::End);
+        statusbar.set_valign(gtk::Align::Center);
+        let status: [gtk::Label; STATUS_FIELDS] = std::array::from_fn(|_| {
+            let label = gtk::Label::new(None);
+            label.add_css_class("dim-label");
+            statusbar.append(&label);
+            label
+        });
+
         // ---- the header -----------------------------------------------------
+        // HIG `patterns/containers/header-bars`: primary and navigation actions at
+        // the **start**, the heading in the **centre**, the menu at the **end**.
+        // S13b put every control at the end and styled Next `suggested-action`,
+        // which that page asks header bars to avoid; both are corrected here, and
+        // the picker gains the primary menu it never had (both reference apps end
+        // their headers in one).
         let folder = gtk::Button::builder()
             .icon_name("folder-open-symbolic")
             .tooltip_text(gettext("Choose a folder of photos"))
@@ -630,6 +722,18 @@ impl Picker {
             }
         ));
 
+        let menu = gtk::MenuButton::builder()
+            .icon_name("open-menu-symbolic")
+            .tooltip_text(gettext("Main menu"))
+            .primary(true)
+            .menu_model(&picker_menu())
+            .build();
+        a11y::label(&menu, &gettext("Main menu"));
+
+        // The label goes on the `AdwButtonContent`, never on the button: laying it
+        // on the button *replaces* the child (`gtkbutton.c`, `gtk_button_set_label`
+        // swaps anything that is not a `GtkLabel`), which is how S13b's Next lost its
+        // icon on the first `update_next`.
         let next_content = adw::ButtonContent::new();
         next_content.set_icon_name("go-next-symbolic");
         next_content.set_label(&gettext("Next"));
@@ -637,7 +741,6 @@ impl Picker {
             .child(&next_content)
             .tooltip_text(gettext("Open the picked photos in a collage"))
             .build();
-        next.add_css_class("suggested-action");
         a11y::label(&next, &gettext("Open the picked photos in a collage"));
         next.connect_clicked(glib::clone!(
             #[weak]
@@ -653,16 +756,28 @@ impl Picker {
         let header = adw::HeaderBar::new();
         header.set_show_back_button(false);
         header.set_title_widget(Some(&title));
+        header.pack_start(&folder);
+        header.pack_end(&menu);
         header.pack_end(&next);
-        header.pack_end(&folder);
 
         // ---- the page -------------------------------------------------------
+        // The three bands, top to bottom: the media area with the picked list
+        // beside it (it takes every pixel the strip and the status bar do not), one
+        // row of thumbnails across the page's width, and the status bar as the
+        // page's own bottom bar — so the band the ruling measures the proportions
+        // against is exactly the content above it.
         let body = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        body.append(&status);
+        columns.set_vexpand(true);
         body.append(&columns);
+        body.append(&strip);
         let root = adw::ToolbarView::new();
         root.add_top_bar(&header);
+        root.add_bottom_bar(&statusbar);
         root.set_content(Some(&body));
+        // loupe's idiom (`src/widgets/image_window.rs:986-998`): the bar is `raised`
+        // while content starts *below* it — which it does here, since the media area
+        // does not extend under the header (`AdwToolbarView`'s own default is flat).
+        root.set_top_bar_style(adw::ToolbarStyle::Raised);
         // The page is handed to the struct below, so the handlers that follow keep
         // their own handle on it.
         let page = root.clone();
@@ -677,6 +792,7 @@ impl Picker {
             failures: RefCell::new(HashMap::new()),
             previews: RefCell::new(Cache::new(PREVIEW_CACHE_BYTES)),
             preview_inflight: RefCell::new(HashSet::new()),
+            sizes: RefCell::new(HashMap::new()),
             shown: RefCell::new(None),
             focused: Cell::new(None),
             requested: Cell::new(0),
@@ -686,13 +802,16 @@ impl Picker {
             multi: multi.clone(),
             grid: grid.clone(),
             root,
+            strip: strip.clone(),
             preview,
             preview_stack,
             list,
-            list_hint,
             columns,
-            rows,
+            header: header.clone(),
+            menu: menu.clone(),
+            status_bar: statusbar.clone(),
             next,
+            next_content,
             status,
             title,
         });
@@ -715,6 +834,7 @@ impl Picker {
         picker.follow_the_pane(window);
         picker.connect_picked_list(window);
         picker.update_next();
+        picker.update_status_line();
 
         // The default folder is listed when the page is first shown, not when it
         // is built: the window is usable only once it is on screen, and listing a
@@ -746,9 +866,38 @@ impl Picker {
         self.grid.clone()
     }
 
+    /// The strip's scroller: one row of cells across the page's width.
+    pub fn strip(&self) -> gtk::ScrolledWindow {
+        self.strip.clone()
+    }
+
     /// The picked list, whose rows are the pick's order.
     pub fn picked_list(&self) -> gtk::ListBox {
         self.list.clone()
+    }
+
+    /// The status bar's four fields, as text, in gthumb's order: the pick's count
+    /// against the folder's, the photo's pixels, its file size, the zoom.
+    ///
+    /// The stage's own numbers, readable without a widget tree — which is how the
+    /// ruling's "the status line is right" is checked (`tests/picker.rs`).
+    pub fn status_line(&self) -> [String; STATUS_FIELDS] {
+        std::array::from_fn(|field| self.status[field].label().to_string())
+    }
+
+    /// The status bar, the page's last band.
+    pub fn status_bar(&self) -> gtk::Box {
+        self.status_bar.clone()
+    }
+
+    /// The page's header bar, whose slots the ruled chrome fixes.
+    pub fn header(&self) -> adw::HeaderBar {
+        self.header.clone()
+    }
+
+    /// The page's primary menu, whose model the chrome check reads.
+    pub fn menu_button(&self) -> gtk::MenuButton {
+        self.menu.clone()
     }
 
     /// The preview pane as a widget: the picture when a photo is focused, the
@@ -819,31 +968,30 @@ impl Picker {
                 return;
             }
         };
-        *self.folder.borrow_mut() = Some(folder.to_path_buf());
-        // The picks belong to the photos that were on screen: a folder change
-        // clears them rather than leaving paths in the document's order that the
-        // grid no longer shows.
-        self.clear_selection();
-        self.files.replace(files.clone());
-        // Nothing about the old folder survives: the tiles, the previews and the
-        // requests in flight were all keyed by an index into a listing that no
-        // longer exists, and a request that is still queued is dropped before it
-        // costs a decode. The generation makes the answers that are already being
-        // decoded recognisable, and they are ignored on arrival.
+        // Nothing about the old folder survives, and it goes first so that what the
+        // status bar and the picked list report below is about the new one: the
+        // tiles, the previews, the sizes and the requests in flight were all keyed by
+        // an index into a listing that no longer exists, and a request that is still
+        // queued is dropped before it costs a decode. The generation makes the
+        // answers that are already being decoded recognisable, and they are ignored
+        // on arrival.
+        if let Some(worker) = window.thumbs() {
+            worker.forget();
+            self.epoch.set(worker.epoch());
+        }
         self.tiles.borrow_mut().clear();
         self.previews.borrow_mut().clear();
         self.cells.borrow_mut().clear();
         self.inflight.borrow_mut().clear();
         self.preview_inflight.borrow_mut().clear();
         self.failures.borrow_mut().clear();
+        self.sizes.borrow_mut().clear();
         *self.shown.borrow_mut() = None;
         self.focused.set(None);
         self.requested.set(0);
-        if let Some(worker) = window.thumbs() {
-            worker.forget();
-            self.epoch.set(worker.epoch());
-        }
 
+        *self.folder.borrow_mut() = Some(folder.to_path_buf());
+        self.files.replace(files.clone());
         self.syncing.set(true);
         self.store.remove_all();
         for path in &files {
@@ -851,19 +999,27 @@ impl Picker {
         }
         self.syncing.set(false);
 
-        self.update_status(folder, files.len());
+        // The picks belong to the photos that were on screen: a folder change
+        // clears them rather than leaving paths in the document's order that the
+        // strip no longer shows. This also rewrites the picked list, the heading's
+        // subtitle and the status bar, so nothing on the page describes the folder
+        // that was open before it.
+        self.clear_selection(window);
         self.show_focused();
     }
 
     /// Opens the session's default folder: `XDG_PICTURES_DIR`, or `~/Pictures`.
     ///
     /// Ruling 8: "`XDG_PICTURES_DIR` by default, plus a folder chooser … no
-    /// configuration file". An account with neither gets the empty grid and the
+    /// configuration file". An account with neither gets the empty strip and the
     /// folder button, which is a state to act on rather than a startup failure.
     pub fn open_default_folder(&self, window: &EditorWindow) {
         match default_folder() {
             Some(folder) => self.open_folder(window, &folder),
-            None => self.update_status(Path::new(""), 0),
+            None => {
+                self.update_next();
+                self.update_status_line();
+            }
         }
     }
 
@@ -926,21 +1082,61 @@ impl Picker {
 
     /// The long edge the preview pane's photo is decoded at, in device pixels.
     ///
-    /// The pane's own long edge, rounded up to [`PREVIEW_PX_STEP`] and capped at
-    /// [`PREVIEW_MAX_PX`]; never zero, so an unallocated pane still has a size to
-    /// ask for.
+    /// **The size it is drawn at** (ruling 22): the `Contain` fit of the pane's
+    /// device size against the focused photo's own pixels, rounded up to
+    /// [`PREVIEW_PX_STEP`] and capped at [`PREVIEW_MAX_PX`]. S13b asked for the
+    /// pane's long edge whatever the photo's aspect, which decoded a portrait
+    /// **1152 px** for a **760 px** draw; the number here never exceeds the pane's
+    /// own long edge by more than the rounding step. A photo whose size is not known
+    /// yet gets the pane's long edge — the largest size the pane could need — and is
+    /// re-asked for at its fitted size when the answer arrives
+    /// ([`Picker::on_preview`]).
     pub fn preview_px(&self) -> u32 {
-        let edge = self.pane_edge() * self.scale_factor();
-        let rounded = edge.div_ceil(PREVIEW_PX_STEP) * PREVIEW_PX_STEP;
+        let edge = match self.focused_size() {
+            Some(size) => fitted_long_edge(self.pane_device_size(), size),
+            None => {
+                let (width, height) = self.pane_device_size();
+                f64::from(width.max(height))
+            }
+        };
+        let rounded = (edge.ceil().max(0.0) as u32).div_ceil(PREVIEW_PX_STEP) * PREVIEW_PX_STEP;
         rounded.clamp(PREVIEW_PX_STEP, PREVIEW_MAX_PX)
     }
 
-    /// The pane's long edge in logical pixels, zero while it is unallocated.
-    fn pane_edge(&self) -> u32 {
-        self.preview_stack
-            .width()
-            .max(self.preview_stack.height())
-            .max(0) as u32
+    /// The focused photo's own pixel size, once a reply has reported it.
+    ///
+    /// Every reply from the picture worker carries it — the decode had the source
+    /// in hand ([`pixlay_imaging::Thumbnail`]) — so a photo whose tile is on screen
+    /// (which is every photo the strip can show) has its size before the pane asks
+    /// for its preview.
+    pub fn focused_size(&self) -> Option<(u32, u32)> {
+        self.sizes
+            .borrow()
+            .get(&self.focused.get()?)
+            .copied()
+            .filter(|(width, height)| *width > 0 && *height > 0)
+    }
+
+    /// The zoom the status bar shows, in whole percent.
+    ///
+    /// `round(100 × drawn / photo long edge)`, where the drawn edge is the `Contain`
+    /// fit the pane paints (never the rounded-up *decode* size): 100 % is one image
+    /// pixel per device pixel, which is what both references mean by it (gthumb
+    /// `ImageViewer.vala:665`, loupe `apply_zoom`).
+    pub fn zoom_percent(&self) -> Option<u32> {
+        let (source_width, source_height) = self.focused_size()?;
+        let drawn = fitted_long_edge(self.pane_device_size(), (source_width, source_height));
+        let longest = f64::from(source_width.max(source_height));
+        Some((100.0 * drawn / longest).round().max(0.0) as u32)
+    }
+
+    /// The pane's size in device pixels, zero while it is unallocated.
+    fn pane_device_size(&self) -> (u32, u32) {
+        let scale = self.scale_factor();
+        (
+            self.preview_stack.width().max(0) as u32 * scale,
+            self.preview_stack.height().max(0) as u32 * scale,
+        )
     }
 
     /// The screen's scale factor, never zero.
@@ -988,17 +1184,16 @@ impl Picker {
             .map(|stack| stack.upcast())
     }
 
-    /// The two divider positions, in pixels: the picked list's width, then the
-    /// preview's height.
-    pub fn split_position(&self) -> (i32, i32) {
-        (self.columns.position(), self.rows.position())
+    /// The divider's position in pixels: the picked list's width, and so the width
+    /// the media pane keeps.
+    pub fn split_position(&self) -> i32 {
+        self.columns.position()
     }
 
-    /// Moves both dividers, which is also what the next window starts from
+    /// Moves the divider, which is also where the next window starts from
     /// (`SPLITS`).
-    pub fn set_split_position(&self, columns: i32, rows: i32) {
+    pub fn set_split_position(&self, columns: i32) {
         self.columns.set_position(columns);
-        self.rows.set_position(rows);
     }
 
     // ---- tiles -------------------------------------------------------------
@@ -1007,6 +1202,12 @@ impl Picker {
     pub fn on_tile(&self, index: usize, px: u32, thumbnail: Result<Thumbnail, String>) {
         match thumbnail {
             Ok(thumbnail) => {
+                // The reply carries the photo's own size, which is where the pane's
+                // fitted decode and the status bar's zoom come from — free here,
+                // because the decode had the source in hand.
+                self.sizes
+                    .borrow_mut()
+                    .insert(index, (thumbnail.source_width, thumbnail.source_height));
                 let picture = Rc::new(Picture::new(thumbnail));
                 self.tiles
                     .borrow_mut()
@@ -1020,6 +1221,11 @@ impl Picker {
                     && let Some(stack) = self.bound_cell(index)
                 {
                     paint_tile(&stack, &picture);
+                }
+                if self.focused.get() == Some(index) {
+                    // The photo the pane is on just became measurable: its pixels
+                    // and its zoom are numbers the status bar did not have.
+                    self.update_status_line();
                 }
             }
             Err(reason) => {
@@ -1208,7 +1414,7 @@ impl Picker {
 
     // ---- the preview -------------------------------------------------------
 
-    /// Shows `index` in the preview pane, decoding it at the pane's own size.
+    /// Shows `index` in the preview pane, decoding it at the size it is drawn at.
     pub fn focus(&self, window: &EditorWindow, index: usize) {
         if index >= self.len() {
             return;
@@ -1216,6 +1422,24 @@ impl Picker {
         self.focused.set(Some(index));
         self.show_focused();
         self.ask_for_preview(window);
+        // The photo's pixels, its size and the zoom are all about the focused
+        // photo, so the status bar moves with the pane.
+        self.update_status_line();
+    }
+
+    /// Shows the photo a picked row stands for, which is what clicking one does
+    /// (ruling 21; S13b's list only selected).
+    ///
+    /// The row's index is a place in the *pick's order*, which is not a position in
+    /// the folder: the photo is looked up and focused by where the strip lists it.
+    pub fn focus_picked(&self, window: &EditorWindow, row: usize) {
+        let photo = self.selection.borrow().photos().get(row).cloned();
+        let Some(photo) = photo else {
+            return;
+        };
+        if let Some(position) = self.files.borrow().iter().position(|file| *file == photo) {
+            self.focus(window, position);
+        }
     }
 
     /// Follows the pane's own allocation, because that is the size its photo is
@@ -1227,7 +1451,8 @@ impl Picker {
     pub fn refresh_pane(&self, window: &EditorWindow) {
         self.show_focused();
         self.ask_for_preview(window);
-        // A resize moves the grid's viewport too, so what is visible can have
+        self.update_status_line();
+        // A resize moves the strip's viewport too, so what is visible can have
         // changed without a scroll.
         self.refresh_visible(window);
     }
@@ -1287,20 +1512,39 @@ impl Picker {
         worker.request_preview(index, &path, px);
     }
 
-    /// One preview arrived (a decode at the pane's own size, not a resampled tile).
-    pub fn on_preview(&self, index: usize, px: u32, thumbnail: Result<Thumbnail, String>) {
+    /// One preview arrived (a decode at the size the pane draws, not a resampled
+    /// tile).
+    pub fn on_preview(
+        &self,
+        window: &EditorWindow,
+        index: usize,
+        px: u32,
+        thumbnail: Result<Thumbnail, String>,
+    ) {
         match thumbnail {
             Ok(thumbnail) => {
+                // The reply reports the photo's own size, which is what the fitted
+                // decode and the status bar's zoom are ratios against. Learning it
+                // can *move* the size the pane wants — a photo focused before its
+                // tile was decoded was asked for at the pane's long edge — so the
+                // request is made again for the fitted size, once.
+                let learned = (thumbnail.source_width, thumbnail.source_height);
+                let first_time = self.sizes.borrow_mut().insert(index, learned).is_none();
                 let picture = Rc::new(Picture::new(thumbnail));
                 self.previews
                     .borrow_mut()
                     .insert((index, px), Rc::clone(&picture));
-                if self.focused.get() == Some(index) && px == self.preview_px() {
-                    let path = self.file(index).unwrap_or_default();
-                    self.preview.set_paintable(Some(&picture.texture));
-                    self.preview.set_tooltip_text(None);
-                    self.preview_stack.set_visible_child_name("photo");
-                    *self.shown.borrow_mut() = Some((path, picture, px));
+                if self.focused.get() == Some(index) {
+                    if px == self.preview_px() {
+                        let path = self.file(index).unwrap_or_default();
+                        self.preview.set_paintable(Some(&picture.texture));
+                        self.preview.set_tooltip_text(None);
+                        self.preview_stack.set_visible_child_name("photo");
+                        *self.shown.borrow_mut() = Some((path, picture, px));
+                    } else if first_time {
+                        self.ask_for_preview(window);
+                    }
+                    self.update_status_line();
                 }
             }
             Err(reason) => {
@@ -1312,8 +1556,8 @@ impl Picker {
         }
     }
 
-    /// Paints the pane from what it has: the focused photo's preview at the pane's
-    /// own size, or the state that says it is still coming.
+    /// Paints the pane from what it has: the focused photo's preview at the size the
+    /// pane draws it, or the state that says it is still coming.
     fn show_focused(&self) {
         let Some(index) = self.focused.get() else {
             self.preview_stack.set_visible_child_name("empty");
@@ -1331,7 +1575,7 @@ impl Picker {
                 *self.shown.borrow_mut() = Some((path, picture, px));
             }
             // Never the tile: the pane waits behind a spinner instead of showing a
-            // 256 px picture stretched over it (`S13 · Ruling`).
+            // 128 px picture stretched over it (`S13 · Ruling`).
             None => {
                 self.preview_stack.set_visible_child_name("loading");
                 *self.shown.borrow_mut() = None;
@@ -1345,7 +1589,7 @@ impl Picker {
     }
 
     /// A reply from the picture worker, routed by what it was asked for.
-    pub fn on_reply(&self, reply: crate::thumbs::Reply) {
+    pub fn on_reply(&self, window: &EditorWindow, reply: crate::thumbs::Reply) {
         // The entry going away is the reply's *own* — it is keyed by the folder it
         // was asked for under — so this happens before the answer is judged, and a
         // reply from the folder before this one cannot clear a live request's
@@ -1369,7 +1613,7 @@ impl Picker {
         }
         match reply.kind {
             Kind::Tile => self.on_tile(reply.index, reply.px, reply.result),
-            Kind::Preview => self.on_preview(reply.index, reply.px, reply.result),
+            Kind::Preview => self.on_preview(window, reply.index, reply.px, reply.result),
         }
     }
 
@@ -1407,25 +1651,18 @@ impl Picker {
         self.focus(window, position as usize);
     }
 
-    /// Picks every photo in the folder, reporting the overflow past the cap.
-    ///
-    /// HIG `patterns/containers/selection-mode`: `Ctrl+A` selects all of a
-    /// collection view; the cap on top of it is the product's own rule, and it is
-    /// announced rather than applied silently.
-    pub fn select_all(&self) {
-        if self.is_empty() {
-            return;
-        }
-        self.multi.select_all();
-    }
-
     /// Clears the pick (`Esc` leaves selection mode).
-    pub fn clear_selection(&self) {
+    ///
+    /// The picked list is rebuilt, not just the numbers: since S13c a row is a
+    /// control that switches the pane, and a row left behind by a cleared pick would
+    /// be a control that lies. (S13b's version left them: it cleared the model and
+    /// the ordered list and refreshed the button only.)
+    pub fn clear_selection(&self, window: &EditorWindow) {
         self.syncing.set(true);
         self.multi.unselect_all();
         self.syncing.set(false);
         *self.selection.borrow_mut() = Selection::default();
-        self.update_next();
+        self.update_picked(window);
     }
 
     /// Drops one photo from the pick (a row's remove button).
@@ -1569,50 +1806,98 @@ impl Picker {
 
     // ---- presentation ------------------------------------------------------
 
-    fn update_status(&self, folder: &Path, count: usize) {
-        if folder.as_os_str().is_empty() {
-            self.status.set_label(&gettext("No folder chosen yet"));
-            self.status.set_visible(true);
-            self.title.set_subtitle("");
-            return;
-        }
-        let name = folder
-            .file_name()
-            .map(file_name_from)
-            .unwrap_or_else(|| folder.display().to_string());
-        self.status.set_label(&fill(
-            ngettext("{} · {} photo", "{} · {} photos", count as u32),
-            &[&name, &count.to_string()],
-        ));
-        self.status.set_visible(true);
+    /// The folder's name, for the heading's subtitle (gthumb keeps the location in
+    /// the header's centre widget too; S13b had it in a caption under the header
+    /// *and* the pick's count in the subtitle, so the same fact lived in two
+    /// places).
+    fn folder_name(&self) -> Option<String> {
+        let folder = self.folder.borrow().clone()?;
+        Some(
+            folder
+                .file_name()
+                .map(file_name_from)
+                .unwrap_or_else(|| folder.display().to_string()),
+        )
     }
 
-    /// The count on the Next button and in the header's subtitle: HIG's
-    /// selection-mode page asks the header to show how many items are selected.
+    /// The count on the Next button, and the heading's subtitle.
+    ///
+    /// `HIG patterns/containers/selection-mode` asks the header to show how many
+    /// items are selected, and that is the button's own label; the subtitle carries
+    /// *where* the photos come from, which is the other half of the heading. HIG
+    /// `patterns/containers/header-bars` wanted the heading in the centre, which is
+    /// where `AdwWindowTitle` already is.
     fn update_next(&self) {
         let count = self.selected_count();
-        self.next.set_label(&fill(gettext("Next ({})"), &[count]));
+        // The label goes on the content object, not the button: `set_label` on the
+        // button would replace the `AdwButtonContent` and with it the icon.
+        self.next_content
+            .set_label(&fill(gettext("Next ({})"), &[count]));
         self.next.set_sensitive(self.can_continue());
         self.next.set_tooltip_text(Some(&if self.can_continue() {
             gettext("Open the picked photos in a collage")
         } else {
             fill(gettext("Pick at least {} photos"), &[MIN_PHOTOS])
         }));
-        self.title.set_subtitle(&fill(
-            ngettext("{} photo picked", "{} photos picked", count as u32),
-            &[count],
+        self.title.set_subtitle(&match self.folder_name() {
+            Some(name) => name,
+            None => gettext("No folder chosen yet"),
+        });
+    }
+
+    /// Writes the status bar's four fields, in gthumb's order (`S13c`).
+    ///
+    /// Every number is one the stage already knows: the pick's count is
+    /// [`Selection`]'s and the folder's, the pixels and the size are the focused
+    /// photo's (its size from the decode that reported it, its file size from one
+    /// `stat`), and the zoom is `round(100 x drawn / photo long edge)`. Nothing here
+    /// decodes anything, and a field with no photo behind it is empty rather than
+    /// stale.
+    fn update_status_line(&self) {
+        self.status[STATUS_COUNT].set_label(&fill(
+            gettext("{} / {}"),
+            &[self.selected_count(), self.len()],
         ));
+        self.status[STATUS_PIXELS].set_label(&match self.focused_size() {
+            Some((width, height)) => fill(gettext("{} × {}"), &[width, height]),
+            None => String::new(),
+        });
+        let bytes = self
+            .focused
+            .get()
+            .and_then(|index| self.file(index))
+            .and_then(|path| std::fs::metadata(path).ok())
+            .map(|metadata| metadata.len());
+        self.status[STATUS_SIZE].set_label(&match bytes {
+            // `GLib.format_size` is what gthumb's status line uses for this field,
+            // so the two read the same way.
+            Some(bytes) => glib::format_size(bytes).to_string(),
+            None => String::new(),
+        });
+        self.status[STATUS_ZOOM].set_label(&match self.zoom_percent() {
+            Some(percent) => fill(gettext("{}%"), &[percent]),
+            None => String::new(),
+        });
     }
 
     /// Rebuilds the picked list: one row per photo, in cell order.
     fn update_picked(&self, window: &EditorWindow) {
         let photos = self.selection.borrow().photos().to_vec();
-        self.list.remove_all();
-        self.list_hint.set_visible(photos.is_empty());
+        // The rows go one at a time rather than through `remove_all`. The list's
+        // placeholder is a *child* of the box, and `GtkListBox::remove_all` takes
+        // every child — the placeholder included — and then forgets it
+        // (`gtklistbox.c`: `if (child == box->placeholder) box->placeholder = NULL`,
+        // measured 2026-09-23: after the first rebuild the empty hint never came
+        // back). `remove_all` had no such trap before S13c, because there was no
+        // placeholder.
+        while let Some(row) = self.list.row_at_index(0) {
+            self.list.remove(&row);
+        }
         for (index, path) in photos.iter().enumerate() {
             self.list.append(&picked_row(window, index, path));
         }
         self.update_next();
+        self.update_status_line();
     }
 
     // ---- the pane's own size, observed -------------------------------------
@@ -1635,28 +1920,22 @@ impl Picker {
                 }
             }
         ));
-        for paned in [self.columns.clone(), self.rows.clone()] {
-            paned.connect_position_notify(glib::clone!(
-                #[weak]
-                window,
-                move |_| {
-                    let Some(picker) = window.picker() else {
-                        return;
-                    };
-                    SPLITS.with(|splits| splits.set(picker.split_position()));
-                    picker.refresh_pane(&window);
-                }
-            ));
-        }
-        // A scroll, and the first moment the grid knows how tall its content is:
-        // both are the vertical adjustment's own signals, and both change what is
-        // on screen.
-        let scroller = self
-            .grid
-            .parent()
-            .and_downcast::<gtk::ScrolledWindow>()
-            .expect("the grid is inside a scrolled window");
-        let adjustment = scroller.vadjustment();
+        self.columns.connect_position_notify(glib::clone!(
+            #[weak]
+            window,
+            move |_| {
+                let Some(picker) = window.picker() else {
+                    return;
+                };
+                SPLITS.with(|splits| splits.set(Some(picker.split_position())));
+                picker.refresh_pane(&window);
+            }
+        ));
+        // A scroll, and the first moment the strip knows how wide its content is:
+        // both are the *horizontal* adjustment's own signals — the strip reflows
+        // along x, so that is the axis it scrolls on — and both change what is on
+        // screen.
+        let adjustment = self.strip.hadjustment();
         for signal in ["value-changed", "changed"] {
             adjustment.connect_local(
                 signal,
@@ -1697,10 +1976,28 @@ impl Picker {
         ));
     }
 
-    /// The picked list's own two interactions: a row dragged onto a position, and
-    /// `Ctrl+Up`/`Ctrl+Down` on the focused row.
+    /// The picked list's three interactions: a row clicked (*switches the pane*,
+    /// ruling 21), a row dragged onto a position, and `Ctrl+Up`/`Ctrl+Down` on the
+    /// focused row.
     fn connect_picked_list(&self, window: &EditorWindow) {
         let list = self.list.clone();
+        // A row's click selects it, and the selection is what switches the preview:
+        // routing it through the list's own signal means the mouse and the keyboard
+        // take one path (a `GtkListBox` in `Single` mode answers both).
+        list.connect_row_selected(glib::clone!(
+            #[weak]
+            window,
+            move |_, row| {
+                let Some(row) = row else {
+                    return;
+                };
+                let Some(picker) = window.picker() else {
+                    return;
+                };
+                picker.focus_picked(&window, row.index() as usize);
+            }
+        ));
+
         let target = gtk::DropTarget::new(i32::static_type(), gdk::DragAction::MOVE);
         target.connect_drop(glib::clone!(
             #[weak]
@@ -1780,6 +2077,65 @@ fn selection_positions(multi: &gtk::MultiSelection) -> Vec<usize> {
     positions
 }
 
+/// The divider's position for a window with no session value behind it: the media
+/// area keeps everything but [`PICKED_LIST_WIDTH`].
+///
+/// The window's own default size is the reference — `GtkPaned`'s position is a
+/// pixel count, and the pane is the paned's *start* child, so "the list is 260 px
+/// wide" is `width - 260`. A window that has been used before starts where the user
+/// left the divider instead ([`SPLITS`]); below the two children's minimums
+/// `GtkPaned` clamps it, which is what keeps the list on screen in a narrow window.
+fn split_position(window: &EditorWindow) -> i32 {
+    if let Some(position) = SPLITS.with(Cell::get) {
+        return position;
+    }
+    let width = window.default_size().0.max(0);
+    (width - PICKED_LIST_WIDTH).max(PICKED_LIST_MIN_WIDTH)
+}
+
+/// The picker's primary menu — the one S13b's header never had.
+///
+/// The shape is the one both reference apps use and ruling 24 asks for: one menu
+/// of sections, `[new / open] · [view options] · [shortcuts, about]` (gthumb's
+/// hamburger is ten items in three sections, `data/ui/browser.ui:243-315`; loupe's
+/// is five in four). The picker's own "view option" is the folder it lists.
+fn picker_menu() -> gio::Menu {
+    let menu = gio::Menu::new();
+
+    let collage = gio::Menu::new();
+    collage.append(Some(&gettext("New collage")), Some("app.new"));
+    collage.append(Some(&gettext("Open…")), Some("app.open"));
+    menu.append_section(None, &collage);
+
+    let view = gio::Menu::new();
+    view.append(Some(&gettext("Choose folder…")), Some("win.choose-folder"));
+    menu.append_section(None, &view);
+
+    let help = gio::Menu::new();
+    help.append(Some(&gettext("Keyboard shortcuts")), Some("app.shortcuts"));
+    help.append(Some(&gettext("About Pixlay")), Some("app.about"));
+    menu.append_section(None, &help);
+
+    menu
+}
+
+/// The long edge a photo is drawn at when `Contain`-fitted into a pane, in device
+/// pixels.
+///
+/// The scale is `min(pane width / photo width, pane height / photo height)`, which
+/// is what `GtkPicture`'s `Contain` does, and the answer is that scale against the
+/// photo's longer edge. This is the number the status bar's zoom is a percentage
+/// of, and the number the pane's decode is rounded up from — the pane always knows
+/// the size it is *drawing* at.
+///
+/// Both sizes are at least one pixel, so an unallocated pane (a zero-size widget,
+/// before its first layout) still divides by something and answers with something.
+fn fitted_long_edge(pane: (u32, u32), photo: (u32, u32)) -> f64 {
+    let (pane_width, pane_height) = (f64::from(pane.0.max(1)), f64::from(pane.1.max(1)));
+    let (photo_width, photo_height) = (f64::from(photo.0.max(1)), f64::from(photo.1.max(1)));
+    f64::min(pane_width / photo_width, pane_height / photo_height) * photo_width.max(photo_height)
+}
+
 /// The folder name of a path, for display.
 fn file_name(path: &Path) -> String {
     path.file_name().map(file_name_from).unwrap_or_default()
@@ -1794,14 +2150,15 @@ fn file_name_from(name: &std::ffi::OsStr) -> String {
 /// A `GtkStack` rather than a bare picture, because a cell has three states and
 /// gthumb's `ThumbnailState` has the same four: not asked for yet, in flight
 /// (**loading**), decoded (**photo**), or refused by the decoder (**failed**).
-/// Its size is [`TILE_SIZE`] whatever the photo's aspect, so the grid does not
+/// Its size is [`TILE_SIZE`] whatever the photo's aspect, so the strip does not
 /// re-flow as it fills.
 fn tile_widget() -> gtk::Stack {
-    // A *static* loading icon rather than a `GtkSpinner`: GTK binds far more cells
-    // than are on screen (measured 2026-09-22: 257 items for a 1000-photo folder in
-    // a 536x396 viewport, a constant of its item manager), a spinner animates while
-    // it is mapped even when it is clipped away, and the cells that are never asked
-    // for would spin for as long as the folder is open.
+    // A *static* loading icon rather than a `GtkSpinner`: GTK keeps many more cells
+    // alive than it shows (measured 2026-09-22: 257 items for a 1000-photo folder in
+    // a 536x396 viewport, a constant of its item manager; the strip's own bound is
+    // `30 x max_columns` = 30), a spinner animates while it is mapped even when it
+    // is clipped away, and the cells that are never asked for would spin for as long
+    // as the folder is open.
     let waiting = gtk::Image::builder()
         .icon_name("image-loading-symbolic")
         .pixel_size(TILE_SIZE / 4)

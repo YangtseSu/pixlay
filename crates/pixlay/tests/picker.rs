@@ -20,11 +20,19 @@
 //!   folder's worth (the ruling's visible-first policy): opening a folder returns
 //!   before *any* decode, a 300-photo folder costs the same bounded number of
 //!   requests as a 14-photo one, and the answer arrives on the worker thread.
-//! * **The pane is decoded at its own size, and it never paints a tile.**
-//!   Regression test for the reported blur: the pane's photo is at least
-//!   min(pane device long edge, `PREVIEW_MAX_PX`) long, the picture it paints is
-//!   that photo's own texture, and coming back to a photo — after focusing another,
-//!   or after changing folder — does not leave the cell's 256 px tile in the pane.
+//! * **The pane is decoded at the size it draws, and it never paints a tile.**
+//!   Regression test for the reported blur, and for the second defect the
+//!   2026-09-22 ruling named: the pane's photo is the `Contain` fit of the pane's
+//!   own device size against the photo's own pixels, rounded up to one
+//!   `PREVIEW_PX_STEP` (S13b asked for the pane's long edge whatever the aspect,
+//!   1.5× the long edge of a portrait in a landscape pane), the picture it paints
+//!   is that photo's own texture, and coming back to a photo — after focusing
+//!   another, or after changing folder — does not leave the cell's tile in the pane.
+//! * **The stage is the ruled shape.** The media area takes ≥ 80 % of the band above
+//!   the status bar, the picked list's height is the pane's, one full-width row of
+//!   128 px cells sits below both, and the status bar's four fields — `picked /
+//!   total`, the photo's pixels, its size, the zoom — are what the ruling says
+//!   (`S13c`).
 //! * **The preview is the pipeline's picture.** Its pixels are compared with the
 //!   file `pixlay-render thumb` writes for the same photo at the same size, because
 //!   both are `pixlay_imaging::thumbnail`: the stage is not a second resampler, and
@@ -39,7 +47,9 @@ use gtk4::glib;
 use gtk4::prelude::*;
 use libadwaita::prelude::*;
 
-use pixlay::picker::{PREVIEW_MAX_PX, Picker, TILE_REQUEST_MAX, TILE_SIZE};
+use pixlay::picker::{
+    PREVIEW_MAX_PX, PREVIEW_PX_STEP, Picker, STATUS_FIELDS, TILE_REQUEST_MAX, TILE_SIZE,
+};
 use pixlay::window::Stage;
 use pixlay_imaging::{Sampler, Source};
 
@@ -236,7 +246,8 @@ fn the_picker_stage_meets_its_own_criteria() {
 
     // ---- Next is gated by the floor of two, and reports the cap ------------
     let next = picker.next_button();
-    picker.clear_selection();
+    let grid = picker.grid();
+    picker.clear_selection(&window);
     assert!(
         !next.is_sensitive(),
         "Next is insensitive with nothing picked"
@@ -252,14 +263,18 @@ fn the_picker_stage_meets_its_own_criteria() {
         "Next is enabled once two photos are picked"
     );
     assert!(
-        next.label().is_some_and(|label| label.contains('2')),
+        next_label(&picker).contains('2'),
         "Next carries the count: {:?}",
-        next.label()
+        next_label(&picker)
     );
 
     // HIG's selection mode: `Ctrl+A` selects the whole collection, and the
     // product's cap has to report what it refuses rather than truncating quietly.
-    picker.select_all();
+    // The key's own path is what is driven — `GtkListBase`'s `list.select-all`, the
+    // only binding for it since S13c (S13 had a second one, so one press fired
+    // twice).
+    grid.activate_action("list.select-all", None)
+        .expect("the grid binds Ctrl+A to list.select-all");
     assert_eq!(
         picker.selected_count(),
         pixlay_core::MAX_PHOTOS,
@@ -278,7 +293,7 @@ fn the_picker_stage_meets_its_own_criteria() {
     );
 
     // ---- the pick becomes the document, in order --------------------------
-    picker.clear_selection();
+    picker.clear_selection(&window);
     for position in scrambled {
         picker.toggle(&window, position as u32);
     }
@@ -334,7 +349,7 @@ fn the_picker_stage_meets_its_own_criteria() {
     );
     window.pump(Duration::from_millis(200));
     let before = support::snapshot(&picker.grid());
-    picker.clear_selection();
+    picker.clear_selection(&window);
     window.pump(Duration::from_millis(200));
     let after = support::snapshot(&picker.grid());
     let difference = support::rmse(&before, &after);
@@ -351,39 +366,60 @@ fn the_picker_stage_meets_its_own_criteria() {
         "clearing the pick drops the highlight"
     );
 
-    // ---- the pane is the pane's size, and never a tile ---------------------
-    // The reported blur, as a number: the pane is decoded at its own device long
-    // edge (rounded up, capped), and what it paints is that photo's own texture.
+    // ---- the pane is decoded at the size it draws, and never a tile ---------
+    // Two defects in one criterion. The reported blur: what the pane paints is the
+    // focused photo's own texture, never a cell's tile. And S13b's over-large
+    // decode: the request is the `Contain` fit of the pane's device size against the
+    // photo's *own* pixels, rounded up to one step — S13b asked for the pane's long
+    // edge whatever the aspect, which is 1.5× the long edge (2.25× the pixels) for a
+    // portrait in a landscape pane.
     let pane = picker.preview_widget();
     let pane_edge = pane.width().max(pane.height()).max(0) as u32 * pane.scale_factor() as u32;
-    let wanted = pane_edge.min(PREVIEW_MAX_PX);
-    picker.toggle(&window, 2);
-    assert!(
-        window.wait_for_preview(support::WAIT),
-        "the pane never decoded the focused photo"
-    );
-    let (width, height) = pane_is_the_preview(&picker, 2);
-    assert!(
-        picker.preview_px() >= wanted,
-        "the pane is {}x{} device pixels and the preview was decoded at {}",
-        pane.width(),
-        pane.height(),
-        picker.preview_px()
-    );
-    assert!(
-        width.max(height) as u32 > TILE_SIZE as u32,
-        "the pane is showing a {width}x{height} picture, which is a cell's tile"
-    );
-    eprintln!(
-        "the pane decoded at {} px for a {}x{} pane ({} device pixels)",
-        picker.preview_px(),
-        pane.width(),
-        pane.height(),
-        pane_edge
-    );
+    for name in ["portrait.jpg", "landscape.jpg", "square.png"] {
+        let position = listed
+            .iter()
+            .position(|path| path.ends_with(name))
+            .unwrap_or_else(|| panic!("{name} is in the fixture folder"));
+        picker.focus(&window, position);
+        assert!(
+            window.wait_for_preview(support::WAIT),
+            "the pane never decoded {name}"
+        );
+        let wanted = decoded_long_edge(&picker, &listed[position]);
+        let drawn = fitted_long_edge(&picker, &listed[position]);
+        assert_eq!(
+            picker.preview_px(),
+            wanted,
+            "{name}: the pane decoded {} px where it draws {} px",
+            picker.preview_px(),
+            drawn
+        );
+        assert!(
+            picker.preview_px() <= pane_edge + PREVIEW_PX_STEP,
+            "{name}: the pane is {pane_edge} device pixels long and the decode is {}",
+            picker.preview_px()
+        );
+        let (width, height) = pane_is_the_preview(&picker, position);
+        assert!(
+            width.max(height) as u32 > TILE_SIZE as u32,
+            "the pane is showing a {width}x{height} picture, which is a cell's tile"
+        );
+        eprintln!(
+            "{name}: the pane decoded at {} px for a {}x{} pane ({} device pixels), drawing {drawn} px",
+            picker.preview_px(),
+            pane.width(),
+            pane.height(),
+            pane_edge
+        );
+    }
 
     // Focus another photo and come back: S13 left the *tile* in the pane when the
     // preview of a photo it had already shown was refused as a repeat.
+    picker.toggle(&window, 2);
+    assert!(
+        window.wait_for_preview(support::WAIT),
+        "the pane never decoded the picked photo"
+    );
     picker.focus(&window, 0);
     assert!(
         window.wait_for_preview(support::WAIT),
@@ -450,22 +486,22 @@ fn the_picker_stage_meets_its_own_criteria() {
         "the preview and the CLI's thumb diverged: RMSE {difference:.4} > {RMSE_THRESHOLD}"
     );
 
-    // ---- the dividers are the session's ------------------------------------
-    // Both positions are what the user chose, so a second window opens where the
-    // first one was left (`SPLITS`), not at the defaults.
-    picker.set_split_position(500, 300);
+    // ---- the divider is the session's --------------------------------------
+    // The position is what the user chose, so a second window opens where the first
+    // one was left (`SPLITS`), not at the default.
+    picker.set_split_position(500);
     window.pump(Duration::from_millis(100));
     assert_eq!(
         picker.split_position(),
-        (500, 300),
-        "the dividers report the position they were given"
+        500,
+        "the divider reports the position it was given"
     );
     let other = support::second_window(&app);
     let other_picker = other.picker().expect("the second window has a picker");
     assert_eq!(
         other_picker.split_position(),
-        (500, 300),
-        "a new window opens on the dividers the session left behind"
+        500,
+        "a new window opens on the divider the session left behind"
     );
 
     // ---- a folder of hundreds of photos costs what a folder of ten does ----
@@ -527,9 +563,9 @@ fn the_picker_stage_meets_its_own_criteria() {
     );
 
     // ---- what the stage looks like -----------------------------------------
-    // Back on the fixture folder with a pick of three, so the picture a human
-    // looks at is a real state of the stage rather than the last thing a check
-    // left behind.
+    // Back on the fixture folder with a pick of three, so the picture a human looks
+    // at — and every geometry the checks below read — is a real state of the stage
+    // rather than the last thing a check left behind.
     picker.open_folder(&window, &folder);
     for position in scrambled {
         picker.toggle(&window, position as u32);
@@ -538,16 +574,245 @@ fn the_picker_stage_meets_its_own_criteria() {
     let _ = window.wait_for_preview(support::WAIT);
     let _ = window.wait_for_tiles(support::WAIT);
     window.pump(Duration::from_millis(300));
+
+    // ---- the ruled shape, and the status line ------------------------------
+    // The 2026-09-22 ruling's arrangement, as geometry and as numbers: the media
+    // area is the majority of the band above the status bar, the picked list is the
+    // pane's own height, the strip is one full-width row of 128 px cells below both,
+    // and the four fields of the status bar are computed, not pasted.
+    //
+    // "The band above the status bar" is the ruling's own measurement, so it is the
+    // **content** band: from the pane's top edge to the status bar's — the header bar
+    // is chrome above it, and the reference's own 88 % is `860 / 974`, the media area
+    // against the content band *excluding* the header (`docs/2026-09-22-STEPS.md`,
+    // `S13c · What the reference actually measures`).
+    let root = picker.root().upcast::<gtk4::Widget>();
+    let pane = picker.preview_widget().upcast::<gtk4::Widget>();
+    let list = picker.picked_list().upcast::<gtk4::Widget>();
+    let strip = picker.strip().upcast::<gtk4::Widget>();
+    let status_bar = picker.status_bar().upcast::<gtk4::Widget>();
+    let corner = |widget: &gtk4::Widget, x: f32, y: f32| {
+        widget
+            .compute_point(&root, &gtk4::graphene::Point::new(x, y))
+            .map(|point| (point.x(), point.y()))
+    };
+    let band = corner(&status_bar, 0.0, 0.0)
+        .expect("the status bar is in the page")
+        .1
+        - corner(&pane, 0.0, 0.0)
+            .expect("the media area is in the page")
+            .1;
+    let pane_share = f64::from(pane.height()) / f64::from(band);
+    let cell = picker.cell_widget(1).expect("a bound cell");
+    eprintln!(
+        "the content band above the status bar is {band:.0} px: the media area is {:.1}% of it \
+         ({} px), the strip is {} px tall (grid {}, cell {}x{} in an item {} px tall), the status \
+         bar {} px",
+        pane_share * 100.0,
+        pane.height(),
+        strip.height(),
+        picker.grid().height(),
+        cell.width(),
+        cell.height(),
+        cell.parent().map(|item| item.height()).unwrap_or(-1),
+        status_bar.height()
+    );
+    assert!(
+        pane_share >= 0.8,
+        "the media area takes {:.1}% of the band above the status bar, under the ruled 80%",
+        pane_share * 100.0
+    );
+    assert_eq!(
+        (
+            list.height(),
+            corner(&list, 0.0, 0.0).map(|(_, y)| y.round())
+        ),
+        (
+            pane.height(),
+            corner(&pane, 0.0, 0.0).map(|(_, y)| y.round())
+        ),
+        "the picked list has to be the media area's own height and start with it"
+    );
+    let top = |widget: &gtk4::Widget| corner(widget, 0.0, 0.0).expect("the band is in the page").1;
+    let strip_top = top(&strip);
+    let pane_bottom = top(&pane) + pane.height() as f32;
+    let list_bottom = top(&list) + list.height() as f32;
+    let status_top = top(&status_bar);
+    eprintln!(
+        "the bands: media area {:.0}..{pane_bottom:.0}, picked list {:.0}..{list_bottom:.0}, \
+         strip {strip_top:.0}..{:.0}, status bar {status_top:.0}..",
+        top(&pane),
+        top(&list),
+        strip_top + strip.height() as f32,
+    );
+    assert!(
+        strip_top >= pane_bottom && strip_top >= list_bottom,
+        "the strip ({strip_top:.0}) has to be below the media area ({pane_bottom:.0}) and the \
+         picked list ({list_bottom:.0})"
+    );
+    assert_eq!(
+        (
+            corner(&strip, 0.0, 0.0).map(|(x, _)| x.round()),
+            corner(&strip, strip.width() as f32, 0.0).map(|(x, _)| x.round()),
+        ),
+        (
+            corner(&pane, 0.0, 0.0).map(|(x, _)| x.round()),
+            Some(root.width() as f32),
+        ),
+        "the strip spans from the media area's left edge to the window's right edge"
+    );
+    assert!(
+        status_bar.height() >= 24,
+        "the status bar is {} px tall, under the ruled 24",
+        status_bar.height()
+    );
+    assert!(
+        status_top >= strip_top + strip.height() as f32,
+        "the status bar ({status_top:.0}) has to be the last band, below the strip ({:.0})",
+        strip_top + strip.height() as f32
+    );
+    // A cell is 128 logical px plus the CSS border, and the tile is decoded at that
+    // size times the screen's scale factor.
+    assert!(
+        (TILE_SIZE..=TILE_SIZE + 4).contains(&cell.width()),
+        "a cell is {} px wide, not {TILE_SIZE} plus its border",
+        cell.width()
+    );
+    assert_eq!(
+        picker.tile_px(),
+        TILE_SIZE as u32 * cell.scale_factor() as u32,
+        "the tile's decode is the cell's own device pixels"
+    );
+
+    // The four fields, each one computed from what it is about: the pick and the
+    // folder, the focused photo's own pixels, its file's size, and the zoom the pane
+    // is drawing at.
+    picker.focus(&window, square_position(&listed));
+    assert!(
+        window.wait_for_preview(support::WAIT),
+        "the pane never decoded the photo the status line is checked on"
+    );
+    let focused = picker
+        .file(picker.focused().expect("a photo is focused"))
+        .expect("the focused photo is in the listing");
+    let source = Source::decode(&focused).expect("the fixture decodes");
+    let bytes = std::fs::metadata(&focused)
+        .expect("the fixture exists")
+        .len();
+    let zoom = (100.0 * f64::from(fitted_long_edge(&picker, &focused))
+        / f64::from(source.width().max(source.height())))
+    .round() as u32;
+    let expected: [String; STATUS_FIELDS] = [
+        format!("{} / {}", picker.selected_count(), picker.len()),
+        format!("{} × {}", source.width(), source.height()),
+        glib::format_size(bytes).to_string(),
+        format!("{zoom}%"),
+    ];
+    eprintln!(
+        "the status line reads {:?}",
+        picker.status_line().join("   ")
+    );
+    assert_eq!(
+        picker.status_line(),
+        expected,
+        "the status bar's four fields are gthumb's, computed from the stage's own numbers"
+    );
+
+    // ---- the picked list switches the pane ---------------------------------
+    // Ruling 21: clicking a row previews that photo — S13b's list only selected, and
+    // the preview followed the *strip's* click. The row's own `row-selected` is what
+    // a click emits, so that is what this drives.
+    let row = picker.picked_list().row_at_index(1).expect("a picked row");
+    picker.picked_list().select_row(Some(&row));
+    window.pump(Duration::from_millis(100));
+    let photo = picker.selection().photos()[1].clone();
+    let wanted = picker
+        .files()
+        .iter()
+        .position(|file| *file == photo)
+        .expect("the picked photo is in the folder");
+    assert_eq!(
+        picker.focused(),
+        Some(wanted),
+        "clicking a picked row has to focus that photo"
+    );
+    assert!(
+        window.wait_for_preview(support::WAIT),
+        "the pane never decoded the photo the picked row stands for"
+    );
+    pane_is_the_preview(&picker, wanted);
+    let source = Source::decode(&photo).expect("the fixture decodes");
+    assert_eq!(
+        picker.status_line()[1],
+        format!("{} × {}", source.width(), source.height()),
+        "and the status line has to follow it"
+    );
+
     let picture = support::artifact("picker.png");
     support::save_png(&picture, &support::snapshot(&window));
     eprintln!("the picker stage is {picture:?}");
+}
+
+/// The index of the square fixture, which is the photo the status line is checked
+/// against (its aspect makes the fitted decode differ from the pane's long edge in
+/// both directions).
+fn square_position(listed: &[PathBuf]) -> usize {
+    listed
+        .iter()
+        .position(|path| path.ends_with("square.png"))
+        .expect("square.png is in the fixture folder")
+}
+
+/// The pane's size in device pixels.
+fn pane_device(picker: &Picker) -> (u32, u32) {
+    let pane = picker.preview_widget();
+    let scale = pane.scale_factor() as u32;
+    (
+        pane.width().max(0) as u32 * scale,
+        pane.height().max(0) as u32 * scale,
+    )
+}
+
+/// The long edge `photo` is drawn at when `Contain`-fitted into the pane, in device
+/// pixels — the expectation, computed from the widget's allocation and the photo's
+/// own pixels rather than pasted.
+fn fitted_long_edge(picker: &Picker, photo: &std::path::Path) -> u32 {
+    let source = Source::decode(photo).expect("the fixture decodes");
+    let (pane_width, pane_height) = pane_device(picker);
+    let scale = f64::min(
+        f64::from(pane_width) / f64::from(source.width()),
+        f64::from(pane_height) / f64::from(source.height()),
+    );
+    (scale * f64::from(source.width().max(source.height()))).ceil() as u32
+}
+
+/// The long edge the pane's decode was asked for: the fitted edge rounded up to one
+/// `PREVIEW_PX_STEP`, capped.
+fn decoded_long_edge(picker: &Picker, photo: &std::path::Path) -> u32 {
+    let wanted = fitted_long_edge(picker, photo).div_ceil(PREVIEW_PX_STEP) * PREVIEW_PX_STEP;
+    wanted.clamp(PREVIEW_PX_STEP, PREVIEW_MAX_PX)
+}
+
+/// The count the Next button carries, read off the `AdwButtonContent` its child is.
+///
+/// The label has to live there: `GtkButton::set_label` *replaces* the button's child,
+/// so S13b's `update_next` destroyed the icon the first time it ran (fixed in S13c,
+/// and this is the check that keeps it fixed).
+fn next_label(picker: &Picker) -> String {
+    picker
+        .next_button()
+        .child()
+        .and_downcast::<libadwaita::ButtonContent>()
+        .expect("Next carries an AdwButtonContent, not a bare label")
+        .label()
+        .to_string()
 }
 
 /// Asserts the pane is showing `index`'s own preview, and returns its size.
 ///
 /// The claim is made of three things at once, which is what makes it the
 /// regression test for the reported blur: the pane's photo is the focused one, the
-/// texture it paints is that photo's preview (so a 256 px tile cannot pass), and
+/// texture it paints is that photo's preview (so a 128 px tile cannot pass), and
 /// the pane considers that preview current for the pane's own size.
 fn pane_is_the_preview(picker: &Picker, index: usize) -> (i32, i32) {
     assert!(
@@ -571,6 +836,26 @@ fn pane_is_the_preview(picker: &Picker, index: usize) -> (i32, i32) {
         (texture.width(), texture.height()),
         (width, height),
         "the pane paints the preview's own texture, not a tile's"
+    );
+    // Holding a texture is not the same as drawing it: the pane's own snapshot has
+    // to show something where the photo is. Measured 2026-09-23: the strip and the
+    // picked list drew while the pane was still on the empty state, because the
+    // `GtkStack`'s crossfade had not run — so this is the check that a preview on
+    // screen is a *pixel* and not a property.
+    let painted = support::snapshot(&picker.preview_widget());
+    let backdrop = support::pixel(&painted, 1, 1);
+    let covered = [(0.5, 0.5), (0.4, 0.5), (0.6, 0.5), (0.5, 0.4), (0.5, 0.6)]
+        .iter()
+        .any(|(x, y)| {
+            support::pixel(
+                &painted,
+                (f64::from(painted.0) * x) as i32,
+                (f64::from(painted.1) * y) as i32,
+            ) != backdrop
+        });
+    assert!(
+        covered,
+        "the pane is holding photo {index}'s preview but drew nothing of it"
     );
     (width, height)
 }

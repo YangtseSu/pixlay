@@ -20,6 +20,7 @@ mod support;
 use std::collections::BTreeSet;
 use std::time::Duration;
 
+use gtk4::gio;
 use gtk4::prelude::*;
 use libadwaita as adw;
 
@@ -62,6 +63,9 @@ fn the_interface_meets_the_machine_checkable_hig() {
     check_shortcuts(&application, &window, &mut failures);
     check_accessible_names(&window, &mut failures);
     check_picker(&window, &mut failures);
+    check_picker_input(&window, &mut failures);
+    check_header_chrome(&window, &mut failures);
+    check_picker_theme(&window, &mut failures);
     check_picker_minimum(&window, &mut failures);
 
     // ---- stage 2: the editor ------------------------------------------------
@@ -192,7 +196,7 @@ fn check_shortcuts(
 fn check_accessible_names(window: &EditorWindow, failures: &mut Vec<String>) {
     let root = window.clone().upcast::<gtk4::Widget>();
     for widget in support::descendants(&root) {
-        if !is_interactive(&widget) {
+        if !is_interactive(&widget) || is_platform_chrome(&widget) {
             continue;
         }
         if !has_accessible_name(&widget) {
@@ -203,6 +207,21 @@ fn check_accessible_names(window: &EditorWindow, failures: &mut Vec<String>) {
             ));
         }
     }
+}
+
+/// The platform's own toast chrome, which is not this app's control: libadwaita's
+/// `AdwToastWidget` puts its dismiss button in every toast and gives it a tooltip
+/// ("Dismiss") and no label — its own accessibility decision, made in libadwaita and
+/// not something a toast from here can change.
+fn is_platform_chrome(widget: &gtk4::Widget) -> bool {
+    let mut current = Some(widget.clone());
+    while let Some(candidate) = current {
+        if candidate.type_().name() == "AdwToastWidget" {
+            return true;
+        }
+        current = candidate.parent();
+    }
+    false
 }
 
 /// The controls a screen reader has to announce: everything a user can operate.
@@ -315,17 +334,25 @@ fn check_picker(window: &EditorWindow, failures: &mut Vec<String>) {
         failures.push("no grid cell carries the .picker-cell class".to_string());
     }
 
-    // The count is the button's own text, and the floor of the product's 2–9 rule
-    // turns it off rather than letting Next open an empty collage.
+    // The count is the content's own label — not the button's, which would replace
+    // the `AdwButtonContent` and lose the icon (`S13c`, the defect this checks) — and
+    // the floor of the product's 2–9 rule turns it off rather than letting Next open
+    // an empty collage.
     let next = picker.next_button();
-    let label = next
-        .label()
-        .map(|label| label.to_string())
-        .unwrap_or_default();
+    let label = next_label(&picker);
     if !label.contains('0') {
         failures.push(format!(
             "Next does not carry the count of picked photos (label is {label:?})"
         ));
+    }
+    if !next
+        .child()
+        .is_some_and(|child| child.is::<adw::ButtonContent>())
+    {
+        failures.push(
+            "Next's child is not an AdwButtonContent, so its icon is gone (S13b's defect)"
+                .to_string(),
+        );
     }
     if next.is_sensitive() {
         failures.push("Next is sensitive with nothing picked".to_string());
@@ -353,10 +380,7 @@ fn check_picker(window: &EditorWindow, failures: &mut Vec<String>) {
     if !next.is_sensitive() {
         failures.push("Next is insensitive with two photos picked".to_string());
     }
-    let label = next
-        .label()
-        .map(|label| label.to_string())
-        .unwrap_or_default();
+    let label = next_label(&picker);
     if !label.contains('2') {
         failures.push(format!(
             "Next does not show two picked photos (label is {label:?})"
@@ -365,7 +389,7 @@ fn check_picker(window: &EditorWindow, failures: &mut Vec<String>) {
     if picker.picked_list().first_child().is_none() {
         failures.push("the picked list is empty with two photos picked".to_string());
     }
-    picker.clear_selection();
+    picker.clear_selection(window);
     if picker.selected_count() != 0 {
         failures.push("Esc-equivalent clearing left photos picked".to_string());
     }
@@ -375,6 +399,283 @@ fn check_picker(window: &EditorWindow, failures: &mut Vec<String>) {
     {
         failures.push("clearing the pick left a cell highlighted".to_string());
     }
+}
+
+/// The picker's input paths, and the three defects S13c fixed while it rewrote the
+/// same code (`docs/2026-09-22-STEPS.md`, `S13c · Work` (a)–(c)).
+///
+/// Every one of them is driven through the platform's own route: `Enter` is GTK's
+/// `list.activate-item` action (the one the key is bound to), `Ctrl+A` is
+/// `list.select-all`, and Next's label is read off the `AdwButtonContent` the button
+/// holds.
+fn check_picker_input(window: &EditorWindow, failures: &mut Vec<String>) {
+    let picker = window.picker().expect("the window has a picker stage");
+    picker.open_folder(window, &support::fixtures().join("photos"));
+    window.pump(Duration::from_millis(300));
+    let grid = picker.grid();
+    if picker.len() < 2 {
+        failures.push("the fixture folder is too small to check the picker's input with".into());
+        return;
+    }
+
+    // `Enter` toggles the focused cell: `list.activate-item` emits the grid's
+    // `activate` signal, which is what the picker answers.
+    let position = 0u32;
+    picker.clear_selection(window);
+    if grid
+        .activate_action("list.activate-item", Some(&position.to_variant()))
+        .is_err()
+    {
+        failures.push("the grid has no list.activate-item action (Enter does nothing)".into());
+    }
+    if picker.selected_count() != 1 {
+        failures.push(format!(
+            "Enter on a cell left {} photos picked, not 1",
+            picker.selected_count()
+        ));
+    }
+    let _ = grid.activate_action("list.activate-item", Some(&position.to_variant()));
+    if picker.selected_count() != 0 {
+        failures.push("Enter on a picked cell did not toggle it off".into());
+    }
+
+    // `Ctrl+A` is bound once — GTK's own `list.select-all` — and one press reports
+    // the cap exactly once. S13's second binding made the same press fire twice.
+    picker.clear_selection(window);
+    let before = window.toasts();
+    let _ = grid.activate_action("list.select-all", None);
+    if picker.selected_count() != pixlay_core::MAX_PHOTOS {
+        failures.push(format!(
+            "selecting all left {} photos picked, not the cap of {}",
+            picker.selected_count(),
+            pixlay_core::MAX_PHOTOS
+        ));
+    }
+    let reports = window.toasts() - before;
+    if reports != 1 {
+        failures.push(format!(
+            "one Ctrl+A reported the cap {reports} times, not once"
+        ));
+    }
+    if !window
+        .last_toast()
+        .is_some_and(|toast| toast.contains(&pixlay_core::MAX_PHOTOS.to_string()))
+    {
+        failures.push(format!(
+            "the refused photos are not reported by name: {:?}",
+            window.last_toast()
+        ));
+    }
+    // And the picked list is rebuilt rather than left stale: S13b cleared the model
+    // and the ordered list without rebuilding the rows, so a cleared pick left rows
+    // behind — which now would be controls that switch the pane to a photo nobody
+    // picked.
+    picker.clear_selection(window);
+    if picker.picked_list().row_at_index(0).is_some() {
+        failures.push("clearing the pick left its rows behind".into());
+    }
+    if picker.picked_list().row_at_index(0).is_none()
+        && picker
+            .picked_list()
+            .first_child()
+            .is_none_or(|child| !child.has_css_class("dim-label"))
+    {
+        failures.push(
+            "the empty picked list has no hint: the placeholder has to survive a rebuild".into(),
+        );
+    }
+}
+
+/// The picker's chrome, as HIG `patterns/containers/header-bars` and ruling 24 fix
+/// it: primary and navigation actions at the start, the heading in the centre, the
+/// menu at the end, and one primary menu of the ruled items.
+fn check_header_chrome(window: &EditorWindow, failures: &mut Vec<String>) {
+    let picker = window.picker().expect("the window has a picker stage");
+    let header = picker.header();
+    let root = picker.root().upcast::<gtk4::Widget>();
+    let title = header
+        .title_widget()
+        .expect("the header has a title widget");
+    let centre = |widget: &gtk4::Widget| {
+        widget
+            .compute_point(
+                &root,
+                &gtk4::graphene::Point::new(
+                    widget.width() as f32 / 2.0,
+                    widget.height() as f32 / 2.0,
+                ),
+            )
+            .map(|point| point.x())
+    };
+
+    // The folder button is the start slot's control: it is the first button of the
+    // header's start box, and it is to the *left* of the heading.
+    let controls = support::descendants(header.upcast_ref::<gtk4::Widget>());
+    let folder = controls.iter().find(|widget| {
+        widget.is::<gtk4::Button>()
+            && widget.tooltip_text().as_deref()
+                == Some(pixlay::i18n::gettext("Choose a folder of photos").as_str())
+    });
+    let Some(folder) = folder else {
+        failures.push("the header has no folder button".into());
+        return;
+    };
+    let menu = picker.menu_button();
+    let (folder_x, title_x, menu_x) = (
+        centre(&folder.clone()),
+        centre(&title.clone()),
+        centre(menu.upcast_ref::<gtk4::Widget>()),
+    );
+    match (folder_x, title_x, menu_x) {
+        (Some(folder_x), Some(title_x), Some(menu_x)) => {
+            if folder_x >= title_x {
+                failures.push(format!(
+                    "the folder button ({folder_x:.0}) is not left of the heading ({title_x:.0})"
+                ));
+            }
+            if menu_x <= title_x {
+                failures.push(format!(
+                    "the menu ({menu_x:.0}) is not right of the heading ({title_x:.0})"
+                ));
+            }
+        }
+        _ => failures.push("the header's controls are not allocated".into()),
+    }
+
+    // One primary menu, of the ruled items, in the ruled sections.
+    let actions = menu
+        .menu_model()
+        .map(|model| menu_actions(&model))
+        .unwrap_or_default();
+    let wanted = [
+        "app.new",
+        "app.open",
+        "win.choose-folder",
+        "app.shortcuts",
+        "app.about",
+    ];
+    if actions != wanted {
+        failures.push(format!(
+            "the picker's menu is {actions:?}, not the ruled {wanted:?}"
+        ));
+    }
+
+    // Every control *this app* puts in the header carries a tooltip (this page's own
+    // "tooltips on primary controls"); the header's own internals — the back button,
+    // the window controls — are the platform's and are checked by
+    // `check_accessible_names` instead.
+    for (name, widget) in [
+        ("the folder button", folder.clone()),
+        ("the menu", menu.clone().upcast::<gtk4::Widget>()),
+        ("Next", picker.next_button().upcast::<gtk4::Widget>()),
+    ] {
+        if widget.tooltip_text().is_none() {
+            failures.push(format!("{name} has no tooltip"));
+        }
+        if !has_accessible_name(&widget) {
+            failures.push(format!("{name} has no accessible name"));
+        }
+    }
+}
+
+/// The menu's items, in the order the model lists them, flattened over its sections.
+fn menu_actions(model: &gio::MenuModel) -> Vec<String> {
+    let mut actions = Vec::new();
+    for index in 0..model.n_items() {
+        if let Some(section) = model.item_link(index, gio::MENU_LINK_SECTION) {
+            actions.extend(menu_actions(&section));
+        }
+        if let Some(action) = model.item_attribute_value(index, "action", None) {
+            actions.push(action.str().unwrap_or_default().to_string());
+        }
+    }
+    actions
+}
+
+/// The media area is on the theme's own background, and the app is dark by default
+/// (rulings 22–23; HIG `guidelines/ui-styling`).
+///
+/// The ruling's own words: the media area's backdrop is `#222226` in the dark
+/// scheme, which *is* libadwaita's `--window-bg-color` — the idiom both references
+/// copy is "the theme's own background", not that literal. So the check is an
+/// equality: the pane's backdrop is the same colour as a plain widget with nothing
+/// painted on it (the status bar), under a forced light *and* a forced dark scheme;
+/// and the two schemes differ, which is what says the colour is not a literal.
+///
+/// The pixels come from the **window's** own snapshot, not from the pane's alone:
+/// `WidgetPaintable` renders a widget's own node, and a widget with no background of
+/// its own paints nothing — the colour at that point comes from the window beneath
+/// it, which is exactly what is being checked.
+fn check_picker_theme(window: &EditorWindow, failures: &mut Vec<String>) {
+    let manager = adw::StyleManager::default();
+    if manager.color_scheme() != adw::ColorScheme::ForceDark {
+        failures.push(format!(
+            "the app is not dark by default ({:?})",
+            manager.color_scheme()
+        ));
+    }
+    let picker = window.picker().expect("the window has a picker stage");
+    let pane = picker.preview_widget().upcast::<gtk4::Widget>();
+    let status_bar = picker.status_bar().upcast::<gtk4::Widget>();
+    let root = window.clone().upcast::<gtk4::Widget>();
+    // Mid-left rather than the very corner: a raised top bar (`AdwToolbarView`'s
+    // `top_bar_style`, S13c) draws its own edge over the first pixels of the content
+    // below it, and that edge is chrome, not the media area's backdrop (measured
+    // 2026-09-23: the pane's corner is one level darker than the window background).
+    let pane_point = pane
+        .compute_point(
+            &root,
+            &gtk4::graphene::Point::new(3.0, pane.height() as f32 / 2.0),
+        )
+        .map(|point| (point.x() as i32, point.y() as i32));
+    let bar_point = status_bar
+        .compute_point(
+            &root,
+            &gtk4::graphene::Point::new(3.0, status_bar.height() as f32 / 2.0),
+        )
+        .map(|point| (point.x() as i32, point.y() as i32));
+    let (Some(pane_point), Some(bar_point)) = (pane_point, bar_point) else {
+        failures.push("the media area and the status bar are not in the window".into());
+        return;
+    };
+
+    let mut backgrounds = Vec::new();
+    for scheme in [adw::ColorScheme::ForceDark, adw::ColorScheme::ForceLight] {
+        manager.set_color_scheme(scheme);
+        window.pump(Duration::from_millis(300));
+        let pixels = support::snapshot(window);
+        backgrounds.push((
+            format!("{scheme:?}"),
+            support::pixel(&pixels, pane_point.0, pane_point.1),
+            support::pixel(&pixels, bar_point.0, bar_point.1),
+        ));
+    }
+    manager.set_color_scheme(adw::ColorScheme::ForceDark);
+    for (scheme, pane_pixel, bar_pixel) in &backgrounds {
+        if pane_pixel != bar_pixel {
+            failures.push(format!(
+                "under {scheme} the media area is {pane_pixel:?} where the window's own \
+                 background is {bar_pixel:?}: the pane is not on the theme's background"
+            ));
+        }
+    }
+    if backgrounds[0].1 == backgrounds[1].1 {
+        failures.push(
+            "the media area's backdrop is the same under both colour schemes, so it is a \
+             literal colour rather than the theme's"
+                .to_string(),
+        );
+    }
+}
+
+/// The count the Next button carries, read off the `AdwButtonContent` it holds.
+fn next_label(picker: &pixlay::picker::Picker) -> String {
+    picker
+        .next_button()
+        .child()
+        .and_downcast::<adw::ButtonContent>()
+        .map(|content| content.label().to_string())
+        .unwrap_or_default()
 }
 
 /// At the minimum size the picker's own controls are all still usable
@@ -488,7 +789,9 @@ fn check_colour_schemes(window: &EditorWindow, failures: &mut Vec<String>) {
         window.pump(Duration::from_millis(300));
         painted.push((format!("{scheme:?}"), support::snapshot(&area)));
     }
-    manager.set_color_scheme(adw::ColorScheme::Default);
+    // The app's own scheme, not `Default`: dark is what `app.rs` sets at startup
+    // (ruling 23), so the window is left where the application put it.
+    manager.set_color_scheme(adw::ColorScheme::ForceDark);
     let (first, second) = (&painted[0].1, &painted[1].1);
     let difference = support::rmse(first, second);
     if difference > 0.0 {

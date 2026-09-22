@@ -135,6 +135,10 @@ mod imp {
         /// The last message a toast carried, for the tests: a refusal the user is
         /// told about is a claim this layer can be held to.
         pub last_toast: RefCell<Option<String>>,
+        /// How many toasts this window has shown, for the tests: "the cap is
+        /// reported *once* per refused pick" is a claim about a count, and the last
+        /// message cannot tell one report from two (`S13c`).
+        pub toasts: Cell<u64>,
         pub actions: RefCell<Vec<gio::SimpleAction>>,
     }
 
@@ -176,6 +180,7 @@ mod imp {
                 exporting: Cell::new(false),
                 missing: RefCell::new(Vec::new()),
                 last_toast: RefCell::new(None),
+                toasts: Cell::new(0),
                 actions: RefCell::new(Vec::new()),
             }
         }
@@ -223,6 +228,16 @@ impl EditorWindow {
     fn build(&self) {
         let imp = self.imp();
 
+        // The default size and the size request are set **before** the pages are
+        // built, because the picker derives its divider's position from the default
+        // width (the media area takes everything but the picked list's 260 px), and
+        // a widget cannot ask a question about a size that has not been given yet.
+        self.set_default_size(1100, 760);
+        // The minimum the layout is designed for (HIG `guidelines/adaptive`): the
+        // picker's grid needs its column and the editor's canvas its own space,
+        // and below this the window would be showing neither.
+        self.set_size_request(560, 420);
+
         // ---- the editor page ------------------------------------------------
         // The header of the stage the document lives in: history, saving and the
         // export. `AdwNavigationView` adds the back button by itself, because this
@@ -253,12 +268,15 @@ impl EditorWindow {
             .build();
         a11y::label(&menu, &gettext("Main menu"));
 
+        // HIG `patterns/containers/header-bars`: navigation actions at the *start*,
+        // the heading in the centre, the menu at the *end* (S13c; S13b packed every
+        // control at the end).
         let header = adw::HeaderBar::new();
-        header.pack_end(&export);
+        header.pack_start(&undo);
+        header.pack_start(&redo);
         header.pack_end(&menu);
+        header.pack_end(&export);
         header.pack_end(&save);
-        header.pack_end(&redo);
-        header.pack_end(&undo);
 
         // ---- progress ------------------------------------------------------
         let progress = gtk::ProgressBar::builder()
@@ -290,6 +308,10 @@ impl EditorWindow {
         editor_view.add_top_bar(&header);
         editor_view.add_bottom_bar(&progress_revealer);
         editor_view.set_content(Some(&editor_body));
+        // The same idiom as the picker's page (S13c, from loupe's
+        // `src/widgets/image_window.rs:986-998`): content starts below the bar, so
+        // the bar is raised rather than flat.
+        editor_view.set_top_bar_style(adw::ToolbarStyle::Raised);
         let editor_page =
             adw::NavigationPage::with_tag(&editor_view, &gettext("Collage"), "editor");
 
@@ -313,11 +335,6 @@ impl EditorWindow {
 
         self.set_content(Some(&toast));
         self.set_title(Some(&gettext("Untitled collage")));
-        self.set_default_size(1100, 760);
-        // The minimum the layout is designed for (HIG `guidelines/adaptive`): the
-        // picker's grid needs its column and the editor's canvas its own space,
-        // and below this the window would be showing neither.
-        self.set_size_request(560, 420);
 
         imp.canvas.set(canvas).ok();
         imp.pages.set(pages).ok();
@@ -478,6 +495,15 @@ impl EditorWindow {
             }),
         );
         add(
+            "choose-folder",
+            false,
+            Box::new(|window| {
+                if let Some(picker) = window.picker() {
+                    picker.choose_folder(window);
+                }
+            }),
+        );
+        add(
             "close",
             true,
             Box::new(|window| {
@@ -549,7 +575,7 @@ impl EditorWindow {
     /// One tile or preview arrived from the picker's worker.
     pub fn on_thumb(&self, reply: thumbs::Reply) {
         if let Some(picker) = self.imp().picker.get() {
-            picker.on_reply(reply);
+            picker.on_reply(self, reply);
         }
     }
 
@@ -916,7 +942,7 @@ impl EditorWindow {
             Ok(editor) => {
                 *self.imp().editor.borrow_mut() = editor;
                 if let Some(picker) = self.picker() {
-                    picker.clear_selection();
+                    picker.clear_selection(self);
                 }
                 self.select(None);
                 self.set_title(Some(&gettext("Untitled collage")));
@@ -1463,7 +1489,8 @@ impl EditorWindow {
         // The document's own actions belong to the stage that shows the document:
         // Save with the picker on screen would save a collage the user has not
         // finished choosing (`AGENTS.md`: a document edit only happens through the
-        // editor's own page).
+        // editor's own page). The picker's own folder action is the mirror image:
+        // it belongs to the stage with the folder on it.
         let editing = self.stage() == Stage::Editor;
         for action in self.imp().actions.borrow().iter() {
             let enabled = match action.name().as_str() {
@@ -1471,6 +1498,7 @@ impl EditorWindow {
                 "redo" => redo,
                 "save" | "save-as" => editing,
                 "export" => editing && has_any_photo,
+                "choose-folder" => !editing,
                 "add-photo" | "clear-photo" | "reset-framing" => editing && selected,
                 _ => action.is_enabled(),
             };
@@ -1532,6 +1560,7 @@ impl EditorWindow {
     /// Short feedback that does not need an answer (HIG `patterns/feedback`).
     pub fn toast(&self, message: &str) {
         *self.imp().last_toast.borrow_mut() = Some(message.to_string());
+        self.imp().toasts.set(self.imp().toasts.get() + 1);
         if let Some(overlay) = self.imp().toast.get() {
             overlay.add_toast(adw::Toast::new(message));
         } else {
@@ -1546,6 +1575,15 @@ impl EditorWindow {
     /// and a toast is not a widget tree a test can walk).
     pub fn last_toast(&self) -> Option<String> {
         self.imp().last_toast.borrow().clone()
+    }
+
+    /// How many toasts this window has shown since it opened.
+    ///
+    /// The tests' handle on "a refusal is reported *once*": `Ctrl+A` past the cap
+    /// fires one selection change, and this is the number that says so — the last
+    /// message alone cannot tell one report from two.
+    pub fn toasts(&self) -> u64 {
+        self.imp().toasts.get()
     }
 
     /// The window's current notice, when it has one: the banner text shown above
@@ -1573,20 +1611,34 @@ impl EditorWindow {
     }
 }
 
-/// The primary menu: the actions that do not deserve a button.
+/// The editor's primary menu: the actions that do not deserve a button.
+///
+/// The same three-section shape as the picker's (`picker_menu`), which is the shape
+/// both reference apps use and ruling 24 asks for: the file items, the stage's own
+/// view options, then the help items.
 fn main_menu() -> gio::Menu {
     let menu = gio::Menu::new();
-    let file = gio::Menu::new();
-    file.append(Some(&gettext("New collage")), Some("app.new"));
-    file.append(Some(&gettext("Open…")), Some("app.open"));
-    file.append(Some(&gettext("Save as…")), Some("win.save-as"));
-    file.append(Some(&gettext("Export…")), Some("win.export"));
-    menu.append_submenu(Some(&gettext("Collage")), &file);
+
+    let collage = gio::Menu::new();
+    collage.append(Some(&gettext("New collage")), Some("app.new"));
+    collage.append(Some(&gettext("Open…")), Some("app.open"));
+    collage.append(Some(&gettext("Save as…")), Some("win.save-as"));
+    collage.append(Some(&gettext("Export…")), Some("win.export"));
+    menu.append_section(None, &collage);
+
+    let edit = gio::Menu::new();
+    edit.append(Some(&gettext("Insert a photo")), Some("win.add-photo"));
+    edit.append(
+        Some(&gettext("Reset the framing")),
+        Some("win.reset-framing"),
+    );
+    menu.append_section(None, &edit);
 
     let help = gio::Menu::new();
     help.append(Some(&gettext("Keyboard shortcuts")), Some("app.shortcuts"));
     help.append(Some(&gettext("About Pixlay")), Some("app.about"));
-    menu.append_submenu(Some(&gettext("Help")), &help);
+    menu.append_section(None, &help);
+
     menu
 }
 

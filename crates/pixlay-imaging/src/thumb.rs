@@ -32,6 +32,15 @@ use crate::resample::{Region, resample};
 pub struct Thumbnail {
     pub width: i32,
     pub height: i32,
+    /// The photo's own pixel size, before the resample.
+    ///
+    /// Carried because a caller that shows a *scaled* copy still has to be able to
+    /// say how big the photo is, and the decode has already read it: the picker's
+    /// status line reports these (S13c), and the zoom it shows is a ratio against
+    /// them. Free here — the sampled source is in hand — and one decode cheaper
+    /// than asking the file a second time.
+    pub source_width: u32,
+    pub source_height: u32,
     /// `width * height * 3` bytes, row-major, `R`, `G`, `B`.
     pub pixels: Vec<u8>,
 }
@@ -56,6 +65,8 @@ pub fn thumbnail(source: &impl Sampler, long_edge: u32) -> Result<Thumbnail, Ima
     Ok(Thumbnail {
         width,
         height,
+        source_width: source.width(),
+        source_height: source.height(),
         pixels: rgb.to_srgb8(),
     })
 }

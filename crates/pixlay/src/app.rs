@@ -41,6 +41,7 @@ pub const ACCELERATORS: &[(&str, &str)] = &[
     ("win.save-as", "<Control><Shift>s"),
     ("win.close", "<Control>w"),
     ("win.export", "<Control>e"),
+    ("win.choose-folder", "<Control><Shift>o"),
     ("win.add-photo", "<Control>i"),
     ("win.undo", "<Control>z"),
     ("win.redo", "<Control><Shift>z"),
@@ -61,6 +62,7 @@ pub const SHORTCUT_SECTIONS: &[(&str, &[&str])] = &[
             "win.add-photo",
         ],
     ),
+    ("Photos", &["win.choose-folder"]),
     ("Editing", &["win.undo", "win.redo", "win.reset-framing"]),
 ];
 
@@ -80,6 +82,7 @@ pub fn shortcut_title(action: &str) -> String {
         "win.save-as" => gettext("Save as…"),
         "win.close" => gettext("Close the window"),
         "win.export" => gettext("Export the collage"),
+        "win.choose-folder" => gettext("Choose a folder of photos"),
         "win.add-photo" => gettext("Insert a photo"),
         "win.undo" => gettext("Undo"),
         "win.redo" => gettext("Redo"),
@@ -103,7 +106,18 @@ pub fn build() -> adw::Application {
     // At startup rather than at build time: the display exists once GTK has
     // initialised, which is what `GtkApplication`'s `startup` runs after — and
     // `build()` is called before the application is run at all.
-    app.connect_startup(|_| install_style());
+    app.connect_startup(|_| {
+        install_style();
+        // **The app is dark by default** (ruled 2026-09-22, ruling 23). HIG
+        // `guidelines/ui-styling` recommends the dark style for "apps which display
+        // rich visual content like images or video", which is what a photo picker is,
+        // and both reference apps do the same thing unconditionally (gthumb
+        // `src/Application.vala:676`, loupe `src/application.rs:76-79`). There is no
+        // per-app switch: neither reference app has one, and a stored preference
+        // would need the settings file ruling 8 forbids. The canvas and the export
+        // are unaffected — they are document content, not styling.
+        adw::StyleManager::default().set_color_scheme(adw::ColorScheme::ForceDark);
+    });
     app.connect_activate(|app| {
         if let Some(window) = active_window(app) {
             window.present();
