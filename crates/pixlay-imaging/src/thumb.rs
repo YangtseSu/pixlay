@@ -68,7 +68,10 @@ pub fn thumbnail(source: &impl Sampler, long_edge: u32) -> Result<Thumbnail, Ima
 /// zero, the same rule the canvas grid follows (`CanvasSpec::pixel_size`), and
 /// neither drops below one pixel — a 10000x1 pano previewed at 100 px is 100x1,
 /// not 100x0.
-fn thumb_size(src_w: u32, src_h: u32, long_edge: u32) -> (i32, i32) {
+///
+/// Crate-internal because the preview-grade reduction sizes itself with the same
+/// rule ([`crate::reduce`]): "a preview-sized copy" is one thing in this crate.
+pub(crate) fn thumb_size(src_w: u32, src_h: u32, long_edge: u32) -> (i32, i32) {
     let longest = f64::from(src_w.max(src_h).max(1));
     let scale = f64::from(long_edge) / longest;
     (

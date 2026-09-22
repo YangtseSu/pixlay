@@ -2,19 +2,30 @@
 //!
 //! A gesture step is the most latency-sensitive work this product does: a wheel
 //! notch or a drag produces one every few milliseconds, and before S12 every one
-//! of them re-decoded the photo it framed and re-resampled it. Two caches remove
-//! that work, and both live here rather than in the window because the CLI's
-//! `gesture` probe has to measure **the window's own step** (`AGENTS.md`: nothing
-//! may be possible only in the GUI).
+//! of them re-decoded the photo it framed and re-resampled it. S12 removed the
+//! decode; what it could not remove was the *resample*, whose cost follows the
+//! **source's** resolution rather than the output grid's (`resample` widens its
+//! kernel with the downscale ratio, S4) — so a 24 MP photo still cost ~200 ms per
+//! step against a 16.7 ms frame. S12b answers that with a second cache: a
+//! **preview-grade source** per photo, reduced once by [`crate::reduce`] to the
+//! size this grid needs, and every bitmap the preview builds is resampled from
+//! that copy. Measured 2026-09-22 (`docs/CONTRACT.md` §8, "S12b"): the same 24 MP
+//! document steps in **2.20 ms** at the editor's own grid and **9.12 ms** at 1600,
+//! against 199.9 and 321.1 ms before.
 //!
-//! * **Decoded sources, keyed by path and `mtime`.** `Source::decode` measured
-//!   11–110 ms per 2400x1600 file (S4, `docs/CONTRACT.md` §8), and a gesture that
-//!   framed the same cell twice paid it twice. The key is the file's own identity
-//!   as the filesystem reports it, so a *changed* file is decoded again: a stale
-//!   cache would be a wrong picture, which is the one thing a cache here may never
-//!   be. A file edited in place keeps its path and gets a new modification time;
-//!   a replacement that reproduces the same one is not detected, and the cache
-//!   says so rather than pretending otherwise.
+//! Both caches live here rather than in the window because the CLI's `gesture`
+//! probe has to measure **the window's own step** (`AGENTS.md`: nothing may be
+//! possible only in the GUI).
+//!
+//! * **Preview-grade sources, keyed by path, `mtime` and target size.** A changed
+//!   file must be reduced again — a stale cache would be a wrong picture, which is
+//!   the one thing a cache here may never be — and the key is the file's own
+//!   identity as the filesystem reports it, plus **the long edge the reduction was
+//!   made for**, because the resting grid changes with the window and a coarse
+//!   gesture frame is served by a smaller copy (that is the point of it). A file
+//!   edited in place keeps its path and gets a new modification time; a replacement
+//!   that reproduces the same one is not detected, and the cache says so rather
+//!   than pretending otherwise.
 //! * **One bitmap set per grid.** S7's decision was that the preview grid belongs
 //!   to the widget; a live gesture draws at a coarser grid than rest
 //!   ([`gesture_grid`]) and returns to the resting one when it ends, so exactly
@@ -41,23 +52,67 @@ use std::time::SystemTime;
 
 use pixlay_core::{CollageDoc, PixelSize};
 
-use crate::decode::{DecodeLimits, Source};
+use crate::decode::{DecodeLimits, Sampler, Source};
 use crate::error::ImagingError;
 use crate::layout::{SlotBitmap, slot_bitmap};
+use crate::reduce::PreviewSource;
 
-/// How many bytes of decoded sources the preview keeps before the least recently
-/// used ones are dropped.
+/// How many bytes of preview-grade sources the preview keeps before the least
+/// recently used ones are dropped.
 ///
-/// A decoded source is `width * height * 4` bytes at 8 bits per channel and twice
-/// that at 16 (`Source` keeps the file's own depth). Measured 2026-09-22: a
-/// 4032x3024 (12 MP) 8-bit photo decodes to `4032 * 3024 * 4` = **48.8 MB**, so a
-/// whole selection — nine photos, ruling 3 — is **439 MB** at 8 bits and 878 MB at
-/// 16, and the verify project's seven photos total **15.7 MB**. 512 MiB therefore
-/// holds a full selection of 12 MP photos whole, and a document of larger files
-/// does not fall out of the cache entirely: the entry the gesture is using is
-/// always the most recent one, and the budget only decides how many of the
-/// *others* survive to the next gesture.
+/// A preview-grade source is a [`crate::reduce::PreviewSource`] — straight sRGB,
+/// `width * height * 4` bytes at the source's own depth — and it is one to two
+/// orders of magnitude smaller than the decoded photo it came from, which is what
+/// makes this budget a promise about *documents* rather than about photos.
+/// Measured 2026-09-22: a 24 MP photo (6000x4000, **96 MB** decoded) reduces to
+/// **975x650 = 2.5 MB** at the editor's canvas (a 780-px grid) and to
+/// **2000x1333 = 10.7 MB** at a 1600-px one, so nine of them — a whole selection,
+/// ruling 3 — are 23 MB at the editor's grid and 96 MB at 1600, where both targets
+/// in play together still come to 119 MB. The verify project's seven photos
+/// (0.35–0.72 MP each) come to 13.7 MB at that grid. Nine 12 MP photos would have
+/// been 439 MB *decoded* — the budget that used to hold photos holds whole
+/// documents now, several times over, and the entry the gesture is using is always
+/// the most recent one: the budget only decides how many of the *others* survive to
+/// the next gesture.
 pub const MAX_SOURCE_BYTES: usize = 512 * 1024 * 1024;
+
+/// How much larger a preview-grade source is than the grid it serves.
+///
+/// The reduction is read by the resampler, so a copy at the grid's own size would
+/// already be used at 1:1 by a cell that fills the canvas; this is the headroom
+/// that keeps a preview from showing the reduction's own sampling when a cell is
+/// zoomed in or rotated. It is also what the step costs — the kernel widens with
+/// `source / displayed`, so the cost of one step is roughly this factor times the
+/// bitmap's own pixels — and it is therefore the largest value that keeps the
+/// measured step inside the frame budget. Measured 2026-09-22 on the 24 MP
+/// document (`mosaic-8-s14`, one 6000x4000 photo in every cell), warm step at grid
+/// 780 / 1600:
+///
+/// | this constant | the copies | warm step | against 16.666667 ms |
+/// |---|---|---|---|
+/// | 1.5 | 585 / 1200 px | 2.84–4.53 / **18.40–18.50 ms** | holds / **misses** |
+/// | **1.25** | 488 / 1000 px | **2.20 / 9.12 ms** | holds, by 7.6x and 1.8x |
+/// | 1.0 | 390 / 800 px | 1.71 / 7.94 ms | holds, with a larger drift |
+/// | 2.5 (S12's own measurement) | 2048 px | 39.08 ms | misses |
+///
+/// What the ladder does *not* decide is fidelity: the drift this step introduces
+/// barely moves across it on photo content — 0.77 / 1.01 / 1.59 RMSE at 1.5 / 1.25
+/// / 1.0 in `crates/pixlay-cli/tests/preview.rs` (`docs/CONTRACT.md` §8, "S12b") —
+/// which is why the constant is set by the frame budget and not by a quality
+/// argument, and why it is the largest value that holds rather than a round number.
+pub const PREVIEW_SOURCE_SCALE: f64 = 1.25;
+
+/// The long edge a preview-grade source is reduced to for a canvas grid.
+///
+/// The reduction's own size is a property of the grid, not of the photo: the
+/// coarser grid a live gesture draws at asks for half of this, which is cheaper to
+/// resample *and* cheaper to hold, and the release goes back to the resting grid's
+/// copy. Neither is ever enlarged — [`crate::reduce`] hands a photo at or below
+/// the target back unchanged.
+pub fn preview_source_long_edge(grid: PixelSize) -> u32 {
+    let long = f64::from(grid.width.max(grid.height)) * PREVIEW_SOURCE_SCALE;
+    (long.round() as i64).clamp(1, i64::from(i32::MAX)) as u32
+}
 
 /// How many grids' bitmaps the preview keeps.
 ///
@@ -125,16 +180,20 @@ fn modified_time(path: &Path) -> Option<SystemTime> {
         .ok()
 }
 
-/// A decoded source with the file identity it was decoded from.
+/// A preview-grade source with the file identity it was reduced from.
 struct Entry {
     path: PathBuf,
-    /// The file's modification time when it was decoded: the second half of the
-    /// key, and the reason a file that changed is decoded again.
+    /// The file's modification time when it was reduced: the second half of the
+    /// key, and the reason a file that changed is reduced again.
     modified: SystemTime,
-    source: Source,
+    /// The long edge the reduction was made for — the third half of the key: the
+    /// resting grid moves with the window, and a live gesture asks for its own,
+    /// smaller copy.
+    long_edge: u32,
+    source: PreviewSource,
 }
 
-/// Decoded sources, keyed by path and modification time.
+/// Preview-grade sources, keyed by path, modification time and target size.
 struct Sources {
     /// Least recently used first, most recently used last.
     entries: Vec<Entry>,
@@ -145,7 +204,7 @@ struct Sources {
     decodes: u64,
     /// Where the result of a lookup that could not be cached lives, so that
     /// "decoded but not kept" can still be borrowed.
-    uncached: Option<Source>,
+    uncached: Option<PreviewSource>,
 }
 
 impl Sources {
@@ -159,8 +218,9 @@ impl Sources {
         }
     }
 
-    /// The decoded photo at `path`: from the cache when the file is the one that
-    /// was decoded, from the decoder otherwise.
+    /// The preview-grade source for `path` at `long_edge`: from the cache when the
+    /// file is the one that was reduced for that size, from the decoder and
+    /// [`PreviewSource::new`] otherwise.
     ///
     /// `modified` is the file's modification time, read by the caller (which
     /// needed it for the bitmap identity anyway) rather than read again here.
@@ -168,13 +228,13 @@ impl Sources {
         &mut self,
         path: &Path,
         modified: Option<SystemTime>,
+        long_edge: u32,
         limits: &DecodeLimits,
-    ) -> Result<&Source, ImagingError> {
+    ) -> Result<&PreviewSource, ImagingError> {
         if let Some(modified) = modified
-            && let Some(index) = self
-                .entries
-                .iter()
-                .position(|entry| entry.modified == modified && entry.path == path)
+            && let Some(index) = self.entries.iter().position(|entry| {
+                entry.modified == modified && entry.path == path && entry.long_edge == long_edge
+            })
         {
             // A hit becomes the most recent one, so the photo the user is
             // gesturing stays while the others age out.
@@ -184,14 +244,18 @@ impl Sources {
         }
 
         self.decodes += 1;
-        let source = Source::decode_with(path, limits)?;
+        // One photo's buffer at a time: the decoded file is read once into the
+        // reduction and dropped, so what the cache holds (and what the budget
+        // counts) is the small copy rather than the 96 MB the decoder produced.
+        let reduced = PreviewSource::new(&Source::decode_with(path, limits)?, long_edge);
         match modified {
-            Some(modified) if source.bytes() <= self.budget => {
-                self.bytes += source.bytes();
+            Some(modified) if reduced.bytes() <= self.budget => {
+                self.bytes += reduced.bytes();
                 self.entries.push(Entry {
                     path: path.to_path_buf(),
                     modified,
-                    source,
+                    long_edge,
+                    source: reduced,
                 });
                 self.evict();
                 Ok(&self
@@ -200,11 +264,11 @@ impl Sources {
                     .expect("the entry was just pushed")
                     .source)
             }
-            // No modification time to key on, or a photo bigger than the whole
-            // budget: decoded, used, and not kept. Both are rare, and a lookup
+            // No modification time to key on, or a reduction bigger than the whole
+            // budget: reduced, used, and not kept. Both are rare, and a lookup
             // that re-decodes is correct — only slower.
             _ => {
-                self.uncached = Some(source);
+                self.uncached = Some(reduced);
                 Ok(self.uncached.as_ref().expect("just set"))
             }
         }
@@ -270,6 +334,14 @@ pub struct Built {
     /// Files this build decoded, refusals included. Zero means both caches
     /// answered every cell, which is what a live gesture step has to look like.
     pub decodes: u64,
+    /// The largest preview-grade source any cell of this build was resampled from,
+    /// or `0 x 0` when every cell came from the bitmap cache.
+    ///
+    /// This is the number that says the reduction happened rather than the
+    /// reduction being assumed (S12b): the CLI's `gesture` prints the step's own
+    /// copy as `src_w`/`src_h`, and against a 6000-px photo it is the difference
+    /// between a step that reads 24 MP and one that reads one.
+    pub source_px: PixelSize,
 }
 
 /// The preview pipeline's two caches.
@@ -332,6 +404,14 @@ impl Preview {
         let mut bitmaps = Vec::with_capacity(sources.iter().filter(|s| s.is_some()).count());
         let mut failed = Vec::new();
         let mut decodes = 0;
+        let mut source_px = PixelSize {
+            width: 0,
+            height: 0,
+        };
+        // One target for the whole build, so every cell this grid rebuilds reads a
+        // copy of the same grade (`preview_source_long_edge`) and the cache keys on
+        // what the build actually asked for.
+        let long_edge = preview_source_long_edge(grid);
         for (slot, source) in sources.iter().enumerate() {
             let Some(path) = source else {
                 continue;
@@ -348,10 +428,20 @@ impl Preview {
             // not fail the build — one unreadable file must not blank the collage
             // — and the slot it belongs to is reported instead.
             let before = self.sources.decodes;
-            let built = self
-                .sources
-                .source(path, modified[slot], &DecodeLimits::default())
-                .and_then(|decoded| slot_bitmap(doc, decoded, slot, grid));
+            let built =
+                match self
+                    .sources
+                    .source(path, modified[slot], long_edge, &DecodeLimits::default())
+                {
+                    Ok(reduced) => {
+                        source_px = PixelSize {
+                            width: reduced.width() as i32,
+                            height: reduced.height() as i32,
+                        };
+                        slot_bitmap(doc, reduced, slot, grid)
+                    }
+                    Err(error) => Err(error),
+                };
             decodes += self.sources.decodes - before;
             match built {
                 Ok(bitmap) => bitmaps.push(bitmap),
@@ -374,6 +464,7 @@ impl Preview {
             bitmaps,
             failed,
             decodes,
+            source_px,
         }
     }
 

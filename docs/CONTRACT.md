@@ -352,6 +352,17 @@ is its fit" true for every caller (28,800 framings, coverage exact to one ulp, a
 the constraint bites — decoding, downsampling, colour, grading, and *not* handing
 Cairo a photo to shrink — is exactly where S4 put the work.
 
+**The preview-grade source (S12b).** The editor's preview does not resample the photo; it resamples a
+**reduction** of it. `pixlay_imaging::reduce::PreviewSource` is a box average in linear light to a
+requested long edge (`PREVIEW_SOURCE_SCALE` x the grid, or the photo itself when that is smaller), and
+`pixlay_imaging::Preview` caches it beside the photo's identity (path + `mtime` + target size). The
+resampler then runs unchanged from those pixels, so this is not a second renderer and not a new stage in
+the frozen order: it is *decode + colour normalization* handed fewer samples, and the export path
+(`slot_bitmaps`) never sees it. The reason it exists is §8 "S12": one cell's cost follows the source's
+resolution, and 24 MP per step is 12x a 60 Hz frame. What it costs in fidelity is measured in §8 "S12b"
+— a fraction of a level on photo content — and **a picture whose fidelity is compared against the
+export** (the window's canvas test, a gallery candidate) must stay inside the RMSE it names.
+
 **The bitmap's region.** A bitmap may hold a sub-rectangle of the displayed
 photo. It then carries where it sits (`Bitmap::origin`, in displayed-photo
 pixels) and the whole displayed photo's size (`Bitmap::display_size`), because
@@ -485,12 +496,13 @@ the problem splits:
 
 | Item | Rule |
 |---|---|
-| shape | `command`, `template`, `version`, `slots`, `occupied`, `slot`, `steps`, `step_deg`, `grid_w`, `grid_h`, `gesture_w`, `gesture_h`, `open_decodes`, `cold_decodes`, `warm_decodes`, `refine_decodes`, `budget_ms`, `verdict` |
+| shape | `command`, `template`, `version`, `slots`, `occupied`, `slot`, `steps`, `step_deg`, `grid_w`, `grid_h`, `gesture_w`, `gesture_h`, `open_decodes`, `cold_decodes`, `warm_decodes`, `refine_decodes`, `src_w`, `src_h`, `budget_ms`, `verdict` |
 | `--project` | required, and **every occupied cell must decode**: a step that cannot be timed is exit 2 naming the cells, because a sequence with a hole in it describes nothing |
 | `--grid <px>` | required: the long edge of the **resting** canvas grid, 1..=20000. The report's `grid_*` is that grid and `gesture_*` is the one a live gesture draws at (`gesture_grid`, half of it), so the two the editor uses are both visible |
 | `--slot <i>` | the cell the gesture frames; default the first occupied one. A slot with no photo is exit 1 naming the occupied ones (`--slot` past the cell count is exit 1 as well, as on `edit`) |
 | `--steps <n>` | 2..=3600, default 60. **Step 1 is the cold one** (the gesture grid built from scratch) and `warm_ms` is the **median** of the rest: a mean over 60 steps on a busy machine is a number about the machine |
-| the four phases | `open` — the document as a window opens on it, at the resting grid (every occupied cell decoded and built); `cold` — the first step of a live gesture, at the gesture grid (sources warm, that grid cold); `warm` — every step after it (one cell rebuilt); `refine` — the release, the resting grid again. Their decode counts are reported separately for exactly that reason |
+| the four phases | `open` — the document as a window opens on it, at the resting grid (every occupied cell decoded and built); `cold` — the first step of a live gesture, at the gesture grid (the sources for *that* grid's copy are built here, S12b, and the grid's bitmaps are cold); `warm` — every step after it (one cell rebuilt, no decode); `refine` — the release, the resting grid again. Their decode counts are reported separately for exactly that reason |
+| `src_w`, `src_h` | the size of the source the **warm** step resampled — since S12b a *preview-grade reduction* (`pixlay_imaging::PreviewSource`), not the file. Before it the field was the photo's own size; against a 6000-px photo the difference (6000 → the copy's own long edge) is what says "the big decode left the step" |
 | the step | a *straightening* one, 1 degree further per step: a rotation grows the region the cell shows and since S11 the clamp pays for the angle with zoom, so it is the most per-step work the editor can be asked for |
 | `verdict` | `pipeline_holds` when the warm median is ≤ `budget_ms` = **16.666667** (one frame at 60 Hz), `gpu_preview` otherwise. **The exit code is 0 either way**: the measurement is the result, and an exit code that moved with the host's speed would make the same input's answer depend on the machine |
 | stability | the *counts* are stable and locale-independent; the *times* are measurements and only appear with `--stats` (`ms`, `open_ms`, `cold_ms`, `warm_ms`, `warm_max_ms`, `refine_ms`, `peak_rss_mb`, `icc = none`), which is the same exception §5 already makes for `--stats` |
@@ -550,7 +562,7 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
 | clamp math | **S3, landed**; the angle-reduction half retired and the visible-region reference landed in **S11 (2026-09-22)** | `CropTransform::fit(slot, covering, canvas_aspect, photo_aspect) -> CropFit { transform }`: the angle is never reduced and the coverage reference is the cell's visible region (`Frame::covering`), applied by `draw`; the fit is idempotent and never exceeds `MAX_ZOOM`. `CollageDoc::fitted_crop` / `fit_crop` are the two entry points that pair the frame with the clamp |
 | canvas decoration (the frame) | **S11, landed** | `CollageDoc::frame`: `Frame { gapRel, radiusRel, color }`, plus `Frame::covering` / `Frame::clip` and the backdrop + clip stage in `draw`; the CLI's `render --gap/--radius/--border-color` (render-time) and `edit` (§5). Measured cost at A0: none — the frame is a clip path and a fill (§8, "S11") |
 | template generator | **S2, landed** | `pixlay_core::templates` (`generator` recipes + the committed `frozen` data) and the `templates` / `init` subcommands; see §3 and §5 |
-| the image pipeline | **S4, landed** | `pixlay-imaging`: `Source::decode`, `resample`, `LinearRgb16::apply`, `slot_bitmap`/`slot_bitmaps`, `probe`; the buffer ladder and the colour decisions are §4.1 |
+| the image pipeline | **S4, landed**; the preview-grade reduction landed in **S12b** | `pixlay-imaging`: `Source::decode`, `resample`, `LinearRgb16::apply`, `slot_bitmap`/`slot_bitmaps`, `probe`, and the preview's `Preview` caches + `reduce::PreviewSource`; the buffer ladder and the colour decisions are §4.1 |
 | command history / hit testing / project writing | **S6.5, landed**; `SetTemplate` added by **S7** | `pixlay-core`: `Command` (one edit: source, framing, grade, filter, text layers, the `{date}` fallback, the template and its canvas — `SetTemplate` carries both because a canvas and a template must agree on their aspect ratio — and the canvas alone) and `History` (snapshot undo/redo; `apply` is all-or-nothing and the document has no mutable accessor; the GUI commits **one command per gesture**, §9), `Template::slot_at(point)` for hit testing, `CollageDoc::save` / `Project::save` / `Project::save_as` for writing a document. The CLI's `hit` and `save` are the machine surface of the first and the last; the command history is a test surface only, on purpose (§5) |
 | text rendering | **S5, landed** | `pixlay_render::text`: one Pango layout per layer, drawn by `draw`; token resolution is `TextLayer::resolve` in `pixlay-core`, the tile grid is `pixlay_core::tiled_grid`; see §1 "Text layers" |
 | encoding and metadata | **S6, landed** | `pixlay_imaging::encode`: one pass per format writing pixels, resolution, sampling and the ICC profile (`icc`), for PNG / JPEG / TIFF; the CLI's `--long-edge` / `--chroma` and the per-format rules are §5, the profile is §4.1 |
@@ -842,8 +854,101 @@ for a file, and it pays 1.6–2.4 s for it.
   ~1.5x the preview grid is inside the frame budget, and one at 2.5x is not. This is the measurement the fork's
   ruling reads next to the 200 ms above; it is not a decision S12 made.
 
-### What S12's number says about the preview's future
+### S12b (2026-09-22, `--release`, this machine)
 
+The step's two builds, in one session, on the same files: the **S12 build** (a detached worktree at
+`c7e0d50`) and this one. `pixlay-render gesture`, 61 steps, two runs per cell (the machine's own variance
+at these sizes is up to 50% between runs, which is why every cell carries both); `src_*` is the new field
+— the size of the preview-grade source the **warm** step resampled.
+
+| Document, grid | the S12 build | this build |
+|---|---|---|
+| `mosaic-8-s14` with one 24 MP photo (6000x4000) in all eight cells, grid 780 (780x585) | `open` 1961 ms (1 decode), `cold` 1535, **`warm` 199.9 ms**, `refine` 182, peak 175.2 MB, `gpu_preview` | `open` 369/397, `cold` 237/336 (1 decode: the coarse grid's own copies), **`warm` 2.20/2.22 ms** (max 2.33/3.21), `refine` 7.8/7.9, peak 185.0/185.1 MB, **`src 488x325`**, warm decodes 0, `pipeline_holds` |
+| the same document, grid 1600 (1600x1200) | `open` 1944, `cold` 1569, **`warm` 206.5 ms**, `refine` 307, peak 175.2 MB, `gpu_preview` | `open` 492/847, `cold` 278/425, **`warm` 9.12/13.95 ms** (max 9.55/15.58), `refine` 33/51, peak 206.4/206.3 MB, **`src 1000x667`**, `pipeline_holds` |
+| the same document, grid 3840 | — (over budget for the verify project at that grid since S12) | `warm` **52.9 ms**, `src 2400x1600`, `gpu_preview`, peak 335.7 MB |
+| `mosaic-9-hero` with **nine distinct** 24 MP photos, grid 780 | `open` 3769 (9 decodes), `cold` 3647, `warm` 177.2, `refine` 233, peak **649.4 MB** | `open` 2911, `cold` 2521, `warm` 3.61, `refine` 15.6, peak **217.2 MB** |
+| the same nine-photo document, grid 1600 | `open` 4115, `cold` 3639, `warm` 196.9, `refine` 281, peak **665.8 MB** | `open` 3449, `cold` 2316, `warm` 15.17, `refine` 65.6, peak **316.5 MB** |
+| `verify.pixlay` (seven photos of 0.35–0.72 MP, so *below* the target at both grids), grid 780 | `open` 239/173, `warm` 9.10/8.40, peak 42.6 MB | `open` 176/174, `warm` **3.21/3.21**, `src 325x488` (the photo itself), peak 51.5 MB |
+| the same project, grid 1600 | `open` 216/217, `warm` 12.10/12.14, peak 72.6 MB | `open` 218/220, `warm` 11.50/7.55, `src 600x900` (the photo itself), peak 92.5 MB |
+
+- **The criterion's number.** The 24 MP document steps in **2.20–2.22 ms** at the editor's own grid and
+  **9.12–13.95 ms** at 1600, against the 16.666667 ms budget (`warm_ms` is the median of 60 steps; the
+  *worst* step measured 15.58 ms, which is the tail rather than the verdict). S12 measured the same two
+  numbers as 199.9–200.6 and 206.5–321.1 ms: **the step is 91x and 23x cheaper**, and the phases around it
+  moved too — `open` 1961 → 369 ms, `cold` 1535 → 237 ms — because a build's resamples now read a 0.16-1 MP
+  copy instead of 24 MP.
+- **The scale, and why 1.25.** `PREVIEW_SOURCE_SCALE` is the copy's long edge over the grid's, and it is
+  the largest value that holds the budget, measured as a ladder on the same document's 1600-px row:
+  **1.5 → 18.40/18.50 ms** (misses), **1.25 → 9.06/9.21**, **1.0 → 7.94/11.03**. Higher is sharper at the
+  same cost only until it is not, and this is the row where it stops. The drift barely moves across the
+  ladder on photo content (below), so the quality argument is not what decides it.
+- **A copy per grid, which is what the two decodes are.** The resting grid and the half-size one a gesture
+  draws at have different targets, so the first frame of a gesture builds the coarse copies: `cold_decodes`
+  is 1 for the one-file document and 9 for the nine-photo one, where S12's was 0 — and `warm_decodes` is 0
+  everywhere, which is what S12's whole claim rests on. The work is the same one-off opening pays, at half
+  the target, and the release is served by the resting copies that were already there.
+- **The export path is untouched, byte for byte.** The verification document rendered by the S12 build and
+  by this one in the same session: md5 **`b1c8bbb88243eac43fe70d9c9b75455e`** (9,216,300 bytes) from
+  both, 14043x10532, `ms` 5032 + `encode_ms` 1180, `peak_rss_mb` 1643, `text = 1`, `occupied = 8`. This is
+  also S12's own md5, so the machine moved neither library nor font between the two sessions this time. The
+  image was looked at (`/var/tmp/pixlay-s12b/export/look.png`): eight cells filled, the `{date}` layer at
+  the bottom, the concave slot continuous, no artefact.
+- **The drift, as a number with a threshold.** Three measurements, one content each:
+
+  | Comparison | RMSE | source |
+  |---|---|---|
+  | the preview's path vs `render --preview-px` at 400 px, four cells of a 1600x1200 photo (one rotated) | **1.0051** over 160,000 px | `pixlay-cli/tests/preview.rs`, threshold 6 |
+  | the window's canvas vs `pixlay-render render` at 640x480, S7's own document (the fixtures' synthetic hard-edged bands) | **2.1423** over 307,200 px (was 0.0077 before this step) | `pixlay/tests/canvas.rs`, S7's threshold 6 |
+  | `slot_bitmap` from the photo vs from the copy, at a 640x480 grid — the reduction *factor* ladder | factor 1.2 **3.38** · 1.5 **4.94** · 2 **6.19** · 3 **7.83** · 4.8 **10.25** on those same bands; on a 24 MP plasma photo at grid 780 (1600): 1.5 **0.12** (0.18) · 2 **0.23** (0.25) · 3 **0.18** (0.29) · 6 **0.30** (0.54) | a throwaway probe, per `AGENTS.md`'s measurement rules |
+
+  So the reduction's cost in fidelity is a **fraction of a level on photo content** and is only visible at
+  all on synthetic hard edges — which is why the two committed tests, one on smooth content and one on the
+  bands at a 1.2x factor, both stay two to three times inside S7's threshold of 6. **The ladder is also a
+  hazard the later stages have to respect**: a picture whose fidelity is compared against the export (a
+  picker tile, a gallery candidate — S13, S14) must come from the photo, as `thumb` does, not from a
+  reduction at a large factor.
+- **The reduction is a pure function**, and it is pinned as one: the same file reduced twice is byte-identical;
+  a file that changed is reduced again (the `mtime` rule, asserted through the cache); the fit of a given
+  crop is the *same transform* from the copy as from the photo, bit for bit, because the copy carries the
+  decoded photo's `aspect()` rather than its own buffer's ratio (`pixlay-imaging/tests/reduce.rs`; the
+  criterion allowed 1e-9).
+- **Memory.** On the document the criterion names — **nine distinct 24 MP photos** — the peak is **217.2 MB**
+  at grid 780 and **316.5 MB** at 1600, against the S12 build's **649.4 MB** and **665.8 MB** for the same
+  runs: the cache now holds copies (33-138 MB for nine photos) where it used to hold decoded photos (96 MB
+  each, and nine of them do not fit in `MAX_SOURCE_BYTES`). On documents whose photos are *small* the peak
+  grows slightly instead (verify: 42.6 → 51.5 MB at grid 780, 72.6 → 92.5 MB at 1600; the one-file 24 MP
+  document: 175.2 → 185.0 / 206.4 MB), because a photo below its target is stored as-is and each of the two
+  targets keeps its own entry. Both are far inside the 2.5 GB budget of `AGENTS.md`.
+
+**Decisions this step made** (recorded here because each one is a shape later steps build on):
+
+- **The reduction is a box average in linear light, not `resample`.** One reading pass, no ringing, no
+  three-lobe kernel; the colour path is the pipeline's own, because averaging sRGB code values is not
+  averaging light (a 2x2 black-and-white checkerboard would come back at 0.22 of its linear value). It is
+  exact for an integer factor, and it *never enlarges* a photo: at or below the target the samples are the
+  decoder's own, which is what makes "a photo the preview can already show" cost nothing but the copy the
+  cache has to own.
+- **The copy carries the photo's `aspect()`, and that is the whole geometry story.** The fit and the region
+  are functions of that number, so a preview's framing is *identical* to an export's — only the sampling
+  grid differs. Without it a 1600x1200 photo reduced to 350x263 would frame the cell differently from the
+  photo, and every later comparison against `render` would carry a geometry error on top of the filtering
+  one.
+- **The cache keys on path + `mtime` + target size.** The target is a function of the grid, the resting
+  grid moves with the window, and a gesture's grid is half of it; so a file legitimately has up to two
+  copies, and a window resize simply makes a new key (the LRU budget evicts the old ones). A copy is a
+  function of (file, target) alone — never of what was built before — so the preview's pixels cannot
+  depend on the order in which the user happened to resize or drag.
+- **The target is a function of the grid, not of the document's own cells.** Sizing the copy by the largest
+  cell's displayed extent would buy another 2-3x on small-cell layouts (a 3x3 grid's cells cover a third of
+  the canvas), at the price of a copy that depends on the layout rather than on the window, and of a cache
+  key the document can invalidate. Not worth it: the step is 23x inside the budget at the editor's grid
+  already.
+- **No new dependency, no `Cargo.lock` change** (`cargo update --workspace` locked 0 packages). The
+  reduction is arithmetic over a buffer that was already there, and the only new code outside it is a
+  16-bit inverse-transfer table (`linear_to_srgb16`, 128 KB, built once) so a 16-bit source is reduced at
+  its own depth.
+
+### What S12's number says about the preview's future
 Read on the plan's own subject — the verification project, at the editor's own grid — the pipeline **holds**:
 5.5 ms against a 16.7 ms frame. Read on a realistic photo — 12 to 24 MP, which is what the product's users
 pick — it does **not**: ~200 ms per step, and the coarse grid and the caches between them only bought a factor
@@ -854,6 +959,11 @@ photo that the preview's bitmaps are resampled from, inside the one renderer (`d
 "S12 · Result" and the step "S12b"). So `draw`, `resample` and the export's quality path stay as this
 document describes them, and the preview's pixels stay `draw`'s; the GPU preview path is **not** written, and
 "do not replace Cairo with GPU rendering" needs no amendment.
+
+**It landed in S12b** (this document, "S12b" above): the step is 91x cheaper at the editor's grid and 23x at
+1600, the export is byte-identical, and the price is the drift that block measures — a fraction of a level on
+photo content, 2.14 RMSE against S7's window-vs-CLI comparison on the fixtures' synthetic hard edges, both
+inside S7's threshold of 6.
 
 ## 9. The window (S7), and the stages added after it
 
@@ -894,13 +1004,17 @@ command. The library and the gallery are **not** renderers of the document — a
   pixels. What the release draws is the resting grid's own render, not an upscaled gesture frame:
   measured, the refined canvas equals the same document drawn in one edit at rest at **RMSE 0**
   (335,808 pixels).
-- **The preview keeps what it can reuse** (S12). `pixlay_imaging::Preview` — the same type the CLI's
-  `gesture` probe drives — holds decoded sources keyed by path and modification time (budgeted by
-  `MAX_SOURCE_BYTES`, least recently used evicted) and **one bitmap set per grid** (at most two: the
-  resting one and the coarse one), carrying over every cell whose cell, source, source identity,
-  template, canvas and filter are unchanged. A step of a gesture therefore rebuilds one cell and
-  touches no disk at all; the window counts the decodes the worker reports
-  (`EditorWindow::decoded_sources`) and the GUI test holds a whole drag to zero of them.
+- **The preview keeps what it can reuse** (S12), **and resamples a preview-grade copy** (S12b).
+  `pixlay_imaging::Preview` — the same type the CLI's `gesture` probe drives — holds preview-grade
+  sources keyed by path, modification time **and target size** (budgeted by `MAX_SOURCE_BYTES`, least
+  recently used evicted) and **one bitmap set per grid** (at most two: the resting one and the coarse
+  one), carrying over every cell whose cell, source, source identity, template, canvas and filter are
+  unchanged. A step of a gesture therefore rebuilds one cell and touches no disk at all; the window
+  counts the decodes the worker reports (`EditorWindow::decoded_sources`) and the GUI test holds a whole
+  drag to zero of them once both grids' copies exist. The copy is a **box average in linear light** to
+  `PREVIEW_SOURCE_SCALE` (1.25) times the grid's long edge — the largest value that keeps the measured
+  step inside the frame budget — or the photo itself when that is smaller; §4.1 has the shape and §8
+  ("S12b") the numbers, including what it costs in fidelity.
 - **Background work, one thread each.** Decoding (`decode.rs`) and exporting (`export.rs`) run
   on their own threads and hand plain data back through `MainContext::invoke`, because a GTK
   object may not leave the main thread. Decode requests are coalesced (latest wins) so a drag

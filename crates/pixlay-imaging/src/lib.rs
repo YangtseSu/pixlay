@@ -57,6 +57,7 @@ pub mod layout;
 pub mod linear;
 pub mod preview;
 pub mod probe;
+pub mod reduce;
 pub mod resample;
 pub mod thumb;
 pub mod transfer;
@@ -71,8 +72,10 @@ pub use error::ImagingError;
 pub use layout::{REGION_GUARD_PX, SlotBitmap, slot_bitmap, slot_bitmaps};
 pub use linear::{LinearRgb16, LinearRgba16};
 pub use preview::{
-    Built, GESTURE_GRID_SCALE, GESTURE_STEP_DEG, MAX_SOURCE_BYTES, Preview, gesture_grid,
+    Built, GESTURE_GRID_SCALE, GESTURE_STEP_DEG, MAX_SOURCE_BYTES, PREVIEW_SOURCE_SCALE, Preview,
+    gesture_grid, preview_source_long_edge,
 };
 pub use probe::{ProbeReport, Rgb8View, probe};
+pub use reduce::PreviewSource;
 pub use resample::{Region, resample};
 pub use thumb::{Thumbnail, thumbnail};

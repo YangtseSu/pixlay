@@ -1,4 +1,4 @@
-//! S12's preview criteria, without a window.
+//! S12's and S12b's preview criteria, without a window.
 //!
 //! The window's decoding thread and the CLI's `gesture` probe run the same
 //! [`Preview`], so what a gesture step costs is decided here rather than by
@@ -8,6 +8,11 @@
 //! is allowed to exist: the release frame is a real resting-grid render, not an
 //! upscaled gesture frame.
 //!
+//! S12b adds the third cache and the number that says it is in play: every build
+//! reports the size of the copy it resampled ([`Built::source_px`]), so "the step
+//! reads a 600-px copy of a 1600-px photo" is an assertion rather than a claim
+//! about the code.
+//!
 //! Every case uses real files and the real decoder: a cache measured on a
 //! synthetic sampler would be measuring the test.
 
@@ -15,7 +20,10 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use pixlay_core::{CanvasSpec, Cell, CollageDoc, CropTransform, PixelSize, templates};
-use pixlay_imaging::{Built, Depth, GESTURE_GRID_SCALE, Preview, Source, gesture_grid};
+use pixlay_imaging::{
+    Built, Depth, GESTURE_GRID_SCALE, Preview, PreviewSource, Sampler, Source, gesture_grid,
+    preview_source_long_edge,
+};
 
 /// Two slots with a gutter between them: enough for "one cell changed, the other
 /// was carried over" to mean something.
@@ -91,14 +99,20 @@ fn pixels(built: &Built, slot: usize) -> Vec<u8> {
         .clone()
 }
 
-/// The size of the buffer a source decodes into: `width * height * 4` bytes at 8
-/// bits per sample, twice that at 16.
-fn source_bytes(source: &Source) -> usize {
+/// The preview-grade source's long edge for this test's resting grid.
+fn target() -> u32 {
+    preview_source_long_edge(resting())
+}
+
+/// The bytes a preview-grade source of `source` occupies at `long_edge` — what the
+/// source cache's budget counts (S12b; before it, the decoded photo did).
+fn reduced_bytes(source: &Source, long_edge: u32) -> usize {
     let per_sample = match source.depth() {
         Depth::Eight => 1,
         Depth::Sixteen => 2,
     };
-    source.width() as usize * source.height() as usize * 4 * per_sample
+    let reduced = PreviewSource::new(source, long_edge);
+    reduced.width() as usize * reduced.height() as usize * 4 * per_sample
 }
 
 /// Sets a file's modification time to a fixed instant, so the test does not depend
@@ -199,9 +213,11 @@ fn the_cache_evicts_the_least_recently_used_source() {
     let paths = [fixture("landscape.jpg"), fixture("square.png")];
     let sources = sources(&paths);
     let doc = document(&sources);
+    // The budget counts the *reductions* (S12b), not the decoded photos, which is
+    // why it is computed through `PreviewSource` rather than from `Source::bytes`.
     let sizes: Vec<usize> = paths
         .iter()
-        .map(|path| source_bytes(&Source::decode(path).expect("decode")))
+        .map(|path| reduced_bytes(&Source::decode(path).expect("decode"), target()))
         .collect();
     // One byte short of holding both: which one survives is decided by use, and
     // the second lookup is the one that decides it.
@@ -254,10 +270,15 @@ fn a_gesture_build_refines_into_the_bytes_a_cold_build_produces() {
     let coarse = gesture_grid(resting());
     let mut preview = Preview::new();
 
-    // The sequence a live gesture makes: a coarse frame first, then the resting
-    // grid again once the gesture ends.
+    // The sequence a window makes: the document opens at the resting grid, a live
+    // gesture draws coarse frames, and the release refines. Since S12b each grid
+    // has its own preview-grade source, so the *first* coarse frame is the one that
+    // builds the coarse copies — one decode per file, exactly what opening paid —
+    // and nothing after it touches the disk.
+    let opened = preview.build(&doc, &sources, resting());
+    assert_eq!(opened.decodes, 2, "opening decodes both photos");
     let frame = preview.build(&doc, &sources, coarse);
-    assert_eq!(frame.decodes, 2);
+    assert_eq!(frame.decodes, 2, "the coarse grid's own copies");
     let refined = preview.build(&doc, &sources, resting());
     assert_eq!(refined.decodes, 0, "the refinement re-decodes nothing");
     assert!(refined.failed.is_empty(), "{:?}", refined.failed);
@@ -283,6 +304,64 @@ fn a_gesture_build_refines_into_the_bytes_a_cold_build_produces() {
         pixels(&refined, 0).len(),
         "the coarse grid is a smaller grid, so its bitmaps are smaller"
     );
+}
+
+#[test]
+fn a_coarser_grid_is_served_by_a_smaller_copy() {
+    // A photo four times the resting grid's width: the reduction has something to
+    // do at both targets, and the two are different numbers.
+    let photo = fixture("resample-source.png");
+    let sources = sources(&[photo.clone(), photo]);
+    let doc = document(&sources);
+    let resting = resting();
+    let coarse = gesture_grid(resting);
+    let mut preview = Preview::new();
+
+    // Opening the document reduces the photo to the resting grid's target: 1.25x
+    // the grid's long edge (`PREVIEW_SOURCE_SCALE`), from a 1600x1200 file, so the
+    // copy's short edge is three quarters of its long one.
+    let copy_size = |long_edge: u32| PixelSize {
+        width: long_edge as i32,
+        height: (f64::from(long_edge) * 0.75).round() as i32,
+    };
+    let open = preview.build(&doc, &sources, resting);
+    assert_eq!(
+        open.decodes, 1,
+        "two cells pointing at one file decode it once"
+    );
+    assert_eq!(
+        open.source_px,
+        copy_size(preview_source_long_edge(resting)),
+        "the resting grid's copy"
+    );
+
+    // A live gesture draws at half the grid and is served by its own, *smaller*
+    // copy — the point of it, and the reason the key carries the target size. The
+    // file is decoded once more for it, because the cache keys on what a build
+    // asked for rather than on the photo alone.
+    let cold = preview.build(&doc, &sources, coarse);
+    assert_eq!(cold.decodes, 1, "a new target is a new reduction");
+    assert_eq!(
+        cold.source_px,
+        copy_size(preview_source_long_edge(coarse)),
+        "the gesture grid's copy"
+    );
+
+    // Every step after it is the cached copy, and the *resting* grid's copy is
+    // still there too: the two targets do not evict each other, and the release
+    // re-decodes nothing.
+    let mut framed = doc.clone();
+    framed.cells[0].crop = CropTransform {
+        zoom: 1.3,
+        ..CropTransform::IDENTITY
+    };
+    let warm = preview.build(&framed, &sources, coarse);
+    assert_eq!(warm.decodes, 0);
+    assert_eq!(warm.source_px, cold.source_px);
+    let refined = preview.build(&framed, &sources, resting);
+    assert_eq!(refined.decodes, 0, "the release re-decodes nothing");
+    assert_eq!(refined.source_px, open.source_px);
+    assert_eq!(preview.decodes(), 2, "one decode per target, per file");
 }
 
 #[test]

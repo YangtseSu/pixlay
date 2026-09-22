@@ -1022,6 +1022,15 @@ fn thumb(args: ThumbArgs) -> Result<u8, Failure> {
 /// zoom instead of reducing it. A number that fits the frame budget here fits it
 /// for a pan or a zoom too.
 ///
+/// `src_w`/`src_h` are the size of the source the warm step resampled — the
+/// preview-grade reduction (S12b), not the file. Before the reduction the step read
+/// the decoded photo, so against a 6000-px file the field went from 6000 to the
+/// copy's own long edge; "the big decode left the step" is therefore a number the
+/// report carries rather than an assumption, and `open`'s and `refine`'s copies
+/// (the resting grid's, one [`preview_source_long_edge`] wide) and `cold`'s (the
+/// gesture grid's, half of it) are that function of the grids the report already
+/// prints.
+///
 /// What it does **not** measure: the cairo blit of the finished bitmaps and the
 /// widget's own paint. Those are the window's, and a windowless command cannot
 /// reach them; what it measures is the half that used to re-decode.
@@ -1090,10 +1099,17 @@ fn gesture(args: GestureArgs) -> Result<u8, Failure> {
     failed.extend(cold.failed.iter().cloned());
     let mut warm_ms = Vec::with_capacity(args.steps as usize - 1);
     let mut warm_decodes = 0;
+    let mut warm_src = PixelSize {
+        width: 0,
+        height: 0,
+    };
     for step in 2..=args.steps {
         let (built, ms) = build(&mut preview, &frame(step), moving);
         warm_ms.push(ms);
         warm_decodes += built.decodes;
+        // The step the verdict is about, and the copy it read: every warm step
+        // frames the same cell at the same grid, so the last one is the answer.
+        warm_src = built.source_px;
         failed.extend(built.failed.iter().cloned());
     }
     let (refined, refine_ms) = build(&mut preview, &frame(args.steps), resting);
@@ -1147,6 +1163,8 @@ fn gesture(args: GestureArgs) -> Result<u8, Failure> {
     report.int("cold_decodes", cold.decodes as i64);
     report.int("warm_decodes", warm_decodes as i64);
     report.int("refine_decodes", refined.decodes as i64);
+    report.int("src_w", i64::from(warm_src.width));
+    report.int("src_h", i64::from(warm_src.height));
     report.float("budget_ms", GESTURE_STEP_BUDGET_MS);
     report.text("verdict", verdict);
     if args.stats {

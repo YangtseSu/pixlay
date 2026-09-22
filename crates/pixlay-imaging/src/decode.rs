@@ -134,6 +134,34 @@ impl Source {
         self.data.len()
     }
 
+    /// The samples as the decoder stored them: straight sRGB, `width * height * 4`
+    /// of them, one byte each at 8 bits per channel and two at 16.
+    ///
+    /// Only the preview-grade reduction reads this (`crate::reduce`): it averages
+    /// in linear light and needs the file's own buffer rather than a pixel at a
+    /// time, which is 24 million `pixel` calls for a 24 MP photo.
+    pub(crate) fn samples(&self) -> &[u8] {
+        &self.data
+    }
+
+    /// A `Source` holding samples someone else produced: `width` x `height` of
+    /// them, in the same layout, with `photo`'s depth, MIME type and EXIF block.
+    ///
+    /// The reduction is the only caller, and it is deliberately narrow: what makes
+    /// the result usable everywhere a decoded photo is (the framing's aspect, the
+    /// `{date}` token, the resampler) is that it *is* the same kind of thing, at a
+    /// smaller size.
+    pub(crate) fn from_samples(photo: &Self, width: u32, height: u32, data: Vec<u8>) -> Self {
+        Self {
+            width,
+            height,
+            depth: photo.depth,
+            data,
+            mime: photo.mime.clone(),
+            exif: photo.exif.clone(),
+        }
+    }
+
     /// The file's own MIME type, as the loader detected it (`image/jpeg`).
     pub fn mime(&self) -> &str {
         &self.mime

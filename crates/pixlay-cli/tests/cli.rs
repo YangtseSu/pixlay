@@ -3497,6 +3497,8 @@ fn gesture_measures_a_step_without_decoding_it() {
             "refine_decodes",
             "slot",
             "slots",
+            "src_h",
+            "src_w",
             "step_deg",
             "steps",
             "template",
@@ -3519,13 +3521,25 @@ fn gesture_measures_a_step_without_decoding_it() {
     assert_eq!(field(&output, "gesture_w"), "200");
     assert_eq!(field(&output, "gesture_h"), "150");
     // S12's central claim, as a count: opening the document decodes its photos, and
-    // **no step of the gesture after that decodes anything at all**. A warm step
-    // that still re-decoded its photo would show a number here, and this is the
-    // assertion that would catch a cache that quietly stopped working.
+    // **no step of the gesture after the first frame decodes anything at all**. A
+    // warm step that still re-decoded its photo would show a number here, and this
+    // is the assertion that would catch a cache that quietly stopped working. The
+    // one frame that does decode is the live gesture's first: since S12b each grid
+    // has its own preview-grade source, so the coarse grid builds its copies once
+    // (two photos, two decodes) and every frame after it — and the release, which
+    // is the resting grid again — is served from the cache.
     assert_eq!(field(&output, "open_decodes"), "2");
-    assert_eq!(field(&output, "cold_decodes"), "0");
+    assert_eq!(field(&output, "cold_decodes"), "2");
     assert_eq!(field(&output, "warm_decodes"), "0");
     assert_eq!(field(&output, "refine_decodes"), "0");
+    // The source the *warm step* resampled (S12b): a preview-grade copy, not the
+    // file. `square.png` is 640x640, and a warm step runs at the gesture grid — half
+    // of 400x300 — whose own target is 1.25x (`PREVIEW_SOURCE_SCALE`) its 200-px
+    // long edge, so 250x250. Before the reduction this field was the photo's own
+    // size, and against a 24 MP photo it is the whole difference between a step that
+    // reads 24 MP and one that reads a megapixel.
+    assert_eq!(field(&output, "src_w"), "250");
+    assert_eq!(field(&output, "src_h"), "250");
     assert_eq!(field(&output, "budget_ms"), "16.666667");
     // The verdict is the warm median against that budget: the test asserts the
     // relation, not a value, so it holds on a slow machine and a fast one.

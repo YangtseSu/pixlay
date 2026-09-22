@@ -58,6 +58,25 @@ pub fn linear_to_srgb8(value: u16) -> u8 {
     TABLE[usize::from(value)]
 }
 
+/// Linear 16-bit to the sRGB code value a 16-bit buffer stores.
+///
+/// The 16-bit counterpart of [`linear_to_srgb8`], and the reason it exists is the
+/// preview-grade reduction (S12b): a 16-bit source is reduced at its own depth
+/// (`crate::reduce`), so the conversion back to sRGB has to land on the same 65536
+/// code values the decoder would have handed over. Rounding per sample instead
+/// would be four `powf` per output texel.
+pub fn linear_to_srgb16(value: u16) -> u16 {
+    static TABLE: LazyLock<Box<[u16; 65536]>> = LazyLock::new(|| {
+        let mut table = Box::new([0u16; 65536]);
+        for (index, slot) in table.iter_mut().enumerate() {
+            let linear = f64::from(index as u16) / 65535.0;
+            *slot = to_fixed(inverse_transfer(linear));
+        }
+        table
+    });
+    TABLE[usize::from(value)]
+}
+
 /// The sRGB electro-optical transfer function (IEC 61966-2-1).
 pub fn transfer(srgb: f64) -> f64 {
     if srgb <= 0.04045 {

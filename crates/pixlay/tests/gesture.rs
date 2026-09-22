@@ -17,10 +17,13 @@
 //!   did. The grid a step asks for is read from the request rather than from the
 //!   reply it eventually gets, so this holds on a loaded machine as well as an idle
 //!   one — the reply's own grid is `pixlay-imaging`'s to assert.
-//! * **A live gesture decodes nothing.** The window counts what the decoding thread
-//!   decoded, and a drag may not add to it. That count is this layer's form of the
-//!   claim `pixlay-imaging`'s own tests make about the caches, so a cache that
-//!   quietly stopped working fails in two places rather than in none.
+//! * **A live gesture decodes nothing after its first frame.** The window counts
+//!   what the decoding thread decoded, and a drag may not add to it once both
+//!   grids' preview-grade sources exist (S12b: each grid has its own copy, so the
+//!   first gesture of a session builds the coarse one — what opening the document
+//!   paid for the resting one). That count is this layer's form of the claim
+//!   `pixlay-imaging`'s own tests make about the caches, so a cache that quietly
+//!   stopped working fails in two places rather than in none.
 //!
 //! The document and the canvas size are the test's own: it is about *which grid* a
 //! gesture asks for, so a small canvas with small photos keeps the whole test in the
@@ -167,11 +170,6 @@ fn a_live_gesture_refines_into_the_resting_grids_own_pixels() {
     window.gesture(Gesture::Step { slot, crop: target });
     assert!(window.wait_for_idle(support::WAIT));
     assert_eq!(window.images().0, resting);
-    assert_eq!(
-        window.decoded_sources(),
-        decoded,
-        "a live gesture must not touch the disk"
-    );
 
     let refined = support::snapshot(&area);
     let difference = support::rmse(&refined, &direct);
@@ -185,6 +183,28 @@ fn a_live_gesture_refines_into_the_resting_grids_own_pixels() {
     assert!(
         difference == 0.0,
         "the coarse frame survived the release: RMSE {difference:.4}"
+    );
+
+    // A *warm* gesture decodes nothing at all. The first one does, once — since
+    // S12b each grid has its own preview-grade source, so the frame above built the
+    // copies the gesture grid draws from, exactly as opening built the resting
+    // ones. What may never happen is a decode per frame, and this is that claim
+    // without the one-off in it: both grids' copies are cached by now, so a whole
+    // drag and its release touch no disk, and neither does the undo that puts the
+    // document back where the reference left it.
+    let warmed = window.decoded_sources();
+    window.gesture(Gesture::Crop {
+        slot,
+        crop: turn(target, 3.0),
+    });
+    window.gesture(Gesture::End);
+    assert!(window.wait_for_idle(support::WAIT));
+    window.undo();
+    assert!(window.wait_for_idle(support::WAIT));
+    assert_eq!(
+        window.decoded_sources(),
+        warmed,
+        "a warm gesture must not touch the disk"
     );
 
     // The two paths left the document framing the slot the same way, which is the
