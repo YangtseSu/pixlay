@@ -1,0 +1,27 @@
+/* The app's only stylesheet: what the picker's picked cells look like (S13b).
+ *
+ * A picked cell is shown by a highlight, not by the platform's
+ * `.selection-mode` check box: the 2026-09-22 ruling
+ * (`docs/2026-09-22-STEPS.md`, `S13 · Ruling`) chose the highlight, and the
+ * deviation from HIG `patterns/containers/selection-mode` is recorded in
+ * `docs/HIG-REVIEW.md` §3.
+ *
+ * Colours come from the theme's own variables and never from a literal:
+ * `--accent-bg-color` is what libadwaita defines for both colour schemes and for
+ * high contrast (measured on this machine: libadwaita 1.10's
+ * `/org/gnome/Adwaita/styles/gtk.css` line 100 defines `--accent-bg-color`,
+ * `--accent-fg-color` and `--accent-color`), so the highlight follows the
+ * system's accent and its contrast settings. The border is transparent — a
+ * keyword, not a colour — while a cell is not picked, so the photo does not move
+ * when the highlight appears, and the accent is used as a border rather than as a
+ * fill so the photo stays the brightest thing in the cell.
+ */
+
+.picker-cell {
+  border: 3px solid transparent;
+  border-radius: 8px;
+}
+
+.picker-cell.picked {
+  border-color: var(--accent-bg-color);
+}

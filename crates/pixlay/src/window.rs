@@ -13,7 +13,7 @@
 //! ```text
 //! AdwToastOverlay                      one place for every toast
 //!  └ AdwNavigationView
-//!     ├ AdwNavigationPage "picker"     the folder, the grid, the tray (S13)
+//!     ├ AdwNavigationPage "picker"     the folder, the grid, the picked list (S13)
 //!     └ AdwNavigationPage "editor"     the canvas, pushed by Next or Open…
 //!        └ AdwToolbarView              header / progress / banner + canvas
 //! ```
@@ -88,7 +88,7 @@ pub const COMMIT_QUIET: Duration = Duration::from_millis(250);
 /// the navigation view is showing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stage {
-    /// Stages 1–2: the folder, the grid and the tray.
+    /// Stages 1–2: the folder, the grid and the picked list.
     Picker,
     /// Stages 3–7: the document itself.
     Editor,
@@ -1375,11 +1375,15 @@ impl EditorWindow {
         }
     }
 
-    /// Waits until every listed photo has a tile or a reported refusal.
+    /// Waits until the grid has asked for its tiles and they have all arrived.
     ///
     /// The picker's counterpart of [`wait_for_idle`](Self::wait_for_idle), and the
     /// same shape: pump the context the worker delivers into, and stop when there
-    /// is nothing left to arrive.
+    /// is nothing left to arrive. What it waits for is the *bound* cells' tiles,
+    /// not a folder's: S13b asks for a tile when a cell is bound (the ruling's
+    /// visible-first policy), so "nothing in flight" is the whole of what there is
+    /// to wait for — and at least one tile has to be in hand, or the wait would
+    /// return before the grid had laid itself out at all.
     pub fn wait_for_tiles(&self, timeout: Duration) -> bool {
         let context = glib::MainContext::default();
         let deadline = Instant::now() + timeout;
@@ -1388,7 +1392,7 @@ impl EditorWindow {
                 context.iteration(false);
             }
             match self.picker() {
-                Some(picker) if picker.tiles_built() + picker.failures().len() >= picker.len() => {
+                Some(picker) if picker.pending_tiles() == 0 && picker.tiles_built() > 0 => {
                     return true;
                 }
                 None => return false,
@@ -1401,7 +1405,10 @@ impl EditorWindow {
         }
     }
 
-    /// Waits until the preview pane has decoded a photo.
+    /// Waits until the preview pane is showing the focused photo's own preview.
+    ///
+    /// Not "until it has pixels": the pane is decoded at its own size (S13b), and
+    /// the size it is at decides whether the photo in hand is the right one.
     pub fn wait_for_preview(&self, timeout: Duration) -> bool {
         let context = glib::MainContext::default();
         let deadline = Instant::now() + timeout;
@@ -1410,7 +1417,7 @@ impl EditorWindow {
                 context.iteration(false);
             }
             match self.picker() {
-                Some(picker) if picker.preview_pixels().is_some() => return true,
+                Some(picker) if picker.preview_current() => return true,
                 None => return false,
                 _ => {}
             }

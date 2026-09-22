@@ -907,7 +907,7 @@ one document, one renderer, one gesture per command. The library and the gallery
 the document — a candidate thumbnail is `render_rgb8` of the same drawn document at a smaller size, and
 S14's criteria hold it to that.
 
-What the picker stage is, as of S13 (`crates/pixlay/src/picker.rs`), and what a caller may rely on
+What the picker stage is, as of S13b (`crates/pixlay/src/picker.rs`), and what a caller may rely on
 without looking at a widget:
 
 - **It lists the session's folder and nothing else.** `XDG_PICTURES_DIR` (or `~/Pictures`) on the first
@@ -915,37 +915,53 @@ without looking at a widget:
   configuration file (ruling 8). The listing is `pixlay_imaging::list_folder`, the same function the
   CLI's `scan` walks with, so the grid and a listing of the same folder cannot disagree about which
   files are photos or in what order.
+- **Its shape is the 2026-09-22 ruling's, and S13b implemented it** (`docs/2026-09-22-STEPS.md`,
+  `S13 · Ruling`): the preview above, the thumbnails the bottom of the page, the picked list down the
+  right edge — two `GtkPaned`s, one vertical inside one horizontal, whose two positions are kept for the
+  session (a `thread_local`, not a configuration file) — and the cell is `TILE_SIZE` = 256 px, twice
+  S13's 128 and gthumb's own default `thumbnail-size`. A picked cell is shown by a **highlight**, not by
+  the platform's check box: `.picker-cell` / `.picked` in `crates/pixlay/src/style.css`, the app's only
+  stylesheet, installed on the display at startup and using the theme's `--accent-bg-color` and nothing
+  literal. It is a deliberate deviation from HIG `patterns/containers/selection-mode`, recorded in
+  `docs/HIG-REVIEW.md` §3. **A scrolled list inside a `GtkPaned` needs `shrink-end-child`** — with the
+  default the paned's minimum becomes the list's *content* height, the grid is allocated its whole
+  content and GTK then counts every item as visible (measured: 257 of a 300-photo folder).
 - **The pick is ordered, and the order is the click order.** A `GtkMultiSelection` is a set, so the
   ordered list is the picker's own (`pixlay_core::Selection`, the policy `init --photo` shares): the
-  picked list is where that order is visible, re-orderable and truncatable, and
-  `Picker::document` is the one place the pick becomes a document. The cell's click *toggles* — the
-  picker claims the gesture, because GTK's own row handling replaces a multi-selection on a plain click
+  picked list is where that order is visible, re-orderable and truncatable, and `Picker::document` is the
+  one place the pick becomes a document. The cell's click *toggles* — the picker claims the gesture,
+  because GTK's own row handling replaces a multi-selection on a plain click
   (`gtklistfactorywidget.c`: `modify = Ctrl held`) — and a pick past the cap is refused with a visible
-  report rather than truncated (ruling 3).
-- **The stage's shape was ruled on 2026-09-22** (`docs/2026-09-22-STEPS.md`, `S13 · Ruling`) and **S13b
-  implements it**: the thumbnails are the bottom of the page and the picked list runs down the right edge,
-  the cell is `TILE_SIZE` = 256 px (twice S13's 128, which is gthumb's own default `thumbnail-size`), a
-  picked cell is shown by a highlight and **not** by a check mark — a deliberate deviation from HIG
-  `patterns/containers/selection-mode`, recorded in `docs/HIG-REVIEW.md` §3 — and order changes by dragging
-  a row or by `Ctrl+Up`/`Ctrl+Down` on the focused row, with a remove button at the row's right and no other
-  button in the list. Until S13b lands, the shapes the bullets below describe as measured are S13's.
+  report rather than truncated (ruling 3). Order changes by dragging a row onto another position
+  (`GtkDragSource` on the row, `GtkDropTarget` on the list) and by `Ctrl+Up`/`Ctrl+Down` on the focused
+  row — a `GtkShortcutController` on the list rather than an application accelerator, because the action
+  belongs to the focused row and a global binding would fire it in the editor too. The row's only button
+  is the remove at its right end.
 - **A tile and the preview are `pixlay_imaging::thumbnail` pixels** — the same function the CLI's `thumb`
-  writes to a file. S13 built the tile at `TILE_PX` (256) against a 128 px cell and the preview at a constant
-  `PREVIEW_PX` (1024) long edge; **the 2026-09-22 ruling replaces both** (S13b): the cell is 256 px and the
-  tile is built at the cell's *device* pixels (256 x the scale factor), and the preview is built at the
-  pane's own device long edge, rounded up to 128 px steps and capped at `PREVIEW_MAX_PX` (2048) — 2048
-  because a pane-sized decode costs 229 ms at 1024, 593 ms at 2048 and 1112 ms at 3840 on a 3840x2160
-  display, which is what this machine has (measured 2026-09-22, `S13 · Ruling`). Measured (S13's own test):
-  the preview pane's pixels against `pixlay-render thumb --px 1024` of the same photo differ by **RMSE
-  0.0218** over 1024x768 pixels (threshold 6), which is the 8-bit PNG round trip, not a second resampler.
+  writes to a file. Both are built at the size the widget *is*: a tile at `TILE_SIZE` times the screen's
+  scale factor (so a HiDPI screen is sharp without a hard-coded 2x), and the pane's photo at the pane's
+  own device long edge, rounded up to 128 px and capped at `PREVIEW_MAX_PX` = 2048 — 2048 because a
+  pane-sized decode costs 229 ms at 1024, 593 ms at 2048 and 1112 ms at 3840 on the 3840x2160 display
+  this machine has (measured 2026-09-22, `S13 · Ruling`). Measured (S13b's own test, 2026-09-22, debug
+  profile): the pane is 536x380 logical on a 2x screen, its photo is decoded at **1152 px**, and its
+  pixels against `pixlay-render thumb --px 1152` of the same photo differ by **RMSE 0.0222** over
+  1152x864 pixels (threshold 6) — the 8-bit PNG round trip, not a second resampler.
+- **The pane never paints a tile.** It shows the focused photo's preview at the pane's own size, or a
+  spinner while that decodes; S13 painted the 256 px cell tile and could stay on it, because a repeated
+  `(index, preview)` request was dropped as already seen. The request identity is now
+  `(folder generation, kind, index, device pixels)`, so a resize asks for the size the pane now is, a
+  re-focus is served from a bounded per-photo cache, and a folder change invalidates all of it.
 - **Tiles are built on one worker thread** (`thumbs.rs`) and cross back as plain bytes through
-  `MainContext::invoke`; a folder listing therefore returns before any decode happens, and the grid
-  fills progressively. Measured (S13, debug profile): 14 tiles at 256 px in **5.6 s**, 13 of them
-  painted into bound cells when the snapshot was taken. **The 2026-09-22 ruling changes what is asked for,
-  not how it is built** (S13b): a tile is requested for a cell that is bound and dropped when that cell
-  unbinds, with a bounded bootstrap, instead of S13's one request per listed file at folder open — gthumb's
-  own policy (`src/FileGrid.vala`, `src/Thumbnailer.vala`), which is what keeps a folder of thousands of
-  photos from queueing thousands of decodes.
+  `MainContext::invoke`; a folder listing therefore returns before any decode happens. **What is asked
+  for is what is on screen**: `bind_tile` and the grid's own vertical adjustment both end in
+  `refresh_visible`, `unbind_tile` drops the request again, and the test for "on screen" is the cell's
+  own allocation against the scroller's — because GTK's item manager binds far more items than it shows
+  (measured: 257 for a 1000-photo model in a 536x396 viewport, the same 257 a 300-photo folder gets, and
+  it does not trim them). Measured (S13b, debug profile): the 14-photo fixture folder asks for **4**
+  tiles and a 300-photo folder opens with **4** requests — 29 ms, no decode — with a scroll to its 200th
+  photo costing **7** more; the bound the test holds this to is `TILE_REQUEST_MAX` = 64. Decoded tiles
+  and previews are cached in memory (64 MB each, LRU, keyed by size as well as by file), which is what
+  makes a scrolled-back row instant.
 - **The stage has no zoom of its own**: the preview is `Contain`-fitted (ruling 2's "fit and zoom" is
   the photo filling the pane), and magnification is the editor's business.
 - **The export form's state lives in the window** (`EditorWindow::set_export_settings` /

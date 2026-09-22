@@ -100,6 +100,10 @@ pub fn build() -> adw::Application {
     for (action, accel) in ACCELERATORS {
         app.set_accels_for_action(action, &[accel]);
     }
+    // At startup rather than at build time: the display exists once GTK has
+    // initialised, which is what `GtkApplication`'s `startup` runs after — and
+    // `build()` is called before the application is run at all.
+    app.connect_startup(|_| install_style());
     app.connect_activate(|app| {
         if let Some(window) = active_window(app) {
             window.present();
@@ -109,6 +113,26 @@ pub fn build() -> adw::Application {
         window.present();
     });
     app
+}
+
+/// The app's own stylesheet, which is the picker's picked-cell highlight and
+/// nothing else (`style.css`, S13b).
+///
+/// It is loaded from a string baked into the binary (`include_str!`) rather than
+/// from a file on disk: the shell has no runtime data directory, and one rule pair
+/// does not need one. The provider goes on the display at the application's own
+/// priority, so it can use the theme's variables but cannot restyle the platform.
+fn install_style() {
+    let Some(display) = gtk::gdk::Display::default() else {
+        return;
+    };
+    let provider = gtk::CssProvider::new();
+    provider.load_from_string(include_str!("style.css"));
+    gtk::style_context_add_provider_for_display(
+        &display,
+        &provider,
+        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+    );
 }
 
 /// Runs the application until the last window closes.

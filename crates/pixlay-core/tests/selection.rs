@@ -3,7 +3,7 @@
 //! These are the rules the picker (S13), the layout stage (S14) and the CLI's
 //! `init --photo` share, so they are asserted where they live — in `pixlay-core`,
 //! with no window and no decoder. The CLI side of the same policy is asserted
-//! from the outside in `pixlay-cli/tests/cli.rs`: "the tray's order is what
+//! from the outside in `pixlay-cli/tests/cli.rs`: "the picked list's order is what
 //! `init --photo` produces" is a statement about both callers, and each one is
 //! checked against this one implementation.
 
@@ -111,7 +111,7 @@ fn a_selection_below_the_floor_cannot_become_a_document() {
         );
         assert!(refused.to_string().contains("2..=9"), "{refused}");
     }
-    // The floor is only a floor for a *document*: the tray may hold one photo
+    // The floor is only a floor for a *document*: the pick may hold one photo
     // while the user is still picking, which is why `push` allows it.
     assert!(selection(0).accepts_more());
     assert!(selection(1).accepts_more());

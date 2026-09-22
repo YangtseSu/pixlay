@@ -2,7 +2,7 @@
 //!
 //! Stages 1–2 of the main path (`AGENTS.md`: `open → pick 2–9 photos → pick a
 //! layout → adjust → export`) are a list of photos in the order the user picked
-//! them, and **order is cell order**: the picker's tray is where that mapping is
+//! them, and **order is cell order**: the picker's picked list is where that mapping is
 //! visible and re-orderable, not decoration. This module is the mapping itself,
 //! and it is pure — no cairo, no GTK, no filesystem — so the picker (S13), the
 //! layout stage (S14) and the CLI's `init --photo` share one implementation
@@ -14,7 +14,7 @@
 //!   The floor is enforced where a selection becomes a document
 //!   ([`Selection::document`]) and the ceiling where a photo is added
 //!   ([`Selection::push`]), because those are the two moments a user can hit them:
-//!   the tray legitimately holds zero or one photo while the user is still
+//!   the picked list legitimately holds zero or one photo while the user is still
 //!   picking, and a tenth is refused with a message rather than truncated.
 //! * **the count filter.** The layouts a selection can use are the library's
 //!   templates with exactly that many slots ([`Selection::layouts`]) — the picker

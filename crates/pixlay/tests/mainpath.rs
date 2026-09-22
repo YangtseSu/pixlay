@@ -106,7 +106,7 @@ fn the_main_path_can_be_walked() {
             == 4,
         "every cell holds a photo"
     );
-    // The tray's order and the CLI's argument order are one policy: the same four
+    // The picked list's order and the CLI's argument order are one policy: the same four
     // paths through `pixlay_core::Selection`, which is what `init --photo` uses.
     let written = support::artifact("mainpath-init.pixlay");
     let argv: Vec<std::ffi::OsString> = {
@@ -136,7 +136,7 @@ fn the_main_path_can_be_walked() {
     let expected: Vec<PathBuf> = picked.iter().map(|path| same_file(path)).collect();
     assert_eq!(
         resolved, expected,
-        "the tray's order is the CLI's argument order, cell for cell"
+        "the picked list's order is the CLI's argument order, cell for cell"
     );
     assert_eq!(
         from_cli.doc().cells.len(),

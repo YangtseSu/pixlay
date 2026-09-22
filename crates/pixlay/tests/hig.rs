@@ -260,13 +260,19 @@ fn has_accessible_name(widget: &gtk4::Widget) -> bool {
         .any(|label| !label.label().is_empty())
 }
 
-/// The picker is a collection view in selection mode (S13).
+/// The picker is a collection view in selection mode (S13), arranged as the
+/// 2026-09-22 ruling fixed it (S13b).
 ///
 /// HIG `patterns/containers/selection-mode`, which the plan's review turned from
 /// "not applicable" into a criteria row: a grid whose model is a real
-/// multi-selection, a cell's selection shown by the platform's own check mark
-/// (`.selection-mode` on a `GtkCheckButton`), and the batch action in the header —
-/// the Next button, carrying the count and insensitive below the floor of two.
+/// multi-selection, a picked cell shown by a highlight — the one part of the page
+/// this product deviates on, recorded in `docs/HIG-REVIEW.md` §3 — and the batch
+/// action in the header, the Next button, carrying the count and insensitive below
+/// the floor of two.
+///
+/// The arrangement is `guidelines/adaptive`'s half: the preview above, the
+/// thumbnails below it, the picked list down the right edge, which is checked as
+/// geometry rather than as a widget tree.
 fn check_picker(window: &EditorWindow, failures: &mut Vec<String>) {
     let picker = window.picker().expect("the window has a picker stage");
     // The fixture folder, so the check does not depend on what `~/Pictures` holds
@@ -285,7 +291,8 @@ fn check_picker(window: &EditorWindow, failures: &mut Vec<String>) {
         ));
     }
 
-    // The check mark is per cell and uses the platform's style class.
+    // The check mark S13 used is gone, and the highlight is what replaced it
+    // (the 2026-09-22 ruling).
     let checks: Vec<gtk4::Widget> =
         support::descendants(picker.grid().upcast_ref::<gtk4::Widget>())
             .into_iter()
@@ -293,8 +300,19 @@ fn check_picker(window: &EditorWindow, failures: &mut Vec<String>) {
                 widget.is::<gtk4::CheckButton>() && widget.has_css_class("selection-mode")
             })
             .collect();
-    if checks.is_empty() {
-        failures.push("no cell carries a .selection-mode check button".to_string());
+    if !checks.is_empty() {
+        failures.push(format!(
+            "{} cell(s) still carry a .selection-mode check button, which the ruling replaced \
+             with the highlight",
+            checks.len()
+        ));
+    }
+    let cells = support::descendants(picker.grid().upcast_ref::<gtk4::Widget>())
+        .into_iter()
+        .filter(|widget| widget.has_css_class("picker-cell"))
+        .count();
+    if cells == 0 {
+        failures.push("no grid cell carries the .picker-cell class".to_string());
     }
 
     // The count is the button's own text, and the floor of the product's 2–9 rule
@@ -323,6 +341,14 @@ fn check_picker(window: &EditorWindow, failures: &mut Vec<String>) {
     if next.is_sensitive() {
         failures.push("Next is sensitive with one photo picked".to_string());
     }
+    let picked_cell = picker
+        .cell_widget(0)
+        .map(|cell| cell.has_css_class("picked"));
+    if picked_cell != Some(true) {
+        failures.push(format!(
+            "a picked cell does not carry the highlight class ({picked_cell:?})"
+        ));
+    }
     picker.toggle(window, 1);
     if !next.is_sensitive() {
         failures.push("Next is insensitive with two photos picked".to_string());
@@ -336,12 +362,18 @@ fn check_picker(window: &EditorWindow, failures: &mut Vec<String>) {
             "Next does not show two picked photos (label is {label:?})"
         ));
     }
-    if picker.tray_widget().first_child().is_none() {
-        failures.push("the tray is empty with two photos picked".to_string());
+    if picker.picked_list().first_child().is_none() {
+        failures.push("the picked list is empty with two photos picked".to_string());
     }
     picker.clear_selection();
     if picker.selected_count() != 0 {
         failures.push("Esc-equivalent clearing left photos picked".to_string());
+    }
+    if picker
+        .cell_widget(0)
+        .is_some_and(|cell| cell.has_css_class("picked"))
+    {
+        failures.push("clearing the pick left a cell highlighted".to_string());
     }
 }
 
@@ -361,7 +393,10 @@ fn check_picker_minimum(window: &EditorWindow, failures: &mut Vec<String>) {
             "the preview pane",
             picker.preview_widget().upcast::<gtk4::Widget>(),
         ),
-        ("the tray", picker.tray_widget().upcast::<gtk4::Widget>()),
+        (
+            "the picked list",
+            picker.picked_list().upcast::<gtk4::Widget>(),
+        ),
     ] {
         if widget.width() <= 0 || widget.height() <= 0 {
             failures.push(format!(
@@ -372,6 +407,40 @@ fn check_picker_minimum(window: &EditorWindow, failures: &mut Vec<String>) {
                 widget.height()
             ));
         }
+    }
+
+    // And the arrangement the 2026-09-22 ruling fixed, as geometry: the
+    // thumbnails below the preview, the picked list to the right of it.
+    let root = picker.root().upcast::<gtk4::Widget>();
+    let grid = picker.grid().upcast::<gtk4::Widget>();
+    let preview = picker.preview_widget().upcast::<gtk4::Widget>();
+    let list = picker.picked_list().upcast::<gtk4::Widget>();
+    let corner = |widget: &gtk4::Widget, x: f32, y: f32| {
+        widget
+            .compute_point(&root, &gtk4::graphene::Point::new(x, y))
+            .map(|point| (point.x(), point.y()))
+    };
+    let (grid_top, preview_bottom) = (
+        corner(&grid, 0.0, 0.0).map(|(_, y)| y),
+        corner(&preview, 0.0, preview.height() as f32).map(|(_, y)| y),
+    );
+    if let (Some(grid_top), Some(preview_bottom)) = (grid_top, preview_bottom)
+        && grid_top < preview_bottom
+    {
+        failures.push(format!(
+            "the thumbnails ({grid_top:.0}) are not below the preview ({preview_bottom:.0})"
+        ));
+    }
+    let (list_left, preview_right) = (
+        corner(&list, 0.0, 0.0).map(|(x, _)| x),
+        corner(&preview, preview.width() as f32, 0.0).map(|(x, _)| x),
+    );
+    if let (Some(list_left), Some(preview_right)) = (list_left, preview_right)
+        && list_left < preview_right
+    {
+        failures.push(format!(
+            "the picked list ({list_left:.0}) is not to the right of the pane ({preview_right:.0})"
+        ));
     }
 }
 

@@ -24,13 +24,18 @@ workspace = true
 pixlay-core = { path = "../pixlay-core" }
 pixlay-imaging = { path = "../pixlay-imaging" }
 pixlay-render = { path = "../pixlay-render" }
-# GTK4 + libadwaita: the shell. `gtk/v4_10` is the level `GtkFileDialog` and
-# `GtkColorDialogButton` need (4.10 dropped the deprecated chooser dialogs);
-# `v1_7` is the level the widgets this window is built from need — `AdwDialog`
-# and `AdwAlertDialog` 1.5, `AdwToastOverlay` 1.7, `AdwToolbarView` and
-# `AdwOverlaySplitView` 1.4. Each is far below what Arch ships (gtk4 4.24,
-# libadwaita 1.10), per the "track the latest" policy.
-gtk4 = { version = "0.11.5", features = ["v4_10"] }
+# GTK4 + libadwaita: the shell. `gtk/v4_12` is the lowest level that carries what
+# the code uses: `GtkListBox::remove_all` and `GtkCssProvider::load_from_string`
+# (S13b rebuilt the picked list on every change), and `GdkSurface::layout`, the
+# only signal GTK4 offers for "the window was resized" (there is no
+# `size-allocate` and no `width` property) — so a build against an older GTK would
+# compile and never resize the preview pane. `v4_10` is the level
+# `GtkFileDialog` and `GtkColorDialogButton` need (4.10 dropped the deprecated
+# chooser dialogs); `v1_8` is the level the widgets this window is built from need
+# — `AdwDialog` and `AdwAlertDialog` 1.5, `AdwToastOverlay` 1.7, `AdwToolbarView`
+# 1.4. All are far below what Arch ships (gtk4 4.24, libadwaita 1.10), per the
+# "track the latest" policy.
+gtk4 = { version = "0.11.5", features = ["v4_12"] }
 libadwaita = { version = "0.9.2", features = ["v1_8", "gtk_v4_10"] }
 # i18n: gettext, the same toolchain GTK and libadwaita use for their own copy, so
 # `.po` files, `.desktop` and AppStream metainfo (S8) all go through one pipeline.

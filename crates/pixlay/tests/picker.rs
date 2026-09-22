@@ -1,39 +1,54 @@
-//! S13's own criteria for the picker stage: what the stage has to be true of
-//! itself, rather than of the path it sits on (`tests/mainpath.rs`).
+//! S13's and S13b's criteria for the picker stage: what the stage has to be true
+//! of itself, rather than of the path it sits on (`tests/mainpath.rs`).
 //!
-//! Four claims, and each one is a different kind of fact:
+//! The claims, and each one is a different kind of fact:
 //!
-//! * **The pick's order is the click order, and the tray is where it is visible.**
-//!   `GtkMultiSelection` is a set, so the order is the picker's own list; this
-//!   checks that a scrambled pick survives as a scrambled order, that the tray
-//!   re-order and remove act on that order, and that Next hands the document the
-//!   same order (`Selection::document`, the policy the CLI's `init --photo` also
-//!   uses — `tests/mainpath.rs` compares the two surfaces cell for cell).
+//! * **The pick's order is the click order, and the picked list is where it is
+//!   visible.** `GtkMultiSelection` is a set, so the order is the picker's own
+//!   list; this checks that a scrambled pick survives as a scrambled order, that a
+//!   row drag and `Ctrl+Up`/`Ctrl+Down` act on that order, and that Next hands the
+//!   document the same order (`Selection::document`, the policy the CLI's
+//!   `init --photo` also uses — `tests/mainpath.rs` compares the two surfaces cell
+//!   for cell).
 //! * **The cap is reported, not applied silently.** Nine photos fit; a tenth is
 //!   refused with a visible message and the pick stays at nine.
-//! * **The grid fills progressively and never blocks the main loop.** Opening a
-//!   folder is a directory read — the tiles are *all* absent at the instant it
-//!   returns, because the worker delivers through the main context and nothing has
-//!   iterated it yet — and they then arrive, one decode at a time, on one worker
-//!   thread.
+//! * **A picked cell carries the highlight, and the highlight really draws** (the
+//!   2026-09-22 ruling): the cell has the `.picked` class, no `.selection-mode`
+//!   check button is left in the stage, and the grid's own pixels change when a
+//!   cell is picked.
+//! * **The grid asks for the tiles of the cells it is showing**, never for a
+//!   folder's worth (the ruling's visible-first policy): opening a folder returns
+//!   before *any* decode, a 300-photo folder costs the same bounded number of
+//!   requests as a 14-photo one, and the answer arrives on the worker thread.
+//! * **The pane is decoded at its own size, and it never paints a tile.**
+//!   Regression test for the reported blur: the pane's photo is at least
+//!   min(pane device long edge, `PREVIEW_MAX_PX`) long, the picture it paints is
+//!   that photo's own texture, and coming back to a photo — after focusing another,
+//!   or after changing folder — does not leave the cell's 256 px tile in the pane.
 //! * **The preview is the pipeline's picture.** Its pixels are compared with the
-//!   file `pixlay-render thumb` writes for the same photo at the same size, byte
-//!   for byte, because both are `pixlay_imaging::thumbnail`: the stage is not a
-//!   second resampler, and this is the number that says so.
+//!   file `pixlay-render thumb` writes for the same photo at the same size, because
+//!   both are `pixlay_imaging::thumbnail`: the stage is not a second resampler, and
+//!   this is the number that says so.
 
 mod support;
 
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use gtk4::glib;
 use gtk4::prelude::*;
+use libadwaita::prelude::*;
 
-use pixlay::picker::PREVIEW_PX;
+use pixlay::picker::{PREVIEW_MAX_PX, Picker, TILE_REQUEST_MAX, TILE_SIZE};
 use pixlay::window::Stage;
 use pixlay_imaging::{Sampler, Source};
 
 /// The "same picture" threshold the repository uses (`AGENTS.md`, "Invariants"):
 /// the same composition at `2N` and `N`, downsampled, stays below 6.
 const RMSE_THRESHOLD: f64 = 6.0;
+
+/// How many copies the "big folder" case makes.
+const BIG_FOLDER: usize = 300;
 
 #[test]
 fn the_picker_stage_meets_its_own_criteria() {
@@ -47,7 +62,7 @@ fn the_picker_stage_meets_its_own_criteria() {
         "the picker is the root stage"
     );
 
-    // ---- the folder, and the grid filling progressively --------------------
+    // ---- the folder, and the grid filling visible-first --------------------
     let folder = support::fixtures().join("photos");
     let listed = pixlay_imaging::list_folder(&folder, false).expect("the folder lists");
     assert!(
@@ -79,13 +94,27 @@ fn the_picker_stage_meets_its_own_criteria() {
         0,
         "the grid decoded a photo synchronously while the folder was being listed"
     );
+    window.pump(Duration::from_millis(300));
+    // What a folder costs is the cells on screen, not the files in it (S13b): the
+    // bound cells ask for their tiles and nothing else does.
+    assert!(
+        picker.tile_requests() > 0,
+        "the bound cells never asked for their tiles"
+    );
+    assert!(
+        picker.tile_requests() <= TILE_REQUEST_MAX,
+        "opening a {} photo folder cost {} tile requests, past the bound of {}",
+        picker.len(),
+        picker.tile_requests(),
+        TILE_REQUEST_MAX
+    );
 
     let filling = Instant::now();
     assert!(
         window.wait_for_tiles(support::WAIT),
-        "the grid never finished filling ({} of {} tiles)",
+        "the grid never finished filling ({} tiles, {} in flight)",
         picker.tiles_built(),
-        picker.len()
+        picker.pending_tiles()
     );
     let filling = filling.elapsed();
     // Every fixture photo decodes; a refusal would be a cell that says so, and the
@@ -95,33 +124,26 @@ fn the_picker_stage_meets_its_own_criteria() {
         "the fixture folder has unreadable photos: {:?}",
         picker.failures()
     );
-    assert_eq!(
-        picker.tiles_built(),
-        picker.len(),
-        "every listed photo has a tile"
-    );
-    // And the cells are showing them: a decoded tile has to reach the picture that
-    // is bound to its position, or the grid would be a wall of empty boxes with a
+    // And the cells are showing them: a decoded tile has to reach the widget that
+    // is bound to its position, or the grid would be a wall of spinners with a
     // full cache behind it (GTK does not re-bind a row because a texture arrived).
     window.pump(Duration::from_millis(200));
-    let painted = support::descendants(picker.grid().upcast_ref::<gtk4::Widget>())
-        .into_iter()
-        .filter_map(|widget| widget.downcast::<gtk4::Picture>().ok())
-        .filter(|picture| picture.paintable().is_some())
-        .count();
+    let painted = painted_cells(&picker);
     assert!(
         painted > 0,
-        "no bound cell received its tile ({painted} painted of {} tiles)",
+        "no bound cell received its tile ({} painted of {} tiles)",
+        painted,
         picker.tiles_built()
     );
     eprintln!(
-        "the grid filled in {filling:?} ({} tiles at {} px, {} cells painted)",
-        picker.len(),
-        pixlay::picker::TILE_PX,
+        "the grid filled in {filling:?} ({} tiles in {} requests at {} px, {} cells painted)",
+        picker.tiles_built(),
+        picker.tile_requests(),
+        picker.tile_px(),
         painted
     );
 
-    // ---- the pick, its order, and the tray --------------------------------
+    // ---- the pick, its order, and the picked list --------------------------
     // Three photos, picked out of grid order, so the order can only be the click
     // order and not the folder's.
     let scrambled = [4usize, 0, 2];
@@ -137,24 +159,78 @@ fn the_picker_stage_meets_its_own_criteria() {
         picked.as_slice(),
         "the pick keeps the order the photos were clicked in"
     );
-    assert!(
-        picker.tray_widget().first_child().is_some(),
-        "the tray shows the pick"
-    );
     assert_eq!(picker.selected_count(), 3);
+    assert_eq!(
+        picked_rows(&picker.picked_list()),
+        names(&picked),
+        "the picked list's rows are the pick's order"
+    );
 
-    // Re-ordering and removing act on that order, which is what makes the tray the
-    // place order is kept rather than a decoration.
-    picker.move_photo(&window, 0, 1);
+    // The drag is wired: every row can be dragged and the list accepts the drop
+    // (this is the pointer path the ruling chose; the check below drives the same
+    // move the drop handler does).
+    let rows = picked_rows(&picker.picked_list());
+    let first_row = picker
+        .picked_list()
+        .row_at_index(0)
+        .expect("the first picked row exists");
+    assert!(
+        controllers_of::<gtk4::DragSource>(&first_row.upcast()) > 0,
+        "a picked row cannot be dragged"
+    );
+    assert!(
+        controllers_of::<gtk4::DropTarget>(&picker.picked_list().upcast()) > 0,
+        "the picked list does not accept a dropped row"
+    );
+    assert_eq!(rows.len(), 3, "three rows before the drag");
+
+    // A drag moves exactly one entry: row 0 dropped on position 2.
+    picker.move_row(&window, 0, 2);
+    assert_eq!(
+        picker.selection().photos(),
+        [picked[1].clone(), picked[2].clone(), picked[0].clone()],
+        "a drop on position 2 puts the dragged photo there and moves nothing else"
+    );
+    assert_eq!(
+        picked_rows(&picker.picked_list()),
+        names(picker.selection().photos()),
+        "and the list shows it"
+    );
+
+    // The same action from the keyboard, through the list's own shortcut
+    // controller: the trigger the user presses and the action it fires, not a
+    // private copy of either.
+    window.pump(Duration::from_millis(100));
+    let list = picker.picked_list();
+    assert!(
+        list.focus_child().is_some(),
+        "a moved row has to keep the focus, or the next Ctrl+Up acts on nothing"
+    );
+    assert!(
+        press(&list, "Up"),
+        "Ctrl+Up was not handled by the picked list"
+    );
     assert_eq!(
         picker.selection().photos(),
         [picked[1].clone(), picked[0].clone(), picked[2].clone()],
-        "moving a photo one place later swaps it with its neighbour"
+        "Ctrl+Up on the focused row moves it one place earlier"
     );
+    window.pump(Duration::from_millis(100));
+    assert!(
+        press(&picker.picked_list(), "Down"),
+        "Ctrl+Down was not handled by the picked list"
+    );
+    assert_eq!(
+        picker.selection().photos(),
+        [picked[1].clone(), picked[2].clone(), picked[0].clone()],
+        "Ctrl+Down moves the same row back"
+    );
+
+    // Removing is the row's own button, and it drops exactly that entry.
     picker.remove_at(&window, 1);
     assert_eq!(
         picker.selection().photos(),
-        [picked[1].clone(), picked[2].clone()],
+        [picked[1].clone(), picked[0].clone()],
         "removing a photo drops exactly that one"
     );
 
@@ -197,12 +273,8 @@ fn the_picker_stage_meets_its_own_criteria() {
         "the report names the cap: {reported:?}"
     );
     assert!(
-        picker
-            .tray_widget()
-            .first_child()
-            .and_then(|first| first.next_sibling())
-            .is_some(),
-        "the tray holds more than one photo after selecting all"
+        picked_rows(&picker.picked_list()).len() > 1,
+        "the picked list holds more than one photo after selecting all"
     );
 
     // ---- the pick becomes the document, in order --------------------------
@@ -217,24 +289,130 @@ fn the_picker_stage_meets_its_own_criteria() {
         "Next opens the editor's stage"
     );
     let doc = window.document();
-    let sources: Vec<Option<std::path::PathBuf>> =
-        doc.cells.iter().map(|cell| cell.source.clone()).collect();
+    let sources: Vec<Option<PathBuf>> = doc.cells.iter().map(|cell| cell.source.clone()).collect();
     assert_eq!(
         sources,
         picked.iter().cloned().map(Some).collect::<Vec<_>>(),
         "the document's cells are the picked photos, in the pick's order"
     );
-
-    // ---- the preview is the CLI's own picture -----------------------------
-    // Back to the picker, focus a photo, and hold the pixels the preview shows to
-    // the file `pixlay-render thumb` writes for it at the same size.
     window.show_picker();
     assert_eq!(window.stage(), Stage::Picker);
+
+    // ---- the highlight ----------------------------------------------------
+    // The 2026-09-22 ruling: a picked cell is shown by a highlight, and the
+    // platform's check mark is gone from the stage entirely.
+    let checks: Vec<gtk4::Widget> =
+        support::descendants(picker.grid().upcast_ref::<gtk4::Widget>())
+            .into_iter()
+            .filter(|widget| {
+                widget.is::<gtk4::CheckButton>() && widget.has_css_class("selection-mode")
+            })
+            .collect();
+    assert!(
+        checks.is_empty(),
+        "the stage still carries {} .selection-mode check button(s)",
+        checks.len()
+    );
+    let cell = picker
+        .cell_widget(0)
+        .expect("position 0 is on screen and bound");
+    assert!(
+        cell.has_css_class("picker-cell"),
+        "a cell carries the .picker-cell class"
+    );
+    assert!(
+        cell.has_css_class("picked"),
+        "a picked cell carries the highlight class"
+    );
+    // Position 1 is not in the pick, so its cell must not carry it.
+    let other = picker
+        .cell_widget(1)
+        .expect("position 1 is on screen and bound");
+    assert!(
+        !other.has_css_class("picked"),
+        "an unpicked cell must not carry the highlight class"
+    );
+    window.pump(Duration::from_millis(200));
+    let before = support::snapshot(&picker.grid());
+    picker.clear_selection();
+    window.pump(Duration::from_millis(200));
+    let after = support::snapshot(&picker.grid());
+    let difference = support::rmse(&before, &after);
+    eprintln!("the highlight is worth RMSE {difference:.3} of the grid's pixels");
+    assert!(
+        difference > 1.0,
+        "picking and unpicking a cell did not change the grid's pixels ({difference:.3}): \
+         the highlight is not drawing"
+    );
+    assert!(
+        !picker
+            .cell_widget(0)
+            .is_some_and(|cell| cell.has_css_class("picked")),
+        "clearing the pick drops the highlight"
+    );
+
+    // ---- the pane is the pane's size, and never a tile ---------------------
+    // The reported blur, as a number: the pane is decoded at its own device long
+    // edge (rounded up, capped), and what it paints is that photo's own texture.
+    let pane = picker.preview_widget();
+    let pane_edge = pane.width().max(pane.height()).max(0) as u32 * pane.scale_factor() as u32;
+    let wanted = pane_edge.min(PREVIEW_MAX_PX);
+    picker.toggle(&window, 2);
+    assert!(
+        window.wait_for_preview(support::WAIT),
+        "the pane never decoded the focused photo"
+    );
+    let (width, height) = pane_is_the_preview(&picker, 2);
+    assert!(
+        picker.preview_px() >= wanted,
+        "the pane is {}x{} device pixels and the preview was decoded at {}",
+        pane.width(),
+        pane.height(),
+        picker.preview_px()
+    );
+    assert!(
+        width.max(height) as u32 > TILE_SIZE as u32,
+        "the pane is showing a {width}x{height} picture, which is a cell's tile"
+    );
+    eprintln!(
+        "the pane decoded at {} px for a {}x{} pane ({} device pixels)",
+        picker.preview_px(),
+        pane.width(),
+        pane.height(),
+        pane_edge
+    );
+
+    // Focus another photo and come back: S13 left the *tile* in the pane when the
+    // preview of a photo it had already shown was refused as a repeat.
+    picker.focus(&window, 0);
+    assert!(
+        window.wait_for_preview(support::WAIT),
+        "the pane never decoded the second photo"
+    );
+    picker.focus(&window, 2);
+    pane_is_the_preview(&picker, 2);
+    assert!(
+        window.wait_for_preview(support::WAIT),
+        "coming back to a photo has to show its preview, not its tile"
+    );
+    pane_is_the_preview(&picker, 2);
+
+    // And a folder change invalidates it all: the file at an index is a different
+    // photo afterwards, so nothing about the old listing may be painted.
+    picker.open_folder(&window, &folder);
+    window.pump(Duration::from_millis(100));
+    assert!(
+        picker.preview_pixels().is_none(),
+        "a folder change has to clear the pane, not leave the old photo in it"
+    );
     picker.focus(&window, 1);
     assert!(
         window.wait_for_preview(support::WAIT),
-        "the preview pane decoded a photo"
+        "the pane never decoded the photo after the folder change"
     );
+    pane_is_the_preview(&picker, 1);
+
+    // ---- the pane's pixels are the CLI's own picture -----------------------------
     let (path, width, height, pixels) = picker
         .preview_pixels()
         .expect("the preview has pixels once it has decoded");
@@ -246,7 +424,7 @@ fn the_picker_stage_meets_its_own_criteria() {
         "--photo",
         path.to_str().expect("a UTF-8 path"),
         "--px",
-        &PREVIEW_PX.to_string(),
+        &picker.preview_px().to_string(),
         "--out",
         thumb.to_str().expect("a UTF-8 path"),
     ]
@@ -264,18 +442,225 @@ fn the_picker_stage_meets_its_own_criteria() {
     );
     let difference = rmse_against(&pixels, width, height, &from_cli);
     eprintln!(
-        "the preview against pixlay-render thumb: RMSE {difference:.4} over {width}x{height} pixels"
+        "the preview against pixlay-render thumb at {} px: RMSE {difference:.4} over {width}x{height} pixels",
+        picker.preview_px()
     );
     assert!(
         difference <= RMSE_THRESHOLD,
         "the preview and the CLI's thumb diverged: RMSE {difference:.4} > {RMSE_THRESHOLD}"
     );
 
-    // What the stage looked like, for a human to look at: everything above is
-    // numbers, and `AGENTS.md` asks for the picture as well.
+    // ---- the dividers are the session's ------------------------------------
+    // Both positions are what the user chose, so a second window opens where the
+    // first one was left (`SPLITS`), not at the defaults.
+    picker.set_split_position(500, 300);
+    window.pump(Duration::from_millis(100));
+    assert_eq!(
+        picker.split_position(),
+        (500, 300),
+        "the dividers report the position they were given"
+    );
+    let other = support::second_window(&app);
+    let other_picker = other.picker().expect("the second window has a picker");
+    assert_eq!(
+        other_picker.split_position(),
+        (500, 300),
+        "a new window opens on the dividers the session left behind"
+    );
+
+    // ---- a folder of hundreds of photos costs what a folder of ten does ----
+    let many = support::out_dir().join("many");
+    let _ = std::fs::remove_dir_all(&many);
+    std::fs::create_dir_all(&many).expect("the big folder can be created");
+    let original = listed
+        .iter()
+        .find(|path| path.ends_with("square.png"))
+        .expect("the fixture folder has square.png");
+    for index in 0..BIG_FOLDER {
+        std::fs::copy(original, many.join(format!("photo-{index:04}.png")))
+            .expect("a copy can be made");
+    }
+    let opening = Instant::now();
+    picker.open_folder(&window, &many);
+    let opening = opening.elapsed();
+    assert_eq!(picker.len(), BIG_FOLDER);
+    assert_eq!(
+        picker.tiles_built(),
+        0,
+        "opening a big folder decoded something before it returned"
+    );
+    window.pump(Duration::from_millis(500));
+    eprintln!(
+        "a {BIG_FOLDER}-photo folder opened in {opening:?} and asked for {} tiles",
+        picker.tile_requests()
+    );
+    assert!(
+        picker.tile_requests() > 0,
+        "the big folder's visible cells never asked for their tiles"
+    );
+    assert!(
+        picker.tile_requests() <= TILE_REQUEST_MAX,
+        "opening a {BIG_FOLDER}-photo folder cost {} tile requests, past the bound of {}",
+        picker.tile_requests(),
+        TILE_REQUEST_MAX
+    );
+
+    // Visible-first, not visible-only: a cell that was off screen when the folder
+    // opened gets its tile when it arrives on screen, and only then.
+    let before = picker.tile_requests();
+    picker
+        .grid()
+        .scroll_to(200, gtk4::ListScrollFlags::NONE, None);
+    assert!(
+        window.wait_for_tiles(support::WAIT),
+        "the tiles of the scrolled-to cells never arrived"
+    );
+    let scrolled = picker.tile_requests() - before;
+    eprintln!("scrolling to the 200th photo cost {scrolled} tile requests");
+    assert!(
+        scrolled > 0,
+        "scrolling to a far row never asked for its tile"
+    );
+    assert!(
+        scrolled <= TILE_REQUEST_MAX,
+        "scrolling to the 200th photo cost {scrolled} tile requests, past the bound of {TILE_REQUEST_MAX}"
+    );
+
+    // ---- what the stage looks like -----------------------------------------
+    // Back on the fixture folder with a pick of three, so the picture a human
+    // looks at is a real state of the stage rather than the last thing a check
+    // left behind.
+    picker.open_folder(&window, &folder);
+    for position in scrambled {
+        picker.toggle(&window, position as u32);
+    }
+    picker.focus(&window, 1);
+    let _ = window.wait_for_preview(support::WAIT);
+    let _ = window.wait_for_tiles(support::WAIT);
+    window.pump(Duration::from_millis(300));
     let picture = support::artifact("picker.png");
     support::save_png(&picture, &support::snapshot(&window));
     eprintln!("the picker stage is {picture:?}");
+}
+
+/// Asserts the pane is showing `index`'s own preview, and returns its size.
+///
+/// The claim is made of three things at once, which is what makes it the
+/// regression test for the reported blur: the pane's photo is the focused one, the
+/// texture it paints is that photo's preview (so a 256 px tile cannot pass), and
+/// the pane considers that preview current for the pane's own size.
+fn pane_is_the_preview(picker: &Picker, index: usize) -> (i32, i32) {
+    assert!(
+        picker.preview_current(),
+        "the pane is not showing photo {index}'s preview at its own size"
+    );
+    let (path, width, height, _) = picker
+        .preview_pixels()
+        .expect("the pane has pixels once it is current");
+    assert_eq!(
+        Some(path),
+        picker.file(index),
+        "the pane's pixels belong to the focused photo"
+    );
+    let texture = picker
+        .preview_picture()
+        .paintable()
+        .and_then(|paintable| paintable.downcast::<gtk4::gdk::Texture>().ok())
+        .expect("the pane paints a texture");
+    assert_eq!(
+        (texture.width(), texture.height()),
+        (width, height),
+        "the pane paints the preview's own texture, not a tile's"
+    );
+    (width, height)
+}
+
+/// The file names of the picked list's rows, in the order the list shows them.
+///
+/// A row is an `AdwActionRow`, which *is* the `GtkListBoxRow` the list holds, so
+/// the list's own children are the rows.
+fn picked_rows(list: &gtk4::ListBox) -> Vec<String> {
+    let mut titles = Vec::new();
+    let mut row = list.first_child();
+    while let Some(widget) = row {
+        if let Some(action_row) = widget.downcast_ref::<libadwaita::ActionRow>() {
+            titles.push(action_row.title().to_string());
+        }
+        row = widget.next_sibling();
+    }
+    titles
+}
+
+/// The file names of a list of paths, in the same order.
+fn names(paths: &[PathBuf]) -> Vec<String> {
+    paths
+        .iter()
+        .map(|path| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
+/// How many controllers of a kind a widget carries.
+fn controllers_of<T: glib::types::StaticType>(widget: &gtk4::Widget) -> usize {
+    let controllers = widget.observe_controllers();
+    (0..controllers.n_items())
+        .filter(|index| controllers.item(*index).is_some_and(|item| item.is::<T>()))
+        .count()
+}
+
+/// How many cells are showing a picture (rather than a spinner).
+fn painted_cells(picker: &Picker) -> usize {
+    let mut painted = 0;
+    for position in 0..picker.len() {
+        let Some(cell) = picker.cell_widget(position) else {
+            continue;
+        };
+        let stack = cell.downcast::<gtk4::Stack>().expect("a cell is a stack");
+        if stack.visible_child_name().as_deref() == Some("photo") {
+            painted += 1;
+        }
+    }
+    painted
+}
+
+/// Presses one of the picked list's own re-order shortcuts.
+///
+/// The controller the list owns is read the way GTK reads it — its model of
+/// `GtkShortcut`s — and the action each shortcut carries is activated, so what is
+/// exercised is the trigger the user presses *and* the action it fires.
+fn press(list: &gtk4::ListBox, key: &str) -> bool {
+    let mut triggers = Vec::new();
+    let controllers = list.observe_controllers();
+    for index in 0..controllers.n_items() {
+        let Some(controller) = controllers.item(index) else {
+            continue;
+        };
+        let Ok(controller) = controller.downcast::<gtk4::ShortcutController>() else {
+            continue;
+        };
+        for shortcut in 0..controller.n_items() {
+            let Some(item) = controller.item(shortcut) else {
+                continue;
+            };
+            let Ok(shortcut) = item.downcast::<gtk4::Shortcut>() else {
+                continue;
+            };
+            let trigger = shortcut
+                .trigger()
+                .map(|trigger| trigger.to_str().to_string())
+                .unwrap_or_default();
+            if trigger.contains(key)
+                && let Some(action) = shortcut.action()
+            {
+                return action.activate(gtk4::ShortcutActionFlags::EXCLUSIVE, list, None);
+            }
+            triggers.push(trigger);
+        }
+    }
+    panic!("the picked list does not bind {key}: {triggers:?}");
 }
 
 /// The root-mean-square difference between a straight 8-bit RGB buffer and a
