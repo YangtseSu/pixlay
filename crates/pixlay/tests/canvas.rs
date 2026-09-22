@@ -10,7 +10,7 @@
 //! through a real render node, and the CLI's file, written by `pixlay-render` and
 //! read back by the decoder. Neither is the other's own code, and the document
 //! they are given exercises decoded photos, EXIF rotation, a transparent PNG
-//! flattened onto white, a framing rotation and a `{date}` text layer.
+//! flattened onto white and a framing rotation.
 
 mod support;
 

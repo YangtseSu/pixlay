@@ -983,8 +983,8 @@ fn the_rendered_output_matches_what_draw_produces() {
 ///
 /// Rather than restate the example here (a copy would drift), this test extracts
 /// the `jsonc` block from the document, strips its `//` comments, and loads it.
-/// The example is expected to be a *valid document*, and its text layer is no
-/// longer a reason it could not be rendered: S5 removed `draw`'s text gate.
+/// The example is expected to be a *valid document* under the current shape:
+/// `docVersion` 2, no `text`/`filter`/`grade`/`textFallback` key, a frame.
 /// The whole path with a real photo: decode, resample in linear light, place,
 /// clip, encode.
 ///
