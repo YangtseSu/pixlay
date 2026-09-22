@@ -44,7 +44,7 @@ use pixlay_render::Images;
 use crate::a11y;
 use crate::canvas::{self, Gesture};
 use crate::decode::{Decoder, Reply};
-use crate::export::{self, Event, Progress, Report, Settings, Size};
+use crate::export::{self, Event, Progress, Report, Settings};
 use crate::i18n::{fill, gettext, ngettext};
 use crate::sidebar::Sidebar;
 use crate::state::Editor;
@@ -801,13 +801,6 @@ impl EditorWindow {
 
     // ---- project ----------------------------------------------------------
 
-    pub fn set_long_edge_mm(&self, mm: f64) {
-        let aspect = self.document().template.aspect;
-        let _ = self.apply(Command::SetCanvas {
-            canvas: CanvasSpec::with_ratio(aspect, mm),
-        });
-    }
-
     pub fn set_template(&self, name: &str) {
         let Some(template) = templates::get(name) else {
             return;
@@ -1034,9 +1027,8 @@ impl EditorWindow {
         let mut settings = match self.imp().sidebar.get() {
             Some(sidebar) => sidebar.settings(PathBuf::new()),
             None => Settings {
-                size: Size::Dpi(DEFAULT_EXPORT_DPI),
+                dpi: DEFAULT_EXPORT_DPI,
                 format: pixlay_imaging::encode::Format::Jpeg,
-                chroma: pixlay_imaging::encode::Chroma::Full,
                 path: PathBuf::new(),
             },
         };
@@ -1462,7 +1454,6 @@ fn suggested_export_name(window: &EditorWindow, format: pixlay_imaging::encode::
     let doc = window.document();
     let extension = match format {
         pixlay_imaging::encode::Format::Png => "png",
-        pixlay_imaging::encode::Format::Tiff => "tif",
         pixlay_imaging::encode::Format::Jpeg => "jpg",
     };
     match window.project_path() {

@@ -14,28 +14,22 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use pixlay_core::{CollageDoc, PixelSize};
-use pixlay_imaging::encode::{Chroma, Export, Format, write};
+use pixlay_imaging::encode::{Export, Format, write};
 use pixlay_imaging::{Rgb8View, Source, slot_bitmap};
 use pixlay_render::{Bitmap, Images, render_rgb8_sized};
 
 /// What the export form asks for.
+///
+/// Three fields, because the form has three controls (S12c): the format, **one**
+/// quality option — the resolution, which is all of "how big is this picture" — and
+/// where it goes. The sheet size is a document field rather than a request: it is
+/// set where the document is made, with the CLI's `edit --sheet`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
-    pub size: Size,
+    /// The resolution the export is written at, in dots per inch.
+    pub dpi: u32,
     pub format: Format,
-    pub chroma: Chroma,
     pub path: PathBuf,
-}
-
-/// The two mutually exclusive sizing requests (`docs/CONTRACT.md` §5).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Size {
-    /// A resolution: the grid is `round(mm / 25.4 * dpi)` and the file carries
-    /// exactly this DPI.
-    Dpi(u32),
-    /// A pixel count on the long edge; the file carries the resolution the grid
-    /// works out to.
-    LongEdge(u32),
 }
 
 /// Where an export has got to. The fractions are the bar's, and they are a
@@ -125,7 +119,6 @@ pub fn run(
         &Export {
             format: settings.format,
             dpi,
-            chroma: settings.chroma,
             image: Rgb8View {
                 width: image.width,
                 height: image.height,
@@ -146,24 +139,19 @@ pub fn run(
 }
 
 /// The pixel grid and the resolution the file has to carry.
+///
+/// One mode, the resolution: the sheet is the document's own size in millimetres
+/// and this multiplies it. The CLI keeps both requests (`--dpi` and `--long-edge`)
+/// because a machine that asks for pixels has to be able to say so; the window's
+/// form asks the one question a person asks about a picture, which is how large
+/// the file is.
 pub fn grid(doc: &CollageDoc, settings: &Settings) -> Result<(PixelSize, f64), String> {
-    match settings.size {
-        Size::Dpi(dpi) => {
-            let pixel = doc
-                .canvas
-                .pixel_size(dpi)
-                .map_err(|error| error.to_string())?;
-            Ok((pixel, f64::from(dpi)))
-        }
-        Size::LongEdge(pixels) => {
-            let pixel = doc
-                .canvas
-                .pixel_size_for_long_edge(pixels)
-                .map_err(|error| error.to_string())?;
-            let dpi = doc.canvas.dpi_for(pixel);
-            Ok((pixel, dpi))
-        }
-    }
+    let dpi = settings.dpi;
+    let pixel = doc
+        .canvas
+        .pixel_size(dpi)
+        .map_err(|error| error.to_string())?;
+    Ok((pixel, f64::from(dpi)))
 }
 
 /// Runs [`run`] on a worker thread, calling `report` on the main context.

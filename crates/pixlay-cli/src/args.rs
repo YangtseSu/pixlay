@@ -14,7 +14,6 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use pixlay_core::{Frame, MAX_DPI, MAX_LONG_EDGE_PX, MIN_DPI, Point, Rgba8};
-use pixlay_imaging::Chroma;
 
 use crate::cli::Failure;
 
@@ -91,7 +90,7 @@ RENDER OPTIONS:
     --project <file>    Project to render. Paths inside it are relative to it.
     --template <name>   Render a template with no photos (see `templates`).
     --out <file>        Output file. Format comes from the extension:
-                        .png, .jpg, .jpeg, .tif, .tiff. Required.
+                        .png, .jpg, .jpeg. Required.
     --dpi <n>           Export resolution, 72..=600. Default 300. The output is
                         the canvas size at that resolution, and the file carries
                         this number.
@@ -99,8 +98,6 @@ RENDER OPTIONS:
                         write the resolution that pixel grid works out to. The
                         other edge follows the canvas ratio, rounded. Exclusive
                         with --dpi, which it replaces.
-    --chroma <j:a:b>    JPEG chroma subsampling: 444 (the default), 422 or 420.
-                        A JPEG-only flag: sampling is what the encoder does.
     --preview-px <n>    Render the long edge at n pixels instead of full size,
                         1..=20000. The same draw, only the scale changes (and
                         the bitmaps are sized for it, so a preview does not pay
@@ -148,7 +145,7 @@ THUMB OPTIONS:
     --photo <file>      Photo to preview. Required.
     --px <n>            Long edge of the preview, 1..=8192. Required. The other
                         edge keeps the photo's ratio, at least 1 pixel.
-    --out <file>        Preview file, .png / .jpg / .jpeg / .tif / .tiff.
+    --out <file>        Preview file, .png / .jpg / .jpeg.
                         Required, and written at 72 dpi (a screen-sized image).
 
 GESTURE OPTIONS:
@@ -229,8 +226,15 @@ EDIT OPTIONS:
                         width over the cell's width.
     --offset <x>,<y>    Set the photo's centre, from -1 to 1 cell widths and
                         heights away from the cell's centre.
-    --clear             Empty the cell: no photo, and its framing and grade back
-                        to their defaults. Exclusive with the framing flags.
+    --clear             Empty the cell: no photo, and its framing back to its
+                        default. Exclusive with the framing flags.
+    --sheet <mm>        Long edge of the sheet, in millimetres, 1..=2000. The
+                        shape is the template's: a canvas and a template have to
+                        agree on their aspect ratio, so this sets the long edge
+                        and the other one follows the layout. It is the one
+                        document field the window's export form no longer has a
+                        row for (S12c: the form is a format and a resolution), so
+                        this flag is how a physical size is chosen.
     The stored `crop` is the *fit* of what was asked for (a crop is a request;
     what is drawn is what covers), so `edit` applied twice to the same project
     writes the same bytes. A cell with no photo has nothing to fit against and
@@ -286,7 +290,6 @@ pub struct RenderArgs {
     pub out: PathBuf,
     pub size: Size,
     pub preview_px: Option<i32>,
-    pub chroma: Chroma,
     /// Frame overrides for this render only: the document is not changed, and
     /// nothing is written back to it (`edit` is the command that stores a frame).
     pub frame: FrameArgs,
@@ -336,8 +339,10 @@ pub struct EditArgs {
     pub rotate: Option<f64>,
     pub zoom: Option<f64>,
     pub offset: Option<(f64, f64)>,
-    /// Empty the cell: no photo, default framing, default grade.
+    /// Empty the cell: no photo, default framing.
     pub clear: bool,
+    /// Long edge of the sheet in millimetres; `None` keeps the document's own.
+    pub sheet: Option<f64>,
     pub frame: FrameArgs,
     pub json: bool,
 }
@@ -435,7 +440,6 @@ struct Flags {
     out: Option<PathBuf>,
     dpi: Option<u32>,
     long_edge: Option<u32>,
-    chroma: Option<Chroma>,
     preview_px: Option<i32>,
     /// `--photo`, repeatable: `image` and `thumb` take exactly one, `init` takes
     /// one per cell in argument order.
@@ -455,6 +459,7 @@ struct Flags {
     zoom: Option<f64>,
     offset: Option<(f64, f64)>,
     clear: bool,
+    sheet: Option<f64>,
     stats: bool,
     json: bool,
 }
@@ -478,7 +483,6 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
             "out",
             "dpi",
             "long-edge",
-            "chroma",
             "preview-px",
             "gap",
             "radius",
@@ -499,6 +503,7 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
             "zoom",
             "offset",
             "clear",
+            "sheet",
             "gap",
             "radius",
             "border-color",
@@ -514,7 +519,6 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
         ("out", flags.out.is_some()),
         ("dpi", flags.dpi.is_some()),
         ("long-edge", flags.long_edge.is_some()),
-        ("chroma", flags.chroma.is_some()),
         ("preview-px", flags.preview_px.is_some()),
         ("photo", !flags.photos.is_empty()),
         ("aspect", flags.aspect.is_some()),
@@ -532,6 +536,7 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
         ("zoom", flags.zoom.is_some()),
         ("offset", flags.offset.is_some()),
         ("clear", flags.clear),
+        ("sheet", flags.sheet.is_some()),
         ("stats", flags.stats),
     ];
     present
@@ -559,15 +564,11 @@ fn reason(name: &str, flag: &str) -> &'static str {
         ("probe", "out") => "probe writes no file",
         ("probe", "preview-px") => "probe always renders at full size",
         ("probe", "long-edge") => "probe always renders at full size",
-        ("probe", "chroma") => "probe writes no file to subsample",
         ("image", "long-edge") => "image decodes at the file's own size",
-        ("image", "chroma") => "image writes no file",
         ("thumb", "dpi") => "thumb writes a screen-sized preview, not a print",
         ("scan", "project") => "scan lists a directory, not a project",
         ("templates", "long-edge") => "templates only lists the library",
-        ("templates", "chroma") => "templates only lists the library",
         ("init", "long-edge") => "init only writes the project file",
-        ("init", "chroma") => "init only writes the project file",
         ("probe", "aspect") => "probe filters no template list",
         ("render" | "probe" | "image", "at") => {
             "only `hit` tests one point; the other commands work on a whole document"
@@ -588,6 +589,7 @@ fn reason(name: &str, flag: &str) -> &'static str {
         (_, "slot" | "rotate" | "zoom" | "offset" | "clear") => {
             "only `edit` changes one cell's framing"
         }
+        (_, "sheet") => "only `edit` sets the sheet size",
         ("hit", _) => "hit reads a layout and answers about one point in it",
         ("save", _) => "save reads a project and writes a project",
         ("templates", _) => "templates only lists the library",
@@ -703,16 +705,6 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                 }
                 set_once(&mut flags.long_edge, pixels, "long-edge")?;
             }
-            "chroma" => {
-                let raw = value("chroma")?;
-                let text = raw
-                    .to_str()
-                    .ok_or_else(|| Failure::Usage("--chroma must be valid UTF-8".to_string()))?;
-                let chroma = Chroma::parse(text).ok_or_else(|| {
-                    Failure::Usage(format!("--chroma must be 444, 422 or 420, got {text}"))
-                })?;
-                set_once(&mut flags.chroma, chroma, "chroma")?;
-            }
             "photo" => flags.photos.push(PathBuf::from(value("photo")?)),
             "dir" => set_once(&mut flags.dir, PathBuf::from(value("dir")?), "dir")?,
             "recursive" => flags.recursive = true,
@@ -808,6 +800,16 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                 set_once(&mut flags.offset, offset, "offset")?;
             }
             "clear" => flags.clear = true,
+            "sheet" => {
+                let sheet = float(&value("sheet")?, "sheet")?;
+                if !(1.0..=pixlay_core::MAX_CANVAS_MM).contains(&sheet) {
+                    return Err(Failure::Usage(format!(
+                        "--sheet {sheet} is outside 1..={} millimetres",
+                        pixlay_core::MAX_CANVAS_MM
+                    )));
+                }
+                set_once(&mut flags.sheet, sheet, "sheet")?;
+            }
             "at" => {
                 let raw = value("at")?;
                 let point = parse_point(&raw)?;
@@ -952,9 +954,9 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                         .to_string(),
                 ));
             }
-            if !framing && !flags.frame_any() {
+            if !framing && !flags.frame_any() && flags.sheet.is_none() {
                 return Err(Failure::Usage(
-                    "edit needs something to change: --slot with a framing flag, or --gap/--radius/--border-color"
+                    "edit needs something to change: --slot with a framing flag, or --sheet/--gap/--radius/--border-color"
                         .to_string(),
                 ));
             }
@@ -975,6 +977,7 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                 zoom: flags.zoom,
                 offset: flags.offset,
                 clear: flags.clear,
+                sheet: flags.sheet,
                 frame: FrameArgs {
                     gap: flags.gap,
                     radius: flags.radius,
@@ -1009,7 +1012,6 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                 out,
                 size,
                 preview_px: flags.preview_px,
-                chroma: flags.chroma.unwrap_or_default(),
                 frame: FrameArgs {
                     gap: flags.gap,
                     radius: flags.radius,

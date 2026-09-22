@@ -1,7 +1,7 @@
 //! S6's export criteria, one file at a time.
 //!
 //! Every criterion here is about what the *file* says, so the assertions read the
-//! encoded bytes: the PNG chunk stream, the JPEG marker stream, the TIFF IFD.
+//! encoded bytes: the PNG chunk stream and the JPEG marker stream.
 //! That is deliberate — the failure mode this step exists to prevent is a file
 //! whose pixels are 4:4:4 while its header says 4:2:0 (the two-pass metadata trap,
 //! measured in S0), and only the stream itself can tell the two apart.
@@ -15,7 +15,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
-use pixlay_imaging::{Chroma, Export, Format, Rgb8View, icc};
+use pixlay_imaging::{Export, Format, Rgb8View, icc};
 
 const WIDTH: i32 = 96;
 const HEIGHT: i32 = 64;
@@ -53,13 +53,12 @@ fn gradient() -> Vec<u8> {
 }
 
 /// Encodes the gradient and returns the bytes, so a test reads a real file.
-fn encode(dir: &Path, name: &str, format: Format, dpi: f64, chroma: Chroma) -> Vec<u8> {
+fn encode(dir: &Path, name: &str, format: Format, dpi: f64) -> Vec<u8> {
     let pixels = gradient();
     let path = dir.join(name);
     let export = Export {
         format,
         dpi,
-        chroma,
         image: Rgb8View {
             width: WIDTH,
             height: HEIGHT,
@@ -166,111 +165,10 @@ fn jpeg_sampling(bytes: &[u8]) -> Vec<(u8, u8)> {
         .collect()
 }
 
-/// The little- or big-endian value readers of a TIFF IFD.
-struct Ifd {
-    bytes: Vec<u8>,
-    big_endian: bool,
-}
-
-impl Ifd {
-    fn new(path: &Path) -> Self {
-        let bytes = std::fs::read(path).expect("read the TIFF");
-        let big_endian = match &bytes[..2] {
-            b"II" => false,
-            b"MM" => true,
-            other => panic!("neither byte order: {other:?}"),
-        };
-        Self { bytes, big_endian }
-    }
-
-    fn u16(&self, at: usize) -> u16 {
-        let pair = [self.bytes[at], self.bytes[at + 1]];
-        if self.big_endian {
-            u16::from_be_bytes(pair)
-        } else {
-            u16::from_le_bytes(pair)
-        }
-    }
-
-    fn u32(&self, at: usize) -> u32 {
-        let quad = [
-            self.bytes[at],
-            self.bytes[at + 1],
-            self.bytes[at + 2],
-            self.bytes[at + 3],
-        ];
-        if self.big_endian {
-            u32::from_be_bytes(quad)
-        } else {
-            u32::from_le_bytes(quad)
-        }
-    }
-
-    /// One entry: `(type, count, value bytes)`. The value bytes are inline when
-    /// the value fits in four bytes and otherwise sit at the offset the entry
-    /// names, which is where a TIFF reader goes.
-    fn entry(&self, tag: u16) -> Option<(u16, u32, Vec<u8>)> {
-        let first = self.u32(4) as usize;
-        let count = self.u16(first) as usize;
-        for index in 0..count {
-            let at = first + 2 + 12 * index;
-            if self.u16(at) != tag {
-                continue;
-            }
-            let kind = self.u16(at + 2);
-            let count = self.u32(at + 4);
-            let size = match kind {
-                1 | 2 | 6 | 7 => 1u32,
-                3 | 8 => 2,
-                4 | 9 | 11 => 4,
-                5 | 10 | 12 => 8,
-                other => panic!("unknown TIFF field type {other}"),
-            } * count;
-            let (from, length) = if size <= 4 {
-                (at + 8, size as usize)
-            } else {
-                (self.u32(at + 8) as usize, size as usize)
-            };
-            return Some((kind, count, self.bytes[from..from + length].to_vec()));
-        }
-        None
-    }
-
-    /// A one-value `SHORT` tag, as the reader should see it.
-    fn short(&self, tag: u16) -> u16 {
-        let (kind, count, data) = self.entry(tag).unwrap_or_else(|| panic!("tag {tag}"));
-        assert_eq!((kind, count), (3, 1), "one SHORT");
-        let pair = [data[0], data[1]];
-        if self.big_endian {
-            u16::from_be_bytes(pair)
-        } else {
-            u16::from_le_bytes(pair)
-        }
-    }
-
-    /// `XResolution` (282) and `YResolution` (283) as pixels per inch.
-    fn dpi(&self, tag: u16) -> f64 {
-        let (kind, count, data) = self.entry(tag).expect("resolution tag");
-        assert_eq!((kind, count), (5, 1), "one RATIONAL");
-        let numerator = self.u32_at(&data, 0);
-        let denominator = self.u32_at(&data, 4);
-        f64::from(numerator) / f64::from(denominator)
-    }
-
-    fn u32_at(&self, data: &[u8], at: usize) -> u32 {
-        let quad = [data[at], data[at + 1], data[at + 2], data[at + 3]];
-        if self.big_endian {
-            u32::from_be_bytes(quad)
-        } else {
-            u32::from_le_bytes(quad)
-        }
-    }
-}
-
 #[test]
 fn the_png_carries_its_resolution_and_profile() {
     let dir = out_dir("png");
-    let bytes = encode(&dir, "out.png", Format::Png, DPI, Chroma::Full);
+    let bytes = encode(&dir, "out.png", Format::Png, DPI);
     let chunks = png_chunks(&bytes);
 
     // pHYs: pixels per metre, the unit the chunk itself carries. 300 dpi is
@@ -310,80 +208,28 @@ fn the_png_carries_its_resolution_and_profile() {
 #[test]
 fn the_jpeg_carries_its_resolution_profile_and_subsampling() {
     let dir = out_dir("jpeg");
-    for (chroma, expected) in [
-        (Chroma::Full, vec![(1, 1), (1, 1), (1, 1)]),
-        (Chroma::HorizontalHalf, vec![(2, 1), (1, 1), (1, 1)]),
-        (Chroma::Quarter, vec![(2, 2), (1, 1), (1, 1)]),
-    ] {
-        let name = format!("out-{}.jpg", chroma.name());
-        let bytes = encode(&dir, &name, Format::Jpeg, DPI, chroma);
+    let bytes = encode(&dir, "out.jpg", Format::Jpeg, DPI);
 
-        // JFIF APP0: density in pixels per inch (unit 1).
-        let (_, app0) = jpeg_segments(&bytes)
-            .into_iter()
-            .find(|(marker, _)| *marker == 0xe0)
-            .expect("a JFIF APP0");
-        assert_eq!(&app0[..5], b"JFIF\0");
-        assert_eq!(app0[7], 1, "density unit is the inch");
-        assert_eq!((be16(app0, 8), be16(app0, 10)), (300, 300));
+    // JFIF APP0: density in pixels per inch (unit 1).
+    let (_, app0) = jpeg_segments(&bytes)
+        .into_iter()
+        .find(|(marker, _)| *marker == 0xe0)
+        .expect("a JFIF APP0");
+    assert_eq!(&app0[..5], b"JFIF\0");
+    assert_eq!(app0[7], 1, "density unit is the inch");
+    assert_eq!((be16(app0, 8), be16(app0, 10)), (300, 300));
 
-        // APP2 ICC_PROFILE, reassembled across its chunks.
-        assert_eq!(jpeg_icc(&bytes), icc::srgb_profile());
+    // APP2 ICC_PROFILE, reassembled across its chunks.
+    assert_eq!(jpeg_icc(&bytes), icc::srgb_profile());
 
-        // The sampling factors are in the file's own frame header, so this is the
-        // assertion the two-pass trap fails: re-encoding to patch metadata would
-        // leave 4:2:0 here whatever the request said.
-        assert_eq!(
-            jpeg_sampling(&bytes),
-            expected,
-            "chroma {} in SOF0",
-            chroma.name()
-        );
-    }
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn the_tiff_carries_its_tags_and_round_trips() {
-    let dir = out_dir("tiff");
-    // A fractional resolution: the pixel-count export mode derives one, and the
-    // rational tag is what carries it.
-    let dpi = 914.4;
-    let path = dir.join("out.tif");
-    let bytes = encode(&dir, "out.tif", Format::Tiff, dpi, Chroma::Full);
-    assert_eq!(&bytes[..4], b"II\x2a\x00", "a standard little-endian TIFF");
-
-    let ifd = Ifd::new(&path);
-    assert_eq!(ifd.short(296), 2, "ResolutionUnit is the inch");
-    assert!(
-        (ifd.dpi(282) - dpi).abs() < 1e-9,
-        "XResolution {}",
-        ifd.dpi(282)
-    );
-    assert!(
-        (ifd.dpi(283) - dpi).abs() < 1e-9,
-        "YResolution {}",
-        ifd.dpi(283)
-    );
-    let (kind, _, profile) = ifd.entry(34_675).expect("ICCProfile");
-    assert_eq!(kind, 7, "UNDEFINED");
-    assert_eq!(profile, icc::srgb_profile());
-    assert_eq!(ifd.short(259), 5, "LZW");
-    assert_eq!(ifd.short(317), 2, "the horizontal predictor");
-
-    // The pixels survive the compression, through the crate's own decoder rather
-    // than through this test's reading of the file.
-    let mut decoder =
-        tiff::decoder::Decoder::new(BufReader::new(File::open(&path).unwrap())).expect("decodes");
+    // The sampling factors are in the file's own frame header, and they are 4:4:4
+    // since S12c removed the request: this is the assertion the two-pass trap
+    // fails, because re-encoding to patch metadata would leave 4:2:0 here.
     assert_eq!(
-        decoder.dimensions().expect("dimensions"),
-        (WIDTH as u32, HEIGHT as u32)
+        jpeg_sampling(&bytes),
+        vec![(1, 1), (1, 1), (1, 1)],
+        "the JPEG is 4:4:4 in its own SOF0"
     );
-    let decoded = decoder.read_image().expect("pixels");
-    let tiff::decoder::DecodingResult::U8(pixels) = decoded else {
-        panic!("8-bit samples");
-    };
-    assert_eq!(pixels, gradient());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -547,7 +393,6 @@ fn a_jpeg_resolution_jfif_cannot_hold_is_refused() {
     let export = Export {
         format: Format::Jpeg,
         dpi: 508_000.0,
-        chroma: Chroma::Full,
         image: Rgb8View {
             width: WIDTH,
             height: HEIGHT,
@@ -572,7 +417,6 @@ fn a_buffer_that_does_not_match_its_size_is_refused() {
     let export = Export {
         format: Format::Png,
         dpi: DPI,
-        chroma: Chroma::Full,
         image: Rgb8View {
             width: WIDTH,
             height: HEIGHT,
@@ -591,17 +435,19 @@ fn the_format_follows_the_extension() {
         ("a.png", Some(Format::Png)),
         ("a.JPG", Some(Format::Jpeg)),
         ("a.jpeg", Some(Format::Jpeg)),
-        ("a.tif", Some(Format::Tiff)),
-        ("a.tiff", Some(Format::Tiff)),
+        ("a.tif", None),
+        ("a.tiff", None),
         ("a.webp", None),
         ("a", None),
     ] {
         assert_eq!(Format::from_path(Path::new(name)), expected, "{name}");
     }
     assert_eq!(Format::Png.name(), "png");
-    assert_eq!(Chroma::parse("444"), Some(Chroma::Full));
-    assert_eq!(Chroma::parse("422"), Some(Chroma::HorizontalHalf));
-    assert_eq!(Chroma::parse("420"), Some(Chroma::Quarter));
-    assert_eq!(Chroma::parse("411"), None);
-    assert_eq!(Chroma::default(), Chroma::Full);
+    // TIFF is not a format this build writes any more, so `.tif` is refused rather
+    // than falling back to a format the caller did not ask for.
+    assert_eq!(
+        Format::EXTENSIONS,
+        ".png, .jpg or .jpeg",
+        "the usage message lists what this build writes"
+    );
 }

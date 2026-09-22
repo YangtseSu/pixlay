@@ -1774,7 +1774,6 @@ dependencies = [
  "pixlay-core",
  "png",
  "thiserror",
- "tiff",
 ]
 
 [[package]]

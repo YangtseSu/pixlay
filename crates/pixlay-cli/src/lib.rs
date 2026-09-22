@@ -11,17 +11,15 @@
 //! pixlay-render render    --project <file.pixlay> --dpi <n> --out <file>
 //! pixlay-render render    --template <name> --dpi <n> --out <file>   # no photos
 //! pixlay-render render    --project <file.pixlay> --long-edge <px> --out <file>
-//! pixlay-render render    --project <file.pixlay> --dpi <n> --chroma 420 --out x.jpg
 //! pixlay-render probe     --project <file.pixlay>
 //! pixlay-render image     --photo <file>
-//! pixlay-render text      --project <file.pixlay>
 //! pixlay-render templates [--aspect <ratio>] [--json]
 //! pixlay-render init      --template <name> --out <file.pixlay>
 //! ```
 //!
-//! The output format follows `--out`'s extension (`.png`, `.jpg`, `.jpeg`, `.tif`,
-//! `.tiff`), and the encoder writes the resolution and the sRGB profile in the
-//! same pass as the pixels (`pixlay_imaging::encode`).
+//! The output format follows `--out`'s extension (`.png`, `.jpg`, `.jpeg` — two
+//! formats since S12c, which removed TIFF), and the encoder writes the resolution
+//! and the sRGB profile in the same pass as the pixels (`pixlay_imaging::encode`).
 //!
 //! * stdout carries only the machine-readable result (sorted `key = value`
 //!   lines, or one JSON object with `--json`); diagnostics go to stderr.

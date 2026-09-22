@@ -34,4 +34,3 @@ jpeg-encoder = "0.7.1"
 # LZW only: it is the compression the S0 baseline measured for TIFF, and every
 # reader understands it. The other codecs this crate ships are decoders we never
 # call.
-tiff = { version = "0.11.3", default-features = false, features = ["lzw"] }

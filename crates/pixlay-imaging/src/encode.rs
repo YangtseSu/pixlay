@@ -15,7 +15,9 @@
 //! |---|---|---|
 //! | PNG | `pHYs`, pixels per metre | `iCCP` (deflate) |
 //! | JPEG | JFIF `APP0` density, pixels per inch | `APP2` `ICC_PROFILE` segments |
-//! | TIFF | `XResolution` / `YResolution`, unit 2 (inch) | tag 34675 |
+//!
+//! Two formats, not three: TIFF left with S12c (the purity ruling — PNG and JPEG
+//! are what a collage is exported as), and with it the `tiff` dependency.
 //!
 //! The PNG `sRGB` chunk is deliberately **not** written alongside `iCCP`: the
 //! specification says the two should not both be present, and the profile is the
@@ -28,11 +30,10 @@
 //! * PNG: `round(dpi * 1000 / 25.4)` pixels per metre (the chunk's own unit).
 //! * JPEG: `round(dpi)` as a 16-bit number of pixels per inch. A resolution past
 //!   65535 dpi cannot be written into JFIF and is refused rather than saturated.
-//! * TIFF: `round(dpi * 100) / 100` as a rational, so a fractional resolution
-//!   (the one a pixel-count export derives) survives.
 //!
-//! JPEG quality is 90, the S0/S4 baseline. Chroma subsampling is the caller's
-//! choice and 4:4:4 by default (`AGENTS.md`: the default is libjpeg-turbo 4:4:4).
+//! JPEG quality is 90, the S0/S4 baseline. Chroma subsampling is **4:4:4**, fixed
+//! rather than chosen: `AGENTS.md` fixes libjpeg-turbo 4:4:4 as the product's
+//! sampling, and S12c removed the `--chroma` flag that made it a request.
 
 use std::borrow::Cow;
 use std::fs::File;
@@ -52,11 +53,13 @@ pub const JPEG_QUALITY: u8 = 90;
 const MAX_JPEG_DPI: u32 = 65_535;
 
 /// What `--out`'s extension selects.
+///
+/// PNG and JPEG only: TIFF left with S12c, so an extension this build does not
+/// write is a usage error rather than a silent fallback.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
     Png,
     Jpeg,
-    Tiff,
 }
 
 impl Format {
@@ -67,7 +70,6 @@ impl Format {
         match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
             "png" => Some(Self::Png),
             "jpg" | "jpeg" => Some(Self::Jpeg),
-            "tif" | "tiff" => Some(Self::Tiff),
             _ => None,
         }
     }
@@ -76,49 +78,11 @@ impl Format {
         match self {
             Self::Png => "png",
             Self::Jpeg => "jpeg",
-            Self::Tiff => "tiff",
         }
     }
 
     /// The extensions `from_path` accepts, for the usage message.
-    pub const EXTENSIONS: &'static str = ".png, .jpg, .jpeg, .tif or .tiff";
-}
-
-/// How a JPEG encodes colour relative to luminance.
-///
-/// The names are the conventional `J:a:b` notation; `Chroma::Full` is what
-/// `AGENTS.md` fixes as the default. Each value maps to one sampling factor of
-/// the encoded frame, so the request is visible in the file's own `SOF0` header.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Chroma {
-    /// 4:4:4 — three samples per pixel, no subsampling.
-    #[default]
-    Full,
-    /// 4:2:2 — chroma halved horizontally.
-    HorizontalHalf,
-    /// 4:2:0 — chroma halved in both directions.
-    Quarter,
-}
-
-impl Chroma {
-    /// The notation the flag and the report use.
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Full => "444",
-            Self::HorizontalHalf => "422",
-            Self::Quarter => "420",
-        }
-    }
-
-    /// Parses the notation the flag takes.
-    pub fn parse(text: &str) -> Option<Self> {
-        match text {
-            "444" => Some(Self::Full),
-            "422" => Some(Self::HorizontalHalf),
-            "420" => Some(Self::Quarter),
-            _ => None,
-        }
-    }
+    pub const EXTENSIONS: &'static str = ".png, .jpg or .jpeg";
 }
 
 /// One image to write, with everything the file has to say about itself.
@@ -126,9 +90,6 @@ pub struct Export<'a> {
     pub format: Format,
     /// Resolution written into the file, both axes, in pixels per inch.
     pub dpi: f64,
-    /// JPEG chroma subsampling; ignored by the two lossless formats, which store
-    /// three samples per pixel by construction.
-    pub chroma: Chroma,
     pub image: Rgb8View<'a>,
 }
 
@@ -168,7 +129,6 @@ pub fn write(path: &Path, export: &Export<'_>) -> Result<u64, EncodeError> {
     let result = match export.format {
         Format::Png => write_png(&mut buffered, export),
         Format::Jpeg => write_jpeg(&mut buffered, export),
-        Format::Tiff => write_tiff(&mut buffered, export),
     };
     result.map_err(|error| error.at(path))?;
     buffered.flush().map_err(|error| EncodeError::Io {
@@ -208,11 +168,10 @@ fn write_jpeg(writer: &mut BufWriter<File>, export: &Export<'_>) -> Result<(), F
     let density = export.dpi.round() as u16;
     let mut encoder = jpeg_encoder::Encoder::new(writer, JPEG_QUALITY);
     encoder.set_density(jpeg_encoder::PixelDensity::dpi(density));
-    encoder.set_sampling_factor(match export.chroma {
-        Chroma::Full => jpeg_encoder::SamplingFactor::R_4_4_4,
-        Chroma::HorizontalHalf => jpeg_encoder::SamplingFactor::R_4_2_2,
-        Chroma::Quarter => jpeg_encoder::SamplingFactor::R_4_2_0,
-    });
+    // 4:4:4, unrequested and unwritable by any flag: `AGENTS.md` fixes it, and a
+    // collage's hard colour edges are exactly what subsampling ruins (S0 measured
+    // a metadata re-encode dropping 4:4:4 to 4:2:0 and 2.71 MB to 1.49 MB).
+    encoder.set_sampling_factor(jpeg_encoder::SamplingFactor::R_4_4_4);
     encoder
         .add_icc_profile(icc::srgb_profile())
         .map_err(Failure::Jpeg)?;
@@ -224,39 +183,6 @@ fn write_jpeg(writer: &mut BufWriter<File>, export: &Export<'_>) -> Result<(), F
             jpeg_encoder::ColorType::Rgb,
         )
         .map_err(Failure::Jpeg)
-}
-
-fn write_tiff(writer: &mut BufWriter<File>, export: &Export<'_>) -> Result<(), Failure> {
-    // LZW + the horizontal predictor: what the S0 baseline measured for TIFF
-    // (ImageMagick's LZW), and the compression every TIFF reader understands.
-    let mut encoder = tiff::encoder::TiffEncoder::new(writer)
-        .map_err(Failure::Tiff)?
-        .with_compression(tiff::encoder::Compression::Lzw)
-        .with_predictor(tiff::encoder::Predictor::Horizontal);
-    let mut image = encoder
-        .new_image::<tiff::encoder::colortype::RGB8>(
-            export.image.width as u32,
-            export.image.height as u32,
-        )
-        .map_err(Failure::Tiff)?;
-    // The rational keeps a derived resolution's fraction; `XResolution` and
-    // `YResolution` are set per axis even though both carry the same number.
-    let resolution = tiff::encoder::Rational {
-        n: (export.dpi * 100.0).round() as u32,
-        d: 100,
-    };
-    image.resolution(tiff::tags::ResolutionUnit::Inch, resolution);
-    // Tag 34675 is typed `UNDEFINED`, which `write_tag` cannot express for a
-    // payload this size (a byte slice's `TiffValue` type is `BYTE`): the data is
-    // written first and the entry is built from where it landed.
-    let icc = image
-        .encoder()
-        .write_entry_bytes(tiff::tags::Type::UNDEFINED, icc::srgb_profile())
-        .map_err(Failure::Tiff)?;
-    let mut directory = tiff::Directory::empty();
-    directory.extend([(tiff::tags::Tag::Unknown(34_675), icc)]);
-    image.encoder().extend_from(&directory);
-    image.write_data(export.image.data).map_err(Failure::Tiff)
 }
 
 /// The PNG `pHYs` unit is the metre: `round(dpi * 1000 / 25.4)`, as the module
@@ -271,7 +197,6 @@ fn pixels_per_metre(dpi: f64) -> u32 {
 enum Failure {
     Png(png::EncodingError),
     Jpeg(jpeg_encoder::EncodingError),
-    Tiff(tiff::TiffError),
 }
 
 impl Failure {
@@ -282,10 +207,6 @@ impl Failure {
                 source,
             },
             Self::Jpeg(source) => EncodeError::Jpeg {
-                path: path.to_path_buf(),
-                source,
-            },
-            Self::Tiff(source) => EncodeError::Tiff {
                 path: path.to_path_buf(),
                 source,
             },
@@ -324,13 +245,6 @@ pub enum EncodeError {
         path: PathBuf,
         #[source]
         source: jpeg_encoder::EncodingError,
-    },
-
-    #[error("{path}: cannot write TIFF: {source}")]
-    Tiff {
-        path: PathBuf,
-        #[source]
-        source: tiff::TiffError,
     },
 
     #[error(

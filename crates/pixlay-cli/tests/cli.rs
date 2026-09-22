@@ -379,73 +379,12 @@ fn long_edge_is_exact_and_carries_the_resolution_it_works_out_to() {
 }
 
 #[test]
-fn chroma_reaches_the_jpeg_it_was_asked_for() {
-    let dir = out_dir("chroma");
-    for (chroma, expected) in [
-        ("444", vec![(1, 1), (1, 1), (1, 1)]),
-        ("422", vec![(2, 1), (1, 1), (1, 1)]),
-        ("420", vec![(2, 2), (1, 1), (1, 1)]),
-    ] {
-        let out = dir.join(format!("chroma-{chroma}.jpg"));
-        let output = run(&[
-            "render",
-            "--template",
-            "grid-4-2x2",
-            "--dpi",
-            "72",
-            "--chroma",
-            chroma,
-            "--out",
-            out.to_str().unwrap(),
-        ]);
-        assert_eq!(code(&output), 0, "{}", stderr(&output));
-        assert_eq!(field(&output, "chroma"), chroma);
-        assert_eq!(jpeg_sampling(&out), expected, "chroma {chroma} in SOF0");
-    }
-
-    // 4:4:4 is the default (`AGENTS.md`), and the report names it.
-    let plain = dir.join("plain.jpg");
-    let output = run(&[
-        "render",
-        "--template",
-        "grid-4-2x2",
-        "--dpi",
-        "72",
-        "--out",
-        plain.to_str().unwrap(),
-    ]);
-    assert_eq!(code(&output), 0, "{}", stderr(&output));
-    assert_eq!(field(&output, "chroma"), "444");
-    assert_eq!(jpeg_sampling(&plain), vec![(1, 1), (1, 1), (1, 1)]);
-
-    // A PNG stores three samples per pixel, so accepting `--chroma` there would
-    // drop the flag silently.
-    let png = dir.join("chroma.png");
-    let output = run(&[
-        "render",
-        "--template",
-        "grid-4-2x2",
-        "--chroma",
-        "420",
-        "--out",
-        png.to_str().unwrap(),
-    ]);
-    assert_eq!(code(&output), 1, "{}", stderr(&output));
-    assert!(stdout(&output).is_empty());
-    assert!(stderr(&output).contains("--chroma"), "{}", stderr(&output));
-    assert!(!png.exists(), "a refused render writes nothing");
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
 fn every_export_format_is_written_with_its_metadata() {
     let dir = out_dir("formats");
     for (name, format) in [
         ("out.png", "png"),
         ("out.jpg", "jpeg"),
         ("out.jpeg", "jpeg"),
-        ("out.tif", "tiff"),
-        ("out.tiff", "tiff"),
     ] {
         let out = dir.join(name);
         let output = run(&[
@@ -485,22 +424,42 @@ fn every_export_format_is_written_with_its_metadata() {
                 assert_eq!(png_pixel_dimensions(&out), (2835, 2835, 1), "{name}");
                 assert!(holds(b"iCCP"), "{name} carries no profile");
             }
-            "jpeg" => {
+            _ => {
                 assert!(holds(b"ICC_PROFILE"), "{name} carries no profile");
                 assert!(holds(b"JFIF"), "{name} is not JFIF");
-            }
-            _ => {
-                assert!(holds(b"acsp"), "{name} carries no profile");
-                assert!(holds(b"pixl"), "{name} carries no profile");
+                // 4:4:4 in the file's own frame header, unrequested since S12c
+                // removed `--chroma`: the sampling factor is a property of the
+                // encoder now, and this is the assertion a metadata-patching
+                // second pass would fail.
+                assert_eq!(
+                    jpeg_sampling(&out),
+                    vec![(1, 1), (1, 1), (1, 1)],
+                    "{name} is not 4:4:4"
+                );
             }
         }
     }
 
-    // An extension nothing writes is still a usage error, and the message names
-    // the formats this build has.
-    let output = run(&["render", "--template", "grid-4-2x2", "--out", "out.gif"]);
-    assert_eq!(code(&output), 1);
-    assert!(stderr(&output).contains(".tiff"), "{}", stderr(&output));
+    // An extension nothing writes is a usage error, and the message names the
+    // formats this build has — two since S12c removed TIFF, so `.tif` is refused
+    // like any other unknown extension rather than falling back to PNG.
+    for extension in ["gif", "tif", "tiff"] {
+        let out = dir.join(format!("out.{extension}"));
+        let output = run(&[
+            "render",
+            "--template",
+            "grid-4-2x2",
+            "--out",
+            out.to_str().unwrap(),
+        ]);
+        assert_eq!(code(&output), 1, "{extension}");
+        assert!(
+            stderr(&output).contains(".png, .jpg or .jpeg"),
+            "{extension}: {}",
+            stderr(&output)
+        );
+        assert!(!out.exists(), "a refused render writes nothing");
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -522,8 +481,8 @@ fn the_export_modes_are_mutually_exclusive() {
         &["--long-edge", "0"],
         &["--long-edge", "30001"],
         &["--long-edge", "wide"],
-        // A chroma spelling that is not one of the three.
-        &["--chroma", "411"],
+        // A flag this build no longer has (S12c removed the JPEG chroma request).
+        &["--chroma", "444"],
     ] {
         let output = run(&with_template(&out, flags));
         assert_eq!(code(&output), 1, "{flags:?}: {}", stderr(&output));
@@ -2182,6 +2141,56 @@ fn edit_clears_a_cell_and_keeps_the_others() {
         after.cells[1].source, before.cells[1].source,
         "the other cell is untouched"
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn edit_sets_the_sheet_size_without_relaying_the_template() {
+    // S12c gave the window's export form one row fewer: the sheet size is a
+    // document field the form no longer shows, so this flag is how a physical size
+    // is chosen. The shape stays the template's — a canvas and a template have to
+    // agree on their aspect ratio — so only the long edge is set.
+    let dir = out_dir("edit-sheet");
+    let project = framing_project(&dir, "a.pixlay");
+    let out = dir.join("a4.pixlay");
+    let before = CollageDoc::load(&project).expect("loads");
+
+    let output = run(&[
+        "edit",
+        "--project",
+        project.to_str().expect("utf-8"),
+        "--sheet",
+        "420",
+        "--out",
+        out.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "sheet_mm"), "420.000000");
+
+    let after = CollageDoc::load(&out).expect("loads");
+    assert_eq!(after.canvas.width_mm.max(after.canvas.height_mm), 420.0);
+    assert_eq!(
+        after.canvas.aspect(),
+        before.canvas.aspect(),
+        "only the long edge moves"
+    );
+    assert_eq!(after.template, before.template, "the layout is untouched");
+    assert_eq!(after.cells, before.cells);
+
+    // A sheet with no size, and one past `MAX_CANVAS_MM`, are usage errors.
+    for sheet in ["0", "2001"] {
+        let output = run(&[
+            "edit",
+            "--project",
+            project.to_str().expect("utf-8"),
+            "--sheet",
+            sheet,
+            "--out",
+            dir.join("refused.pixlay").to_str().expect("utf-8"),
+        ]);
+        assert_eq!(code(&output), 1, "--sheet {sheet}: {}", stderr(&output));
+        assert!(stderr(&output).contains("--sheet"), "{}", stderr(&output));
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 

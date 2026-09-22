@@ -373,7 +373,9 @@ fn check_english() {
             visible.push(label.label().to_string());
         }
     }
-    for expected in ["Export", "Sheet size", "Template"] {
+    // `Sheet size` was the export form's third row until S12c collapsed it into
+    // one quality option; `Quality` and `Format` are what the form has now.
+    for expected in ["Export", "Quality", "Format", "Template"] {
         assert!(
             visible.iter().any(|label| label == expected),
             "the interface should read English; {expected:?} is missing from {visible:?}"

@@ -67,7 +67,7 @@ mod error;
 pub use decode::{
     DECODE_TIMEOUT, DecodeLimits, Depth, MAX_DECODE_EDGE, MAX_DECODE_PIXELS, Sampler, Source,
 };
-pub use encode::{Chroma, Export, Format};
+pub use encode::{Export, Format};
 pub use error::ImagingError;
 pub use layout::{REGION_GUARD_PX, SlotBitmap, slot_bitmap, slot_bitmaps};
 pub use linear::{LinearRgb16, LinearRgba16};

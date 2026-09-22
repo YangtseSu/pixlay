@@ -29,23 +29,9 @@ use libadwaita as adw;
 use pixlay_core::templates;
 
 use crate::a11y;
-use crate::export::{Settings, Size};
+use crate::export::Settings;
 use crate::i18n::{fill, gettext, ngettext};
 use crate::window::{DEFAULT_EXPORT_DPI, EditorWindow};
-
-/// Long edges the sheet chooser offers, in millimetres.
-///
-/// The *shape* comes from the template, not from the paper: a template's geometry
-/// is authored for one aspect ratio and `CollageDoc::validate` refuses a canvas
-/// that disagrees with it, so a preset is a long edge plus the current template's
-/// ratio (`CanvasSpec::with_ratio`). "A4" therefore means an A4-wide sheet of the
-/// collage's own shape, which is what printing a 4:3 collage on A4 gives.
-///
-/// The row that offers them is a row of the export form, next to the resolution
-/// (2026-09-22), because the long edge only becomes visible as pixels where the
-/// export multiplies it by a DPI: the canvas pane draws the template's shape and
-/// never shows the millimetres, so as a canvas setting the number looked inert.
-pub const CANVAS_SIZES: [(&str, f64); 3] = [("A4", 297.0), ("A3", 420.0), ("A0", 1189.0)];
 
 pub struct Sidebar {
     pub root: gtk::ScrolledWindow,
@@ -62,11 +48,8 @@ pub struct Sidebar {
     zoom_row: adw::SpinRow,
     rotation_scale: gtk::Scale,
 
-    size_combo: adw::ComboRow,
-    size_mode: adw::ComboRow,
     export_size: adw::SpinRow,
     format_combo: adw::ComboRow,
-    chroma_combo: adw::ComboRow,
     export_path: adw::ActionRow,
 
     /// Set while [`Sidebar::update`] writes into widgets.
@@ -179,43 +162,17 @@ impl Sidebar {
         framing_group.add(&rotation_row);
         framing_group.add(&reset_row);
 
-        // The sheet size leads the form: with the resolution below it, it is what
-        // the exported pixel grid is made of (`mm * dpi`), and in the long-edge
-        // mode it is the DPI the file carries.
-        let size_combo = adw::ComboRow::builder()
-            .title(gettext("Sheet size"))
-            .subtitle(gettext(
-                "The physical size of the export; the template decides the shape",
-            ))
-            .model(&string_list(
-                CANVAS_SIZES
-                    .iter()
-                    .map(|(name, mm)| format!("{name} — {mm:.0} mm")),
-            ))
+        // Three rows, because the form answers three questions (S12c): which
+        // format, how large a picture, and where. The sheet size used to be a row
+        // here; it is a document field, and the CLI's `edit --sheet` is where it is
+        // set, so the window has one quality option instead of a sizing mode.
+        let format_combo = adw::ComboRow::builder()
+            .title(gettext("Format"))
+            .model(&string_list(["JPEG", "PNG"]))
             .build();
-        a11y::label(&size_combo, &gettext("Sheet size"));
-        connect_combo(&size_combo, &updating, {
-            let window = window.downgrade();
-            move |index| {
-                let Some((_, long_edge)) = CANVAS_SIZES.get(index) else {
-                    return;
-                };
-                if let Some(window) = window.upgrade() {
-                    window.set_long_edge_mm(*long_edge);
-                }
-            }
-        });
-
-        let size_mode = adw::ComboRow::builder()
-            .title(gettext("Size"))
-            .model(&string_list([
-                gettext("Resolution (dpi)"),
-                gettext("Long edge (pixels)"),
-            ]))
-            .build();
-        a11y::label(&size_mode, &gettext("Export size"));
+        a11y::label(&format_combo, &gettext("Export format"));
         let export_size = spin_row(
-            gettext("Resolution"),
+            gettext("Quality"),
             &gettext("Export resolution in dots per inch"),
             72.0,
             600.0,
@@ -225,17 +182,6 @@ impl Sidebar {
         // A spin button otherwise starts at the bottom of its range, which would
         // make 72 dpi a new window's export resolution.
         export_size.set_value(f64::from(DEFAULT_EXPORT_DPI));
-
-        let format_combo = adw::ComboRow::builder()
-            .title(gettext("Format"))
-            .model(&string_list(["JPEG", "PNG", "TIFF"]))
-            .build();
-        a11y::label(&format_combo, &gettext("Export format"));
-        let chroma_combo = adw::ComboRow::builder()
-            .title(gettext("Colour detail"))
-            .model(&string_list(["4:4:4", "4:2:2", "4:2:0"]))
-            .build();
-        a11y::label(&chroma_combo, &gettext("JPEG colour detail"));
         let export_path = adw::ActionRow::builder()
             .title(gettext("File"))
             .subtitle(gettext("Not chosen yet"))
@@ -249,61 +195,10 @@ impl Sidebar {
         let export_path_row = adw::ActionRow::new();
         export_path_row.add_suffix(&export_path_button);
         let export_group = group(gettext("Export"), "");
-        export_group.add(&size_combo);
-        export_group.add(&size_mode);
-        export_group.add(&export_size);
         export_group.add(&format_combo);
-        export_group.add(&chroma_combo);
+        export_group.add(&export_size);
         export_group.add(&export_path);
         export_group.add(&export_path_row);
-
-        // The two sizing modes are two different requests, so the row switches
-        // between them: a DPI range and a pixel range, and the label follows.
-        size_mode.connect_selected_notify(glib::clone!(
-            #[weak]
-            updating,
-            #[weak]
-            export_size,
-            move |row: &adw::ComboRow| {
-                if updating.get() {
-                    return;
-                }
-                let dpi = row.selected() == 0;
-                export_size.set_range(
-                    if dpi { 72.0 } else { 1.0 },
-                    if dpi { 600.0 } else { 30000.0 },
-                );
-                export_size.set_value(if dpi {
-                    f64::from(DEFAULT_EXPORT_DPI)
-                } else {
-                    4000.0
-                });
-                export_size.set_title(&if dpi {
-                    gettext("Resolution")
-                } else {
-                    gettext("Long edge")
-                });
-                export_size.update_property(&[gtk::accessible::Property::Label(&if dpi {
-                    gettext("Export resolution in dots per inch")
-                } else {
-                    gettext("Export long edge in pixels")
-                })]);
-            }
-        ));
-        // The chroma row only means something for JPEG; the CLI refuses the flag
-        // for the other formats rather than dropping it, so the GUI hides it.
-        format_combo.connect_selected_notify(glib::clone!(
-            #[weak]
-            updating,
-            #[weak]
-            chroma_combo,
-            move |row: &adw::ComboRow| {
-                if updating.get() {
-                    return;
-                }
-                chroma_combo.set_visible(row.selected() == 0);
-            }
-        ));
 
         // ---- the page -------------------------------------------------------
         let page = adw::PreferencesPage::new();
@@ -330,11 +225,8 @@ impl Sidebar {
             framing_group,
             zoom_row,
             rotation_scale,
-            size_combo,
-            size_mode,
             export_size,
             format_combo,
-            chroma_combo,
             export_path,
             updating,
         };
@@ -348,12 +240,6 @@ impl Sidebar {
         let selection = window.selection();
         self.updating.set(true);
 
-        let long_edge = doc.canvas.width_mm.max(doc.canvas.height_mm);
-        let size_index = CANVAS_SIZES
-            .iter()
-            .position(|(_, mm)| (mm - long_edge).abs() < 0.5)
-            .unwrap_or(0);
-        self.size_combo.set_selected(size_index as u32);
         self.update_templates(&doc);
 
         let cell = selection.and_then(|slot| doc.cells.get(slot));
@@ -422,20 +308,10 @@ impl Sidebar {
     /// holds.
     pub fn settings(&self, path: PathBuf) -> Settings {
         Settings {
-            size: if self.size_mode.selected() == 0 {
-                Size::Dpi(self.export_size.value().round() as u32)
-            } else {
-                Size::LongEdge(self.export_size.value().round() as u32)
-            },
+            dpi: self.export_size.value().round() as u32,
             format: match self.format_combo.selected() {
                 1 => pixlay_imaging::encode::Format::Png,
-                2 => pixlay_imaging::encode::Format::Tiff,
                 _ => pixlay_imaging::encode::Format::Jpeg,
-            },
-            chroma: match self.chroma_combo.selected() {
-                1 => pixlay_imaging::encode::Chroma::HorizontalHalf,
-                2 => pixlay_imaging::encode::Chroma::Quarter,
-                _ => pixlay_imaging::encode::Chroma::Full,
             },
             path,
         }
@@ -448,32 +324,10 @@ impl Sidebar {
     /// uses the same call to set a size before exporting from the background.
     pub fn show_settings(&self, settings: &Settings) {
         self.updating.set(true);
-        let dpi = matches!(settings.size, Size::Dpi(_));
-        self.size_mode.set_selected(u32::from(!dpi));
-        self.export_size.set_range(
-            if dpi { 72.0 } else { 1.0 },
-            if dpi { 600.0 } else { 30000.0 },
-        );
-        self.export_size.set_value(match settings.size {
-            Size::Dpi(dpi) => f64::from(dpi),
-            Size::LongEdge(pixels) => f64::from(pixels),
-        });
-        self.export_size.set_title(&if dpi {
-            gettext("Resolution")
-        } else {
-            gettext("Long edge")
-        });
+        self.export_size.set_value(f64::from(settings.dpi));
         self.format_combo.set_selected(match settings.format {
             pixlay_imaging::encode::Format::Jpeg => 0,
             pixlay_imaging::encode::Format::Png => 1,
-            pixlay_imaging::encode::Format::Tiff => 2,
-        });
-        self.chroma_combo
-            .set_visible(settings.format == pixlay_imaging::encode::Format::Jpeg);
-        self.chroma_combo.set_selected(match settings.chroma {
-            pixlay_imaging::encode::Chroma::Full => 0,
-            pixlay_imaging::encode::Chroma::HorizontalHalf => 1,
-            pixlay_imaging::encode::Chroma::Quarter => 2,
         });
         self.export_path
             .set_subtitle(&match settings.path.file_name() {

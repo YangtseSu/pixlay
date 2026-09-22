@@ -2,8 +2,8 @@
 
 A Linux-native collage tool. Pick 2–9 photos, pick a layout, adjust, export. Regular and irregular
 templates; per-slot framing (pan / zoom / rotation by any angle); a canvas frame (gap / corner radius /
-colour); export of high-resolution finished images (PNG at physical size + DPI, or a specified long
-edge in pixels, or JPEG).
+colour); export of high-resolution finished images as **PNG or JPEG** (physical size + DPI, or a
+specified long edge in pixels — TIFF and the JPEG chroma request left with S12c).
 **The product is only a collage** (ruled 2026-09-22, S12c): it places photos and frames them. It has no
 colour grading, no text layer, no watermark and no date stamp — S4's per-slot grade and one-click filter
 and S5's canvas-level text layers were built and then removed, because none of them is on the main path
@@ -56,8 +56,8 @@ GTK's ibus module recurses without a session bus), so the entry still works on a
 Measurement rules that go with it:
 
 - Write artifacts to a disk path (`/var/tmp` or `$XDG_CACHE_HOME`), **never `/tmp`**: on this
-  machine `/tmp` is tmpfs (7.5 GB free), an A0 photo-content PNG is 342 MB and a TIFF 476 MB, so
-  writing tmpfs costs another copy in RAM.
+  machine `/tmp` is tmpfs (7.5 GB free) and an A0 photo-content PNG is 342 MB, so writing tmpfs
+  costs another copy in RAM.
 - "Looks right" is not a criterion. Pixel-level conclusions (did a slot change, is everything
   outside it clean, how much blends across a seam) become a probe: sample coordinates or count
   blended pixels, and print numbers.
@@ -216,7 +216,7 @@ at `Cargo.lock` diffs during review.
   rotation interpolation and the colour conversion all happen in `pixlay-imaging`; Cairo receives bitmaps that are
   already the right size. *Rationale: this keeps Cairo's weak filtering (bilinear + mipmap only)
   out of the finished product.*
-- **Encoding and metadata happen in one pass.** Chroma subsampling, ICC and DPI must live in the
+- **Encoding and metadata happen in one pass.** Colour sampling, ICC and DPI must live in the
   same pipeline; "encode first, patch the metadata afterwards" is forbidden.
   *Rationale: the second pass re-encodes with default parameters and silently drops 4:4:4 to 4:2:0
   (measured 2.71 MB → 1.49 MB).*
@@ -225,8 +225,9 @@ at `Cargo.lock` diffs during review.
   (`identify` reports `Units: Undefined`) — and `cairo_surface_set_fallback_resolution` has no
   effect on a bitmap backend. Writing PNG through Cairo necessarily loses DPI.
   Since S6 the encoder is `pixlay_imaging::encode`: PNG `pHYs` + `iCCP`, JPEG JFIF density + `APP2`
-  ICC + the `SOF0` sampling factors of the request, TIFF `XResolution`/`YResolution` + tag 34675 —
-  each written while the pixels go out, never by a second pass over the finished file. The DPI/ICC
+  ICC + the `SOF0` sampling factors, which are 4:4:4 since S12c — each written while the pixels go
+  out, never by a second pass over the finished file. The third format, TIFF, and the `--chroma`
+  request left with the same ruling. The DPI/ICC
   rounding rules and the per-format field list are in `docs/CONTRACT.md` §5.
 - **The evaluation order is frozen** and must not be reordered:
   `decode + color normalization → geometry (crop / arbitrary rotation) → per-slot
@@ -352,7 +353,8 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
   photos → pick a layout → compose) is a multi-step task, which HIG itself shapes as a navigable
   sequence (`AdwNavigationView` push/pop with Back) rather than as two modes to know about.*
 - **Not doing**: beauty retouching, levels / curves, online geocoding, RAW, brush marking, a
-  single-image retouch mode, **and flipping or mirroring a cell in any form** — ruled 2026-09-22: the
+  single-image retouch mode, **TIFF output and a JPEG chroma request** (S12c: two formats, one
+  sampling), **and flipping or mirroring a cell in any form** — ruled 2026-09-22: the
   per-cell capabilities are zoom, move and rotation by any angle.
   *Rationale: levels / curves is a professional control that needs a full ICC pipeline and is opaque
   to the target user; geocoding carries API quotas, identity requirements and privacy costs, and a
@@ -387,7 +389,7 @@ not a criterion — a visual conclusion must become a number (a probe) in the CL
   cell — the slot, narrowed by the document's frame (`docs/CONTRACT.md` §1)
 - render consistency: the same composition at `2N` and `N`, downsampled, stays below the RMSE
   threshold (measured 2.62/255; threshold 6)
-- encoding: physical-size mode must carry DPI + ICC, and chroma subsampling must match the request
+- encoding: physical-size mode must carry DPI + ICC, and a JPEG must be 4:4:4 in its own `SOF0`
 
 **Every rule a test can enforce lives only in the tests; this file does not restate it.**
 
@@ -450,8 +452,7 @@ policy: track the latest": latest stable only, no upper pin.
 | `cairo-rs` 0.22.9 | `pixlay-render` | The only rendering backend; GTK4 already depends on cairo, so packaging is free | System cairo 1.18.4; the `png` feature is dev-only (golden image read/write) |
 | `png` 0.18.1 | `pixlay-imaging` | The PNG writer of the one-pass encoder (S6). `image`'s PNG writer exposes neither `pHYs` nor `iCCP` (their values stay at the defaults) and Cairo's emits no `pHYs` at all, so neither can carry an export's DPI | Pure Rust; it was already in the tree through `image`, so the download set did not grow |
 | `jpeg-encoder` 0.7.1 | `pixlay-imaging` | The JPEG writer of the one-pass encoder (S6): `set_density` (JFIF), `set_sampling_factor` (4:4:4 / 4:2:2 / 4:2:0) and `add_icc_profile` (`APP2`), which is exactly the "pixels + sampling + ICC + DPI in one pass" the constraint names | Pure Rust; already in the tree through `glycin-image-rs`. Measured against the previous writer (`image` = zune-jpeg): +1.1% bytes, −27% time at A0/300dpi/q90/4:4:4 |
-| `tiff` 0.11.3 (`lzw`) | `pixlay-imaging` | The TIFF writer of the one-pass encoder (S6): `XResolution`/`YResolution`/`ResolutionUnit` and tag 34675 for the profile. Only the `lzw` feature is enabled — it is the compression the S0 baseline measured, and every reader understands it | Pure Rust (`weezl`); already in the tree through `image` |
-| `image` 0.25.10 | `pixlay-cli` (**dev only** since S6) | It was S1's encoder stand-in and S6 replaced it (`pixlay_imaging::encode` writes the DPI and the ICC profile that this crate's writers leave at their defaults). What it is still for: the CLI's **tests** read renders back with `image::open` (PNG/JPEG/TIFF) and write flat photos to render against, and `pixlay-cli/tests/fixtures/generate.py` produced the fixtures | Not a production dependency any more, so the shipped binary no longer links it |
+| `image` 0.25.10 | `pixlay-cli` (**dev only** since S6) | It was S1's encoder stand-in and S6 replaced it (`pixlay_imaging::encode` writes the DPI and the ICC profile that this crate's writers leave at their defaults). What it is still for: the CLI's **tests** read renders back with `image::open` (PNG/JPEG) and write flat photos to render against, and `pixlay-cli/tests/fixtures/generate.py` produced the fixtures | Not a production dependency any more, so the shipped binary no longer links it |
 | `glycin` 4.0.0 | `pixlay-imaging` | The decoding backend, measured against the in-process alternative (S4): the sandboxed loader is the only one of the two that decodes HEIC and AVIF, and it works with an empty environment | Pulls `glib`/`gio` and, through `cfg(target_os = "linux")`, `libseccomp` / `bubblewrap` / `fontconfig` / the distro's loader packages — this is what S8's `depends` must name |
 | `glib` 0.22 / `gio` 0.22 | `pixlay-imaging` | The decode is driven on a private `MainContext`: a glycin frame request only completes while one is iterated (measured: every frame hung under a plain executor until glycin's own 60 s limit). `glib`'s `futures` feature provides `MainContext::block_on`; `gio::File` is glycin's own input type | Already in the tree with `glycin`; named here because the API is used directly |
 |`gtk4` 0.11.5 + `libadwaita` 0.9.2|`pixlay`|The shell: the window, the rows, the utility pane and the dialogs. The `gtk_v4_10` / `v1_8` feature levels are the lowest that carry `GtkFileDialog` and `GtkColorDialogButton` (4.10 dropped the deprecated chooser dialogs) and `AdwDialog` / `AdwToastOverlay` / `AdwShortcutsDialog`|System gtk4 4.24 / libadwaita 1.10 through pkg-config; GTK already depends on cairo, pango and gdk-pixbuf, so the download set grows by the bindings alone. Linked by `pixlay` only — the other four crates must not name it|

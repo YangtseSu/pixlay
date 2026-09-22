@@ -14,9 +14,9 @@ mod support;
 use std::time::{Duration, Instant};
 
 use pixlay::canvas::Gesture;
-use pixlay::export::{Settings, Size};
+use pixlay::export::Settings;
 use pixlay_core::{CollageDoc, CropTransform};
-use pixlay_imaging::encode::{Chroma, Format};
+use pixlay_imaging::encode::Format;
 
 #[test]
 fn the_main_path_can_be_walked() {
@@ -109,9 +109,8 @@ fn the_main_path_can_be_walked() {
     // ---- export ----------------------------------------------------------
     let out = support::artifact("mainpath.jpg");
     let settings = Settings {
-        size: Size::LongEdge(600),
+        dpi: 150,
         format: Format::Jpeg,
-        chroma: Chroma::Full,
         path: out.clone(),
     };
     // The background path: the call has to return while the work happens on the
@@ -128,10 +127,17 @@ fn the_main_path_can_be_walked() {
     assert!(out.is_file(), "the export landed on disk");
 
     let exported = pixlay_imaging::Source::decode(&out).expect("the export decodes");
+    // The sheet is the document's own size in millimetres, and the one quality
+    // option multiplies it (S12c): 150 dpi of the default A4-long-edge sheet.
+    let expected = window
+        .document()
+        .canvas
+        .pixel_size(150)
+        .expect("the grid the export asked for");
     assert_eq!(
         (exported.width(), exported.height()),
-        (600, 600),
-        "the square canvas of `grid-4-2x2` asked for a 600 px long edge"
+        (expected.width as u32, expected.height as u32),
+        "the export is the document's sheet at the requested resolution"
     );
 
     // The synchronous path, which is the same function, at the size the test can
@@ -139,9 +145,8 @@ fn the_main_path_can_be_walked() {
     let png = support::artifact("mainpath.png");
     let report = window
         .export_to(&Settings {
-            size: Size::Dpi(150),
+            dpi: 150,
             format: Format::Png,
-            chroma: Chroma::Full,
             path: png.clone(),
         })
         .expect("the export runs");
@@ -173,9 +178,8 @@ fn the_main_path_can_be_walked() {
     let gone = support::out_dir().join("gone.jpg");
     let _ = std::fs::remove_file(&gone);
     window.set_export_settings(&Settings {
-        size: Size::LongEdge(400),
+        dpi: 100,
         format: Format::Jpeg,
-        chroma: Chroma::Full,
         path: support::artifact("missing.jpg"),
     });
     window
@@ -199,9 +203,8 @@ fn the_main_path_can_be_walked() {
     assert!(
         window
             .export_to(&Settings {
-                size: Size::LongEdge(400),
+                dpi: 100,
                 format: Format::Jpeg,
-                chroma: Chroma::Full,
                 path: support::artifact("missing.jpg"),
             })
             .is_err(),

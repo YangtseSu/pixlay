@@ -9,9 +9,9 @@ use std::io::Write;
 
 use std::path::{Path, PathBuf};
 
-use pixlay_core::{PixelSize, Project};
+use pixlay_core::{CanvasSpec, PixelSize, Project};
 use pixlay_imaging::preview::GESTURE_STEP_DEG;
-use pixlay_imaging::{Chroma, Export, Format, Preview, Rgb8View, SlotBitmap, gesture_grid, icc};
+use pixlay_imaging::{Export, Format, Preview, Rgb8View, SlotBitmap, gesture_grid, icc};
 use pixlay_render::Images;
 
 use crate::args::{
@@ -177,6 +177,12 @@ fn edit_project(args: EditArgs) -> Result<u8, Failure> {
         .map_err(|error| Failure::Failed(error.to_string()))?;
     let mut doc = project.doc().clone();
     args.frame.apply(&mut doc.frame);
+    // The sheet is a resize, not a relayout: the long edge is in millimetres and
+    // the other one follows the template's aspect, which is what keeps the
+    // document valid (`validate` refuses a canvas that disagrees with it).
+    if let Some(mm) = args.sheet {
+        doc.canvas = CanvasSpec::with_ratio(doc.template.aspect, mm);
+    }
 
     if let Some(slot) = args.slot {
         if slot >= doc.cells.len() {
@@ -244,6 +250,9 @@ fn edit_project(args: EditArgs) -> Result<u8, Failure> {
     report.float("radius", doc.frame.radius_rel);
     let border = doc.frame.color;
     report.text("border", rgb([border.r, border.g, border.b]));
+    // The long edge, always: a caller that set it cannot otherwise see what the
+    // other edge became, and a caller that did not gets the document's own.
+    report.float("sheet_mm", doc.canvas.width_mm.max(doc.canvas.height_mm));
     if let Some(slot) = args.slot {
         let cell = &doc.cells[slot];
         report.int("slot", slot as i64);
@@ -441,16 +450,6 @@ fn render(args: RenderArgs) -> Result<u8, Failure> {
             Format::EXTENSIONS
         ))
     })?;
-    // A dropped flag that looks honored is worse than a refusal (S1's rule for
-    // `--dpi` on `templates`): PNG and TIFF store three samples per pixel, so
-    // there is nothing for `--chroma` to set.
-    if args.chroma != Chroma::default() && format != Format::Jpeg {
-        return Err(Failure::Usage(format!(
-            "--chroma applies to JPEG only, and {} stores every sample",
-            format.name()
-        )));
-    }
-
     // Load the document first: a broken project must fail before anything is
     // rendered, and its message must name the path that is wrong.
     let (mut doc, sources) = match &args.source {
@@ -529,7 +528,6 @@ fn render(args: RenderArgs) -> Result<u8, Failure> {
         &Export {
             format,
             dpi,
-            chroma: args.chroma,
             image: Rgb8View {
                 width: image.width,
                 height: image.height,
@@ -556,9 +554,6 @@ fn render(args: RenderArgs) -> Result<u8, Failure> {
             report.int("long_edge", i64::from(pixels));
             report.float("dpi", dpi);
         }
-    }
-    if format == Format::Jpeg {
-        report.text("chroma", args.chroma.name());
     }
     report.int("cells", doc.cells.len() as i64);
     report.int("occupied", images.len() as i64);
@@ -836,9 +831,6 @@ fn thumb(args: ThumbArgs) -> Result<u8, Failure> {
         &Export {
             format,
             dpi: THUMB_DPI,
-            // A preview is a screen picture; there is nothing to subsample for,
-            // and 4:4:4 is the project's default anyway.
-            chroma: Chroma::default(),
             image: Rgb8View {
                 width: preview.width,
                 height: preview.height,
