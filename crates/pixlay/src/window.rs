@@ -395,9 +395,7 @@ impl EditorWindow {
         // that has just been pushed is allocated before it is painted, and a window
         // resized while it is not being painted must still decode for its new size.
         // The canvas's own draw asks for its grid too, and this is the half that does
-        // not depend on a paint: measured 2026-09-23, a headless run could allocate the
-        // editor's page and never paint it, which left the canvas on a 1x1 grid for the
-        // whole test.
+        // not depend on a paint.
         let window = self.clone();
         editor_page.connect_realize(glib::clone!(
             #[weak]
