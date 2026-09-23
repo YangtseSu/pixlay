@@ -2213,6 +2213,223 @@ fn edit_clears_a_cell_and_keeps_the_others() {
 }
 
 #[test]
+fn edit_grows_and_shrinks_the_layout_one_cell_at_a_time() {
+    // S14b's count control, from the outside: `--add-cell` takes the layout with one
+    // slot more and leaves the new cell empty; `--remove-cell` takes the layout with
+    // one slot fewer, dropping the last cell whatever it holds. Both are the window's
+    // own `Command`s, so the two produce the same document.
+    let dir = out_dir("edit-cells");
+    let project = framing_project(&dir, "a.pixlay");
+    let before = CollageDoc::load(&project).expect("loads");
+    assert_eq!(before.cells.len(), 2);
+
+    let grown = dir.join("grown.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        project.to_str().expect("utf-8"),
+        "--add-cell",
+        "--out",
+        grown.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "command"), "edit");
+    assert_eq!(field(&output, "cells"), "3");
+    assert_eq!(
+        field(&output, "photos"),
+        "2",
+        "the new cell has no photo: `+` is a layout edit"
+    );
+    let after = CollageDoc::load(&grown).expect("loads");
+    assert_eq!(
+        after.cells[..2],
+        before.cells[..],
+        "the cells that survived keep their photo and framing"
+    );
+    assert!(
+        after.cells[2].source.is_none(),
+        "the appended cell is empty: {:?}",
+        after.cells[2].source
+    );
+    assert_eq!(after.cells[2].crop, CropTransform::IDENTITY);
+    assert_eq!(
+        after.template.slots.len(),
+        3,
+        "and the layout has one more cell"
+    );
+
+    // `-` takes it away again, and the document is what it was.
+    let shrunk = dir.join("shrunk.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        grown.to_str().expect("utf-8"),
+        "--remove-cell",
+        "--out",
+        shrunk.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "cells"), "2");
+    let back = CollageDoc::load(&shrunk).expect("loads");
+    assert_eq!(
+        back.cells, before.cells,
+        "add then remove lands on the document it started from"
+    );
+
+    // The floor: two cells is the smallest layout the library has.
+    let refused = dir.join("floor.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        project.to_str().expect("utf-8"),
+        "--remove-cell",
+        "--out",
+        refused.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 2, "there is no one-cell layout");
+    assert!(
+        stderr(&output).contains("at least 2 cells"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(!refused.exists());
+
+    // The two are opposites: one edit, one intent.
+    let both = run(&[
+        "edit",
+        "--project",
+        project.to_str().expect("utf-8"),
+        "--add-cell",
+        "--remove-cell",
+        "--out",
+        dir.join("both.pixlay").to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&both), 1, "{}", stderr(&both));
+    assert!(stderr(&both).contains("--add-cell"), "{}", stderr(&both));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn edit_exchanges_two_cells_whole() {
+    // S14b: "two photos must be swappable". The whole cell moves, so a photo keeps
+    // the framing that made it look right where it was.
+    let dir = out_dir("edit-swap");
+    let project = framing_project(&dir, "a.pixlay");
+    let framed = dir.join("framed.pixlay");
+    // Framing on cell 0 only, so the swap has something to carry.
+    let output = run(&[
+        "edit",
+        "--project",
+        project.to_str().expect("utf-8"),
+        "--slot",
+        "0",
+        "--rotate",
+        "12",
+        "--zoom",
+        "1.8",
+        "--out",
+        framed.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let before = CollageDoc::load(&framed).expect("loads");
+
+    let out = dir.join("swapped.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        framed.to_str().expect("utf-8"),
+        "--swap",
+        "0,1",
+        "--out",
+        out.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "command"), "edit");
+    assert_eq!(field(&output, "cells"), "2", "a swap changes no count");
+    assert_eq!(field(&output, "photos"), "2");
+    let after = CollageDoc::load(&out).expect("loads");
+    assert_eq!(after.cells[0], before.cells[1], "cell 0 is what cell 1 was");
+    assert_eq!(after.cells[1], before.cells[0], "and the other way round");
+    assert_ne!(
+        after.cells[1].crop,
+        CropTransform::IDENTITY,
+        "the framing travelled with its photo"
+    );
+
+    // Swapping the same pair back is the identity, which is what makes it a swap
+    // rather than a rotation of the list.
+    let back = dir.join("back.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        out.to_str().expect("utf-8"),
+        "--swap",
+        "0,1",
+        "--out",
+        back.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let round = CollageDoc::load(&back).expect("loads");
+    assert_eq!(round.cells, before.cells, "two swaps are no swap");
+    assert_eq!(
+        CollageDoc::load(&framed)
+            .expect("loads")
+            .to_json()
+            .expect("serializes"),
+        round.to_json().expect("serializes"),
+        "and the bytes agree, not just the fields"
+    );
+
+    // The two pairs that cannot be a swap: the command's own refusals, with the
+    // document untouched.
+    let same = run(&[
+        "edit",
+        "--project",
+        framed.to_str().expect("utf-8"),
+        "--swap",
+        "1,1",
+        "--out",
+        dir.join("same.pixlay").to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&same), 2, "{}", stderr(&same));
+    assert!(
+        stderr(&same).contains("swapped with itself"),
+        "{}",
+        stderr(&same)
+    );
+
+    let missing = run(&[
+        "edit",
+        "--project",
+        framed.to_str().expect("utf-8"),
+        "--swap",
+        "0,9",
+        "--out",
+        dir.join("missing.pixlay").to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&missing), 2, "{}", stderr(&missing));
+    assert!(
+        stderr(&missing).contains("slot 9 does not exist"),
+        "{}",
+        stderr(&missing)
+    );
+
+    // A malformed pair is a usage error, before anything is read.
+    let malformed = run(&[
+        "edit",
+        "--project",
+        framed.to_str().expect("utf-8"),
+        "--swap",
+        "0",
+        "--out",
+        dir.join("malformed.pixlay").to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&malformed), 1, "{}", stderr(&malformed));
+    assert!(stderr(&malformed).contains("i,j"), "{}", stderr(&malformed));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn edit_appends_a_photo_and_grows_the_layout_with_the_count() {
     // S14's `+`: the photo goes to the first empty cell, and if there is none the
     // layout grows by one slot — the same command the window's count control sends,
@@ -2304,10 +2521,10 @@ fn edit_appends_a_photo_and_grows_the_layout_with_the_count() {
 }
 
 #[test]
-fn edit_drops_the_last_photo_and_shrinks_the_layout() {
-    // The other half of the count control. "The last photo" is the last occupied
-    // cell, and the layout shrinks to what the survivors need — never below the
-    // floor of two, which is the same floor `Selection` enforces.
+fn edit_shrinks_the_layout_one_cell_at_a_time() {
+    // The other half of the count control (S14b): `−` takes the layout with one
+    // cell fewer, so the last *cell* goes whether or not it holds a photo — and
+    // never below two, which is the floor `Selection` enforces.
     let dir = out_dir("edit-remove");
     let photos = dir.join("photos");
     std::fs::create_dir_all(&photos).expect("create photos");
@@ -2351,7 +2568,7 @@ fn edit_drops_the_last_photo_and_shrinks_the_layout() {
         "edit",
         "--project",
         project.to_str().expect("utf-8"),
-        "--remove-photo",
+        "--remove-cell",
         "--out",
         out.to_str().expect("utf-8"),
     ]);
@@ -2366,69 +2583,91 @@ fn edit_drops_the_last_photo_and_shrinks_the_layout() {
         "the survivors are the first three cells, unchanged"
     );
 
-    // The floor: a two-photo document has no smaller layout, and one that is
-    // already empty has nothing to drop at all.
+    // The floor: a two-cell layout is the smallest the library has, so `−` is exit 2
+    // there — whatever the *photo* count of those two cells is, since the control
+    // moves the layout.
     let two = dir.join("two.pixlay");
     let output = run(&[
         "edit",
         "--project",
         out.to_str().expect("utf-8"),
-        "--remove-photo",
+        "--remove-cell",
         "--out",
         two.to_str().expect("utf-8"),
     ]);
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     assert_eq!(field(&output, "template"), "strip-2-2x1");
 
-    let empty = dir.join("empty.pixlay");
+    // Two cells, one of them emptied on its own: the layout floor still refuses,
+    // because "how many photos" and "how many cells" are different questions — a
+    // cell that holds no photo is still a cell of the layout.
+    let holed = dir.join("holed.pixlay");
     let output = run(&[
         "edit",
         "--project",
         two.to_str().expect("utf-8"),
         "--slot",
-        "0",
+        "1",
         "--clear",
         "--out",
-        empty.to_str().expect("utf-8"),
+        holed.to_str().expect("utf-8"),
     ]);
     assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "photos"), "1");
     let refused = dir.join("refused.pixlay");
     let output = run(&[
         "edit",
         "--project",
-        empty.to_str().expect("utf-8"),
-        "--slot",
-        "1",
-        "--clear",
-        "--out",
-        empty.to_str().expect("utf-8"),
-    ]);
-    assert_eq!(code(&output), 0, "{}", stderr(&output));
-    let output = run(&[
-        "edit",
-        "--project",
-        empty.to_str().expect("utf-8"),
-        "--remove-photo",
+        holed.to_str().expect("utf-8"),
+        "--remove-cell",
         "--out",
         refused.to_str().expect("utf-8"),
     ]);
-    assert_eq!(code(&output), 2, "there is no photo to drop");
-    assert!(stderr(&output).contains("no photo"), "{}", stderr(&output));
+    assert_eq!(
+        code(&output),
+        2,
+        "a two-cell layout has no smaller one: {}",
+        stderr(&output)
+    );
+    assert!(
+        stderr(&output).contains("at least 2 cells"),
+        "{}",
+        stderr(&output)
+    );
     assert!(!refused.exists());
 
-    // The two batch flags are opposites: one edit, one intent.
-    let both = run(&[
+    // `--remove-cell` and `--add-photo` are *not* opposites any more (S14b): one
+    // moves the layout, the other places a photo, and an edit that does both is a
+    // legal edit. The documented order decides the result: the cell goes first, so
+    // the photo lands in the layout that is left.
+    let both = dir.join("both.pixlay");
+    let output = run(&[
         "edit",
         "--project",
         project.to_str().expect("utf-8"),
+        "--remove-cell",
         "--add-photo",
         photos.join("a.jpg").to_str().expect("utf-8"),
-        "--remove-photo",
         "--out",
-        dir.join("both.pixlay").to_str().expect("utf-8"),
+        both.to_str().expect("utf-8"),
     ]);
-    assert_eq!(code(&both), 1, "{}", stderr(&both));
-    assert!(stderr(&both).contains("--add-photo"), "{}", stderr(&both));
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(
+        field(&output, "cells"),
+        "4",
+        "three cells after the removal, then the layout grew to hold the photo"
+    );
+    assert_eq!(field(&output, "photos"), "4");
+    let composed = CollageDoc::load(&both).expect("loads");
+    assert_eq!(composed.cells.len(), 4);
+    assert!(
+        composed.cells[3]
+            .source
+            .as_deref()
+            .is_some_and(|source| source.ends_with("a.jpg")),
+        "the photo took the cell the growth made: {:?}",
+        composed.cells[3].source
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

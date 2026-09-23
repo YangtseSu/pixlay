@@ -818,6 +818,32 @@ fn check_gallery(window: &EditorWindow, failures: &mut Vec<String>) {
     if gallery.count_label().label().is_empty() {
         failures.push("the band's count has no label".into());
     }
+    // The empty cells' own `+` (S14b): the visible control over a cell that has no
+    // photo. It is a real button, so the accessible-name and keyboard checks above
+    // already cover it — what is checked here is that the document this check runs
+    // on has none of them shown and that the control exists for every slot, so a
+    // later change cannot quietly drop it.
+    let Some(empty) = window.empty_cells() else {
+        failures.push("the canvas has no empty-cell layer".into());
+        return;
+    };
+    for slot in 0..window.document().cells.len() {
+        let Some(button) = empty.button(slot) else {
+            failures.push(format!("slot {slot} has no `+` control"));
+            continue;
+        };
+        if button.tooltip_text().is_none() {
+            failures.push(format!("slot {slot}'s `+` has no tooltip"));
+        }
+        if !button.is_focusable() {
+            failures.push(format!(
+                "slot {slot}'s `+` cannot be reached with the keyboard"
+            ));
+        }
+        if button.is_visible() {
+            failures.push(format!("slot {slot} holds a photo but its `+` is shown"));
+        }
+    }
 }
 
 /// At the minimum size the sheet is still drawn in full inside the canvas
@@ -869,27 +895,104 @@ fn check_editor_minimum(window: &EditorWindow, failures: &mut Vec<String>) {
     }
 }
 
-/// The app starts under both colour schemes, and the canvas pixels do not depend
-/// on the style: the sheet is content, not styling (`AGENTS.md`).
+/// The colour scheme is applied to the window, and the **sheet's own pixels** do not
+/// depend on it: the collage is content, and the space around it is the theme's.
+///
+/// The check used to compare the whole canvas widget between the two schemes and
+/// fail on any difference. That passed while the canvas flooded its entire widget
+/// with the document's backdrop — in other words it *asserted* the defect the human
+/// reported on 2026-09-23 ("the dark theme still has not been applied"): the window
+/// was dark around a canvas that had been painted white edge to edge. A widget's own
+/// snapshot cannot see the theme either (its surrounding pixels come back with a
+/// zero alpha, which this harness reads as black), so what is measured here is the
+/// **window**: the thing the human was looking at.
 fn check_colour_schemes(window: &EditorWindow, failures: &mut Vec<String>) {
     let manager = adw::StyleManager::default();
     let area = window.canvas_widget();
+    let canvas_widget = area.clone().upcast::<gtk4::Widget>();
     let mut painted: Vec<(String, support::Image)> = Vec::new();
     for scheme in [adw::ColorScheme::ForceDark, adw::ColorScheme::ForceLight] {
         manager.set_color_scheme(scheme);
         window.pump(Duration::from_millis(300));
-        painted.push((format!("{scheme:?}"), support::snapshot(&area)));
+        painted.push((format!("{scheme:?}"), support::snapshot(window)));
     }
     // The app's own scheme, not `Default`: dark is what `app.rs` sets at startup
     // (ruling 23), so the window is left where the application put it.
     manager.set_color_scheme(adw::ColorScheme::ForceDark);
-    let (first, second) = (&painted[0].1, &painted[1].1);
-    let difference = support::rmse(first, second);
-    if difference > 0.0 {
+    let (dark, light) = (&painted[0].1, &painted[1].1);
+
+    // The sheet's rectangle in the *window's* coordinates, which is what the two
+    // snapshots are in: the sheet is where the canvas's own placement puts it.
+    let (grid, _) = window.images();
+    let placement = canvas::placement(grid, area.width(), area.height());
+    let origin = canvas_widget
+        .compute_point(
+            window.upcast_ref::<gtk4::Widget>(),
+            &gtk4::graphene::Point::new(placement.origin.0 as f32, placement.origin.1 as f32),
+        )
+        .expect("the canvas is in the window");
+    let (sheet_x, sheet_y) = (origin.x().round() as i32, origin.y().round() as i32);
+    let (sheet_w, sheet_h) = (
+        placement.width().round() as i32,
+        placement.height().round() as i32,
+    );
+
+    // 1. **The frame around the sheet is the theme's.** It has to differ between the
+    //    two schemes, or the canvas is painting over the theme's own background —
+    //    exactly what the human saw as "the dark theme is not applied". Sampled in
+    //    the middle of the margin the canvas leaves, which is outside the sheet for
+    //    every layout and above the selection outline.
+    let margin = ((placement.origin.0 / 2.0).round() as i32).max(1);
+    let sample_y = (sheet_y + sheet_h / 2).max(margin);
+    let (dark_edge, light_edge) = (
+        support::pixel(dark, margin, sample_y),
+        support::pixel(light, margin, sample_y),
+    );
+    if dark_edge == light_edge {
         failures.push(format!(
-            "the canvas changed with the colour scheme (RMSE {difference:.3})"
+            "the canvas paints over the theme: the frame beside the sheet reads \
+             {dark_edge:?} in both colour schemes"
         ));
     }
+
+    // 2. **The scheme really is dark.** The app forces it at startup (ruling 23), and
+    //    the frame the theme paints has to be dark, not merely different.
+    if manager.is_dark() && luminance(dark_edge) > 128.0 {
+        failures.push(format!(
+            "the app is dark but the canvas frame is {dark_edge:?}, which is light"
+        ));
+    }
+
+    // 3. **The sheet itself is content.** Sampled inside the sheet and away from its
+    //    own edge, so the selection outline — which is drawn with the widget's theme
+    //    colour *by design*, because a hard-coded grey fails in high contrast mode —
+    //    is not what this compares. The collage's pixels are the export's pixels and
+    //    must not depend on the desktop's appearance.
+    let inset = 4;
+    let probes = [
+        (sheet_x + inset, sheet_y + inset),
+        (sheet_x + sheet_w / 2, sheet_y + sheet_h / 2),
+        (sheet_x + sheet_w - inset, sheet_y + sheet_h - inset),
+    ];
+    for (x, y) in probes {
+        let (dark_pixel, light_pixel) = (support::pixel(dark, x, y), support::pixel(light, x, y));
+        if dark_pixel != light_pixel {
+            failures.push(format!(
+                "the sheet changed with the colour scheme at {x},{y}: {dark_pixel:?} vs \
+                 {light_pixel:?} — the collage is content, not styling"
+            ));
+        }
+    }
+    eprintln!(
+        "the canvas frame: {dark_edge:?} in dark, {light_edge:?} in light; the sheet \
+         {sheet_w}x{sheet_h} at {sheet_x},{sheet_y}, unchanged at all three probes"
+    );
+}
+
+/// Perceived brightness of a colour, `0..=255`: the ITU-R BT.601 luma, which is
+/// what "does this read as dark" means for a background.
+fn luminance(rgb: [u8; 3]) -> f64 {
+    0.299 * f64::from(rgb[0]) + 0.587 * f64::from(rgb[1]) + 0.114 * f64::from(rgb[2])
 }
 
 /// The about dialog takes its identity from the application, not from a second

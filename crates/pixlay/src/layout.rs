@@ -51,7 +51,7 @@ use pixlay_core::{MAX_PHOTOS, MIN_PHOTOS, PixelSize};
 use pixlay_render::Rgb8Image;
 
 use crate::a11y;
-use crate::i18n::{fill, gettext, ngettext};
+use crate::i18n::{fill, gettext};
 use crate::picture::Picture;
 use crate::window::EditorWindow;
 
@@ -124,12 +124,13 @@ pub struct Gallery {
 impl Gallery {
     /// Builds the band.
     pub fn build(window: &EditorWindow) -> Rc<Self> {
-        let minus = icon_button("list-remove-symbolic", &gettext("Remove the last photo"));
-        let plus = icon_button("list-add-symbolic", &gettext("Add a photo"));
+        let minus = icon_button("list-remove-symbolic", &gettext("Remove the last cell"));
+        let plus = icon_button("list-add-symbolic", &gettext("Add a cell"));
         let count = gtk::Label::new(None);
         count.add_css_class("dim-label");
-        // The count is a readout, not a control, but it is also the only place the
-        // number of photos in the collage is written down.
+        // The number is all that is drawn, so what it *counts* is what a screen
+        // reader has to hear: without this the control announces "8" between two
+        // unlabelled buttons.
         count.update_property(&[gtk::accessible::Property::Label(&gettext(
             "Photos in the collage",
         ))]);
@@ -308,20 +309,25 @@ impl Gallery {
     /// Writes the count and the two controls: the floor and the ceiling are the
     /// picker's own (`MIN_PHOTOS` / `MAX_PHOTOS`), so the control is insensitive
     /// exactly where the refusal would be.
-    pub fn update_control(&self, photos: usize) {
-        self.count.set_label(&fill(
-            ngettext("{} photo", "{} photos", photos as u32),
-            &[photos],
-        ));
-        self.minus.set_sensitive(photos > MIN_PHOTOS);
-        self.plus.set_sensitive(photos < MAX_PHOTOS);
-        self.minus.set_tooltip_text(Some(&if photos > MIN_PHOTOS {
-            gettext("Remove the last photo")
+    ///
+    /// **The label is the number alone** (ruled 2026-09-23): the control sits beside
+    /// a strip of layout thumbnails and under a canvas, so "8" between `−` and `+`
+    /// needs no noun, and the word "photos" next to a picture of the collage reads
+    /// as a caption rather than as the quantity. What the number *counts* is the
+    /// accessible name and the tooltips' business — a screen reader announces
+    /// "Photos in the collage: 8" — which is where HIG `guidelines/accessibility`
+    /// asks for it and where a two-word caption costs nothing.
+    pub fn update_control(&self, cells: usize) {
+        self.count.set_label(&cells.to_string());
+        self.minus.set_sensitive(cells > MIN_PHOTOS);
+        self.plus.set_sensitive(cells < MAX_PHOTOS);
+        self.minus.set_tooltip_text(Some(&if cells > MIN_PHOTOS {
+            gettext("Remove the last cell")
         } else {
             fill(gettext("A collage needs at least {} photos"), &[MIN_PHOTOS])
         }));
-        self.plus.set_tooltip_text(Some(&if photos < MAX_PHOTOS {
-            gettext("Add a photo")
+        self.plus.set_tooltip_text(Some(&if cells < MAX_PHOTOS {
+            gettext("Add a cell")
         } else {
             fill(gettext("A collage takes at most {} photos"), &[MAX_PHOTOS])
         }));

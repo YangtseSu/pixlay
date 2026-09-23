@@ -10,9 +10,7 @@
 
 use std::path::PathBuf;
 
-use pixlay_core::{
-    Cell, CollageDoc, Command, CoreError, CropTransform, History, remove_last, templates,
-};
+use pixlay_core::{Cell, CollageDoc, Command, CoreError, CropTransform, History, templates};
 
 fn document() -> CollageDoc {
     let template = templates::get(templates::SMOKE_TEMPLATE).expect("registered");
@@ -68,6 +66,11 @@ fn sequence() -> Vec<Command> {
         Command::SetTemplate {
             template: templates::get("mosaic-5-hero").expect("registered"),
         },
+        // S14b's three, after the resize so they act on a known five-cell document:
+        // a cell is taken, two cells are exchanged, one is given back.
+        Command::AddCell,
+        Command::SwapCells { left: 0, right: 1 },
+        Command::RemoveLastCell,
     ]
 }
 
@@ -532,97 +535,185 @@ fn adding_photos_fills_empty_cells_before_it_grows_the_layout() {
 }
 
 #[test]
-fn the_batch_removal_shrinks_the_layout_and_the_token_brings_the_cell_back() {
-    // Ruling 7: one control drops the last photo and brings it back. The layout
-    // follows the count down, and the token puts both the cell and its framing
-    // back exactly where they were.
-    let mut history = History::new(occupied("mosaic-5-hero")).expect("a valid document");
+fn the_count_control_takes_and_drops_a_cell_without_remembering_it() {
+    // S14b, ruled 2026-09-23: the control addresses the *layout*. `+` takes the
+    // layout with one cell more and leaves it empty; `−` takes the layout with one
+    // cell fewer, whatever the last cell holds. Neither remembers a photo, and
+    // `Ctrl+Z` is what brings one back — which is the property that makes `+` mean
+    // "one more cell" rather than "undo the last removal".
+    let mut history = History::new(occupied("mosaic-4-hero")).expect("a valid document");
     history
         .apply(Command::SetCrop {
-            slot: 4,
+            slot: 0,
             crop: CropTransform {
-                zoom: 2.4,
-                offset: (-0.3, 0.4),
-                rotation_deg: -17.0,
+                zoom: 1.9,
+                offset: (-0.2, 0.15),
+                rotation_deg: -13.0,
             },
         })
         .expect("applies");
-    let before = history.doc().clone();
+    let framed = history.doc().clone();
 
-    // The token is the same `remove_last` the command applies, on the same
-    // document: the two cannot disagree about which cell is on its way out.
-    let mut probe = history.doc().clone();
-    let removed = remove_last(&mut probe).expect("there is a photo to drop");
-    history.apply(Command::RemoveLastPhoto).expect("applies");
-
+    history.apply(Command::AddCell).expect("a fifth cell fits");
     let doc = history.doc();
-    assert_eq!(doc.cells.len(), 4, "the layout shrank with the count");
-    assert_eq!(doc.template.name, "mosaic-4-hero", "4:3 stays 4:3");
-    assert_eq!(doc.cells[..4], before.cells[..4]);
+    assert_eq!(doc.cells.len(), 5, "the layout took one cell more");
+    assert_eq!(doc.template.name, "mosaic-5-hero", "4:3 stays 4:3");
+    assert_eq!(
+        doc.cells[..4],
+        framed.cells[..],
+        "every existing cell kept its photo and framing"
+    );
+    assert!(
+        doc.cells[4].source.is_none(),
+        "the new cell is empty: it is a layout edit, not a photo"
+    );
+    assert_eq!(
+        doc.cells[4].crop,
+        CropTransform::IDENTITY,
+        "and its framing is the default one"
+    );
     doc.validate().expect("a valid document");
 
-    history
-        .apply(Command::RestorePhoto(removed))
-        .expect("the cell comes back");
+    // `−` takes the cell away again — the empty one, here, because it is last.
+    history.apply(Command::RemoveLastCell).expect("applies");
+    assert_eq!(history.doc().cells.len(), 4);
     assert_eq!(
-        history.doc(),
-        &before,
-        "remove then restore is the exact inverse: same layout, same cell, same framing"
+        history.doc().cells[..4],
+        framed.cells[..],
+        "the survivors are untouched"
     );
 
-    // Two undo steps, and undoing them walks back through both states.
+    // A removal with a photo in the cell drops the photo with the cell: that is
+    // what "one cell fewer" means, and the undo stack is the way back.
+    let depth = history.undo_depth();
+    history
+        .apply(Command::RemoveLastCell)
+        .expect("there is a cell to drop");
+    assert_eq!(history.doc().cells.len(), 3);
+    assert_eq!(
+        history.doc().template.name,
+        "mosaic-3-hero",
+        "three photos of 4:3 take the three-cell 4:3 layout"
+    );
+    assert_eq!(history.undo_depth(), depth + 1, "one call is one undo step");
     assert!(history.undo());
-    assert_eq!(history.doc().cells.len(), 4);
-    assert!(history.undo());
-    assert_eq!(history.doc(), &before);
-
-    // The hole case: the last *occupied* cell is what leaves, and the layout
-    // shrinks to what the survivors need rather than to one less.
-    let mut holed = occupied("strip-4-4x1");
-    holed.cells[2] = Cell::default();
-    let mut history = History::new(holed).expect("a valid document");
-    let mut probe = history.doc().clone();
-    let removed = remove_last(&mut probe).expect("cell 3 is the last photo");
-    assert_eq!(removed.slot, 3);
-    history.apply(Command::RemoveLastPhoto).expect("applies");
     assert_eq!(
         history.doc().cells.len(),
-        2,
-        "cells 0 and 1 are the survivors, and the cell that was already empty goes with the shrink"
+        4,
+        "undo is the only way a dropped photo comes back"
     );
-    assert_eq!(history.doc().template.name, "strip-2-2x1");
+    assert_eq!(
+        history.doc().cells[3].source,
+        framed.cells[3].source,
+        "and it comes back whole, photo and framing"
+    );
+
+    // The ceiling is the format's slot limit, and the floor is the picker's own
+    // minimum: past either, the refusal changes nothing.
+    let mut full = History::new(occupied("strip-9-9x1")).expect("a valid document");
+    let refused = full.apply(Command::AddCell).expect_err("no tenth cell");
+    assert!(
+        matches!(refused, CoreError::TooManyCells { max: 9 }),
+        "{refused}"
+    );
+    assert_eq!(full.doc().cells.len(), 9, "the refusal changed nothing");
+    assert_eq!(full.undo_depth(), 0);
+
+    let mut two = History::new(occupied("strip-2-2x1")).expect("a valid document");
+    let refused = two
+        .apply(Command::RemoveLastCell)
+        .expect_err("no one-cell layout");
+    assert!(
+        matches!(refused, CoreError::TooFewCells { min: 2 }),
+        "{refused}"
+    );
+    assert_eq!(two.doc().cells.len(), 2, "the refusal changed nothing");
+    assert_eq!(two.undo_depth(), 0);
 }
 
 #[test]
-fn the_batch_removal_refuses_an_empty_document_and_a_taken_slot() {
-    let mut empty = History::new(document()).expect("a valid document");
-    let refused = empty
-        .apply(Command::RemoveLastPhoto)
-        .expect_err("there is no photo to drop");
-    assert!(matches!(refused, CoreError::NothingToRemove), "{refused}");
-    assert_eq!(empty.doc().cells.len(), 8, "the refusal changed nothing");
-
-    // A restore whose cell was taken while it was out is refused — and the
-    // *layout* the restore would have grown is not left behind either, because the
-    // command is applied to a copy.
-    let mut history = History::new(occupied("strip-3-3x1")).expect("a valid document");
-    let mut probe = history.doc().clone();
-    let removed = remove_last(&mut probe).expect("a photo");
-    history.apply(Command::RemoveLastPhoto).expect("applies");
-    assert_eq!(history.doc().cells.len(), 2, "the layout shrank");
+fn a_swap_exchanges_two_cells_whole() {
+    // S14b: "two photos must be swappable". The *cell* moves — photo and framing
+    // together — because the framing is what makes a photo look right where it is;
+    // swapping the sources and leaving the crops behind would reframe both pictures
+    // as a side effect of wanting them in each other's place.
+    let mut history = History::new(occupied("grid-4-2x2")).expect("a valid document");
+    let framing = |zoom: f64, rotation: f64| CropTransform {
+        zoom,
+        offset: (0.1, -0.2),
+        rotation_deg: rotation,
+    };
     history
-        .apply(Command::AddPhotos {
-            photos: vec![PathBuf::from("photos/other.jpg")],
+        .apply(Command::SetCrop {
+            slot: 0,
+            crop: framing(2.4, 17.0),
         })
         .expect("applies");
-    assert_eq!(history.doc().cells.len(), 3, "and grew back");
+    history
+        .apply(Command::SetCrop {
+            slot: 3,
+            crop: framing(1.3, -8.5),
+        })
+        .expect("applies");
     let before = history.doc().clone();
+
+    let depth = history.undo_depth();
+    history
+        .apply(Command::SwapCells { left: 0, right: 3 })
+        .expect("applies");
+    let doc = history.doc();
+    assert_eq!(
+        doc.cells[0], before.cells[3],
+        "cell 0 is what cell 3 was: photo and framing"
+    );
+    assert_eq!(doc.cells[3], before.cells[0], "and the other way round");
+    assert_eq!(doc.cells[1..3], before.cells[1..3], "no other cell moved");
+    assert_eq!(history.undo_depth(), depth + 1, "one swap is one undo step");
+    doc.validate().expect("a valid document");
+
+    // A swap has to be its own inverse, which is what makes it a swap rather than
+    // a rotation of the list.
+    history
+        .apply(Command::SwapCells { left: 0, right: 3 })
+        .expect("applies");
+    assert_eq!(history.doc(), &before, "swapping back is the identity");
+
+    // An empty cell is a legal half: the whole point of `+` is that a cell starts
+    // without a photo, and moving it somewhere is how a user fills a hole.
+    let mut history = History::new(occupied("mosaic-4-hero")).expect("a valid document");
+    history
+        .apply(Command::SetSource {
+            slot: 1,
+            source: None,
+        })
+        .expect("applies");
+    history
+        .apply(Command::SwapCells { left: 1, right: 3 })
+        .expect("applies");
+    assert!(history.doc().cells[3].source.is_none(), "the hole moved");
+    assert_eq!(
+        history.doc().cells[1].source,
+        Some(PathBuf::from("photos/cell3.jpg")),
+        "and the photo took its place"
+    );
+
+    // The two pairs that cannot be a swap are refused, and neither leaves a trace.
+    let mut history = History::new(occupied("strip-3-3x1")).expect("a valid document");
     let refused = history
-        .apply(Command::RestorePhoto(removed))
-        .expect_err("slot 2 holds the photo that took its place");
+        .apply(Command::SwapCells { left: 1, right: 1 })
+        .expect_err("a cell cannot be swapped with itself");
     assert!(
-        matches!(refused, CoreError::SlotOccupied { slot: 2 }),
+        matches!(refused, CoreError::SameSlot { slot: 1 }),
         "{refused}"
     );
-    assert_eq!(history.doc(), &before, "the refusal changed nothing");
+    assert_eq!(history.undo_depth(), 0, "the refusal left no step");
+
+    let refused = history
+        .apply(Command::SwapCells { left: 0, right: 7 })
+        .expect_err("the layout has three cells");
+    assert!(
+        matches!(refused, CoreError::NoSuchSlot { slot: 7, slots: 3 }),
+        "{refused}"
+    );
+    assert_eq!(history.undo_depth(), 0);
 }

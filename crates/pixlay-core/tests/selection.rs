@@ -1,4 +1,4 @@
-//! The selection policy: order, the 2–9 clamp, the count filter and the LIFO rule.
+//! The selection policy: order, the 2–9 clamp, the count filter and the count rule.
 //!
 //! These are the rules the picker (S13), the layout stage (S14) and the CLI's
 //! `init --photo` share, so they are asserted where they live — in `pixlay-core`,
@@ -6,12 +6,16 @@
 //! from the outside in `pixlay-cli/tests/cli.rs`: "the picked list's order is what
 //! `init --photo` produces" is a statement about both callers, and each one is
 //! checked against this one implementation.
+//!
+//! S14's LIFO rule left this module in S14b (the 2026-09-23 ruling made `+` a
+//! layout switch): what remains of it is [`remove_last`], which clears a cell and
+//! says which, and the neighbour rule the keyboard's swap needs.
 
 use std::path::PathBuf;
 
 use pixlay_core::{
-    ASPECT_TOLERANCE, Cell, CollageDoc, CropTransform, Family, MAX_PHOTOS, MIN_PHOTOS, Removed,
-    Selection, SelectionError, last_photo, layout_for, remove_last, templates,
+    ASPECT_TOLERANCE, Cell, CollageDoc, CropTransform, Family, MAX_PHOTOS, MIN_PHOTOS, Selection,
+    SelectionError, last_photo, layout_for, remove_last, templates,
 };
 
 fn photo(name: &str) -> PathBuf {
@@ -160,20 +164,18 @@ fn layouts_are_exactly_the_templates_with_that_many_slots() {
 }
 
 #[test]
-fn pop_and_remove_drop_photos_in_order_or_by_index() {
+fn remove_drops_a_photo_by_index() {
     let mut selection = selection(4);
-    assert_eq!(selection.pop(), Some(photo("p3")));
     assert_eq!(selection.remove(0), Some(photo("p0")));
     assert_eq!(
         selection.photos(),
-        &[photo("p1"), photo("p2")],
+        &[photo("p1"), photo("p2"), photo("p3")],
         "the rest keeps its order"
     );
     // A stale index is a no-op, not a panic.
     assert_eq!(selection.remove(9), None);
-    assert_eq!(selection.pop(), Some(photo("p2")));
-    assert_eq!(selection.pop(), Some(photo("p1")));
-    assert_eq!(selection.pop(), None);
+    assert_eq!(selection.remove(2), Some(photo("p3")));
+    assert_eq!(selection.photos(), &[photo("p1"), photo("p2")]);
 }
 
 #[test]
@@ -192,123 +194,102 @@ fn remove_last_clears_only_the_last_occupied_cell() {
     // The last photo is cell 3, not "the fourth cell": the hole changes nothing,
     // and a batch control that dropped the tail cell instead would drop nothing.
     assert_eq!(last_photo(&doc), Some(3));
-    let removed = remove_last(&mut doc).expect("there is a photo to drop");
-    assert_eq!(removed.slot, 3);
-    assert_eq!(removed.cell.source, Some(photo("cell3")));
-    assert!(doc.cells[3].source.is_none(), "the last cell is cleared");
+    assert_eq!(
+        remove_last(&mut doc),
+        Some(3),
+        "the slot it cleared, named so a caller does not have to guess"
+    );
+    assert_eq!(
+        doc.cells[3],
+        Cell::default(),
+        "the cleared cell is a whole default cell: no photo and no framing"
+    );
     // Everything else is untouched — including the cell that was already empty.
     assert_eq!(doc.cells[0].crop, before.cells[0].crop);
     assert_eq!(doc.cells[2].source, Some(photo("cell2")));
     assert!(doc.cells[1].source.is_none());
 
-    // The second removal takes cell 2, so the batch control is LIFO across holes.
-    assert_eq!(remove_last(&mut doc).expect("another photo").slot, 2);
+    // The second removal takes cell 2, so the batch control steps backwards across
+    // holes.
+    assert_eq!(remove_last(&mut doc), Some(2));
     doc.validate().expect("still a valid document");
 }
 
 #[test]
-fn restore_puts_the_cell_back_where_it_was() {
-    let mut doc = occupied("grid-4-2x2");
-    // A framing on the cell that is about to leave, so "restored in place" means
-    // the *contents* came back, not just a source path.
-    doc.cells[1].crop = CropTransform {
-        zoom: 3.0,
-        offset: (-0.4, 0.6),
-        rotation_deg: -22.5,
-    };
+fn remove_last_answers_none_on_an_empty_document() {
+    // Every cell empty: there is nothing to clear, and the answer comes without
+    // changing the document to find out.
+    let mut doc = CollageDoc::new(templates::get("strip-3-3x1").expect("registered"));
     let before = doc.clone();
-    let removed = remove_last(&mut doc).expect("there is a photo to drop");
-    // The last photo of this template is cell 3; removing cell 1 on its own is the
-    // per-cell clear, which is a different command.
-    assert_eq!(removed.slot, 3);
-
-    removed.restore(&mut doc).expect("the cell is free again");
-    assert_eq!(doc, before, "restore is the exact inverse of remove_last");
-
-    // And a hole in the middle comes back into the hole, not into the first empty
-    // cell: the batch control must not reorder a user's photos.
-    let mut doc = occupied("strip-4-4x1");
-    doc.cells[1] = Cell::default();
-    let removed = remove_last(&mut doc).expect("a photo");
-    removed.restore(&mut doc).expect("restores");
-    assert_eq!(doc.cells[3].source, Some(photo("cell3")));
-    assert!(doc.cells[1].source.is_none());
+    assert_eq!(remove_last(&mut doc), None);
+    assert_eq!(doc, before, "a refused removal changes nothing");
 }
 
 #[test]
-fn restore_refuses_a_cell_that_is_no_longer_free() {
-    let mut doc = occupied("strip-3-3x1");
-    let removed = remove_last(&mut doc).expect("a photo");
-    // Someone put a photo back in the meantime: restoring would drop it, so the
-    // caller has to decide instead.
-    doc.cells[2].source = Some(photo("other"));
-    let refused = removed
-        .clone()
-        .restore(&mut doc)
-        .expect_err("the cell is taken");
-    assert!(refused.to_string().contains("slot 2"), "{refused}");
-    assert_eq!(doc.cells[2].source, Some(photo("other")));
+fn a_neighbour_is_the_cell_next_to_this_one_on_the_sheet() {
+    // S14b's swap needs a second cell, and the keyboard can only name one by
+    // direction. The rule is geometric, because the library is not one row: cell 1
+    // of a 2x2 grid is next to cell 3 *above/below*, and index arithmetic would
+    // name cell 0 or 2 instead.
+    let square = templates::get("grid-4-2x2").expect("registered");
+    // The library's slot order for this template is row-major, so 0 is top-left,
+    // 1 top-right, 2 bottom-left, 3 bottom-right.
+    assert_eq!(square.neighbour(0, (1, 0)), Some(1), "right of 0 is 1");
+    assert_eq!(square.neighbour(1, (-1, 0)), Some(0), "left of 1 is 0");
+    assert_eq!(square.neighbour(0, (0, 1)), Some(2), "below 0 is 2");
+    assert_eq!(square.neighbour(3, (0, -1)), Some(1), "above 3 is 1");
+    // The edges of the sheet answer nothing rather than clamping, which is what
+    // makes an arrow key at the border a no-op.
+    assert_eq!(square.neighbour(0, (-1, 0)), None);
+    assert_eq!(square.neighbour(0, (0, -1)), None);
+    assert_eq!(square.neighbour(3, (1, 0)), None);
+    assert_eq!(square.neighbour(3, (0, 1)), None);
+    // A direction of nothing is not a direction.
+    assert_eq!(square.neighbour(0, (0, 0)), None);
 
-    // A document that shrank under the removed cell grows back to the layout the
-    // cell was taken from — the token carries it — and one that cannot is refused
-    // rather than written past the end. (The one that *can* is
-    // `restore_returns_the_layout_it_was_taken_from` below.)
-    let mut small = occupied("strip-2-2x1");
-    let removed = Removed {
-        slot: 5,
-        cell: Cell::default(),
-        template: templates::get("strip-2-2x1").expect("registered"),
-    };
-    assert!(removed.restore(&mut small).is_err());
-    assert_eq!(small.cells.len(), 2, "a refused restore changes nothing");
-}
+    // A strip: the same row all the way along, so the left/right neighbours are the
+    // index neighbours and up/down answers nothing at all.
+    let strip = templates::get("strip-4-4x1").expect("registered");
+    assert_eq!(strip.neighbour(0, (1, 0)), Some(1));
+    assert_eq!(strip.neighbour(3, (-1, 0)), Some(2));
+    assert_eq!(strip.neighbour(1, (0, 1)), None);
+    assert_eq!(strip.neighbour(1, (0, -1)), None);
 
-#[test]
-fn restore_returns_the_layout_it_was_taken_from() {
-    // Ruling 7's control "drops the last photo and brings it back", and the count
-    // moves the layout with it. For four photos of `grid-4-2x2` (1:1) there is no
-    // three-slot *grid* and no three-slot 1:1 layout at all, so the count rule's
-    // own answer on the way down (a 2:3 strip, the nearest aspect) cannot lead back
-    // to a grid on the way up: the token has to carry the layout.
-    let before = occupied("grid-4-2x2");
-    let mut doc = before.clone();
-    doc.cells[3].crop = CropTransform {
-        zoom: 2.1,
-        offset: (-0.2, 0.1),
-        rotation_deg: 31.0,
-    };
-    let before = doc.clone();
-    let removed = remove_last(&mut doc).expect("a photo");
-    assert_eq!(removed.template.name, "grid-4-2x2");
-    // The document shrinks to what the survivors need — that is the count rule, and
-    // it is a *different* layout.
-    let shrunk =
-        layout_for(3, doc.template.aspect, doc.template.family()).expect("a three-slot layout");
-    doc.template = shrunk.clone();
-    doc.cells.truncate(3);
-    assert_ne!(shrunk.name, "grid-4-2x2");
+    // A column: the other way round, and the *vertical* neighbour is the index
+    // neighbour — which is exactly the case index arithmetic would get right by
+    // luck and a row-major assumption would get wrong everywhere else.
+    let column = templates::get("strip-3-1x3").expect("registered");
+    assert_eq!(column.neighbour(0, (0, 1)), Some(1), "below the top cell");
+    assert_eq!(column.neighbour(2, (0, -1)), Some(1));
+    assert_eq!(column.neighbour(0, (1, 0)), None);
 
-    removed
-        .clone()
-        .restore(&mut doc)
-        .expect("the cell comes back");
-    assert_eq!(
-        doc, before,
-        "remove then restore is the exact inverse, layout included"
+    // **The stacking case, which is why the rule is geometric**: a mosaic where
+    // cell 0 is a tall left column and cells 1 and 2 stack beside it. "Right of 0"
+    // has two candidates at the same distance across, and the answer has to be
+    // deterministic — the nearer one along the direction, and the lower index when
+    // they tie.
+    let mosaic = templates::get("mosaic-3-hero").expect("registered");
+    let right = mosaic
+        .neighbour(0, (1, 0))
+        .expect("cell 0 has something right");
+    assert!(right != 0, "a cell is not its own neighbour");
+    assert!(
+        mosaic.slots[right].outline.bbox().x0 >= mosaic.slots[0].outline.bbox().x0,
+        "the neighbour is to the right"
     );
 
-    // A layout the user picked while the cell was out is kept when it can host the
-    // cell: that pick is newer than the token, and the cell only needs its slot.
-    let mut doc = occupied("grid-4-2x2");
-    let removed = remove_last(&mut doc).expect("a photo");
-    doc.template = templates::get("mosaic-4-hero").expect("registered");
-    doc.cells.resize(4, Cell::default());
-    removed.restore(&mut doc).expect("the slot is free");
-    assert_eq!(
-        doc.template.name, "mosaic-4-hero",
-        "the user's own layout survives the add-back"
-    );
-    assert_eq!(doc.cells[3].source, Some(photo("cell3")));
+    // Every direction on every shipped layout answers with a cell that exists, and
+    // never with the cell asked about: the caller indexes with the answer.
+    for template in templates::all() {
+        for slot in 0..template.slots.len() {
+            for direction in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                if let Some(other) = template.neighbour(slot, direction) {
+                    assert!(other < template.slots.len(), "{}", template.name);
+                    assert_ne!(other, slot, "{}: {slot}", template.name);
+                }
+            }
+        }
+    }
 }
 
 #[test]

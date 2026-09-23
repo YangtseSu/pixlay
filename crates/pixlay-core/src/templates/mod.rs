@@ -92,6 +92,22 @@ pub fn names() -> Vec<&'static str> {
     frozen::TEMPLATES.iter().map(|entry| entry.name).collect()
 }
 
+/// Templates with exactly `slots` slots, in library order (S14).
+///
+/// The layout stage's own query, and since S14b the *only* place that filter is
+/// written: [`Selection::layouts`](crate::Selection::layouts) is this call on the
+/// selection's length, and the CLI's `templates --slots` is this call on its own
+/// argument. The three used to be one rule with three expressions of it, which is
+/// exactly the drift the count filter cannot afford — the strip and the CLI have to
+/// agree about which layouts a count offers.
+pub fn with_slots(slots: usize) -> Vec<Template> {
+    frozen::TEMPLATES
+        .iter()
+        .filter(|entry| entry.slots.len() == slots)
+        .map(thaw)
+        .collect()
+}
+
 /// Looks a template up by name.
 pub fn get(name: &str) -> Option<Template> {
     frozen::TEMPLATES

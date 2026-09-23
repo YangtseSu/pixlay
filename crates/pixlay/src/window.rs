@@ -43,7 +43,7 @@ use libadwaita as adw;
 
 use pixlay_core::{
     CollageDoc, Command, CoreError, CropTransform, MAX_PHOTOS, MIN_PHOTOS, PixelSize, Project,
-    Removed, Selection, Template, templates,
+    Template, templates,
 };
 use pixlay_imaging::{gesture_grid, preview_source_long_edge};
 use pixlay_render::Images;
@@ -118,6 +118,8 @@ mod imp {
         pub selection: Cell<Option<usize>>,
         pub guides: Cell<bool>,
         pub canvas: OnceCell<gtk::DrawingArea>,
+        /// The `+` buttons over the empty cells (S14b), stacked over the canvas.
+        pub empty: OnceCell<Rc<canvas::EmptyCells>>,
         /// The two stages, and the picker behind the first of them (S13).
         pub pages: OnceCell<adw::NavigationView>,
         pub picker_page: OnceCell<adw::NavigationPage>,
@@ -137,9 +139,6 @@ mod imp {
         /// share ("the gallery costs no decode the canvas does not already pay
         /// for"), not the thread's total.
         pub gallery_decodes: Cell<u64>,
-        /// The cells the batch control has taken out, newest last (ruling 7's
-        /// LIFO): `+` brings the last one back before it asks for a file.
-        pub removed: RefCell<Vec<Removed>>,
         pub banner: OnceCell<adw::Banner>,
         pub toast: OnceCell<adw::ToastOverlay>,
         pub progress: OnceCell<gtk::ProgressBar>,
@@ -181,6 +180,7 @@ mod imp {
                 selection: Cell::new(None),
                 guides: Cell::new(false),
                 canvas: OnceCell::new(),
+                empty: OnceCell::new(),
                 pages: OnceCell::new(),
                 picker_page: OnceCell::new(),
                 editor_page: OnceCell::new(),
@@ -190,7 +190,6 @@ mod imp {
                 gallery_generation: Cell::new(0),
                 gallery_pending: Cell::new(false),
                 gallery_decodes: Cell::new(0),
-                removed: RefCell::new(Vec::new()),
                 banner: OnceCell::new(),
                 toast: OnceCell::new(),
                 progress: OnceCell::new(),
@@ -319,7 +318,11 @@ impl EditorWindow {
             .build();
 
         // ---- the editor page's content --------------------------------------
-        let canvas = canvas::build(self);
+        // The canvas is wrapped in an overlay (S14b): the `+` buttons of the empty
+        // cells are real GTK controls over it (ruling 9), and only the buttons claim
+        // a press — the canvas keeps every drag and click that is not on one.
+        let empty = Rc::new(canvas::EmptyCells::new(self, &canvas::build(self)));
+        let canvas = empty.canvas();
         // The layout band sits under the canvas (S14): the candidates are the
         // editor's own document with another template, and S15's compose controls
         // attach to the canvas above them, so the two are one page.
@@ -331,7 +334,7 @@ impl EditorWindow {
         banner.set_button_label(Some(&gettext("Find it…")));
         let editor_body = gtk::Box::new(gtk::Orientation::Vertical, 0);
         editor_body.append(&banner);
-        editor_body.append(&canvas);
+        editor_body.append(&empty.root());
         editor_body.append(&gallery.root());
         let editor_view = adw::ToolbarView::new();
         editor_view.add_top_bar(&header);
@@ -366,6 +369,7 @@ impl EditorWindow {
         self.set_title(Some(&gettext("Untitled collage")));
 
         imp.canvas.set(canvas).ok();
+        imp.empty.set(empty).ok();
         imp.pages.set(pages).ok();
         imp.picker_page.set(picker_page).ok();
         imp.editor_page.set(editor_page).ok();
@@ -590,6 +594,12 @@ impl EditorWindow {
 
     pub fn canvas_widget(&self) -> gtk::DrawingArea {
         self.imp().canvas.get().expect("the canvas exists").clone()
+    }
+
+    /// The `+` buttons over the empty cells (S14b), for the widget tree and the
+    /// tests.
+    pub fn empty_cells(&self) -> Option<Rc<canvas::EmptyCells>> {
+        self.imp().empty.get().cloned()
     }
 
     /// The picker, for the tests and for the widgets that call into it.
@@ -983,22 +993,21 @@ impl EditorWindow {
             .count()
     }
 
-    /// The layouts the gallery lists: every template with the document's own photo
+    /// The layouts the gallery lists: every template with the document's own **cell**
     /// count, in library order.
     ///
-    /// `Selection::layouts` is the picker's own query — the same one the CLI's
-    /// `templates --slots` answers with — so this is not a second rule about what
-    /// "the layouts with that count" means.
+    /// The strip follows the layout rather than the photo count (S14b): `+` takes
+    /// the layout with one cell more and leaves it empty, so a three-cell document
+    /// with two photos in it is still a three-cell document, and a strip filtered
+    /// to the photo count would show the layouts of a *different* document — the
+    /// user's own next click would then move the sheet somewhere they were not
+    /// looking.
+    ///
+    /// [`templates::with_slots`] is the same query the CLI's `templates --slots`
+    /// answers with and the one `Selection::layouts` is expressed in, so the three
+    /// cannot disagree about what "the layouts with that count" means.
     pub fn candidate_templates(&self) -> Vec<Template> {
-        let doc = self.document();
-        let photos: Vec<PathBuf> = doc
-            .cells
-            .iter()
-            .filter_map(|cell| cell.source.clone())
-            .collect();
-        Selection::new(photos)
-            .map(|selection| selection.layouts())
-            .unwrap_or_default()
+        templates::with_slots(self.document().cells.len())
     }
 
     /// Switches the document to the layout `name`.
@@ -1028,53 +1037,81 @@ impl EditorWindow {
         }
     }
 
-    /// Drops the last photo, keeping the cell so `+` can bring it back (ruling 7).
+    /// The count control's `−`: one cell fewer, and the layout follows (S14b).
     ///
-    /// The token is the same `remove_last` the command applies to the same
-    /// document, so the two cannot disagree about which cell it was.
+    /// The control addresses the *layout* — the same thing [`add_photo`] does — so
+    /// this is one command and not two: the last cell leaves with whatever it held,
+    /// and `Ctrl+Z` is the way back. The cell's photo is not remembered anywhere,
+    /// which is the point: `+` means "switch to a layout with one more cell", not
+    /// "undo the last removal".
+    ///
+    /// [`add_photo`]: Self::add_photo
     pub fn remove_photo(&self) {
-        if self.photo_count() <= MIN_PHOTOS {
+        let cells = self.document().cells.len();
+        if cells <= MIN_PHOTOS {
             self.toast(&fill(
                 gettext("A collage needs at least {} photos"),
                 &[MIN_PHOTOS],
             ));
             return;
         }
-        let mut probe = self.document();
-        let Some(removed) = pixlay_core::remove_last(&mut probe) else {
-            return;
-        };
-        if self.apply(Command::RemoveLastPhoto).is_ok() {
-            self.imp().removed.borrow_mut().push(removed);
+        // The selection can name a cell that is about to stop existing.
+        if self.selection().is_some_and(|slot| slot >= cells - 1) {
+            self.select(None);
         }
+        let _ = self.apply(Command::RemoveLastCell);
     }
 
-    /// Puts the last removed cell back where it was.
-    pub fn restore_photo(&self) {
-        let Some(removed) = self.imp().removed.borrow_mut().pop() else {
-            return;
-        };
-        let _ = self.apply(Command::RestorePhoto(removed));
-    }
-
-    /// The count control's `+`: bring the last removed photo back, or ask for a
-    /// file to append.
+    /// The count control's `+`: switch to the layout with one cell more, and leave
+    /// the new cell empty (S14b).
     ///
-    /// Ruling 7's LIFO rule: the batch control drops the last photo and brings it
-    /// back, so `+` restores while it can and only then asks the user for a file.
+    /// Ruled 2026-09-23: `+`'s job is to change the layout, not to open a file
+    /// chooser and not to undo the last removal. The cell it adds is empty on
+    /// purpose, and an empty cell is a control of its own — the canvas draws a `+`
+    /// over it, and clicking that region is what asks for a photo
+    /// (`EditorWindow::choose_photo`, the same path a double click on an empty cell
+    /// already took).
     pub fn add_photo(&self) {
-        if self.photo_count() >= MAX_PHOTOS {
+        let cells = self.document().cells.len();
+        if cells >= MAX_PHOTOS {
             self.toast(&fill(
                 gettext("A collage takes at most {} photos"),
                 &[MAX_PHOTOS],
             ));
             return;
         }
-        if !self.imp().removed.borrow().is_empty() {
-            self.restore_photo();
-            return;
+        if self.apply(Command::AddCell).is_ok() {
+            // The user asked for a cell; the next thing they want is a photo in it,
+            // so the new cell is selected and the canvas's own `+` is under the
+            // pointer they already have.
+            self.select(Some(cells));
         }
-        self.choose_photos();
+    }
+
+    /// Exchanges the selected cell with its neighbour in direction `(dx, dy)`
+    /// (S14b): `(-1, 0)` is the cell to the left, `(0, 1)` the cell below.
+    ///
+    /// Geometric rather than index arithmetic, because the library is not one row:
+    /// `Template::neighbour` is the rule, and it is in `pixlay-core` so the CLI and
+    /// the canvas cannot disagree about which cell is "to the right". `None` from
+    /// that function — the edge of the sheet — means there is nothing to swap with,
+    /// and the edit is skipped rather than clamped.
+    pub fn swap_towards(&self, slot: usize, direction: (i32, i32)) {
+        let doc = self.document();
+        let Some(target) = doc.template.neighbour(slot, direction) else {
+            return;
+        };
+        self.swap_slots(slot, target);
+    }
+
+    /// Exchanges two cells whole — photo *and* framing (S14b).
+    ///
+    /// The whole [`Cell`](pixlay_core::Cell) moves, so the picture that looked right
+    /// in its cell keeps the framing that made it look right. The pairs that cannot
+    /// be a swap — the same cell twice, a cell outside the layout — are refused by
+    /// the command itself, so the CLI and the window report them the same way.
+    pub fn swap_slots(&self, left: usize, right: usize) {
+        let _ = self.apply(Command::SwapCells { left, right });
     }
 
     /// Appends `paths` in the order they arrive, one command.
@@ -1762,14 +1799,27 @@ impl EditorWindow {
         self.update_title();
         self.update_banner();
         self.update_gallery_control();
+        // The empty cells' `+` buttons follow the document, so they are written here
+        // rather than from a draw: showing a widget inside GTK's own traversal
+        // leaves it snapshotted before it is allocated (`EmptyCells::sync`).
+        if let Some(empty) = self.empty_cells() {
+            empty.sync(self);
+        }
         self.canvas_widget().queue_draw();
     }
 
-    /// Writes the count control: the number of photos and the two bounds it acts
-    /// on (`MIN_PHOTOS` / `MAX_PHOTOS`, the picker's own).
+    /// Writes the count control: the document's own cell count and the two bounds
+    /// it acts on (`MIN_PHOTOS` / `MAX_PHOTOS`, the picker's own).
+    ///
+    /// The number is the **cell** count, because that is the number the two buttons
+    /// move (S14b): `+` takes the layout with one cell more, `−` the layout with one
+    /// cell fewer, and the control reads out the count it edits. It is also the
+    /// number the strip below it filters by, so the three always agree — while the
+    /// photo count can legitimately be lower (a `+` whose cell has no photo yet, a
+    /// per-cell clear).
     fn update_gallery_control(&self) {
         if let Some(gallery) = self.imp().gallery.get() {
-            gallery.update_control(self.photo_count());
+            gallery.update_control(self.document().cells.len());
         }
     }
 

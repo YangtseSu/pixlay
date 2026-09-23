@@ -280,12 +280,13 @@ Every decision this review raised, and what the human ruled. The plan that follo
 
 Two further rulings that the questions did not cover and that change the contract:
 
-- **No mirroring and no quarter turns.** Verbatim: *"不要翻转了。只要任意角度旋转和移动和缩放。旋转上限取消。"*
-  So the per-cell capabilities are **zoom, move, rotate by any angle** — and the ±45° cap, together with
-  the `CLAMP_ZOOM_LIMIT`/`rotation_limited` machinery that existed to reduce an over-asking angle, is
-  **removed** (S11). Flip is added to `AGENTS.md`'s "not doing" list.
-- **The Xiaomi gallery allows nine photos.** The human's word overrides the guides this review's web
-  check found ("Select 1 to 6 photos" in Xiaomi's own MIUI-era manuals, §4): those guides are wrong or
-  outdated for the current gallery. The 2–9 range stands as the product's own decision either way, and
-  the parts of §4 that remain load-bearing are Google Photos' *live-preview templates* pattern and the
-  observation that flip and floating per-cell buttons come from neither reference product.
+- **No mirroring and no quarter turns.** The ruling keeps only rotation by any angle, movement and zoom,
+  and cancels the rotation cap. So the per-cell capabilities are **zoom, move, rotate by any angle** —
+  and the ±45° cap, together with the `CLAMP_ZOOM_LIMIT`/`rotation_limited` machinery that existed to
+  reduce an over-asking angle, is **removed** (S11). Flip is added to `AGENTS.md`'s "not doing" list.
+- **The Xiaomi gallery allows nine photos.** The human ruled that on 2026-09-22, and the ruling overrides
+  the guides this review's web check found ("Select 1 to 6 photos" in Xiaomi's own MIUI-era manuals, §4):
+  those guides are wrong or outdated for the current gallery. The 2–9 range stands as the product's own
+  decision either way, and the parts of §4 that remain load-bearing are Google Photos' *live-preview
+  templates* pattern and the observation that flip and floating per-cell buttons come from neither
+  reference product.

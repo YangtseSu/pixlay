@@ -161,7 +161,7 @@ fn the_main_path_can_be_walked() {
     // keeps the cells that survive.
     let gallery = window.gallery().expect("the editor has a layout band");
     assert!(window.wait_for_gallery(support::WAIT), "the band was built");
-    assert_eq!(gallery.count_label().label(), "4 photos");
+    assert_eq!(gallery.count_label().label(), "4");
     let candidates = gallery.candidates();
     assert!(
         candidates.len() >= 3,
@@ -196,32 +196,37 @@ fn the_main_path_can_be_walked() {
         "the band highlights the layout the document is on"
     );
 
-    // The count control, on the same band: `−` drops the last photo and `+`
-    // brings it back (ruling 7's LIFO), which is how a wrong count is fixed
-    // without going back to the picker.
+    // The count control, on the same band (S14b): `−` takes the layout with one
+    // cell fewer and `+` gives it back, empty — the control moves the layout, so a
+    // wrong count is fixed without going back to the picker and without `+` meaning
+    // two different things depending on history.
     assert!(gallery.minus_button().is_sensitive());
     window.remove_photo();
     assert!(
         window.wait_for_idle(support::WAIT) && window.wait_for_gallery(support::WAIT),
         "the shorter layout rendered"
     );
-    assert_eq!(window.photo_count(), 3, "one photo left the collage");
-    assert_eq!(window.document().cells.len(), 3, "and the layout shrank");
+    assert_eq!(
+        window.document().cells.len(),
+        3,
+        "the layout gave up a cell"
+    );
+    assert_eq!(window.photo_count(), 3, "and the photo went with it");
     window.add_photo();
     assert!(
         window.wait_for_idle(support::WAIT) && window.wait_for_gallery(support::WAIT),
-        "the restored layout rendered"
+        "the grown layout rendered"
+    );
+    assert_eq!(window.document().cells.len(), 4, "four cells again");
+    assert!(
+        window.document().cells[3].source.is_none(),
+        "and the new cell is empty — it is the layout that grew"
     );
     assert_eq!(
         window.photo_count(),
-        4,
-        "and `+` brought the photo back rather than asking for a file"
-    );
-    assert_eq!(window.document().cells.len(), 4);
-    assert_eq!(
-        window.document().cells[3].source,
-        doc.cells[3].source,
-        "the cell came back in its own slot"
+        3,
+        "so the photo count is one below the cell count, and the next thing the \
+         stage offers is the empty cell's own `+`"
     );
 
     // ---- adjust the framing ---------------------------------------------
@@ -367,10 +372,21 @@ fn the_main_path_can_be_walked() {
         "the window has to say that a photo is missing, got {:?}",
         window.notice()
     );
+    // How many bitmaps the canvas should hold: one per cell that names a photo,
+    // minus the one that cannot be read. Derived from the document rather than
+    // written down, because `+` can leave a cell empty (S14b) and the count is
+    // therefore a fact about this walk rather than a constant of the product.
+    let expected_bitmaps = window
+        .document()
+        .cells
+        .iter()
+        .filter(|cell| cell.source.is_some())
+        .count()
+        - 1;
     assert_eq!(
         window.images().1.len(),
-        3,
-        "the other three slots still have bitmaps"
+        expected_bitmaps,
+        "the slots that still have a photo and a readable file still have bitmaps"
     );
     assert!(
         window

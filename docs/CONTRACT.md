@@ -315,7 +315,7 @@ pixlay-render templates [--aspect <ratio>] [--slots <n>] [--json]
 pixlay-render init      --template <name> --out <file.pixlay> [--photo <p>...]
 pixlay-render edit      --project <file.pixlay> --out <file.pixlay> --slot <i> --rotate <deg> --zoom <z> --offset <x>,<y> --clear
 pixlay-render edit      --project <file.pixlay> --out <file.pixlay> --slot <i> --photo <file>
-pixlay-render edit      --project <file.pixlay> --out <file.pixlay> --template <name> --add-photo <file> --remove-photo
+pixlay-render edit      --project <file.pixlay> --out <file.pixlay> --template <name> --add-cell --remove-cell --add-photo <file> --swap <i>,<j>
 pixlay-render edit      --project <file.pixlay> --out <file.pixlay> --gap <rel> --radius <rel> --border-color <r,g,b>
 pixlay-render hit       --project <file.pixlay> --at <x>,<y> [--json]
 pixlay-render hit       --template <name> --at <x>,<y> [--json]
@@ -440,10 +440,12 @@ operations the band performs:
 |---|---|
 | `templates --slots <n>` | only the templates with exactly `n` slots, `2..=9` (exit 1 outside, and the same bound the format's slot limit gives). This is `Selection::layouts` — the gallery's own query — seen from the outside, so a caller can list a photo count's candidates; the two filters combine with `--aspect`. The report echoes `slots` beside `aspect` |
 | `edit --template <name>` | switches the document to another layout, keeping the surviving cells' photos and framing (`Command::SetTemplate`'s retention: a layout with fewer slots drops the tail, one with more appends empty cells). An unknown name is exit 1 with the library listed |
-| `edit --add-photo <file>` | appends a photo: the first empty cell, else the layout with one slot more (`Command::AddPhotos`, the window's `+`). Repeated once per photo in argument order; a photo that is not there is exit 2 with the path named, and a tenth is exit 2 (`a collage takes at most 9 photos`) |
-| `edit --remove-photo` | drops the last **occupied** cell and shrinks the layout to what the survivors need (`Command::RemoveLastPhoto`), never below two slots. An empty document is exit 2 (`no photo to remove: every cell is empty`). Refused together with `--add-photo` (exit 1): they are opposites, and one edit is one intent |
+| `edit --add-cell` | takes the layout with one cell more, leaving it empty (`Command::AddCell`, the window's `+`). An edit *about the layout*, so it moves the count without placing a photo: the cell the user wants filled is the one that shows a `+`, and clicking that is what asks for the file (S14b) |
+| `edit --remove-cell` | takes the layout with one cell fewer, dropping the last cell whatever it holds (`Command::RemoveLastCell`, the window's `−`). Exit 2 at two cells (`a collage's layout has at least 2 cells`) — the floor is the layout's, not the photo count's. The mirror image of `--add-cell`, and refused together with it (exit 1): they are opposites, and one edit is one intent |
+| `edit --swap <i>,<j>` | exchanges two cells **whole** — photo and framing both (`Command::SwapCells`), because the framing is what makes a photo look right in *that* cell. Exit 2 for the same cell twice (`slot i cannot be swapped with itself`) and for a cell the layout does not have; a malformed pair is exit 1. The window's own path is `Ctrl+Shift+Arrow`, which names the neighbour geometrically (`Template::neighbour`, S14b) |
+| `edit --add-photo <file>` | appends a photo: the first empty cell, else the layout with one slot more (`Command::AddPhotos`). Repeated once per photo in argument order; a photo that is not there is exit 2 with the path named, and a tenth is exit 2 (`a collage takes at most 9 photos`) |
 | `edit --slot <i> --photo <file>` | the photo that cell shows instead. Needs `--slot` (exit 1 otherwise, like the framing flags), and the stored path follows `init --photo`'s rule (relative to the project when the two share a root, absolute otherwise) |
-| the order of one `edit` | `--template`, `--add-photo`, `--slot`/`--photo`, then the framing — so the framing is fitted against the document the earlier flags produced. `--clear` is exclusive with `--photo` as well as with the framing flags |
+| the order of one `edit` | `--template`, `--add-cell`/`--remove-cell`, `--swap`, `--add-photo`, `--slot`/`--photo`, then the framing — so the framing is fitted against the document the earlier flags produced, and `--swap 0,3 --slot 0 --rotate 10` frames the cell that ends up at index 0. `--clear` is exclusive with `--photo` as well as with the framing flags |
 | one implementation | every one of these goes through the same `pixlay_core::Command` the window sends (`crates/pixlay-cli/src/cli.rs::edit_project` applies them to a `History`), so "the CLI and the window produce the same document" is a property of the code rather than of two editors kept in step by hand — asserted in `crates/pixlay/tests/layout.rs` |
 
 Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wall clock, with compositing and encoding reported separately.
@@ -546,8 +548,8 @@ were taken: they are the process record, and the S12c/S12d results in
 |---|---|
 | the `AGENTS.md` verification render (`render --project tests/fixtures/verify.pixlay --dpi 300 --stats`, eight photos **and one `{date}` layer** since S5) | 14043x10532, **ms 6164/6359** (two runs) + **encode_ms 2469/2475**, **`peak_rss_mb` 1641**, 9,114,833 bytes. The same project with the layer removed: ms 6360/5660, peak 1631, 9,056,692 bytes — **the one line's cost is below the run-to-run spread of the decode+resample stage**, so no per-layer number is claimed at 139.5 MP |
 | per-layer cost at 16.7 MP (400x300 mm at 300 dpi, empty cells) | white sheet alone **24-42 ms** (3 runs); + 2,601 tiles **295-436 ms** → a tile is about **0.13 ms**, so the 10,000-tile cap is ~1.3 s of drawing at that size; + 20 wrapped CJK captions 31-57 ms (below the spread) |
-| punctuation squeezing | one em per full-width mark; `。，` = 0.5 + 1.0 em, `。。。` = 0.5 + 0.5 + 1.0, a lone `。` = 1.0, and a mark at a line boundary keeps 1.0 |
-| kinsoku | `他他他说。他` at a four-em width breaks as `他他他 / 说。他`; over 4 paragraphs x 6 widths, no line starts with `、。，．：；？！）］｝〕〉》」』】〙〛’”` and none ends with `（［｛〔〈《「『【〘〚‘“` |
+| punctuation squeezing | one em per full-width mark; a full-width full stop followed by a full-width comma = 0.5 + 1.0 em, three consecutive full-width full stops = 0.5 + 0.5 + 1.0, a lone full-width full stop = 1.0, and a mark at a line boundary keeps 1.0 |
+| kinsoku | a six-character CJK sample (three identical Han characters, then one more Han character, a full-width full stop and a final Han character) at a four-em width breaks after the third character; over 4 paragraphs x 6 widths, no line starts with any of a 21-mark closing set (eight punctuation marks — ideographic comma, ideographic full stop, full-width comma, full-width full stop, full-width colon, full-width semicolon, full-width question mark, full-width exclamation mark — the three full-width closing brackets, the eight CJK closing brackets and the two closing quotation marks) and none ends with any of a 13-mark opening set (the three full-width opening brackets, the eight CJK opening brackets and the two opening quotation marks) |
 | preview vs export with text (2N vs N, downsampled) | RMSE **1.92** (threshold 6; AGENTS.md's photo-only A0 measurement is 2.62); the text's ink rectangle at 2N is the one at N doubled to within 1 px |
 | the committed test font | `pixlay-cli/tests/fixtures/fonts/pixlay-test-sans.otf`, **93,100 bytes**, 691 glyphs covering 204 codepoints, GPOS `halt` present; regenerated by `fonts/generate.py` from Arch's `noto-fonts-cjk` (SIL OFL, `OFL.txt` beside it) |
 | the text fixture (`render --project tests/fixtures/text.pixlay --dpi 150 --preview-px 2400`) | 2400x1801, **ms 459** + encode 45, peak 77 MB, 3,320,360 bytes with its three layers; the same project with `text: []` is ms 355, 3,276,176 bytes — the three layers (a wrapped 45-character CJK caption, a date line and a 15-tile watermark) cost about **100 ms** at 2400 px |
@@ -960,14 +962,17 @@ above are unchanged by the sequence: still one document, one renderer, one gestu
 library and the gallery are **not** renderers of the document — a candidate thumbnail is `render_rgb8` of
 the same drawn document at a smaller size, which S14's own criteria hold it to (§8, "S14").
 
-What the layout stage is, as of S14 (`crates/pixlay/src/layout.rs`), and what a caller may rely on:
+What the layout stage is, as of S14b (`crates/pixlay/src/layout.rs`, `canvas.rs`), and what a caller may
+rely on:
 
-- **The candidates are the layouts with the photo count, and only those** (ruling 25, 2026-09-23):
-  `Selection::layouts()` — the picker's own query, which the CLI's `templates --slots` answers with — in
-  library order. Each candidate is a **real document**: the editor's own document with
-  `Command::SetTemplate` applied, so a candidate of another aspect is drawn at its own shape and the
-  sheet's shape changes with the click. A document whose count has no layout (a per-cell clear can leave
-  fewer photos than slots) shows an empty cell-shaped placeholder instead of a strip.
+- **The candidates are the layouts with the document's cell count, and only those** (ruling 25, 2026-09-23;
+  S14b moved the count from the *photo* count to the *cell* count): `templates::with_slots()`, the one
+  function the CLI's `templates --slots` and `Selection::layouts()` are expressed in. Each candidate is a
+  **real document**: the editor's own document with `Command::SetTemplate` applied, so a candidate of
+  another aspect is drawn at its own shape and the sheet's shape changes with the click. The strip follows
+  the layout rather than the photo count because `+` can leave a cell empty: a three-cell document with two
+  photos in it is still a three-cell document, and a strip filtered to the photos would offer the layouts of
+  a *different* one. A count with no layout shows an empty cell-shaped placeholder instead of a strip.
 - **The band is a band on the document's page**: the editor's content is
   `banner · canvas · gallery`, so the canvas keeps the majority of the page and the band is one candidate
   cell tall (measured: 139 logical px of a 760-px window, a 128x96 thumbnail in a 115-px cell). The
@@ -977,15 +982,32 @@ What the layout stage is, as of S14 (`crates/pixlay/src/layout.rs`), and what a 
   the same document costs **7** with it (one per distinct file; the count that remains is the canvas's
   own, and the request made before the canvas was allocated at all — a 1x1 grid — is gone with it,
   `EditorWindow::refresh_document`).
-- **The count is a control, not a readout**: `− / N photos / +` at the band's start, insensitive at the
-  floor (`MIN_PHOTOS`) and at the ceiling (`MAX_PHOTOS`), with the picker's own message if a caller asks
-  anyway. `−` clears the last *occupied* cell and shrinks the layout to what the survivors need; `+`
-  brings the last removed cell back (ruling 7's LIFO — the token is the same `selection::remove_last` the
-  command applies, so the two cannot disagree about which cell it was, and it carries the layout the cell
-  was taken from) and only asks `GtkFileDialog::open_multiple` for files when it has nothing to bring
-  back. The one rule that decides *which* layout is `selection::layout_for` (same aspect → same recipe
-  family → nearest aspect → library order), so the window and the CLI cannot disagree about "the layout
-  with this count".
+- **The count is a control of the layout, and it reads the number it edits** (ruled 2026-09-23): the label
+  is the **cell count alone** — no noun beside it, because the control sits between two buttons and above a
+  strip of the very layouts it counts, and what the number counts is the accessible name
+  (`Photos in the collage`), which is where HIG `guidelines/accessibility` asks for it. `+` takes the
+  layout with one cell more and leaves the new cell **empty**; `−` takes the layout with one cell fewer,
+  dropping the last cell whatever it holds. Neither remembers a photo: `Ctrl+Z` is the way a dropped photo
+  comes back, which is what makes `+` mean one thing rather than two. Both are insensitive at their bound
+  (`MIN_PHOTOS` / `MAX_PHOTOS`, the picker's own floor and ceiling), with the picker's own message if a
+  caller asks anyway, and `selection::layout_for` (same aspect → same recipe family → nearest aspect →
+  library order) is the one rule that decides *which* layout either one moves to.
+- **An empty cell is a control of its own.** The canvas is wrapped in a `GtkOverlay` and each empty cell
+  carries a real `GtkButton` with `list-add-symbolic` at the cell's centre (32x32, `osd` + `circular`
+  classes, explicit accessible name): clicking it asks for the photo of *that* cell
+  (`EditorWindow::choose_photo`), which is the pointer's half of "an empty cell asks for a picture" — the
+  keyboard's half is `Return` on the selected cell. The buttons are built once, at construction — one per
+  slot, nine is the format's own ceiling — and shown or hidden by `EditorWindow::refresh`, never from a
+  draw: showing a widget inside GTK's own traversal leaves it snapshotted before it is allocated (measured
+  2026-09-23, "Trying to snapshot GtkButton … without a current allocation"). An occupied cell has no
+  button over it, so a drag or a click on a photo is still the framing gesture.
+- **Two cells can be exchanged whole** (ruled 2026-09-23): `Command::SwapCells { left, right }` moves the
+  [`Cell`], so the photo keeps the framing that made it look right where it was; the keyboard's path is
+  `Ctrl+Shift+Left/Right/Up/Down`, which names the neighbour geometrically — `Template::neighbour` is in
+  `pixlay-core`, so the canvas and the CLI cannot disagree about which cell is "to the right" — and the
+  edge of the sheet answers `None` rather than clamping. The same cell twice and a cell the layout does not
+  have are refused by the command itself (`CoreError::SameSlot` / `NoSuchSlot`), so the window and the CLI
+  report them the same way.
 - **A candidate cell is a `GtkToggleButton`** with an explicit accessible name, so HIG
   `guidelines/accessibility` and `guidelines/pointer-touch` cover it for free (focusable, named, `Space`
   activates it), and the layout the document is on is shown by the app's own highlight — the accent border

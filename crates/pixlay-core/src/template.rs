@@ -176,6 +176,59 @@ impl Template {
             .position(|slot| slot.outline.contains(point))
     }
 
+    /// The slot next to `slot` in direction `(dx, dy)` (S14b).
+    ///
+    /// A swap needs a *second* cell, and the keyboard has only four directions to
+    /// name one with. The rule is geometric rather than index arithmetic because
+    /// the library is not a single row: slot 3 of a 2×2 grid is slot 1's
+    /// *neighbour below*, and index 1 ± 1 would name slot 0 or 2 instead. The
+    /// directions are the canvas axes, in normalized space — `(-1, 0)` is the cell
+    /// to the left, `(0, 1)` the cell below.
+    ///
+    /// The choice, among the slots whose centre lies in that direction at all:
+    /// minimise the distance *along* the direction plus twice the distance
+    /// *across* it, so a cell straight ahead beats a nearer one off to the side.
+    /// Ties keep the lower index, so the answer is deterministic. `None` when no
+    /// slot lies in that direction, which is how the edge of the sheet says
+    /// "nothing that way" — the caller then does nothing rather than clamping.
+    pub fn neighbour(&self, slot: usize, direction: (i32, i32)) -> Option<usize> {
+        let (dx, dy) = (f64::from(direction.0), f64::from(direction.1));
+        if dx == 0.0 && dy == 0.0 {
+            return None;
+        }
+        let centre = |index: usize| -> Option<Point> {
+            let box_ = self.slots.get(index)?.outline.bbox();
+            Some(Point::new(
+                (box_.x0 + box_.x1) / 2.0,
+                (box_.y0 + box_.y1) / 2.0,
+            ))
+        };
+        let from = centre(slot)?;
+        let mut best: Option<(f64, usize)> = None;
+        for index in 0..self.slots.len() {
+            if index == slot {
+                continue;
+            }
+            let Some(to) = centre(index) else {
+                continue;
+            };
+            let (ox, oy) = (to.x - from.x, to.y - from.y);
+            // The offset along the direction, and the part of it across: the
+            // direction is axis-aligned, so the projection *is* the matching
+            // component.
+            let along = ox * dx + oy * dy;
+            if along <= EPSILON {
+                continue;
+            }
+            let across = if dx == 0.0 { ox.abs() } else { oy.abs() };
+            let score = along + 2.0 * across;
+            if best.is_none_or(|(best_score, _)| score < best_score) {
+                best = Some((score, index));
+            }
+        }
+        best.map(|(_, index)| index)
+    }
+
     /// Pairs of slots whose outlines share a stretch of boundary, with the
     /// shared segment itself.
     ///

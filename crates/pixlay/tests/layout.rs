@@ -19,8 +19,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use gtk4::prelude::*;
+use pixlay::canvas;
 use pixlay::window::Stage;
-use pixlay_core::{CropTransform, Project, Selection, templates};
+use pixlay_core::{CropTransform, Project, templates};
 use pixlay_imaging::Source;
 
 /// The threshold from `AGENTS.md`: the same composition at `2N` and `N`,
@@ -116,7 +117,7 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
         "the document's own layout is the highlighted one"
     );
     // The count control reads the picker's numbers: the label, and the two bounds.
-    assert_eq!(gallery.count_label().label(), "8 photos");
+    assert_eq!(gallery.count_label().label(), "8");
     assert!(
         gallery.minus_button().is_sensitive(),
         "8 photos can drop one"
@@ -253,9 +254,10 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
         );
     }
 
-    // ---- the LIFO removal --------------------------------------------------
-    // Framing on the last cell, so "back where it was" means the contents and not
-    // only a path.
+    // ---- the count control moves the layout one cell at a time -------------
+    // S14b (ruled 2026-09-23): `+`/`−` address the *layout*, and neither remembers a
+    // photo. Framing on the last cell first, so "the survivors are untouched" means
+    // the contents and not only a path.
     window
         .apply(pixlay_core::Command::SetCrop {
             slot: 7,
@@ -268,13 +270,15 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
         .expect("the last cell takes framing");
     settle(&window);
     let framed = window.document();
-    let framed_cell = framed.cells[7].clone();
 
     window.remove_photo();
     settle(&window);
     let removed = window.document();
-    assert_eq!(window.photo_count(), 7, "one photo left");
-    assert_eq!(removed.cells.len(), 7, "the layout shrank with the count");
+    assert_eq!(
+        removed.cells.len(),
+        7,
+        "the layout gave up one cell of its own"
+    );
     assert_eq!(
         removed.template.name, "mosaic-7-t4b3",
         "4:3 stays 4:3 through the count rule: `layout_for`'s first preference"
@@ -284,41 +288,166 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
         framed.cells[..7],
         "every surviving cell kept its photo and framing"
     );
-    // The strip follows the count: the candidates are the 7-slot layouts now.
+    // The strip follows the layout, so the candidates are the seven-cell layouts.
     assert_eq!(
         gallery.candidates(),
         layouts_of(&removed),
-        "the strip lists the layouts with the *new* count"
+        "the strip lists the layouts with the *new* cell count"
     );
-    assert_eq!(gallery.count_label().label(), "7 photos");
+    assert_eq!(gallery.count_label().label(), "7");
 
-    // The add-back: the LIFO half of the control (ruling 7).
+    // `+` gives the layout one cell back, and the cell is **empty**: it is a layout
+    // edit, not a restore of the photo that left.
     window.add_photo();
     settle(&window);
-    assert_eq!(window.photo_count(), 8, "the photo came back");
-    assert_eq!(
-        window.document().cells.len(),
-        8,
-        "and so did the layout that held it"
-    );
-    assert_eq!(
-        window.document().cells[7],
-        framed_cell,
-        "the cell came back with its own photo and its own framing"
-    );
+    assert_eq!(window.document().cells.len(), 8, "eight cells again");
     assert_eq!(
         window.document().template.name,
         "mosaic-8-s14",
-        "the add-back returns the layout the removal took away"
+        "and the same layout the document was on"
+    );
+    assert!(
+        window.document().cells[7].source.is_none(),
+        "the new cell has no photo: {:?}",
+        window.document().cells[7].source
+    );
+    assert_eq!(
+        window.photo_count(),
+        7,
+        "so the photo count is one below the cell count"
+    );
+    // The empty cell is what asks for a photo, and it is a real control over the
+    // canvas (`EmptyCells`), reachable by the Tab order like any other button.
+    let empty = window
+        .empty_cells()
+        .expect("the canvas has an empty-cell layer");
+    // The buttons follow the canvas's own allocation, which the window writes on
+    // every refresh; this call makes the geometry the test measures explicit.
+    let area = window.canvas_widget();
+    empty.sync_in(&window, area.width(), area.height());
+    let add = empty.button(7).expect("the empty cell has a `+` button");
+    assert!(add.is_visible(), "and the `+` is on screen");
+    assert!(add.is_focusable(), "and reachable with the keyboard");
+    // **The button is really allocated and really over its own cell**, which is the
+    // number behind "the empty cell shows a `+`": the widget's own corners, in the
+    // canvas's coordinates, against the slot's own rectangle from the placement.
+    assert!(
+        add.width() > 0 && add.height() > 0,
+        "the `+` was never allocated ({}x{})",
+        add.width(),
+        add.height()
+    );
+    let canvas_widget = window.canvas_widget().upcast::<gtk4::Widget>();
+    let origin = add
+        .compute_point(&canvas_widget, &gtk4::graphene::Point::new(0.0, 0.0))
+        .expect("the `+` is in the canvas's own space");
+    let (grid, _) = window.images();
+    let placement = canvas::placement(grid, canvas_widget.width(), canvas_widget.height());
+    let slot_box = window
+        .document()
+        .template
+        .slots
+        .get(7)
+        .expect("the layout has eight slots")
+        .outline
+        .bbox();
+    let (x0, y0) = placement.to_widget(pixlay_core::Point::new(slot_box.x0, slot_box.y0));
+    let (x1, y1) = placement.to_widget(pixlay_core::Point::new(slot_box.x1, slot_box.y1));
+    let centre_x = f64::from(origin.x()) + f64::from(add.width()) / 2.0;
+    let centre_y = f64::from(origin.y()) + f64::from(add.height()) / 2.0;
+    assert!(
+        centre_x > x0 && centre_x < x1 && centre_y > y0 && centre_y < y1,
+        "the `+` ({centre_x:.0},{centre_y:.0}) is not inside its own cell \
+         ({x0:.0},{y0:.0})-({x1:.0},{y1:.0})"
+    );
+    eprintln!(
+        "the empty cell's `+`: {}x{} at {:.0},{:.0} in the canvas; its cell is \
+         {:.0},{:.0}-{:.0},{:.0}",
+        add.width(),
+        add.height(),
+        origin.x(),
+        origin.y(),
+        x0,
+        y0,
+        x1,
+        y1
+    );
+    // And a cell that holds a photo has no `+` over it: an occupied cell is dragged
+    // and clicked to reframe, and a button on top of it would take that press.
+    assert!(
+        !empty.button(0).expect("a first button").is_visible(),
+        "cell 0 holds a photo and must have no `+`"
+    );
+
+    // Clicking it asks for a photo rather than placing one, so what this checks is
+    // the wiring: the button exists, is named, and belongs to the empty cell. The
+    // chooser itself is a `GtkFileDialog` a test cannot answer.
+    // `+` on a full document is the ceiling and reports it once.
+    let full = nine_photo_document();
+    window.open_document(full);
+    settle(&window);
+    assert_eq!(window.document().cells.len(), 9);
+    assert!(!gallery.plus_button().is_sensitive(), "nine is the ceiling");
+
+    // ---- two photos are swappable in the layout stage ----------------------
+    // S14b: a whole cell moves, photo and framing together.
+    window
+        .open_path(&project)
+        .expect("the verification project opens");
+    settle(&window);
+    window
+        .apply(pixlay_core::Command::SetCrop {
+            slot: 0,
+            crop: CropTransform {
+                zoom: 2.5,
+                offset: (0.1, -0.2),
+                rotation_deg: 21.0,
+            },
+        })
+        .expect("cell 0 takes framing");
+    settle(&window);
+    let before = window.document();
+    window.swap_slots(0, 3);
+    settle(&window);
+    let after = window.document();
+    assert_eq!(after.cells[0], before.cells[3], "the cells exchanged whole");
+    assert_eq!(after.cells[3], before.cells[0]);
+    assert_eq!(
+        after.template.name, before.template.name,
+        "and the layout did not move"
+    );
+    assert_eq!(window.photo_count(), 8, "a swap changes no count");
+    // The keyboard's own path: the neighbour is geometric, so the swap lands on
+    // whatever cell is to the right of 0 — which the rule decides, not this test.
+    let neighbour = after
+        .template
+        .neighbour(0, (1, 0))
+        .expect("cell 0 has a cell to its right");
+    let now = window.document();
+    window.swap_towards(0, (1, 0));
+    settle(&window);
+    assert_eq!(
+        window.document().cells[0],
+        now.cells[neighbour],
+        "the arrow key exchanged cell 0 with the cell the rule calls right of it"
+    );
+    assert_eq!(window.document().cells[neighbour], now.cells[0]);
+    window.swap_towards(0, (1, 0));
+    settle(&window);
+    assert_eq!(
+        window.document().cells,
+        now.cells,
+        "and the same key again puts them back"
     );
 
     // ---- the `+` path appends in the order its files arrive ----------------
-    // Two photos, so the order is a claim and not a coincidence. The document is
-    // dropped to six photos first, which is where the two have room.
+    // Two photos, so the order is a claim and not a coincidence. The layout is
+    // dropped to six cells first, which is where the two have room.
     window.remove_photo();
     window.remove_photo();
     settle(&window);
     assert_eq!(window.photo_count(), 6);
+    assert_eq!(window.document().cells.len(), 6);
     let first = support::photo("landscape.jpg");
     let second = support::photo("portrait.jpg");
     window.add_photos(vec![first.clone(), second.clone()]);
@@ -337,21 +466,21 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
     );
 
     // ---- the count control's two bounds ------------------------------------
-    // The floor: a two-photo collage is the smallest the product makes, so `−` is
+    // The floor: two cells is the smallest layout the library has, so `−` is
     // insensitive and the refusal names the number the picker names.
     let two = two_photo_document();
     window.open_document(two.clone());
     settle(&window);
-    assert_eq!(gallery.count_label().label(), "2 photos");
+    assert_eq!(gallery.count_label().label(), "2");
     assert!(
         !gallery.minus_button().is_sensitive(),
-        "two photos is the floor"
+        "two cells is the floor"
     );
     assert!(gallery.plus_button().is_sensitive(), "and 2 < 9");
     assert_eq!(
         gallery.candidates(),
         layouts_of(&two),
-        "the band lists the two-slot layouts"
+        "the band lists the two-cell layouts"
     );
     for name in gallery.candidates() {
         assert_eq!(
@@ -360,7 +489,7 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
                 .slots
                 .len(),
             2,
-            "{name} is not a two-slot layout"
+            "{name} is not a two-cell layout"
         );
     }
     window.remove_photo();
@@ -372,12 +501,13 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
         window.last_toast()
     );
     assert_eq!(window.photo_count(), 2, "and changes nothing");
+    assert_eq!(window.document().cells.len(), 2);
 
     // The ceiling: nine, which is also the format's slot limit (S12c).
     let nine = nine_photo_document();
     window.open_document(nine);
     settle(&window);
-    assert_eq!(gallery.count_label().label(), "9 photos");
+    assert_eq!(gallery.count_label().label(), "9");
     assert!(!gallery.plus_button().is_sensitive(), "nine is the ceiling");
     assert!(gallery.minus_button().is_sensitive());
     let toasts = window.toasts();
@@ -422,7 +552,7 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
         path(&project),
         "--template",
         "grid-8-4x2",
-        "--remove-photo",
+        "--remove-cell",
         "--out",
         path(&from_cli),
     ]))
@@ -514,15 +644,11 @@ fn read_image(path: &Path) -> support::Image {
 }
 
 /// The names of the layouts a document's photo count has.
+/// The strip's own query for a document: every layout with the document's **cell**
+/// count, in library order (S14b — the strip follows the layout, not the photo
+/// count, so `+` can leave a cell empty without the strip moving).
 fn layouts_of(doc: &pixlay_core::CollageDoc) -> Vec<String> {
-    let photos: Vec<PathBuf> = doc
-        .cells
-        .iter()
-        .filter_map(|cell| cell.source.clone())
-        .collect();
-    Selection::new(photos)
-        .expect("a document holds at most nine photos")
-        .layouts()
+    templates::with_slots(doc.cells.len())
         .into_iter()
         .map(|template| template.name)
         .collect()

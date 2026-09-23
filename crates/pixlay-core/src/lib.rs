@@ -51,7 +51,7 @@ pub use frame::{Frame, MAX_FRAME_REL, Rgba8};
 pub use geometry::{EPSILON, Point, Polygon, Rect};
 pub use history::{Command, History};
 pub use selection::{
-    MAX_PHOTOS, MIN_PHOTOS, Removed, Selection, SelectionError, last_photo, layout_for, remove_last,
+    MAX_PHOTOS, MIN_PHOTOS, Selection, SelectionError, last_photo, layout_for, remove_last,
 };
 pub use template::{AREA_TOLERANCE, Family, SharedEdge, Slot, Template};
 

@@ -204,11 +204,23 @@ fn edit_project(args: EditArgs) -> Result<u8, Failure> {
         })?;
         apply(&mut history, Edit::SetTemplate { template })?;
     }
+    // The layout's own count control, before any photo lands: `--add-cell` takes
+    // the layout with one slot more and leaves the cell empty, which is what the
+    // window's `+` now does (S14b).
+    if args.add_cell {
+        apply(&mut history, Edit::AddCell)?;
+    }
+    if args.remove_cell {
+        apply(&mut history, Edit::RemoveLastCell)?;
+    }
+    // The swap is applied *before* the framing flags, so `--swap 0,3 --slot 0
+    // --rotate 10` frames the cell that ends up at index 0 rather than the one that
+    // was there.
+    if let Some((left, right)) = args.swap {
+        apply(&mut history, Edit::SwapCells { left, right })?;
+    }
     if !added.is_empty() {
         apply(&mut history, Edit::AddPhotos { photos: added })?;
-    }
-    if args.remove_photo {
-        apply(&mut history, Edit::RemoveLastPhoto)?;
     }
 
     if let Some(slot) = args.slot {

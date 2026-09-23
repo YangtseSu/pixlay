@@ -210,13 +210,21 @@ EDIT OPTIONS:
     --photo <file>      The photo the `--slot` cell shows instead of the one it
                         has. Needs --slot, and a file that is not there is
                         refused rather than written into the project.
-    --add-photo <file>  Append a photo: it goes to the first empty cell, and if
-                        there is none the layout grows by one slot — the same
-                        rule the window's `+` follows (`layout_for`). Repeated
-                        once per photo, in argument order.
-    --remove-photo      Drop the last photo, and shrink the layout to what the
-                        survivors need. The mirror image of --add-photo, and
+    --add-cell          Take the layout with one slot more, leaving the new cell
+                        empty — the window's `+` (`Command::AddCell`). The cell
+                        count is the layout's, so this is how a collage grows to
+                        hold one more photo.
+    --remove-cell       Take the layout with one slot fewer, dropping the last
+                        cell whatever it holds — the window's `−`. Refused at two
+                        cells, the floor. The mirror image of --add-cell, and
                         refused together with it: run `edit` twice for both.
+    --add-photo <file>  Append a photo: it goes to the first empty cell, and if
+                        there is none the layout grows by one slot. Repeated
+                        once per photo, in argument order.
+    --swap <i>,<j>      Exchange two cells whole — photo and framing both, since
+                        the framing is what makes a photo look right in *that*
+                        cell. Refused for the same cell twice (exit 1) and for a
+                        cell the layout does not have (exit 1).
     --template <name>   Switch the document to another layout (see
                         `templates`), keeping the surviving cells' photos and
                         framing. The count is not required to match: a layout
@@ -233,13 +241,13 @@ EDIT OPTIONS:
     --clear             Empty the cell: no photo, and its framing back to its
                         default. Exclusive with the framing flags and with
                         --photo.
-    The edit is applied in the order --template, --add-photo, --slot/--photo and
-    then the framing, so the framing is fitted against the document the earlier
-    flags produced. The stored `crop` is the *fit* of what was asked for (a crop
-    is a request; what is drawn is what covers), so `edit` applied twice to the
-    same project writes the same bytes. A cell with no photo has nothing to fit
-    against and keeps the numbers as given; the fit returns when the cell gets a
-    photo.
+    The edit is applied in the order --template, --add-cell/--remove-cell, the
+    --swap, --add-photo, --slot/--photo and then the framing, so the framing is
+    fitted against the document the earlier flags produced. The stored `crop` is
+    the *fit* of what was asked for (a crop is a request; what is drawn is what
+    covers), so `edit` applied twice to the same project writes the same bytes. A
+    cell with no photo has nothing to fit against and keeps the numbers as given;
+    the fit returns when the cell gets a photo.
 
 COMMON OPTIONS:
     --json              Print one JSON object instead of key = value lines.
@@ -343,8 +351,12 @@ pub struct EditArgs {
     pub photo: Option<PathBuf>,
     /// Photos to append (`--add-photo`), in argument order.
     pub add_photos: Vec<PathBuf>,
-    /// Drop the last photo and shrink the layout (`--remove-photo`).
-    pub remove_photo: bool,
+    /// Take the layout with one slot more, empty (`--add-cell`).
+    pub add_cell: bool,
+    /// Take the layout with one slot less (`--remove-cell`).
+    pub remove_cell: bool,
+    /// Exchange two cells whole (`--swap <i>,<j>`).
+    pub swap: Option<(usize, usize)>,
     /// Switch the layout, keeping the surviving cells (`--template`).
     pub template: Option<String>,
     pub rotate: Option<f64>,
@@ -446,8 +458,12 @@ struct Flags {
     photos: Vec<PathBuf>,
     /// `--add-photo`, repeatable: the photos `edit` appends.
     add_photos: Vec<PathBuf>,
-    /// `--remove-photo`: drop the last photo.
-    remove_photo: bool,
+    /// `--add-cell`: take the layout with one slot more.
+    add_cell: bool,
+    /// `--remove-cell`: take the layout with one slot less.
+    remove_cell: bool,
+    /// `--swap <i>,<j>`: exchange two cells whole.
+    swap: Option<(usize, usize)>,
     /// `--slots <n>`: the layout gallery's count filter for `templates`.
     slots: Option<usize>,
     aspect: Option<f64>,
@@ -505,7 +521,9 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
             "slot",
             "photo",
             "add-photo",
-            "remove-photo",
+            "add-cell",
+            "remove-cell",
+            "swap",
             "template",
             "rotate",
             "zoom",
@@ -520,7 +538,7 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
         "gesture" => &["project", "grid", "slot", "steps", "stats"],
         _ => &[],
     };
-    let present: [(&'static str, bool); 25] = [
+    let present: [(&'static str, bool); 27] = [
         ("project", flags.project.is_some()),
         ("template", flags.template.is_some()),
         ("out", flags.out.is_some()),
@@ -528,7 +546,9 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
         ("preview-px", flags.preview_px.is_some()),
         ("photo", !flags.photos.is_empty()),
         ("add-photo", !flags.add_photos.is_empty()),
-        ("remove-photo", flags.remove_photo),
+        ("add-cell", flags.add_cell),
+        ("remove-cell", flags.remove_cell),
+        ("swap", flags.swap.is_some()),
         ("slots", flags.slots.is_some()),
         ("aspect", flags.aspect.is_some()),
         ("at", flags.at.is_some()),
@@ -593,7 +613,9 @@ fn reason(name: &str, flag: &str) -> &'static str {
         ) => "only `render` and `edit` take the frame",
         (_, "slots") => "only `templates` filters the library by slot count",
         (_, "add-photo") => "only `edit` appends a photo",
-        (_, "remove-photo") => "only `edit` drops the last photo",
+        (_, "add-cell") => "only `edit` grows the layout",
+        (_, "remove-cell") => "only `edit` shrinks the layout",
+        (_, "swap") => "only `edit` exchanges two cells",
         (_, "slot" | "rotate" | "zoom" | "offset" | "clear") => {
             "only `edit` changes one cell's framing"
         }
@@ -702,7 +724,12 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
             }
             "photo" => flags.photos.push(PathBuf::from(value("photo")?)),
             "add-photo" => flags.add_photos.push(PathBuf::from(value("add-photo")?)),
-            "remove-photo" => flags.remove_photo = true,
+            "add-cell" => flags.add_cell = true,
+            "remove-cell" => flags.remove_cell = true,
+            "swap" => {
+                let swap = parse_swap(&value("swap")?)?;
+                set_once(&mut flags.swap, swap, "swap")?;
+            }
             "slots" => {
                 let raw = number(&value("slots")?, "slots")?;
                 let slots = usize::try_from(raw).map_err(|_| {
@@ -975,21 +1002,24 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
             }
             // The two batch flags are opposites, and applying both would make the
             // result depend on which one ran first. One command, one intent.
-            if flags.remove_photo && !flags.add_photos.is_empty() {
+            if flags.remove_cell && flags.add_cell {
                 return Err(Failure::Usage(
-                    "--remove-photo and --add-photo cannot be one edit: add first, then drop"
+                    "--remove-cell and --add-cell cannot be one edit: add first, then drop"
                         .to_string(),
                 ));
             }
             let changes = framing
                 || !flags.photos.is_empty()
                 || !flags.add_photos.is_empty()
-                || flags.remove_photo
+                || flags.add_cell
+                || flags.remove_cell
+                || flags.swap.is_some()
                 || flags.template.is_some();
             if !changes && !flags.frame_any() {
                 return Err(Failure::Usage(
                     "edit needs something to change: --slot with a framing flag, --photo, \
-                     --add-photo, --remove-photo, --template, or --gap/--radius/--border-color"
+                     --add-photo, --add-cell, --remove-cell, --swap, --template, or \
+                     --gap/--radius/--border-color"
                         .to_string(),
                 ));
             }
@@ -1008,7 +1038,9 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                 slot: flags.slot,
                 photo: flags.photos.first().cloned(),
                 add_photos: std::mem::take(&mut flags.add_photos),
-                remove_photo: flags.remove_photo,
+                add_cell: flags.add_cell,
+                remove_cell: flags.remove_cell,
+                swap: flags.swap,
                 template: flags.template.take(),
                 rotate: flags.rotate,
                 zoom: flags.zoom,
@@ -1137,6 +1169,28 @@ fn parse_offset(value: &OsString) -> Result<(f64, f64), Failure> {
         Ok(value)
     };
     Ok((component("x", parsed.0)?, component("y", parsed.1)?))
+}
+
+/// Parses `--swap <i>,<j>`: two cell indexes, the same comma convention as
+/// `--offset` and `--at`.
+///
+/// The indexes are *not* range-checked here. Whether cell 7 exists is a fact about
+/// the project, not about the command line, so the command's own `NoSuchSlot` answers
+/// it — reported as a failure (exit 2), with the layout's count in the message.
+/// `i == j` is likewise the command's `SameSlot` (exit 2) rather than a usage error.
+fn parse_swap(value: &OsString) -> Result<(usize, usize), Failure> {
+    let text = value
+        .to_str()
+        .ok_or_else(|| Failure::Usage("--swap must be valid UTF-8".to_string()))?;
+    let (left, right) = text
+        .split_once(',')
+        .ok_or_else(|| Failure::Usage(format!("--swap must be i,j, got {text}")))?;
+    let index = |side: &str, raw: &str| -> Result<usize, Failure> {
+        raw.trim()
+            .parse::<usize>()
+            .map_err(|_| Failure::Usage(format!("--swap {side} must be a cell index, got {raw}")))
+    };
+    Ok((index("i", left)?, index("j", right)?))
 }
 
 /// Parses `r,g,b`, each 0..=255, as an opaque [`Rgba8`].

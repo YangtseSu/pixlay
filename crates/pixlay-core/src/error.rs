@@ -80,12 +80,6 @@ pub enum CoreError {
     #[error("slot {slot} does not exist; the template has {slots} slots")]
     NoSuchSlot { slot: usize, slots: usize },
 
-    /// A restore of a removed cell found its slot occupied again: the document
-    /// changed while the cell was out, and putting the old contents back would
-    /// silently drop whatever a later edit put there (`crate::selection`).
-    #[error("slot {slot} already holds a photo; restoring would overwrite it")]
-    SlotOccupied { slot: usize },
-
     /// A photo was added to a document that already holds `max` of them (S14).
     ///
     /// The ceiling is a *request* limit, exactly like the picker's own refusal
@@ -96,11 +90,22 @@ pub enum CoreError {
     #[error("a collage takes at most {max} photos")]
     TooManyPhotos { max: usize },
 
-    /// A batch removal found every cell empty (S14). The GUI's `−` is insensitive
-    /// below the floor, so this is reached by a caller that asked anyway —
-    /// `edit --remove-photo` on a document with no photos.
-    #[error("no photo to remove: every cell is empty")]
-    NothingToRemove,
+    /// The count control's `−` on a document already at the floor (S14b).
+    ///
+    /// A *request* limit like [`TooManyPhotos`](Self::TooManyPhotos), and the same
+    /// number the picker's floor names: `MIN_SLOTS` is `MIN_PHOTOS`, so a layout
+    /// cannot shrink into a collage the picker would not make.
+    #[error("a collage's layout has at least {min} cells")]
+    TooFewCells { min: usize },
+
+    /// The count control's `+` on a document at the format's slot limit (S14b).
+    #[error("a collage's layout takes at most {max} cells")]
+    TooManyCells { max: usize },
+
+    /// A swap named the same slot twice (S14b). Not a `NoSuchSlot`: both indexes
+    /// exist, and what is wrong is that the edit would change nothing.
+    #[error("slot {slot} cannot be swapped with itself")]
+    SameSlot { slot: usize },
 
     #[error("canvas would be {pixels} pixels; the limit is {max}")]
     CanvasTooLarge { pixels: u64, max: u64 },

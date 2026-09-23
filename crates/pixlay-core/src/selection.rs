@@ -21,16 +21,17 @@
 //!   offers a layout exactly when it has as many slots as the user picked photos,
 //!   and since S12c the library itself stops at nine, so no layout exists that the
 //!   picker could not offer.
-//! * **the batch rule (LIFO).** [`remove_last`] clears the last *occupied* cell
-//!   and nothing else, and the [`Removed`] it hands back puts that cell back
-//!   where it was. A single cell can be cleared on its own (ruling 7), so "the
-//!   last photo" is the last occupied cell rather than the last cell, and
-//!   restoring means *that* slot — not the first empty one.
 //! * **the count rule.** When the photo count changes, the layout changes with it:
 //!   [`layout_for`] is the one answer to "which layout, when the choice is not
 //!   obvious" (same aspect, then same recipe family, then the nearest aspect, then
 //!   library order), so the composition's count control and the CLI's
-//!   `edit --add-photo` / `--remove-photo` cannot disagree about it (S14).
+//!   `edit --add-cell` / `--remove-photo` cannot disagree about it (S14).
+//!
+//! What is *not* here any more: S14's batch control dropped the last photo and
+//! brought it back by remembering the cell it took (LIFO). S14b removed the
+//! add-back with the ruling that `+` switches the layout instead of restoring a
+//! photo, so the token, its carried template and [`Selection::pop`] are gone —
+//! [`remove_last`] clears a cell and says which, and nothing has to keep it.
 
 use std::path::PathBuf;
 
@@ -38,7 +39,6 @@ use thiserror::Error;
 
 use crate::ASPECT_TOLERANCE;
 use crate::doc::{Cell, CollageDoc};
-use crate::error::CoreError;
 use crate::template::{Family, Template};
 use crate::templates;
 
@@ -123,14 +123,7 @@ impl Selection {
         Ok(self.photos.len() - 1)
     }
 
-    /// Drops the last photo — the LIFO half of the batch control, on the
-    /// selection. The document-side half is [`remove_last`], which also keeps the
-    /// cell's framing so it can come back.
-    pub fn pop(&mut self) -> Option<PathBuf> {
-        self.photos.pop()
-    }
-
-    /// Drops the photo at `index` (ruling 7's per-cell clear). `None` past the
+    /// Drops the photo at `index` (the picker's per-cell clear). `None` past the
     /// end, so a stale index is a no-op rather than a panic.
     pub fn remove(&mut self, index: usize) -> Option<PathBuf> {
         (index < self.photos.len()).then(|| self.photos.remove(index))
@@ -141,12 +134,12 @@ impl Selection {
     ///
     /// An empty selection asks for nothing and gets nothing — there is no
     /// zero-slot layout to offer, and a caller that wants the whole library asks
-    /// `templates::all` itself.
+    /// `templates::all` itself. This is [`templates::with_slots`]; the layout stage
+    /// asks the same function about the *document's* cell count instead, which is
+    /// the count its strip follows (S14b: `+` can leave a cell empty, so the two
+    /// numbers are no longer always equal).
     pub fn layouts(&self) -> Vec<Template> {
-        templates::all()
-            .into_iter()
-            .filter(|template| template.slots.len() == self.photos.len())
-            .collect()
+        templates::with_slots(self.photos.len())
     }
 
     /// The document these photos make on `template`, in cell order.
@@ -195,7 +188,7 @@ pub fn last_photo(doc: &CollageDoc) -> Option<usize> {
 /// document whose template has one cell too many, and `+` needs one back. This is
 /// the one rule that answers "which layout, when there is no longer an obvious
 /// one", and it is pure, so the GUI's count control and the CLI's
-/// `edit --add-photo` / `--remove-photo` cannot disagree about it.
+/// `edit --add-cell` / `--remove-photo` cannot disagree about it.
 ///
 /// The preference, in the order it decides:
 ///
@@ -237,68 +230,19 @@ pub fn layout_for(count: usize, aspect: f64, family: Option<Family>) -> Option<T
     best.map(|(_, _, _, template)| template)
 }
 
-/// A cell a batch removal cleared, kept whole so it can come back unchanged.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Removed {
-    /// The cell index it was taken from.
-    pub slot: usize,
-    /// The cell as it was: photo and framing.
-    pub cell: Cell,
-    /// The layout the document was on when the cell was taken.
-    ///
-    /// Ruling 7's control "drops the last photo and brings it back", and the count
-    /// moves the layout with it (`layout_for`): pressing `−` on a four-photo
-    /// `grid-4-2x2` leaves a three-slot document, and no three-slot *grid* exists
-    /// for the count rule to grow back into — the nearest aspect would return a
-    /// strip. So the token carries the layout too, and [`Removed::restore`] puts it
-    /// back when the document can no longer host the cell. A layout the user chose
-    /// *while the cell was out* is kept when it can host it (the document has the
-    /// slot), because that pick is newer than this token.
-    pub template: Template,
-}
-
-impl Removed {
-    /// Puts the cell back where it came from (LIFO, the other half of
-    /// [`remove_last`]).
-    ///
-    /// Refused when the cell has been taken since — restoring would overwrite
-    /// whatever is there now — or when the document no longer has that cell. The
-    /// caller then has to decide; guessing which photo to lose is not this
-    /// function's call.
-    pub fn restore(self, doc: &mut CollageDoc) -> Result<(), CoreError> {
-        // A document that shrank past the cell's own index has to grow back first,
-        // and only a layout can do that: this is the document the cell was taken
-        // from, so its layout comes back with it.
-        if self.slot >= doc.cells.len() {
-            let slots = self.template.slots.len();
-            doc.template = self.template;
-            doc.cells.resize(slots, Cell::default());
-        }
-        let slots = doc.cells.len();
-        let cell = doc.cells.get_mut(self.slot).ok_or(CoreError::NoSuchSlot {
-            slot: self.slot,
-            slots,
-        })?;
-        if cell.source.is_some() {
-            return Err(CoreError::SlotOccupied { slot: self.slot });
-        }
-        *cell = self.cell;
-        Ok(())
-    }
-}
-
-/// Clears the last occupied cell and returns what it held.
+/// Clears the last occupied cell and says which one it was.
 ///
 /// Nothing else moves: the other cells keep their photo and framing, and the
-/// removed cell's own framing travels out with it, so a later
-/// [`Removed::restore`] is the exact inverse rather than a re-placement with
-/// defaults.
-pub fn remove_last(doc: &mut CollageDoc) -> Option<Removed> {
+/// cleared cell comes out whole — no photo *and* no framing, which is what
+/// [`Cell::default`] is. `None` when every cell is already empty, which is the
+/// query "is there anything to drop" answered without changing a document to find
+/// out.
+///
+/// The returned index is the one thing a batch control used to need beyond the
+/// edit (S14 kept the cell in a token so `+` could put it back); S14b's `+` switches
+/// the layout instead of restoring a photo, so the index is all that is left.
+pub fn remove_last(doc: &mut CollageDoc) -> Option<usize> {
     let slot = last_photo(doc)?;
-    let cell = std::mem::take(&mut doc.cells[slot]);
-    Some(Removed {
-        slot,
-        cell,
-        template: doc.template.clone(),
-    })
+    doc.cells[slot] = Cell::default();
+    Some(slot)
 }

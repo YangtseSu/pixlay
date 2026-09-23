@@ -26,7 +26,6 @@ use std::path::PathBuf;
 use crate::crop::CropTransform;
 use crate::doc::CollageDoc;
 use crate::error::CoreError;
-use crate::selection::Removed;
 use crate::template::Template;
 
 /// One edit to a document.
@@ -81,22 +80,39 @@ pub enum Command {
     /// Refused past [`MAX_PHOTOS`](crate::MAX_PHOTOS): that is also the format's
     /// slot limit, so there is no layout to grow into.
     AddPhotos { photos: Vec<PathBuf> },
-    /// Drop the last *occupied* cell and shrink the layout to what the survivors
-    /// need (S14).
+    /// Drop the last cell, and take the layout with one slot fewer (S14b).
     ///
-    /// "The last photo" is the last occupied cell rather than the last cell, because
-    /// a single cell can be cleared on its own (ruling 7). The layout then shrinks
-    /// to the smallest one that still gives every survivor its own cell — never
-    /// below [`MIN_PHOTOS`](crate::MIN_PHOTOS) slots — through
-    /// [`selection::layout_for`], the same rule `+` grows by.
-    RemoveLastPhoto,
-    /// Put a removed cell back, with the framing it was taken with (S14: the LIFO
-    /// half of ruling 7's batch control).
+    /// The count control's `−`, and [`AddCell`](Self::AddCell)'s exact inverse: the
+    /// control addresses the *layout*, so `+` appends an empty cell and `−` removes
+    /// the last cell whatever it holds. A photo that was in it goes with the cell —
+    /// that is what "one cell fewer" means — and `Ctrl+Z` is what brings it back.
     ///
-    /// The layout grows back first when the document has since shrunk past the
-    /// cell's own index, and [`Removed::restore`] then refuses if something else has
-    /// taken the slot in the meantime.
-    RestorePhoto(Removed),
+    /// Never below [`MIN_SLOTS`](crate::MIN_SLOTS) slots: a collage's layout has at
+    /// least two cells, and `layout_for` has no answer below that.
+    RemoveLastCell,
+    /// Take the layout with one slot more, and leave the new cell empty
+    /// (S14b).
+    ///
+    /// The count control's `+`: the count and the layout move together, so "add a
+    /// photo" is "switch to the layout of the next count" and the new cell is
+    /// empty until a photo lands in it. Retention is
+    /// [`SetTemplate`](Self::SetTemplate)'s — every existing cell keeps its photo
+    /// and framing — and the layout is [`selection::layout_for`]'s answer for the
+    /// new count, so the GUI's `+` and the CLI's `edit --add-cell` cannot disagree
+    /// about which layout the document grows into.
+    ///
+    /// Refused past [`MAX_PHOTOS`](crate::MAX_PHOTOS): that is also the format's
+    /// slot limit, so there is no layout to grow into.
+    AddCell,
+    /// Exchange two cells whole — photo *and* framing (S14b).
+    ///
+    /// The cell moves, not the photo: the framing is what makes a photo look right
+    /// in *that* cell, so swapping the two sources and leaving the crops behind
+    /// would reframe both pictures as a side effect of wanting them in each other's
+    /// place. One command, one undo step, and `left == right` is refused rather
+    /// than silently accepted: an edit that changes nothing is a step the user has
+    /// to press `Ctrl+Z` through.
+    SwapCells { left: usize, right: usize },
 }
 
 impl Command {
@@ -149,23 +165,42 @@ impl Command {
                     }
                 }
             }
-            Self::RemoveLastPhoto => {
-                crate::selection::remove_last(doc).ok_or(CoreError::NothingToRemove)?;
-                // What the survivors need: one cell per slot up to the last one that
-                // still holds a photo, and never below the floor.
-                let kept = crate::selection::last_photo(doc).map_or(0, |slot| slot + 1);
-                let target = kept.clamp(crate::MIN_PHOTOS, doc.cells.len());
-                if target < doc.cells.len() {
-                    set_template(doc, layout_with(doc, target)?);
+            Self::RemoveLastCell => {
+                let slots = doc.cells.len();
+                if slots <= crate::MIN_SLOTS {
+                    return Err(CoreError::TooFewCells {
+                        min: crate::MIN_SLOTS,
+                    });
                 }
+                set_template(doc, layout_with(doc, slots - 1)?);
             }
-            Self::RestorePhoto(removed) => {
-                // The token carries the layout as well as the cell: a document that
-                // shrank past the cell's own index grows back to the layout the cell
-                // was taken from, which is the only way "brings it back" can be
-                // exact (no layout may exist at the intermediate count with the
-                // document's own family and aspect).
-                removed.clone().restore(doc)?;
+            Self::AddCell => {
+                let slots = doc.cells.len();
+                if slots >= crate::MAX_SLOTS {
+                    return Err(CoreError::TooManyCells {
+                        max: crate::MAX_SLOTS,
+                    });
+                }
+                set_template(doc, layout_with(doc, slots + 1)?);
+            }
+            Self::SwapCells { left, right } => {
+                if left == right {
+                    return Err(CoreError::SameSlot { slot: *left });
+                }
+                let cells = doc.cells.len();
+                if *left >= cells {
+                    return Err(CoreError::NoSuchSlot {
+                        slot: *left,
+                        slots: cells,
+                    });
+                }
+                if *right >= cells {
+                    return Err(CoreError::NoSuchSlot {
+                        slot: *right,
+                        slots: cells,
+                    });
+                }
+                doc.cells.swap(*left, *right);
             }
         }
         Ok(())

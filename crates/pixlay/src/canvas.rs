@@ -191,7 +191,24 @@ pub fn render(
     ctx.restore()?;
 
     // The document itself: the single `draw`, at the widget's own grid.
+    //
+    // **Clipped to the sheet**, because `draw` paints its backdrop with
+    // `Operator::Source` over the whole of whatever it is drawn into — that is
+    // what makes an export opaque to its own edges. Left unclipped the widget
+    // would be filled with the *frame's* colour (white by default) instead of
+    // showing the window's own background around the sheet, which on a dark
+    // desktop reads as a light app (measured 2026-09-23: the whole 1100x575
+    // canvas widget read `#FFFFFF` outside the sheet before this clip, and the
+    // theme's `#222226` after it). The sheet is still opaque and still
+    // style-independent — the clip changes what surrounds it, not what it is.
     ctx.save()?;
+    ctx.rectangle(
+        placement.origin.0,
+        placement.origin.1,
+        placement.width(),
+        placement.height(),
+    );
+    ctx.clip();
     ctx.translate(placement.origin.0, placement.origin.1);
     draw(
         doc,
@@ -280,6 +297,11 @@ pub enum Gesture {
 }
 
 /// Builds the canvas widget: the drawing area, its gestures, and its keyboard.
+///
+/// The `+` buttons over the empty cells are a sibling widget
+/// ([`EmptyCells`]), stacked by the window's overlay; the draw function asks the
+/// window for them, because the draw is the one moment that knows the widget's own
+/// size and the current document at once.
 pub fn build(window: &EditorWindow) -> gtk::DrawingArea {
     let area = gtk::DrawingArea::new();
     area.set_focusable(true);
@@ -287,7 +309,8 @@ pub fn build(window: &EditorWindow) -> gtk::DrawingArea {
     area.set_vexpand(true);
     a11y::label(&area, &gettext("Collage canvas"));
     area.set_tooltip_text(Some(&gettext(
-        "Drag to move the photo, scroll to zoom, Ctrl+scroll to straighten",
+        "Drag to move the photo, scroll to zoom, Ctrl+scroll to straighten, \
+         Ctrl+Shift+Left/Right to swap two photos",
     )));
 
     area.set_draw_func(glib::clone!(
@@ -493,10 +516,29 @@ fn add_keys(area: &gtk::DrawingArea, window: &EditorWindow) {
                 // reaches every control in the pane.
                 return glib::Propagation::Proceed;
             };
+            // Swapping two cells is about the layout rather than about one photo's
+            // framing, so it is answered before the crop is read: an *empty* cell
+            // has no crop and is still a legal half of a swap (the whole point of
+            // `+` is that the new cell starts empty).
+            let shift = state.contains(gdk::ModifierType::SHIFT_MASK);
+            let control = state.contains(gdk::ModifierType::CONTROL_MASK);
+            if control && shift {
+                let direction = match key {
+                    gdk::Key::Left => (-1, 0),
+                    gdk::Key::Right => (1, 0),
+                    gdk::Key::Up => (0, -1),
+                    gdk::Key::Down => (0, 1),
+                    _ => (0, 0),
+                };
+                if direction != (0, 0) {
+                    window.swap_towards(slot, direction);
+                    return glib::Propagation::Stop;
+                }
+            }
             let Some(crop) = window.fitted_crop(slot) else {
                 return glib::Propagation::Proceed;
             };
-            let coarse = state.contains(gdk::ModifierType::CONTROL_MASK);
+            let coarse = control;
             let step = if coarse { 0.1 } else { 0.02 };
             let next = match key {
                 gdk::Key::Left => Some(CropTransform {
@@ -546,6 +588,150 @@ fn add_keys(area: &gtk::DrawingArea, window: &EditorWindow) {
         }
     ));
     area.add_controller(keys);
+}
+
+/// The `+` controls over the empty cells (S14b).
+///
+/// **Real GTK buttons over the canvas rather than a glyph drawn into it** (ruling
+/// 9): `tests/hig.rs` walks the widget tree for accessible names and the Tab order,
+/// and a cairo-drawn `+` is invisible to both. They are the visible control the
+/// ruling asked for — `+` grows the layout, and a *cell* that is empty is what asks
+/// for a photo — so this is where "click the empty cell to give it a picture" lives
+/// for a pointer.
+///
+/// **Each button is a child of the canvas's own `GtkOverlay`**, placed by its own
+/// margins. That is deliberate: a `GtkFixed` holding them measures only its
+/// children, so a document whose empty cells come and go leaves the container
+/// 0x0 — and GTK snapshots an unallocated child with a warning (measured
+/// 2026-09-23). An overlay child is always allocated the overlay's own area, so a
+/// button that is shown on one frame is positioned and allocated on that same
+/// frame, whatever the document did.
+///
+/// **One button per slot is built once**, at construction, and shown or hidden as
+/// the document changes. Nine is the format's own slot ceiling, so the set is
+/// complete.
+pub struct EmptyCells {
+    overlay: gtk::Overlay,
+    /// One button per slot index, built at construction and never replaced.
+    buttons: Vec<gtk::Button>,
+}
+
+impl EmptyCells {
+    /// Builds the overlay around `canvas`, with its nine hidden buttons.
+    pub fn new(window: &EditorWindow, canvas: &gtk::DrawingArea) -> Self {
+        let overlay = gtk::Overlay::builder().child(canvas).build();
+        let buttons: Vec<gtk::Button> = (0..pixlay_core::MAX_SLOTS)
+            .map(|slot| {
+                let button = empty_cell_button(window, slot);
+                button.set_visible(false);
+                overlay.add_overlay(&button);
+                button
+            })
+            .collect();
+        Self { overlay, buttons }
+    }
+
+    /// The widget the editor page appends: the canvas, with the buttons over it.
+    pub fn root(&self) -> gtk::Overlay {
+        self.overlay.clone()
+    }
+
+    /// The canvas inside the overlay: every caller in the window asks for a
+    /// `GtkDrawingArea` (its `color()`, its size, its `queue_draw`), and the overlay
+    /// adds nothing to any of those.
+    pub fn canvas(&self) -> gtk::DrawingArea {
+        self.overlay
+            .child()
+            .and_then(|child| child.downcast::<gtk::DrawingArea>().ok())
+            .expect("the overlay's child is the canvas this was built with")
+    }
+
+    /// One cell's `+` button, for the tests and for the position sync.
+    pub fn button(&self, slot: usize) -> Option<gtk::Button> {
+        self.buttons.get(slot).cloned()
+    }
+
+    /// Puts every `+` over its own empty cell, and hides the rest (S14b).
+    ///
+    /// **Called from the window's `refresh`, never from a draw or a snapshot.**
+    /// Showing a widget changes the tree, and a tree that changes while GTK is
+    /// walking it produces an unallocated child in the very frame it appears in
+    /// (measured 2026-09-23: "Trying to snapshot GtkButton … without a current
+    /// allocation" when this ran inside `canvas::build`'s draw function). The window
+    /// calls it after an edit and on a resize, which is exactly when the answer can
+    /// change, and GTK then has a layout pass to allocate what it revealed.
+    ///
+    /// The size is the canvas's own allocation: `placement` is the one description
+    /// of where the sheet is, and the canvas is what the placement is measured on.
+    ///
+    /// A button past the document's own cell count is hidden — a layout with fewer
+    /// cells leaves the rest of them with nowhere to be. A slot is also hidden when
+    /// its cell holds a photo: an occupied cell is dragged and clicked to reframe,
+    /// and a `+` on top of a photo would take that press for itself.
+    pub fn sync(&self, window: &EditorWindow) {
+        let canvas = self.canvas();
+        self.sync_in(window, canvas.width(), canvas.height());
+    }
+
+    /// [`sync`](Self::sync) against an explicit size, which is what a test can drive
+    /// without an allocation.
+    pub fn sync_in(&self, window: &EditorWindow, width: i32, height: i32) {
+        let doc = window.document();
+        let (grid, _) = window.images();
+        let placement = placement(grid, width, height);
+        // One cell tall/wide enough to hit: HIG `guidelines/pointer-touch` asks for
+        // 24x24 at least, and 32 is a comfortable pointer target at the cell sizes
+        // the library ships.
+        const SIZE: f64 = 32.0;
+        for (slot, button) in self.buttons.iter().enumerate() {
+            let empty = doc
+                .cells
+                .get(slot)
+                .is_some_and(|cell| cell.source.is_none());
+            let Some(geometry) = doc.template.slots.get(slot).filter(|_| empty) else {
+                button.set_visible(false);
+                continue;
+            };
+            let box_ = geometry.outline.bbox();
+            let centre = placement.to_widget(Point::new(
+                (box_.x0 + box_.x1) / 2.0,
+                (box_.y0 + box_.y1) / 2.0,
+            ));
+            // The overlay aligns a child to its start corner and lets its margins
+            // place it, so the cell's centre in device pixels is the margin the
+            // button needs: rounded, because a margin is an integer.
+            button.set_margin_start((centre.0 - SIZE / 2.0).round() as i32);
+            button.set_margin_top((centre.1 - SIZE / 2.0).round() as i32);
+            button.set_visible(true);
+        }
+    }
+}
+
+/// One cell's `+`: the cell has no photo, and this is how a pointer gives it one.
+fn empty_cell_button(window: &EditorWindow, slot: usize) -> gtk::Button {
+    let label = gettext("Add a photo");
+    let button = gtk::Button::builder()
+        .icon_name("list-add-symbolic")
+        .tooltip_text(&label)
+        .halign(gtk::Align::Start)
+        .valign(gtk::Align::Start)
+        .width_request(32)
+        .height_request(32)
+        .build();
+    // `osd` is the platform's own class for a control over content, which is what
+    // this is: hard-coded colours would fail in high contrast mode, and the sheet
+    // under the button is the user's own photo, not the theme (`AGENTS.md`,
+    // "GNOME HIG": styling uses libadwaita's classes and nothing else).
+    button.add_css_class("osd");
+    button.add_css_class("circular");
+    a11y::label(&button, &label);
+    button.set_can_focus(true);
+    button.connect_clicked(glib::clone!(
+        #[weak]
+        window,
+        move |_| window.choose_photo(slot)
+    ));
+    button
 }
 
 /// Dropping image files places them, starting at the slot under the pointer.

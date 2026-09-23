@@ -661,10 +661,10 @@ The exit criteria, item by item:
 |---|---|---|
 | free placement and a tiled watermark both produce an image | `pixlay-render/tests/text/measure.rs` (`measure_free_placement_puts_the_box_on_the_anchor`, `measure_a_tiled_watermark_covers_the_grid_from_the_canvas_origin`), and end to end `pixlay-cli/tests/cli.rs::rendered_text_reaches_the_output` | the free layer's ink rectangle equals the rectangle the layout's **own metrics** predict (anchor × box × ink offset, within 2 px) for four anchors; the tiled layer paints a solid em square at each of the anchors the canvas can see — 15 anchors for `step (0.5, 0.25)`, counted by `tiled_grid`, with the far-edge row and column off-canvas exactly as the contract's "Tiled phase" says. The free layer's ink box is compared against the layout's own metrics, so an off-by-one in the anchor fractions cannot pass. The CLI renders the committed fixture (`text.pixlay`, a caption + a `{date}` + a 15-tile watermark) and the same project with `text: []`: the layers change more than a thousand pixels (the test's floor; the assertion would fail if the layers reached only the report), so the criterion is not a report-only claim |
 | `{date}` is filled correctly from EXIF, and the fallback when EXIF is missing has a test | `pixlay-core/tests/text.rs` (resolution), `pixlay-render/tests/text/measure.rs::measure_tokens_render_the_values_the_slot_reports`, `pixlay-cli/tests/cli.rs` (`text_reports_resolved_tokens_from_the_projects_photos`, `text_falls_back_to_the_documents_own_date`) | `pixlay-render text` on the fixture reports `2019:07:14 10:32:00` — the EXIF value of slot 5's `dated.jpg`, not the document's stored `2026-09-21`. A photo with no EXIF block, an empty slot and a layer naming no slot all resolve to the stored string, and with no stored string the token renders as **nothing**, never as `{date}`. Each render case is compared against the same text typed out literally: the two renders are byte-identical, so the assertion is about the *string* and not about ink having appeared |
-| CJK kinsoku and punctuation squeezing are visually correct | `pixlay-render/tests/text/measure.rs` (`measure_kinsoku_keeps_punctuation_off_a_line_start`, `measure_consecutive_punctuation_is_compressed_to_half_width`), plus the human gate below | kinsoku is Pango's: `他他他说。他` at a four-em width breaks `他他他 / 说。他` (the breaker pulls back rather than starting a line with `。`), and over 4 paragraphs × 6 widths no line starts with a closing mark and none ends with an opening one. Squeezing is the renderer's, through the font's `halt`: `。，` = 0.5 + 1.0 em, `。。。` = 0.5 + 0.5 + 1.0, a lone `。` = 1.0, and a mark at a line boundary keeps 1.0 (measured with the pinned font, 20 px) |
+| CJK kinsoku and punctuation squeezing are visually correct | `pixlay-render/tests/text/measure.rs` (`measure_kinsoku_keeps_punctuation_off_a_line_start`, `measure_consecutive_punctuation_is_compressed_to_half_width`), plus the human gate below | kinsoku is Pango's: a six-character CJK sample (three identical Han characters, then one more Han character, a full-width full stop and a final Han character) at a four-em width breaks after the third character (the breaker pulls back rather than starting a line with the full-width full stop), and over 4 paragraphs × 6 widths no line starts with a closing mark and none ends with an opening one. Squeezing is the renderer's, through the font's `halt`: a full-width full stop followed by a full-width comma = 0.5 + 1.0 em, three consecutive full-width full stops = 0.5 + 0.5 + 1.0, a lone full-width full stop = 1.0, and a mark at a line boundary keeps 1.0 (measured with the pinned font, 20 px) |
 | the text position is stable after a rotation | `pixlay-render/tests/text/measure.rs` (`measure_a_slot_rotation_does_not_move_the_text`, `measure_a_text_layer_rotates_about_its_anchor`) | rotating a **slot** by 35° changes the slot and moves the text by **0 px** (the ink's bounding box is identical); rotating a **layer** by 45/90/180/−30° moves its ink centre to the rotated position within **2 px**, so the rotation is about the anchor and not about the canvas origin |
 | (from the review additions) the font size is normalized | `measure_preview_and_export_agree_with_text`, `docs/CONTRACT.md` §1 "Text layers" | the same document at 2N and N, the 2N one downsampled: RMSE **1.92** (threshold 6), and the ink rectangle at 2N is the rectangle at N **doubled to within 1 px** — the layout is computed in canvas pixels, so only the glyph raster changes with the scale |
-| (from the review additions) "no line starts with a forbidden character" is checkable through `pango_layout_get_line*` | the same kinsoku test | it is: each line's text comes from `LayoutLine::start_index` / `length`, and the two sets (`行頭禁則` / `行末禁則`) are the test's own constants |
+| (from the review additions) "no line starts with a forbidden character" is checkable through `pango_layout_get_line*` | the same kinsoku test | it is: each line's text comes from `LayoutLine::start_index` / `length`, and the two sets (a forbidden line-start set and a forbidden line-end set) are the test's own constants |
 
 **What was built, in one line each.**
 
@@ -686,21 +686,22 @@ The exit criteria, item by item:
 ### S5 · decisions this step made
 
 1. **Punctuation squeezing is not something Pango does, and the font has to be asked.**
-   Measured 2026-09-21: `。，` advances two full ems — exactly like two isolated marks — and
-   no layout option changes that. The rule the criteria ask for is also about a *run*
-   rather than a character (a lone `。` must keep its blank, or every sentence end in the
-   product crowds the word after it), so the renderer marks each mark that another mark
-   follows and asks the font for the OpenType `halt` (half-width) positioning feature.
+   Measured 2026-09-21: a full-width full stop followed by a full-width comma advances two full ems
+   — exactly like the two marks in isolation — and no layout option changes that. The rule the
+   criteria ask for is also about a *run* rather than a character (a lone full-width full stop must
+   keep its blank, or every sentence end in the product crowds the word after it), so the renderer
+   marks each mark that another mark follows and asks the font for the OpenType `halt` (half-width)
+   positioning feature.
    Consequence, accepted: what a compressed mark *looks* like is the font's design, and a
    font without `halt` simply does not compress. The alternative — moving glyphs ourselves
    — is a layout engine, and the workspace's `unsafe_code = deny` rules out the glyph-level
    FFI it would need.
-2. **Pango's line breaking is kept, and `。` at a line *end* is left alone.** Pango
-   implements the Unicode line-breaking rules, so kinsoku's 行頭禁則/行末禁則 come for free
-   and the tests pin them instead of reimplementing them. What is *not* done is JLREQ's
-   other half of squeezing — trimming the trailing blank of a mark that ends a line — which
-   needs a per-line layout pass; v1 draws a mark's own advance there. Written into §6 as a
-   non-goal rather than left to be discovered.
+2. **Pango's line breaking is kept, and the full-width full stop at a line *end* is left alone.**
+   Pango implements the Unicode line-breaking rules, so kinsoku's forbidden-line-start and
+   forbidden-line-end sets come for free and the tests pin them instead of reimplementing them.
+   What is *not* done is JLREQ's other half of squeezing — trimming the trailing blank of a mark
+   that ends a line — which needs a per-line layout pass; v1 draws a mark's own advance there.
+   Written into §6 as a non-goal rather than left to be discovered.
 3. **The free layer's box is the canvas width.** A layer has no size of its own in the
    contract (§6: no text-box field), so wrapping needs *a* width, and the canvas is the one
    width the document already has: long text wraps at the canvas edge instead of running
@@ -747,12 +748,12 @@ The exit criteria, item by item:
 | the `AGENTS.md` verification render (`render --project crates/pixlay-cli/tests/fixtures/verify.pixlay --dpi 300 --stats`, eight photos + one `{date}` layer) | 14043x10532, **ms 6164/6359** (two runs) + **encode_ms 2469/2475**, **`peak_rss_mb` 1641**, **9,114,833 bytes**; the same project with `text: []`: ms 6360/5660, peak 1631, 9,056,692 bytes — the layer's cost is **below the run-to-run spread of the decode+resample stage**, so nothing smaller than that is claimed at 139.5 MP |
 | text cost at 16.7 MP (400x300 mm at 300 dpi, empty cells) | white sheet **24-42 ms** (3 runs); + **2,601 tiles** 295-436 ms → **≈ 0.13 ms per tile** (the 10,000-tile cap is ~1.3 s of drawing); + 20 wrapped CJK captions 31-57 ms, i.e. below the spread |
 | the text fixture as a 2400 px preview (`text.pixlay`, dpi 150, **pinned font**) | ms 459 + encode 45, peak 77 MB, 3,320,360 bytes; with `text: []` ms 355, 3,276,176 bytes — the three layers cost about **100 ms** at 2400 px. The machine's own `sans-serif` gives 443 ms / 3,380,931 bytes: the difference is glyph rasterization, and the line breaks are the same |
-| squeezing (pinned font, 20 px) | `。` 20.0; `。，` 10.0 + 20.0; `。。` 10.0 + 20.0; `。”` 10.0 + 20.0; `。。。` 10.0 + 10.0 + 20.0; `（（` 10.0 + 20.0; `。\n。` 20.0 + 20.0 |
-| kinsoku | `他他他说。他` at 4 em: `他他他 / 说。他`; 4 paragraphs × 6 widths (3-9 em): no forbidden line start, no forbidden line end, every case wrapped |
+| squeezing (pinned font, 20 px) | a lone full-width full stop 20.0; a full stop then a full-width comma 10.0 + 20.0; two full stops 10.0 + 20.0; a full stop then a closing double quotation mark 10.0 + 20.0; three full stops 10.0 + 10.0 + 20.0; two full-width opening parentheses 10.0 + 20.0; a full stop, a newline, a full stop 20.0 + 20.0 |
+| kinsoku | the six-character CJK sample (three identical Han characters, then one more, a full-width full stop and a final one) at 4 em: the first three characters / the remaining three; 4 paragraphs × 6 widths (3-9 em): no forbidden line start, no forbidden line end, every case wrapped |
 | layout vs scale | the ink rectangle at 2N is the one at N doubled to within 1 px; 2N-vs-N RMSE 1.92 (no text: 1.53) |
 | the pinned font | `pixlay-test-sans.otf` 93,100 bytes, 691 glyphs, 204 codepoints, GPOS `halt` present; fontconfig with only this font resolves `sans-serif` to it |
 | the fixtures | `text.pixlay` (3 layers: a 45-character wrapped caption, a `{date}` line, a 15-tile watermark) and `verify.pixlay` + one `{date}` layer; regenerating the font is `python3 crates/pixlay-cli/tests/fixtures/fonts/generate.py` |
-| visual inspection | `/var/tmp/pixlay-s5/text-preview.png`: the caption wraps at the canvas width with no line starting on a mark, `：“` and `。”` are visibly tighter than a full em, the `{date}` line carries the EXIF date, and the tiled watermark sits on a 5x3 grid with its far-edge tiles off the sheet |
+| visual inspection | `/var/tmp/pixlay-s5/text-preview.png`: the caption wraps at the canvas width with no line starting on a mark, the colon + opening-quotation-mark run and the full-stop + closing-quotation-mark run are both visibly tighter than a full em, the `{date}` line carries the EXIF date, and the tiled watermark sits on a 5x3 grid with its far-edge tiles off the sheet |
 
 ### S5 · the one visual criterion
 
@@ -760,10 +761,11 @@ The exit criteria, item by item:
 
 1. **Kinsoku** — in `/var/tmp/pixlay-s5/text-preview.png`, the caption is 45 characters and
    wraps inside a sentence: line 1 has to end *short* (the breaker pulls the break back so
-   that the `，` after `中文文字` does not start line 2). If a line ever starts with `，` or
-   `。`, that is the defect.
-2. **Punctuation squeezing** — `他说：“今天天气很好。”` has `：“` and `。”` in it, and both
-   runs are drawn at 3/4 of what they would cost uncompressed. Asked simply: do those two
+   that the full-width comma after a four-character CJK word does not start line 2). If a line
+   ever starts with a full-width comma or a full-width full stop, that is the defect.
+2. **Punctuation squeezing** — the sample line (a pronoun and a verb, a colon, an opening quotation
+   mark, six Han characters, a full stop and a closing quotation mark) carries both runs, and both
+   are drawn at 3/4 of what they would cost uncompressed. Asked simply: do those two
    pairs read as tight typography, or as a collision?
 
 **Status: rendered, numbers on disk (`docs/CONTRACT.md` §8 "S5"), and ruled on 2026-09-21
@@ -772,17 +774,19 @@ step depends on how a squeezed mark looks.
 
 ### S5 · ruling (2026-09-21, human)
 
-**The text passes.** `/var/tmp/pixlay-s5/text-preview.png` was looked at, and both halves of
-the criterion hold: the 45-character caption wraps inside its sentence with line 2 starting
-`字，` — no line starts with a mark and none ends with an opening mark — and `：“` and `。”`
-read as tight typography rather than as a collision, with the run's last mark keeping its full
-em (which is why `”` carries its own advance before `然后`). Kinsoku stays Pango's and
-squeezing stays the font's `halt`, exactly as S5 built them.
+**The text passes.** `/var/tmp/pixlay-s5/text-preview.png` was looked at, and both halves of the
+criterion hold: the 45-character caption wraps inside its sentence with line 2 starting on a Han
+character followed by a full-width comma — no line starts with a mark and none ends with an opening
+mark — and the colon + opening-quotation-mark run and the full-stop + closing-quotation-mark run
+read as tight typography rather than as a collision, with the run's last mark keeping its full em
+(which is why the closing quotation mark carries its own advance before the two Han characters that
+follow). Kinsoku stays Pango's and squeezing stays the font's `halt`, exactly as S5 built them.
 
 Two alternatives were considered and **declined**: turning squeezing off (it would make the
-look independent of whether a font has `halt`, at the cost of a loose 2-em `。”` and of the
-compression tests), and adding JLREQ's 行末の約物 (trimming the trailing blank of a mark that
-ends a line). The latter therefore stays a v1 non-goal, recorded in `docs/CONTRACT.md` §6.
+look independent of whether a font has `halt`, at the cost of a loose 2-em full-stop +
+closing-quotation-mark run and of the compression tests), and adding JLREQ's punctuation trimming
+(trimming the trailing blank of a mark that ends a line). The latter therefore stays a v1 non-goal,
+recorded in `docs/CONTRACT.md` §6.
 
 No shape changed, so `docs/CONTRACT.md` needs no edit from this ruling beyond what §8 "S5"
 already records. The gate row and the "Current progress" line were rewritten in the same
@@ -1098,7 +1102,7 @@ punctuation squeezing have all been ruled on (2026-09-20 / 2026-09-21).
 | After S0 | Look at the numbers: is Cairo usable? | ✅ passed (2026-09-20, human): **Cairo stays** |
 | After S1 | Review the contract. This is the only place a human must confirm — if the contract is wrong, the seven steps after it are all wasted, and the model itself cannot see that "this contract will not be enough later". Before reviewing, first read "Open decisions": every entry in those tables changes the contract's shape | ✅ passed (2026-09-21, human): **contract v1 passes**, defects fixed per the review (see `completed/2026-09-20-STEPS-done.md`) |
 | After S4 | Look at the downsampling: is a 4000 px photo in a 400 px slot free of aliasing and mush? The numbers are on disk (RMSE 1.41 against ImageMagick's Lanczos, a 16x separation from one-sample-per-texel on the zone plate), the preview is `/var/tmp/verify-preview.png`, and S4's exit criteria call this the one human criterion of the step | ✅ passed (2026-09-21, human): **the downsampling passes** — the resampler stays as built, and the optional permanent threshold was declined (see `completed/2026-09-20-STEPS-done.md`, "S4 · ruling") |
-| After S5 | Look at the text: do CJK line breaks and squeezed punctuation read right? The preview is `/var/tmp/pixlay-s5/text-preview.png` (the fixture `crates/pixlay-cli/tests/fixtures/text.pixlay`: a wrapped caption with `：“`, `。”` and a break inside a sentence, a `{date}` line, and a tiled watermark), the numbers are in "S5 · the one visual criterion", and S5's exit criteria call this the one human criterion of the step | ✅ passed (2026-09-21, human): **the text passes** — kinsoku stays Pango's and squeezing stays `halt`; line-end trimming stays a non-goal (see `completed/2026-09-20-STEPS-done.md`, "S5 · ruling") |
+| After S5 | Look at the text: do CJK line breaks and squeezed punctuation read right? The preview is `/var/tmp/pixlay-s5/text-preview.png` (the fixture `crates/pixlay-cli/tests/fixtures/text.pixlay`: a wrapped caption with a colon + opening-quotation-mark run, a full-stop + closing-quotation-mark run and a break inside a sentence, a `{date}` line, and a tiled watermark), the numbers are in "S5 · the one visual criterion", and S5's exit criteria call this the one human criterion of the step | ✅ passed (2026-09-21, human): **the text passes** — kinsoku stays Pango's and squeezing stays `halt`; line-end trimming stays a non-goal (see `completed/2026-09-20-STEPS-done.md`, "S5 · ruling") |
 
 ---
 
