@@ -4,9 +4,11 @@ crates/pixlay/src/canvas.rs
 crates/pixlay/src/decode.rs
 crates/pixlay/src/export.rs
 crates/pixlay/src/i18n.rs
+crates/pixlay/src/layout.rs
 crates/pixlay/src/lib.rs
 crates/pixlay/src/main.rs
 crates/pixlay/src/picker.rs
+crates/pixlay/src/picture.rs
 crates/pixlay/src/state.rs
 crates/pixlay/src/thumbs.rs
 crates/pixlay/src/window.rs

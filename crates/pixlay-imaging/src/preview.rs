@@ -385,6 +385,38 @@ impl Preview {
         sources: &[Option<PathBuf>],
         grid: PixelSize,
     ) -> Built {
+        self.build_at_source_edge(doc, sources, grid, preview_source_long_edge(grid))
+    }
+
+    /// [`build`](Self::build) with its preview-grade copies taken at `long_edge`
+    /// instead of at the one `grid` would ask for.
+    ///
+    /// The copies are keyed by **the edge they were reduced to**, so a caller that
+    /// names the edge another consumer is already using shares that consumer's
+    /// entries and decodes nothing at all. That is what S14's layout gallery does:
+    /// it renders several *small* candidates of the same document while the canvas
+    /// renders one big one, and it names the canvas's edge so that the band's own
+    /// builds cost **0** decodes however many candidates it lists. Measured
+    /// 2026-09-23 (`--release`, this machine, the eight-photo verification project's
+    /// 8-slot template and its three candidates at a 128x96 thumbnail grid, canvas
+    /// grid 780): sharing the canvas's 975-px edge, the gallery's own builds decode
+    /// **0** files, the whole band takes **74.6 ms**, and its pixels differ from a
+    /// full-resolution `slot_bitmaps` render at the same grid by **0.083** RMSE.
+    /// Reducing the gallery's own 128-px copies instead costs **7** further decodes
+    /// — one per distinct photo file, on top of the canvas's own — rebuilds the band
+    /// in 4.0 ms, and differs from the same render by **3.42**.
+    ///
+    /// So the cost of sharing is a wider resampling kernel — the copy is
+    /// `PREVIEW_SOURCE_SCALE` times the *canvas* grid, not times the thumbnail's —
+    /// and it buys both the decodes and the fidelity: a copy at the thumbnail's own
+    /// size is one the resampler reads at 1:1, which is where the 3.42 comes from.
+    pub fn build_at_source_edge(
+        &mut self,
+        doc: &CollageDoc,
+        sources: &[Option<PathBuf>],
+        grid: PixelSize,
+        long_edge: u32,
+    ) -> Built {
         // Taken out for the duration so the source cache can be borrowed at the
         // same time, and put back at the front when the build is done.
         let cache = self
@@ -410,7 +442,7 @@ impl Preview {
         // One target for the whole build, so every cell this grid rebuilds reads a
         // copy of the same grade (`preview_source_long_edge`) and the cache keys on
         // what the build actually asked for.
-        let long_edge = preview_source_long_edge(grid);
+        let long_edge = long_edge.max(1);
         for (slot, source) in sources.iter().enumerate() {
             let Some(path) = source else {
                 continue;

@@ -9,7 +9,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 use pixlay_core::{
-    Cell, CollageDoc, CropTransform, PixelSize, Point, Polygon, Project, Slot, Template, templates,
+    Cell, CollageDoc, CropTransform, PixelSize, Point, Polygon, Project, Selection, Slot, Template,
+    templates,
 };
 
 /// `CARGO_BIN_EXE_<name>` is set by Cargo for integration tests.
@@ -1220,6 +1221,67 @@ fn templates_lists_the_library_and_filters_by_aspect() {
 }
 
 #[test]
+fn templates_filters_by_slot_count_which_is_the_gallery_s_query() {
+    // S14: the layout gallery offers every layout with the photo count, and
+    // `Selection::layouts` is that query. This flag is the same query from the
+    // outside — `AGENTS.md`: nothing may be possible only in the GUI — so the
+    // expectation is read from the core policy rather than written as a literal.
+    for slots in 2..=9usize {
+        let output = run(&["templates", "--slots", &slots.to_string()]);
+        assert_eq!(code(&output), 0, "{slots}: {}", stderr(&output));
+        assert_eq!(field(&output, "slots"), slots.to_string());
+        let count: usize = field(&output, "count").parse().unwrap();
+        assert!(count >= 3, "{slots} photos have {count} layouts");
+        let listed: Vec<String> = (0..count)
+            .map(|index| {
+                let name = field(&output, &format!("template.{index}.name"));
+                assert_eq!(
+                    field(&output, &format!("template.{index}.slots")),
+                    slots.to_string(),
+                    "{name} is not a {slots}-slot layout"
+                );
+                name
+            })
+            .collect();
+        // The order is the library's, and the set is `Selection::layouts`'s: the
+        // picker's own query and this report cannot drift.
+        let expected: Vec<String> = Selection::new(
+            (0..slots)
+                .map(|index| PathBuf::from(format!("/photos/{index}.jpg")))
+                .collect(),
+        )
+        .expect("a selection inside the clamp")
+        .layouts()
+        .into_iter()
+        .map(|template| template.name)
+        .collect();
+        assert_eq!(listed, expected, "{slots} slots");
+    }
+
+    // The two filters combine, and the shape filter is still the library's own.
+    let both = run(&["templates", "--slots", "5", "--aspect", "4:3"]);
+    assert_eq!(code(&both), 0, "{}", stderr(&both));
+    assert_eq!(field(&both, "count"), "1");
+    assert_eq!(field(&both, "template.0.name"), "mosaic-5-hero");
+
+    // A count outside the format's range is a usage error with an empty stdout: no
+    // layout has one slot, and ten left the library with S12c.
+    for bad in ["0", "1", "10", "-2", "x"] {
+        let output = run(&["templates", "--slots", bad]);
+        assert_eq!(code(&output), 1, "--slots {bad}");
+        assert!(stdout(&output).is_empty(), "--slots {bad} wrote to stdout");
+    }
+    // And the filter is `templates`'s alone.
+    let misplaced = run(&["scan", "--dir", ".", "--slots", "5"]);
+    assert_eq!(code(&misplaced), 1);
+    assert!(
+        stderr(&misplaced).contains("--slots"),
+        "{}",
+        stderr(&misplaced)
+    );
+}
+
+#[test]
 fn init_writes_a_project_that_loads_back() {
     let dir = out_dir("init");
     let path = dir.join("new.pixlay");
@@ -2146,6 +2208,357 @@ fn edit_clears_a_cell_and_keeps_the_others() {
     assert_eq!(
         after.cells[1].source, before.cells[1].source,
         "the other cell is untouched"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn edit_appends_a_photo_and_grows_the_layout_with_the_count() {
+    // S14's `+`: the photo goes to the first empty cell, and if there is none the
+    // layout grows by one slot — the same command the window's count control sends,
+    // so the two produce the same document (the GUI test compares them).
+    let dir = out_dir("edit-add");
+    let project = framing_project(&dir, "a.pixlay");
+    let extra = dir.join("photos/wide.jpg");
+    assert!(
+        extra.is_file(),
+        "the fixture photo the project was built from"
+    );
+
+    let out = dir.join("added.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        project.to_str().expect("utf-8"),
+        "--add-photo",
+        extra.to_str().expect("utf-8"),
+        "--out",
+        out.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "command"), "edit");
+    assert_eq!(
+        field(&output, "cells"),
+        "3",
+        "the layout grew with the count"
+    );
+    assert_eq!(field(&output, "photos"), "3");
+    // `strip-2-2x1` is 3:2; the three-slot layouts are 16:9, 2:3 and 4:3, so the
+    // count rule keeps the *family* — this is the same `layout_for` the window
+    // uses, and the two are one implementation.
+    assert_eq!(field(&output, "template"), "strip-3-3x1");
+
+    let before = CollageDoc::load(&project).expect("loads");
+    let after = CollageDoc::load(&out).expect("loads");
+    assert_eq!(
+        after.cells[..2],
+        before.cells[..],
+        "the cells that survived keep their photo and framing"
+    );
+    assert!(
+        after.cells[2]
+            .source
+            .as_deref()
+            .is_some_and(|source| source.ends_with("photos/wide.jpg")),
+        "the appended cell shows the new photo: {:?}",
+        after.cells[2].source
+    );
+    assert_eq!(after.template.slots.len(), 3);
+
+    // Two photos at once, and the growth is per photo; a second photo that cannot
+    // be read is refused before anything is written.
+    let two = dir.join("two.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        project.to_str().expect("utf-8"),
+        "--add-photo",
+        extra.to_str().expect("utf-8"),
+        "--add-photo",
+        extra.to_str().expect("utf-8"),
+        "--out",
+        two.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "cells"), "4");
+    assert_eq!(field(&output, "template"), "strip-4-4x1");
+
+    let missing = dir.join("missing.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        project.to_str().expect("utf-8"),
+        "--add-photo",
+        dir.join("nope.jpg").to_str().expect("utf-8"),
+        "--out",
+        missing.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(
+        code(&output),
+        2,
+        "a photo that is not there is not written in"
+    );
+    assert!(stderr(&output).contains("nope.jpg"), "{}", stderr(&output));
+    assert!(!missing.exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn edit_drops_the_last_photo_and_shrinks_the_layout() {
+    // The other half of the count control. "The last photo" is the last occupied
+    // cell, and the layout shrinks to what the survivors need — never below the
+    // floor of two, which is the same floor `Selection` enforces.
+    let dir = out_dir("edit-remove");
+    let photos = dir.join("photos");
+    std::fs::create_dir_all(&photos).expect("create photos");
+    for (name, source) in [
+        ("a.jpg", "landscape.jpg"),
+        ("b.jpg", "portrait.jpg"),
+        ("c.jpg", "square.png"),
+        ("d.jpg", "dated.jpg"),
+    ] {
+        let bytes: &[u8] = match source {
+            "landscape.jpg" => include_bytes!("fixtures/photos/landscape.jpg"),
+            "portrait.jpg" => include_bytes!("fixtures/photos/portrait.jpg"),
+            "square.png" => include_bytes!("fixtures/photos/square.png"),
+            _ => include_bytes!("fixtures/photos/dated.jpg"),
+        };
+        std::fs::write(photos.join(name), bytes).expect("write photo");
+    }
+    let project = dir.join("four.pixlay");
+    let mut init = vec![
+        "init",
+        "--template",
+        "strip-4-4x1",
+        "--out",
+        project.to_str().expect("utf-8"),
+    ];
+    let photo_args: Vec<String> = ["a.jpg", "b.jpg", "c.jpg", "d.jpg"]
+        .iter()
+        .map(|name| photos.join(name).to_str().expect("utf-8").to_string())
+        .collect();
+    for path in &photo_args {
+        init.push("--photo");
+        init.push(path);
+    }
+    let output = run(&init);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let before = CollageDoc::load(&project).expect("loads");
+    assert_eq!(before.cells.len(), 4);
+
+    let out = dir.join("three.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        project.to_str().expect("utf-8"),
+        "--remove-photo",
+        "--out",
+        out.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "cells"), "3");
+    assert_eq!(field(&output, "photos"), "3");
+    assert_eq!(field(&output, "template"), "strip-3-3x1", "16:9 stays 16:9");
+    let after = CollageDoc::load(&out).expect("loads");
+    assert_eq!(
+        after.cells,
+        before.cells[..3],
+        "the survivors are the first three cells, unchanged"
+    );
+
+    // The floor: a two-photo document has no smaller layout, and one that is
+    // already empty has nothing to drop at all.
+    let two = dir.join("two.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        out.to_str().expect("utf-8"),
+        "--remove-photo",
+        "--out",
+        two.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "template"), "strip-2-2x1");
+
+    let empty = dir.join("empty.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        two.to_str().expect("utf-8"),
+        "--slot",
+        "0",
+        "--clear",
+        "--out",
+        empty.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let refused = dir.join("refused.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        empty.to_str().expect("utf-8"),
+        "--slot",
+        "1",
+        "--clear",
+        "--out",
+        empty.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let output = run(&[
+        "edit",
+        "--project",
+        empty.to_str().expect("utf-8"),
+        "--remove-photo",
+        "--out",
+        refused.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 2, "there is no photo to drop");
+    assert!(stderr(&output).contains("no photo"), "{}", stderr(&output));
+    assert!(!refused.exists());
+
+    // The two batch flags are opposites: one edit, one intent.
+    let both = run(&[
+        "edit",
+        "--project",
+        project.to_str().expect("utf-8"),
+        "--add-photo",
+        photos.join("a.jpg").to_str().expect("utf-8"),
+        "--remove-photo",
+        "--out",
+        dir.join("both.pixlay").to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&both), 1, "{}", stderr(&both));
+    assert!(stderr(&both).contains("--add-photo"), "{}", stderr(&both));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn edit_switches_the_layout_and_sets_one_cell_s_photo() {
+    // S14's other two capabilities, which the gallery and the canvas's own
+    // click-to-replace reach from the window: switch the layout keeping the
+    // surviving cells, and point one cell at another photo.
+    let dir = out_dir("edit-layout");
+    let project = framing_project(&dir, "a.pixlay");
+    let other = dir.join("photos/tall.jpg");
+    let before = CollageDoc::load(&project).expect("loads");
+
+    // A layout with more slots: the cells that survive keep what they hold, and
+    // the new ones are empty.
+    let grown = dir.join("grown.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        project.to_str().expect("utf-8"),
+        "--template",
+        "mosaic-4-hero",
+        "--out",
+        grown.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "template"), "mosaic-4-hero");
+    assert_eq!(field(&output, "cells"), "4");
+    assert_eq!(field(&output, "photos"), "2");
+    let after = CollageDoc::load(&grown).expect("loads");
+    assert_eq!(after.cells[..2], before.cells[..]);
+    assert_eq!(after.cells[2], Cell::default());
+    assert_eq!(after.cells[3], Cell::default());
+
+    // A layout with *fewer* slots drops the tail, which is the documented rule and
+    // the one the gallery's own thumbnails show before the click.
+    let shrunk = dir.join("shrunk.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        grown.to_str().expect("utf-8"),
+        "--template",
+        "strip-2-2x1",
+        "--out",
+        shrunk.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "cells"), "2");
+    assert_eq!(field(&output, "photos"), "2");
+
+    // One cell's photo, with the framing it already had: `SetSource` never resets
+    // the crop, because the zoom is absolute (docs/CONTRACT.md §1).
+    let framed = dir.join("framed.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        project.to_str().expect("utf-8"),
+        "--slot",
+        "1",
+        "--rotate",
+        "12",
+        "--out",
+        framed.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let crop = stored_crop(&framed, 1);
+    let replaced = dir.join("replaced.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        framed.to_str().expect("utf-8"),
+        "--slot",
+        "1",
+        "--photo",
+        other.to_str().expect("utf-8"),
+        "--out",
+        replaced.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "occupied"), "true");
+    let after = CollageDoc::load(&replaced).expect("loads");
+    assert!(
+        after.cells[1]
+            .source
+            .as_deref()
+            .is_some_and(|source| source.ends_with("photos/tall.jpg")),
+        "{:?}",
+        after.cells[1].source
+    );
+    assert_eq!(
+        after.cells[1].crop.rotation_deg, crop.rotation_deg,
+        "the new photo keeps the framing the cell had"
+    );
+    assert_eq!(
+        after.cells[0], before.cells[0],
+        "the other cell is untouched"
+    );
+
+    // The flag relationships: `--photo` needs a cell, and it is not a way to empty
+    // one.
+    for args in [
+        vec!["--photo", other.to_str().expect("utf-8")],
+        vec!["--slot", "0", "--clear", "--photo", "x.jpg"],
+        vec!["--slot", "9", "--photo", other.to_str().expect("utf-8")],
+    ] {
+        let bad = dir.join("bad.pixlay");
+        let mut argv = vec!["edit", "--project", project.to_str().expect("utf-8")];
+        argv.extend(&args);
+        argv.push("--out");
+        argv.push(bad.to_str().expect("utf-8"));
+        let output = run(&argv);
+        assert_eq!(code(&output), 1, "{args:?}: {}", stderr(&output));
+        assert!(!dir.join("bad.pixlay").exists());
+    }
+    // An unknown layout names the library, like every other unknown-template
+    // refusal this build has.
+    let unknown = run(&[
+        "edit",
+        "--project",
+        project.to_str().expect("utf-8"),
+        "--template",
+        "nope",
+        "--out",
+        dir.join("nope.pixlay").to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&unknown), 1);
+    assert!(
+        stderr(&unknown).contains("mosaic-8-s14"),
+        "{}",
+        stderr(&unknown)
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

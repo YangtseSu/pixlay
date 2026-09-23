@@ -10,11 +10,24 @@
 
 use std::path::PathBuf;
 
-use pixlay_core::{Cell, CollageDoc, Command, CoreError, CropTransform, History, templates};
+use pixlay_core::{
+    Cell, CollageDoc, Command, CoreError, CropTransform, History, remove_last, templates,
+};
 
 fn document() -> CollageDoc {
     let template = templates::get(templates::SMOKE_TEMPLATE).expect("registered");
     CollageDoc::new(template)
+}
+
+/// A document on `template` with a source in every cell — the state S14's count
+/// control starts from.
+fn occupied(template: &str) -> CollageDoc {
+    let template = templates::get(template).unwrap_or_else(|| panic!("template {template}"));
+    let mut doc = CollageDoc::new(template);
+    for (index, cell) in doc.cells.iter_mut().enumerate() {
+        cell.source = Some(PathBuf::from(format!("photos/cell{index}.jpg")));
+    }
+    doc
 }
 
 /// A template the library never had: ten slots, one past `MAX_SLOTS` since S12c
@@ -421,4 +434,195 @@ fn a_template_change_keeps_the_photos_it_can_and_never_leaves_a_dangling_slot() 
     assert_eq!(history.undo_depth(), 4);
     assert!(history.undo());
     assert_eq!(history.doc().cells.len(), 8);
+}
+
+#[test]
+fn adding_photos_fills_empty_cells_before_it_grows_the_layout() {
+    // S14's count control, in its two halves. A photo goes to the first *empty*
+    // cell, and a photo that finds none takes the layout with one slot more —
+    // which is what makes `+` one control rather than a menu.
+    let mut history = History::new(occupied("mosaic-4-hero")).expect("a valid document");
+    history
+        .apply(Command::SetCrop {
+            slot: 0,
+            crop: CropTransform {
+                zoom: 1.8,
+                offset: (0.2, -0.1),
+                rotation_deg: 9.0,
+            },
+        })
+        .expect("applies");
+    let survived = history.doc().cells[..4].to_vec();
+
+    history
+        .apply(Command::AddPhotos {
+            photos: vec![PathBuf::from("photos/new.jpg")],
+        })
+        .expect("a fifth photo fits");
+    let doc = history.doc();
+    assert_eq!(doc.cells.len(), 5, "the layout grew with the count");
+    assert_eq!(doc.template.name, "mosaic-5-hero", "4:3 stays 4:3");
+    assert_eq!(
+        doc.cells[..4],
+        survived[..],
+        "the cells that survived keep their photo and framing"
+    );
+    assert_eq!(
+        doc.cells[4].source,
+        Some(PathBuf::from("photos/new.jpg")),
+        "the new photo lands in the appended cell"
+    );
+    doc.validate().expect("a valid document");
+
+    // An empty cell comes first: the count is what grew, not the layout.
+    history
+        .apply(Command::SetSource {
+            slot: 2,
+            source: None,
+        })
+        .expect("applies");
+    history
+        .apply(Command::AddPhotos {
+            photos: vec![PathBuf::from("photos/hole.jpg")],
+        })
+        .expect("applies");
+    let doc = history.doc();
+    assert_eq!(doc.cells.len(), 5, "no sixth cell: there was an empty one");
+    assert_eq!(doc.cells[2].source, Some(PathBuf::from("photos/hole.jpg")));
+    assert_eq!(
+        doc.cells[2].crop,
+        CropTransform::IDENTITY,
+        "the empty cell had no framing to inherit"
+    );
+
+    // Two photos at once, with every cell taken: the layout grows per photo, and
+    // it is still one undo step.
+    let depth = history.undo_depth();
+    history
+        .apply(Command::AddPhotos {
+            photos: vec![
+                PathBuf::from("photos/six.jpg"),
+                PathBuf::from("photos/seven.jpg"),
+            ],
+        })
+        .expect("applies");
+    let doc = history.doc();
+    assert_eq!(doc.cells.len(), 7);
+    assert_eq!(doc.template.name, "mosaic-7-t4b3");
+    assert_eq!(doc.cells[5].source, Some(PathBuf::from("photos/six.jpg")));
+    assert_eq!(doc.cells[6].source, Some(PathBuf::from("photos/seven.jpg")));
+    assert_eq!(history.undo_depth(), depth + 1, "one call is one undo step");
+
+    // The ceiling is the picker's own: nine is also the format's slot limit, so
+    // there is no layout left to grow into.
+    let full = History::new(occupied("strip-9-9x1")).expect("a valid document");
+    let mut full = full;
+    let refused = full
+        .apply(Command::AddPhotos {
+            photos: vec![PathBuf::from("photos/tenth.jpg")],
+        })
+        .expect_err("a tenth photo has nowhere to go");
+    assert!(
+        matches!(refused, CoreError::TooManyPhotos { max: 9 }),
+        "{refused}"
+    );
+    assert!(refused.to_string().contains('9'), "{refused}");
+    assert_eq!(full.doc().cells.len(), 9, "the refusal changed nothing");
+    assert_eq!(full.undo_depth(), 0);
+}
+
+#[test]
+fn the_batch_removal_shrinks_the_layout_and_the_token_brings_the_cell_back() {
+    // Ruling 7: one control drops the last photo and brings it back. The layout
+    // follows the count down, and the token puts both the cell and its framing
+    // back exactly where they were.
+    let mut history = History::new(occupied("mosaic-5-hero")).expect("a valid document");
+    history
+        .apply(Command::SetCrop {
+            slot: 4,
+            crop: CropTransform {
+                zoom: 2.4,
+                offset: (-0.3, 0.4),
+                rotation_deg: -17.0,
+            },
+        })
+        .expect("applies");
+    let before = history.doc().clone();
+
+    // The token is the same `remove_last` the command applies, on the same
+    // document: the two cannot disagree about which cell is on its way out.
+    let mut probe = history.doc().clone();
+    let removed = remove_last(&mut probe).expect("there is a photo to drop");
+    history.apply(Command::RemoveLastPhoto).expect("applies");
+
+    let doc = history.doc();
+    assert_eq!(doc.cells.len(), 4, "the layout shrank with the count");
+    assert_eq!(doc.template.name, "mosaic-4-hero", "4:3 stays 4:3");
+    assert_eq!(doc.cells[..4], before.cells[..4]);
+    doc.validate().expect("a valid document");
+
+    history
+        .apply(Command::RestorePhoto(removed))
+        .expect("the cell comes back");
+    assert_eq!(
+        history.doc(),
+        &before,
+        "remove then restore is the exact inverse: same layout, same cell, same framing"
+    );
+
+    // Two undo steps, and undoing them walks back through both states.
+    assert!(history.undo());
+    assert_eq!(history.doc().cells.len(), 4);
+    assert!(history.undo());
+    assert_eq!(history.doc(), &before);
+
+    // The hole case: the last *occupied* cell is what leaves, and the layout
+    // shrinks to what the survivors need rather than to one less.
+    let mut holed = occupied("strip-4-4x1");
+    holed.cells[2] = Cell::default();
+    let mut history = History::new(holed).expect("a valid document");
+    let mut probe = history.doc().clone();
+    let removed = remove_last(&mut probe).expect("cell 3 is the last photo");
+    assert_eq!(removed.slot, 3);
+    history.apply(Command::RemoveLastPhoto).expect("applies");
+    assert_eq!(
+        history.doc().cells.len(),
+        2,
+        "cells 0 and 1 are the survivors, and the cell that was already empty goes with the shrink"
+    );
+    assert_eq!(history.doc().template.name, "strip-2-2x1");
+}
+
+#[test]
+fn the_batch_removal_refuses_an_empty_document_and_a_taken_slot() {
+    let mut empty = History::new(document()).expect("a valid document");
+    let refused = empty
+        .apply(Command::RemoveLastPhoto)
+        .expect_err("there is no photo to drop");
+    assert!(matches!(refused, CoreError::NothingToRemove), "{refused}");
+    assert_eq!(empty.doc().cells.len(), 8, "the refusal changed nothing");
+
+    // A restore whose cell was taken while it was out is refused — and the
+    // *layout* the restore would have grown is not left behind either, because the
+    // command is applied to a copy.
+    let mut history = History::new(occupied("strip-3-3x1")).expect("a valid document");
+    let mut probe = history.doc().clone();
+    let removed = remove_last(&mut probe).expect("a photo");
+    history.apply(Command::RemoveLastPhoto).expect("applies");
+    assert_eq!(history.doc().cells.len(), 2, "the layout shrank");
+    history
+        .apply(Command::AddPhotos {
+            photos: vec![PathBuf::from("photos/other.jpg")],
+        })
+        .expect("applies");
+    assert_eq!(history.doc().cells.len(), 3, "and grew back");
+    let before = history.doc().clone();
+    let refused = history
+        .apply(Command::RestorePhoto(removed))
+        .expect_err("slot 2 holds the photo that took its place");
+    assert!(
+        matches!(refused, CoreError::SlotOccupied { slot: 2 }),
+        "{refused}"
+    );
+    assert_eq!(history.doc(), &before, "the refusal changed nothing");
 }

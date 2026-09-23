@@ -311,9 +311,11 @@ pixlay-render probe     --project <file.pixlay> --long-edge <px>
 pixlay-render image     --photo <file>
 pixlay-render scan      --dir <path> [--recursive] [--json]
 pixlay-render thumb     --photo <file> --px <n> --out <file>
-pixlay-render templates [--aspect <ratio>] [--json]
+pixlay-render templates [--aspect <ratio>] [--slots <n>] [--json]
 pixlay-render init      --template <name> --out <file.pixlay> [--photo <p>...]
 pixlay-render edit      --project <file.pixlay> --out <file.pixlay> --slot <i> --rotate <deg> --zoom <z> --offset <x>,<y> --clear
+pixlay-render edit      --project <file.pixlay> --out <file.pixlay> --slot <i> --photo <file>
+pixlay-render edit      --project <file.pixlay> --out <file.pixlay> --template <name> --add-photo <file> --remove-photo
 pixlay-render edit      --project <file.pixlay> --out <file.pixlay> --gap <rel> --radius <rel> --border-color <r,g,b>
 pixlay-render hit       --project <file.pixlay> --at <x>,<y> [--json]
 pixlay-render hit       --template <name> --at <x>,<y> [--json]
@@ -360,7 +362,7 @@ comparable, and `--quality` was deliberately not added — a knob nobody tests b
 | Item | `templates` | `init` |
 |---|---|---|
 | shape | `template.<i>.{name,slots,aspect,version}` plus `count` (and `aspect`, when filtering) | `template`, `version`, `aspect`, `cells`, `bytes` |
-| `--aspect` | the only flag it takes: accepts `W:H` (`4:3`) or a decimal, matched against the template's declared ratio within `ASPECT_TOLERANCE` (the picker's own `templates::of_aspect` query). A ratio nothing was authored for is `count = 0` and exit 0 | — |
+| `--aspect` / `--slots` | the only flags it takes (S14 added the second): `--aspect` accepts `W:H` (`4:3`) or a decimal, matched against the template's declared ratio within `ASPECT_TOLERANCE` (the picker's own `templates::of_aspect` query), and `--slots` filters by slot count (`Selection::layouts`, the gallery's query). A ratio or a count nothing was authored for is `count = 0` and exit 0 | — |
 | `--template` / `--out` | — | both required; `--out` must end in `.pixlay` |
 | refusal | any other flag (`--long-edge`, `--project`, …) is a usage error (exit 1) | same; and an existing `--out` path is a **failure** (exit 2) because `init` never overwrites a project |
 | unknown template | — | usage error (exit 1), stderr lists the names this build knows |
@@ -385,7 +387,7 @@ comparable, and `--quality` was deliberately not added — a knob nobody tests b
 | count | 2..=9 inclusive (ruling 3). Outside it: usage error (exit 1) naming both bounds (`a collage needs 2..=9 photos, got 10`). Omitting `--photo` entirely is still the photo-free project S2 shipped |
 | template | the slot count must equal the number of photos; a mismatch is a usage error (exit 1) naming the template, its slots and the photo count |
 | paths | a **photo that is not there** is a failure (exit 2, the path named) — the same rule a project that points at a deleted file follows. Each stored `source` is relative to the project file when the two share a root (`pixlay_core::relative_to`, the function `Project::save_as` rebases with) and absolute otherwise, so a project whose photos sit beside it can be moved |
-| the policy itself | `pixlay_core::selection`: `Selection` (ordered photos, the 2..=9 clamp, `layouts()` = the templates with that many slots), `remove_last` / `Removed::restore` (the LIFO batch rule: the last **occupied** cell, because a per-cell clear leaves holes, and the cell comes back in its own slot with its framing). Pure functions, no filesystem |
+| the policy itself | `pixlay_core::selection`: `Selection` (ordered photos, the 2..=9 clamp, `layouts()` = the templates with that many slots), `layout_for` (the count rule, S14: same aspect → same recipe family → nearest aspect → library order), `remove_last` / `Removed::restore` (the LIFO batch rule: the last **occupied** cell, because a per-cell clear leaves holes, and the cell comes back in its own slot with its framing — **and the token carries the document's template**, because ruling 7's "brings it back" is exact only if the layout comes back too: the count moves the layout with it, and no three-slot *grid* exists for a four-photo `grid-4-2x2` to grow back into). Pure functions, no filesystem |
 
 **S11 added one subcommand (`edit`) and three shared flags**, because the free rotation and the frame are things a *person*
 does and a machine has to be able to do too (`AGENTS.md`: nothing may be possible only in the GUI). The flags are the same
@@ -405,7 +407,7 @@ three on both commands, and the difference between them is scope:
 | idempotence | fitting a fit returns it bit for bit, so `edit` applied twice to the same project writes the same bytes — asserted on a rotation that has to be paid for *and* a pan that has to be clamped. A frame is likewise idempotent |
 | writing | through `Project::save_as`, the same call `save` makes: atomic, and relative photo paths are rebased when the copy lands in another directory. `--out` may be `--project` (edit in place) |
 | what `edit` reports | `template`, `version`, `cells`, `photos`, the frame's three fields, `bytes`, and — when `--slot` was given — `slot`, `occupied`, `zoom`, `offset`, `rotation_deg` |
-| no `--photo`, no `--long-edge` | an edit changes a cell's framing and the document's frame; which photos and how big an export are other commands' questions |
+| no `--long-edge` | an edit changes a cell's framing, the document's frame, its layout and the photos it holds; how big an export is another command's question. `--photo` joined the framing flags in S14 (`edit --slot <i> --photo <file>`), with the rules S14 added further down |
 
 **S12 added one subcommand and no flags to the others.** `gesture` is the ruler for what one step of a live
 gesture costs, which is the number ruling 1 (2026-09-22) hands the preview's fate to. It drives the same
@@ -428,6 +430,21 @@ the problem splits:
 
 `step_deg` is `pixlay_imaging::preview::GESTURE_STEP_DEG`, the same constant the canvas's Ctrl+scroll
 straightening uses, so the thing measured and the thing used cannot drift apart.
+
+**S14 taught the CLI the layout stage's own vocabulary**, because the count control and the layout gallery
+are things a person does and a machine has to be able to do too. Two of the flags are new questions rather
+than new commands — `templates --slots` is the gallery's candidate set, and `edit` gained the three
+operations the band performs:
+
+| Item | Rule |
+|---|---|
+| `templates --slots <n>` | only the templates with exactly `n` slots, `2..=9` (exit 1 outside, and the same bound the format's slot limit gives). This is `Selection::layouts` — the gallery's own query — seen from the outside, so a caller can list a photo count's candidates; the two filters combine with `--aspect`. The report echoes `slots` beside `aspect` |
+| `edit --template <name>` | switches the document to another layout, keeping the surviving cells' photos and framing (`Command::SetTemplate`'s retention: a layout with fewer slots drops the tail, one with more appends empty cells). An unknown name is exit 1 with the library listed |
+| `edit --add-photo <file>` | appends a photo: the first empty cell, else the layout with one slot more (`Command::AddPhotos`, the window's `+`). Repeated once per photo in argument order; a photo that is not there is exit 2 with the path named, and a tenth is exit 2 (`a collage takes at most 9 photos`) |
+| `edit --remove-photo` | drops the last **occupied** cell and shrinks the layout to what the survivors need (`Command::RemoveLastPhoto`), never below two slots. An empty document is exit 2 (`no photo to remove: every cell is empty`). Refused together with `--add-photo` (exit 1): they are opposites, and one edit is one intent |
+| `edit --slot <i> --photo <file>` | the photo that cell shows instead. Needs `--slot` (exit 1 otherwise, like the framing flags), and the stored path follows `init --photo`'s rule (relative to the project when the two share a root, absolute otherwise) |
+| the order of one `edit` | `--template`, `--add-photo`, `--slot`/`--photo`, then the framing — so the framing is fitted against the document the earlier flags produced. `--clear` is exclusive with `--photo` as well as with the framing flags |
+| one implementation | every one of these goes through the same `pixlay_core::Command` the window sends (`crates/pixlay-cli/src/cli.rs::edit_project` applies them to a `History`), so "the CLI and the window produce the same document" is a property of the code rather than of two editors kept in step by hand — asserted in `crates/pixlay/tests/layout.rs` |
 
 Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wall clock, with compositing and encoding reported separately.
 
@@ -563,7 +580,7 @@ eight photos and one `{date}` layer on a 14043x10532 A0 sheet, per format:
 | the machine's walk of the main path (`tests/mainpath.rs`) | template → four photos (one chosen, three dropped) → zoom/straighten/pan → JPEG and PNG export → save and reopen → the missing-photo case: **12.6 s** including two windows, four decodes at two sizes, both exports and the 2.2 s missing-photo half; the JPEG at `--long-edge 600` is 600x600 for that square template |
 | a missing photo | the slot is reported, the window notices it, its bitmap drops out and the export is refused (asserted) — the contract's "visible, not silent" is a claim with a test |
 | the real app | `target/debug/pixlay` runs under the session's Wayland for as long as it is left alone, with nothing on stderr; the window the tests draw is `/var/tmp/pixlay-s7/window.png` |
-| the strings | `po/POTFILES` = the crate's 11 source files; `xgettext --language=Rust` finds **77** msgids after S12c removed the Text and Colour groups |
+| the strings | `po/POTFILES` = the crate's **14** source files; `xgettext --language=Rust` finds **74** parseable msgids after S14 added the layout band's (63 before it). Counted the way `tests/i18n.rs::msgids` counts them — `msgid `/`msgid_plural ` lines, the header's own `msgid ""` excluded — because that is the comparison the test makes against the committed `po/pixlay.pot` |
 | the layout | no utility pane since ruling 18 (S13): at the minimum window size (480x360) the sheet is still drawn in full (asserted) |
 | a display, or none | the four GUI test binaries are one test each and run on the session's display; with none they re-run themselves under `xvfb-run` (pinning `GTK_IM_MODULE=gtk-im-context-simple` and `NO_AT_BRIDGE=1`, because GTK's `im-ibus` module recurses without a session bus), and the whole suite is green headlessly |
 
@@ -894,6 +911,39 @@ document describes them, and the preview's pixels stay `draw`'s; the GPU preview
 photo content, 2.14 RMSE against S7's window-vs-CLI comparison on the fixtures' synthetic hard edges, both
 inside S7's threshold of 6.
 
+### S14 (2026-09-23, this machine)
+
+The layout stage's numbers. Two of the three were taken by the CLI's own pipeline (the source-choice probe
+below, `--release`); the rest are the committed test's (`crates/pixlay/tests/layout.rs`, a debug test build —
+the geometry and the decode counts are the same code a release build runs, so these are the *shape* of the
+cost rather than its floor).
+
+| what | number |
+|---|---|
+| the band, at 1100x760 | **139** logical px tall of the window's 760; a candidate cell **128x115**, its thumbnail the largest grid inside **128x96** (a 4:3 candidate 128x96, a 16:9 one 128x72, a 2:3 one 64x96) |
+| the canvas, before the candidates land and after | **575** px both times (`tests/layout.rs` asserts the two are equal) — the placeholder is a candidate cell, so the band cannot resize the canvas under it |
+| decodes for the eight-photo verification project, on open | **7** — one per distinct file. Before S14's two fixes it was **21**: a request at a 1x1 grid, made before the canvas was allocated at all, plus the canvas being laid out twice because the band grew when the candidates arrived. Both are gone (`EditorWindow::refresh_document`, `layout::placeholder_cell`) |
+| the band's **own** decodes | **0** through a layout change, a committed framing change and a resize (`EditorWindow::gallery_decodes`) |
+| what a layout change and a resize cost the canvas | **7** decodes across both events for the same eight photos: a layout change moves the sheet's aspect and a resize moves the grid, so the copy at the new edge is cut once — the canvas's own work, and neither event is doubled by the band, whose request goes out beside it at that same edge |
+| a candidate's pixels vs `pixlay-render render` of the same document at the same grid | **0.1094** / **0.2269** / **0.1432** across the three candidates of the eight-photo document (worst **0.2269**, threshold 6) |
+| the band's rebuild | **74.6 ms** for three candidates at a 128x96 grid (`--release`) |
+| **the source choice**, measured as a probe: the canvas's own preview-grade copy (975 px for a 780-px canvas) against the gallery's own thumbnail-sized one | **(a) shared: 0 gallery decodes, 74.6 ms, worst drift 0.083** · **(b) its own: 7 further decodes, 4.0 ms, worst drift 3.42** — **(a) is what shipped** |
+
+- **The source choice is (a), and it is the same question S12b's fidelity ladder names.** A copy *larger* than
+  the candidate is a downsampling source, which is what the resampler wants; a copy *at* the candidate's size
+  is read at 1:1, where the reduction's own sampling is what the picture shows — which is exactly the 3.42.
+  So the hazard "a gallery candidate must not come from a reduction at a large factor" (S12b, above) is
+  resolved by naming the canvas's *edge* rather than by reducing a second copy: the factor from that copy to
+  a candidate is 7.6, and the drift is **0.083** on the CLI's own pipeline, **0.11-0.23** through the
+  window's. `pixlay_imaging::Preview::build_at_source_edge` carries this measurement in its own docs.
+- **The window's own criterion is the decode count, and it is now exactly "one per photo".** `decoded_sources`
+  is a claim about the decoding *thread*, so the band's share is counted separately
+  (`gallery_decodes`): the band never decodes anything once the canvas has built at the same edge, and the
+  canvas itself is one decode per distinct file per grid it is asked for.
+- **The band's geometry is a design constant, not a measurement of the reference** — there is no reference
+  for it — and it is chosen so the canvas keeps the majority of the page: 139 of 760 leaves the sheet 575 px
+  tall, and the thumbnail box (128x96) is the largest that does.
+
 ## 9. The window (S7), and the stages added after it
 
 The GUI is the fifth consumer of the same document, and what it adds is interaction. Its
@@ -902,16 +952,52 @@ contract is what a caller can rely on without looking at a widget:
 **Since the 2026-09-22 ruling the window is a sequence of stages** (`docs/2026-09-22-STEPS.md`,
 S13–S15), and **S13 landed the first of them**: the picker is the `AdwNavigationView`'s root page and
 the editor of S7 is pushed on top of it, so a new window opens on photos rather than on an empty sheet.
-The layout stage of S14 will sit between them. The invariants above are unchanged by the sequence: still
-one document, one renderer, one gesture per command. The library and the gallery are **not** renderers of
-the document — a candidate thumbnail is `render_rgb8` of the same drawn document at a smaller size, and
-S14's criteria hold it to that.
+**S14 landed the layout stage, and it is a band on the document's page rather than a third page** — a
+second `AdwNavigationPage` would have to own a second canvas, and S15's compose controls attach to the
+canvas the band sits under. The stage is a moment in the *flow*, not a place in the navigation stack; the
+sentences above that said it "will sit between them" meant the flow and are rewritten here. The invariants
+above are unchanged by the sequence: still one document, one renderer, one gesture per command. The
+library and the gallery are **not** renderers of the document — a candidate thumbnail is `render_rgb8` of
+the same drawn document at a smaller size, which S14's own criteria hold it to (§8, "S14").
 
-> **Read S14's own section for that step's shape** (`docs/2026-09-22-STEPS.md`, "S14 · The layout stage"
-> and "S14 · Ruling"): the layout stage is a **band on the document's page**, not a third page — a second
-> page would have to own a second canvas, and S15's compose controls attach to the canvas the gallery sits
-> under. The sentence "will sit between them" above means the stage's place in the *flow*, not a second
-> `AdwNavigationPage`; S14 rewrites this paragraph when it lands.
+What the layout stage is, as of S14 (`crates/pixlay/src/layout.rs`), and what a caller may rely on:
+
+- **The candidates are the layouts with the photo count, and only those** (ruling 25, 2026-09-23):
+  `Selection::layouts()` — the picker's own query, which the CLI's `templates --slots` answers with — in
+  library order. Each candidate is a **real document**: the editor's own document with
+  `Command::SetTemplate` applied, so a candidate of another aspect is drawn at its own shape and the
+  sheet's shape changes with the click. A document whose count has no layout (a per-cell clear can leave
+  fewer photos than slots) shows an empty cell-shaped placeholder instead of a strip.
+- **The band is a band on the document's page**: the editor's content is
+  `banner · canvas · gallery`, so the canvas keeps the majority of the page and the band is one candidate
+  cell tall (measured: 139 logical px of a 760-px window, a 128x96 thumbnail in a 115-px cell). The
+  placeholder is **the same widgets as a candidate** — a `GtkToggleButton` with the cell's class and an
+  empty thumbnail — so the canvas does not resize when the candidates land from their background build:
+  measured 2026-09-23, a shorter placeholder cost the document's eight photos **21** decodes on open and
+  the same document costs **7** with it (one per distinct file; the count that remains is the canvas's
+  own, and the request made before the canvas was allocated at all — a 1x1 grid — is gone with it,
+  `EditorWindow::refresh_document`).
+- **The count is a control, not a readout**: `− / N photos / +` at the band's start, insensitive at the
+  floor (`MIN_PHOTOS`) and at the ceiling (`MAX_PHOTOS`), with the picker's own message if a caller asks
+  anyway. `−` clears the last *occupied* cell and shrinks the layout to what the survivors need; `+`
+  brings the last removed cell back (ruling 7's LIFO — the token is the same `selection::remove_last` the
+  command applies, so the two cannot disagree about which cell it was, and it carries the layout the cell
+  was taken from) and only asks `GtkFileDialog::open_multiple` for files when it has nothing to bring
+  back. The one rule that decides *which* layout is `selection::layout_for` (same aspect → same recipe
+  family → nearest aspect → library order), so the window and the CLI cannot disagree about "the layout
+  with this count".
+- **A candidate cell is a `GtkToggleButton`** with an explicit accessible name, so HIG
+  `guidelines/accessibility` and `guidelines/pointer-touch` cover it for free (focusable, named, `Space`
+  activates it), and the layout the document is on is shown by the app's own highlight — the accent border
+  of `style.css`'s `.layout-cell.picked`, beside the platform's checked state.
+- **The band's own decodes are zero**: it renders on the canvas's decode worker and names the canvas's own
+  preview-grade edge (`Preview::build_at_source_edge`), so its first build is answered by the copies the
+  canvas already has. Measured 2026-09-23 (`--release`, this machine, the verification project's three
+  candidates at a 128x96 thumbnail grid): the gallery's own builds decode **0** files, the band takes
+  **74.6 ms** to rebuild, and its pixels differ from `pixlay-render render` of the same candidate at the
+  same grid by **0.11–0.23 RMSE** (threshold 6). Reducing its own thumbnail-sized copies instead would
+  decode every photo a second time and differ by up to 3.42 — that measurement is on
+  `pixlay_imaging::Preview::build_at_source_edge`.
 
 What the picker stage is, as of S13c (`crates/pixlay/src/picker.rs`), and what a caller may rely on
 without looking at a widget:

@@ -132,6 +132,7 @@ use pixlay_imaging::Thumbnail;
 
 use crate::a11y;
 use crate::i18n::{fill, gettext};
+use crate::picture::Picture;
 use crate::thumbs::Kind;
 use crate::window::EditorWindow;
 
@@ -335,43 +336,15 @@ pub struct Picker {
     title: adw::WindowTitle,
 }
 
-/// One decoded picture, ready to paint.
-///
-/// The texture and the bytes behind it are the *same* buffer — a
-/// `GdkMemoryTexture` holds a reference to the `glib::Bytes` it was built from — so
-/// a picture costs one copy of its pixels rather than two, and `texture()` is a
-/// refcount bump where the previous code copied the whole image on every paint.
-struct Picture {
-    texture: gdk::Texture,
-    bytes: glib::Bytes,
-    width: i32,
-    height: i32,
+/// One decoded picture, ready to paint: the shared wrapper, with the byte count a
+/// cache budgets on spelled out here (`crate::picture`).
+fn picture_from(thumbnail: Thumbnail) -> Picture {
+    Picture::rgb8(thumbnail.width, thumbnail.height, thumbnail.pixels)
 }
 
-impl Picture {
-    /// Decodes a thumbnail's pixels into a texture and keeps the buffer.
-    fn new(thumbnail: Thumbnail) -> Self {
-        let bytes = glib::Bytes::from_owned(thumbnail.pixels);
-        let texture = gdk::MemoryTexture::new(
-            thumbnail.width,
-            thumbnail.height,
-            gdk::MemoryFormat::R8g8b8,
-            &bytes,
-            (thumbnail.width * 3) as usize,
-        )
-        .upcast();
-        Self {
-            texture,
-            bytes,
-            width: thumbnail.width,
-            height: thumbnail.height,
-        }
-    }
-
-    /// The bytes this picture costs in a cache.
-    fn bytes(&self) -> usize {
-        self.bytes.len()
-    }
+/// The bytes a picture costs in a cache.
+fn picture_bytes(picture: &Picture) -> usize {
+    picture.bytes().len()
 }
 
 /// A bounded cache of decoded pictures, keyed by what was asked for.
@@ -412,7 +385,7 @@ impl<K: Eq + std::hash::Hash + Clone> Cache<K> {
 
     fn insert(&mut self, key: K, picture: Rc<Picture>) {
         self.remove(&key);
-        self.bytes += picture.bytes();
+        self.bytes += picture_bytes(&picture);
         self.order.push_back(key.clone());
         self.entries.insert(key, picture);
         while self.bytes > self.limit {
@@ -420,14 +393,14 @@ impl<K: Eq + std::hash::Hash + Clone> Cache<K> {
                 break;
             };
             if let Some(picture) = self.entries.remove(&oldest) {
-                self.bytes -= picture.bytes();
+                self.bytes -= picture_bytes(&picture);
             }
         }
     }
 
     fn remove(&mut self, key: &K) {
         if let Some(picture) = self.entries.remove(key) {
-            self.bytes -= picture.bytes();
+            self.bytes -= picture_bytes(&picture);
             self.order.retain(|held| held != key);
         }
     }
@@ -1157,9 +1130,9 @@ impl Picker {
         let (path, picture, _) = shown.as_ref()?;
         Some((
             path.clone(),
-            picture.width,
-            picture.height,
-            picture.bytes.as_ref().to_vec(),
+            picture.width(),
+            picture.height(),
+            picture.bytes().to_vec(),
         ))
     }
 
@@ -1208,7 +1181,7 @@ impl Picker {
                 self.sizes
                     .borrow_mut()
                     .insert(index, (thumbnail.source_width, thumbnail.source_height));
-                let picture = Rc::new(Picture::new(thumbnail));
+                let picture = Rc::new(picture_from(thumbnail));
                 self.tiles
                     .borrow_mut()
                     .insert((index, px), Rc::clone(&picture));
@@ -1530,14 +1503,14 @@ impl Picker {
                 // request is made again for the fitted size, once.
                 let learned = (thumbnail.source_width, thumbnail.source_height);
                 let first_time = self.sizes.borrow_mut().insert(index, learned).is_none();
-                let picture = Rc::new(Picture::new(thumbnail));
+                let picture = Rc::new(picture_from(thumbnail));
                 self.previews
                     .borrow_mut()
                     .insert((index, px), Rc::clone(&picture));
                 if self.focused.get() == Some(index) {
                     if px == self.preview_px() {
                         let path = self.file(index).unwrap_or_default();
-                        self.preview.set_paintable(Some(&picture.texture));
+                        self.preview.set_paintable(Some(picture.texture()));
                         self.preview.set_tooltip_text(None);
                         self.preview_stack.set_visible_child_name("photo");
                         *self.shown.borrow_mut() = Some((path, picture, px));
@@ -1568,7 +1541,7 @@ impl Picker {
         let picture = self.previews.borrow_mut().get(&(index, px));
         match picture {
             Some(picture) => {
-                self.preview.set_paintable(Some(&picture.texture));
+                self.preview.set_paintable(Some(picture.texture()));
                 self.preview.set_tooltip_text(None);
                 self.preview_stack.set_visible_child_name("photo");
                 let path = self.file(index).unwrap_or_default();
@@ -2202,7 +2175,7 @@ fn highlight(cell: Option<&gtk::Widget>, selected: bool) {
 /// Puts a decoded picture into a cell.
 fn paint_tile(stack: &gtk::Stack, picture: &Rc<Picture>) {
     if let Some(picture_widget) = stack.child_by_name("photo").and_downcast::<gtk::Picture>() {
-        picture_widget.set_paintable(Some(&picture.texture));
+        picture_widget.set_paintable(Some(picture.texture()));
     }
     stack.set_visible_child_name("photo");
 }

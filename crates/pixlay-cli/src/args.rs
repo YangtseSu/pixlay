@@ -67,7 +67,7 @@ USAGE:
     pixlay-render image  --photo <file> [--json]
     pixlay-render scan   --dir <path> [--recursive] [--json]
     pixlay-render thumb  --photo <file> --px <n> --out <file> [--json]
-    pixlay-render templates [--aspect <ratio>] [--json]
+    pixlay-render templates [--aspect <ratio>] [--slots <n>] [--json]
     pixlay-render init --template <name> --out <file.pixlay> [--photo <p>...] [--json]
     pixlay-render gesture --project <file.pixlay> --grid <px> [--slot <i>] [--steps <n>] [--json]
     pixlay-render edit   --project <file.pixlay> --out <file.pixlay> [EDIT OPTIONS] [--json]
@@ -162,6 +162,9 @@ GESTURE OPTIONS:
 TEMPLATES OPTIONS:
     --aspect <ratio>    List only the templates authored for this layout shape,
                         as W:H (4:3) or a decimal (1.333333). Omit to list all.
+    --slots <n>         List only the templates with exactly n slots, 2..=9. This
+                        is the layout gallery's own query (S14): the candidates
+                        for a collage of n photos. The two filters combine.
 
 HIT OPTIONS:
     --project <file>    Project whose layout to test. Required unless --template
@@ -204,6 +207,21 @@ EDIT OPTIONS:
     --slot <i>          The cell the framing flags below apply to. Without it
                         they are refused: every other flag is about the whole
                         document.
+    --photo <file>      The photo the `--slot` cell shows instead of the one it
+                        has. Needs --slot, and a file that is not there is
+                        refused rather than written into the project.
+    --add-photo <file>  Append a photo: it goes to the first empty cell, and if
+                        there is none the layout grows by one slot — the same
+                        rule the window's `+` follows (`layout_for`). Repeated
+                        once per photo, in argument order.
+    --remove-photo      Drop the last photo, and shrink the layout to what the
+                        survivors need. The mirror image of --add-photo, and
+                        refused together with it: run `edit` twice for both.
+    --template <name>   Switch the document to another layout (see
+                        `templates`), keeping the surviving cells' photos and
+                        framing. The count is not required to match: a layout
+                        with fewer slots drops the tail, one with more appends
+                        empty cells.
     --rotate <deg>      Set the cell's rotation to any finite angle, clockwise
                         on screen. It is stored wrapped into -180..=180 and is
                         never reduced by the clamp; the zoom is raised to
@@ -213,11 +231,15 @@ EDIT OPTIONS:
     --offset <x>,<y>    Set the photo's centre, from -1 to 1 cell widths and
                         heights away from the cell's centre.
     --clear             Empty the cell: no photo, and its framing back to its
-                        default. Exclusive with the framing flags.
-    The stored `crop` is the *fit* of what was asked for (a crop is a request;
-    what is drawn is what covers), so `edit` applied twice to the same project
-    writes the same bytes. A cell with no photo has nothing to fit against and
-    keeps the numbers as given; the fit returns when the cell gets a photo.
+                        default. Exclusive with the framing flags and with
+                        --photo.
+    The edit is applied in the order --template, --add-photo, --slot/--photo and
+    then the framing, so the framing is fitted against the document the earlier
+    flags produced. The stored `crop` is the *fit* of what was asked for (a crop
+    is a request; what is drawn is what covers), so `edit` applied twice to the
+    same project writes the same bytes. A cell with no photo has nothing to fit
+    against and keeps the numbers as given; the fit returns when the cell gets a
+    photo.
 
 COMMON OPTIONS:
     --json              Print one JSON object instead of key = value lines.
@@ -308,14 +330,23 @@ impl FrameArgs {
     }
 }
 
-/// `edit`: the framing of one cell, and the document's frame.
+/// `edit`: one cell's framing and/or photo, the document's frame, its layout, and
+/// the photos it holds.
 pub struct EditArgs {
     pub project: PathBuf,
     pub out: PathBuf,
-    /// The cell the framing flags apply to. `None` edits the frame alone, which is
-    /// what makes `--rotate` without `--slot` a usage error rather than a silent
-    /// no-op.
+    /// The cell the framing flags and `--photo` apply to. `None` edits the frame,
+    /// the layout or the photo count alone, which is what makes `--rotate` without
+    /// `--slot` a usage error rather than a silent no-op.
     pub slot: Option<usize>,
+    /// The photo the `--slot` cell shows instead. Only with `slot`.
+    pub photo: Option<PathBuf>,
+    /// Photos to append (`--add-photo`), in argument order.
+    pub add_photos: Vec<PathBuf>,
+    /// Drop the last photo and shrink the layout (`--remove-photo`).
+    pub remove_photo: bool,
+    /// Switch the layout, keeping the surviving cells (`--template`).
+    pub template: Option<String>,
     pub rotate: Option<f64>,
     pub zoom: Option<f64>,
     pub offset: Option<(f64, f64)>,
@@ -373,6 +404,9 @@ pub struct ProbeArgs {
 pub struct TemplatesArgs {
     /// Canvas aspect ratio to filter by, already parsed. `None` lists the library.
     pub aspect: Option<f64>,
+    /// Slot count to filter by. `None` lists every count — this is the layout
+    /// gallery's query, `Selection::layouts` spelled as a flag (S14).
+    pub slots: Option<usize>,
     pub json: bool,
 }
 
@@ -408,8 +442,14 @@ struct Flags {
     long_edge: Option<u32>,
     preview_px: Option<i32>,
     /// `--photo`, repeatable: `image` and `thumb` take exactly one, `init` takes
-    /// one per cell in argument order.
+    /// one per cell in argument order, and `edit` takes the one `--slot` shows.
     photos: Vec<PathBuf>,
+    /// `--add-photo`, repeatable: the photos `edit` appends.
+    add_photos: Vec<PathBuf>,
+    /// `--remove-photo`: drop the last photo.
+    remove_photo: bool,
+    /// `--slots <n>`: the layout gallery's count filter for `templates`.
+    slots: Option<usize>,
     aspect: Option<f64>,
     at: Option<Point>,
     dir: Option<PathBuf>,
@@ -457,12 +497,16 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
         "image" => &["photo"],
         "scan" => &["dir", "recursive", "stats"],
         "thumb" => &["photo", "px", "out", "stats"],
-        "templates" => &["aspect"],
+        "templates" => &["aspect", "slots"],
         "init" => &["template", "out", "photo"],
         "edit" => &[
             "project",
             "out",
             "slot",
+            "photo",
+            "add-photo",
+            "remove-photo",
+            "template",
             "rotate",
             "zoom",
             "offset",
@@ -476,13 +520,16 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
         "gesture" => &["project", "grid", "slot", "steps", "stats"],
         _ => &[],
     };
-    let present: [(&'static str, bool); 22] = [
+    let present: [(&'static str, bool); 25] = [
         ("project", flags.project.is_some()),
         ("template", flags.template.is_some()),
         ("out", flags.out.is_some()),
         ("long-edge", flags.long_edge.is_some()),
         ("preview-px", flags.preview_px.is_some()),
         ("photo", !flags.photos.is_empty()),
+        ("add-photo", !flags.add_photos.is_empty()),
+        ("remove-photo", flags.remove_photo),
+        ("slots", flags.slots.is_some()),
         ("aspect", flags.aspect.is_some()),
         ("at", flags.at.is_some()),
         ("dir", flags.dir.is_some()),
@@ -544,6 +591,9 @@ fn reason(name: &str, flag: &str) -> &'static str {
             "probe" | "image" | "scan" | "thumb" | "templates" | "init" | "hit" | "save",
             "gap" | "radius" | "border-color",
         ) => "only `render` and `edit` take the frame",
+        (_, "slots") => "only `templates` filters the library by slot count",
+        (_, "add-photo") => "only `edit` appends a photo",
+        (_, "remove-photo") => "only `edit` drops the last photo",
         (_, "slot" | "rotate" | "zoom" | "offset" | "clear") => {
             "only `edit` changes one cell's framing"
         }
@@ -651,6 +701,22 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                 set_once(&mut flags.long_edge, pixels, "long-edge")?;
             }
             "photo" => flags.photos.push(PathBuf::from(value("photo")?)),
+            "add-photo" => flags.add_photos.push(PathBuf::from(value("add-photo")?)),
+            "remove-photo" => flags.remove_photo = true,
+            "slots" => {
+                let raw = number(&value("slots")?, "slots")?;
+                let slots = usize::try_from(raw).map_err(|_| {
+                    Failure::Usage(format!("--slots must be a positive integer, got {raw}"))
+                })?;
+                if !(pixlay_core::MIN_SLOTS..=pixlay_core::MAX_SLOTS).contains(&slots) {
+                    return Err(Failure::Usage(format!(
+                        "--slots {slots} is outside {}..={}",
+                        pixlay_core::MIN_SLOTS,
+                        pixlay_core::MAX_SLOTS
+                    )));
+                }
+                set_once(&mut flags.slots, slots, "slots")?;
+            }
             "dir" => set_once(&mut flags.dir, PathBuf::from(value("dir")?), "dir")?,
             "recursive" => flags.recursive = true,
             "px" => {
@@ -824,6 +890,7 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
         }
         "templates" => Ok(Command::Templates(TemplatesArgs {
             aspect: flags.aspect,
+            slots: flags.slots,
             json: flags.json,
         })),
         "hit" => {
@@ -881,6 +948,23 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                         .to_string(),
                 ));
             }
+            if !flags.photos.is_empty() && flags.slot.is_none() {
+                return Err(Failure::Usage(
+                    "--photo needs --slot <i>: it is the photo that cell shows (--add-photo appends)"
+                        .to_string(),
+                ));
+            }
+            if flags.photos.len() > 1 {
+                return Err(Failure::Usage(format!(
+                    "--slot edits one cell; --photo was given {} times",
+                    flags.photos.len()
+                )));
+            }
+            if flags.clear && !flags.photos.is_empty() {
+                return Err(Failure::Usage(
+                    "--clear empties the cell; it and --photo are mutually exclusive".to_string(),
+                ));
+            }
             if flags.clear
                 && (flags.rotate.is_some() || flags.zoom.is_some() || flags.offset.is_some())
             {
@@ -889,9 +973,23 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                         .to_string(),
                 ));
             }
-            if !framing && !flags.frame_any() {
+            // The two batch flags are opposites, and applying both would make the
+            // result depend on which one ran first. One command, one intent.
+            if flags.remove_photo && !flags.add_photos.is_empty() {
                 return Err(Failure::Usage(
-                    "edit needs something to change: --slot with a framing flag, or --gap/--radius/--border-color"
+                    "--remove-photo and --add-photo cannot be one edit: add first, then drop"
+                        .to_string(),
+                ));
+            }
+            let changes = framing
+                || !flags.photos.is_empty()
+                || !flags.add_photos.is_empty()
+                || flags.remove_photo
+                || flags.template.is_some();
+            if !changes && !flags.frame_any() {
+                return Err(Failure::Usage(
+                    "edit needs something to change: --slot with a framing flag, --photo, \
+                     --add-photo, --remove-photo, --template, or --gap/--radius/--border-color"
                         .to_string(),
                 ));
             }
@@ -908,6 +1006,10 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                 project,
                 out,
                 slot: flags.slot,
+                photo: flags.photos.first().cloned(),
+                add_photos: std::mem::take(&mut flags.add_photos),
+                remove_photo: flags.remove_photo,
+                template: flags.template.take(),
                 rotate: flags.rotate,
                 zoom: flags.zoom,
                 offset: flags.offset,

@@ -20,6 +20,7 @@ mod support;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use gtk4::prelude::*;
 use pixlay::canvas::Gesture;
 use pixlay::export::Settings;
 use pixlay::window::Stage;
@@ -152,6 +153,75 @@ fn the_main_path_can_be_walked() {
         window.images().1.len(),
         4,
         "four bitmaps reached the canvas"
+    );
+
+    // ---- pick a layout ----------------------------------------------------
+    // Stage 3 (S14): the band under the canvas lists every layout with four slots,
+    // drawn with the photos just picked, and choosing one is a document edit that
+    // keeps the cells that survive.
+    let gallery = window.gallery().expect("the editor has a layout band");
+    assert!(window.wait_for_gallery(support::WAIT), "the band was built");
+    assert_eq!(gallery.count_label().label(), "4 photos");
+    let candidates = gallery.candidates();
+    assert!(
+        candidates.len() >= 3,
+        "every count has at least three layouts: {candidates:?}"
+    );
+    assert_eq!(
+        candidates.first().map(String::as_str),
+        Some(doc.template.name.as_str()),
+        "the picker's first layout is the one the document starts on"
+    );
+    let chosen = candidates
+        .iter()
+        .find(|name| name.as_str() != doc.template.name)
+        .expect("a second candidate");
+    window.select_layout(chosen);
+    assert!(
+        window.wait_for_idle(support::WAIT) && window.wait_for_gallery(support::WAIT),
+        "the new layout rendered"
+    );
+    let relaid = window.document();
+    assert_eq!(relaid.template.name, *chosen);
+    assert_eq!(relaid.cells.len(), 4, "one cell per slot");
+    for slot in 0..4 {
+        assert_eq!(
+            relaid.cells[slot].source, doc.cells[slot].source,
+            "cell {slot} kept its photo across the layout change"
+        );
+    }
+    assert_eq!(
+        gallery.selected().as_deref(),
+        Some(chosen.as_str()),
+        "the band highlights the layout the document is on"
+    );
+
+    // The count control, on the same band: `−` drops the last photo and `+`
+    // brings it back (ruling 7's LIFO), which is how a wrong count is fixed
+    // without going back to the picker.
+    assert!(gallery.minus_button().is_sensitive());
+    window.remove_photo();
+    assert!(
+        window.wait_for_idle(support::WAIT) && window.wait_for_gallery(support::WAIT),
+        "the shorter layout rendered"
+    );
+    assert_eq!(window.photo_count(), 3, "one photo left the collage");
+    assert_eq!(window.document().cells.len(), 3, "and the layout shrank");
+    window.add_photo();
+    assert!(
+        window.wait_for_idle(support::WAIT) && window.wait_for_gallery(support::WAIT),
+        "the restored layout rendered"
+    );
+    assert_eq!(
+        window.photo_count(),
+        4,
+        "and `+` brought the photo back rather than asking for a file"
+    );
+    assert_eq!(window.document().cells.len(), 4);
+    assert_eq!(
+        window.document().cells[3].source,
+        doc.cells[3].source,
+        "the cell came back in its own slot"
     );
 
     // ---- adjust the framing ---------------------------------------------

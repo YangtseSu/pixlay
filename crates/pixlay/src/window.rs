@@ -41,15 +41,19 @@ use gtk4::glib::subclass::prelude::ObjectSubclassIsExt as _;
 use gtk4::prelude::*;
 use libadwaita as adw;
 
-use pixlay_core::{CollageDoc, Command, CoreError, CropTransform, PixelSize, Project, templates};
-use pixlay_imaging::gesture_grid;
+use pixlay_core::{
+    CollageDoc, Command, CoreError, CropTransform, MAX_PHOTOS, MIN_PHOTOS, PixelSize, Project,
+    Removed, Selection, Template, templates,
+};
+use pixlay_imaging::{gesture_grid, preview_source_long_edge};
 use pixlay_render::Images;
 
 use crate::a11y;
 use crate::canvas::{self, Gesture};
-use crate::decode::{Decoder, Reply};
-use crate::export::{self, Event, Progress, Report, Settings};
+use crate::decode::{Decoder, GalleryReply, Reply};
+use crate::export::{self, Progress, Report, Settings};
 use crate::i18n::{fill, gettext, ngettext};
+use crate::layout::Gallery;
 use crate::picker::Picker;
 use crate::state::Editor;
 use crate::thumbs;
@@ -121,6 +125,21 @@ mod imp {
         pub picker: OnceCell<Rc<Picker>>,
         /// The picker's tile worker: one thread, many small pictures.
         pub thumbs: OnceCell<Rc<thumbs::Thumbs>>,
+        /// The layout gallery: the band under the canvas, and the count control
+        /// that decides what the candidates are (S14).
+        pub gallery: OnceCell<Rc<Gallery>>,
+        /// The generation of the gallery build in flight, so a reply for a
+        /// document that has moved on is ignored.
+        pub gallery_generation: Cell<u64>,
+        /// Whether a gallery build is outstanding, which is what the tests wait on.
+        pub gallery_pending: Cell<bool>,
+        /// Files the *band's* own builds decoded: S14's criterion counts that
+        /// share ("the gallery costs no decode the canvas does not already pay
+        /// for"), not the thread's total.
+        pub gallery_decodes: Cell<u64>,
+        /// The cells the batch control has taken out, newest last (ruling 7's
+        /// LIFO): `+` brings the last one back before it asks for a file.
+        pub removed: RefCell<Vec<Removed>>,
         pub banner: OnceCell<adw::Banner>,
         pub toast: OnceCell<adw::ToastOverlay>,
         pub progress: OnceCell<gtk::ProgressBar>,
@@ -167,6 +186,11 @@ mod imp {
                 editor_page: OnceCell::new(),
                 picker: OnceCell::new(),
                 thumbs: OnceCell::new(),
+                gallery: OnceCell::new(),
+                gallery_generation: Cell::new(0),
+                gallery_pending: Cell::new(false),
+                gallery_decodes: Cell::new(0),
+                removed: RefCell::new(Vec::new()),
                 banner: OnceCell::new(),
                 toast: OnceCell::new(),
                 progress: OnceCell::new(),
@@ -296,6 +320,10 @@ impl EditorWindow {
 
         // ---- the editor page's content --------------------------------------
         let canvas = canvas::build(self);
+        // The layout band sits under the canvas (S14): the candidates are the
+        // editor's own document with another template, and S15's compose controls
+        // attach to the canvas above them, so the two are one page.
+        let gallery = Gallery::build(self);
         // The banner's action is named once, here: its button exists from the
         // start, and a control with no label is a control a screen reader cannot
         // announce (`docs/HIG-REVIEW.md`, section 1).
@@ -304,6 +332,7 @@ impl EditorWindow {
         let editor_body = gtk::Box::new(gtk::Orientation::Vertical, 0);
         editor_body.append(&banner);
         editor_body.append(&canvas);
+        editor_body.append(&gallery.root());
         let editor_view = adw::ToolbarView::new();
         editor_view.add_top_bar(&header);
         editor_view.add_bottom_bar(&progress_revealer);
@@ -345,6 +374,7 @@ impl EditorWindow {
         imp.progress.set(progress).ok();
         imp.progress_revealer.set(progress_revealer).ok();
         imp.picker.set(picker).ok();
+        imp.gallery.set(gallery).ok();
 
         let banner_weak = self.downgrade();
         banner.connect_button_clicked(move |_banner| {
@@ -362,12 +392,12 @@ impl EditorWindow {
         // ---- decoding ------------------------------------------------------
         let window = self.downgrade();
         let sender = glib::SendWeakRef::from(window);
-        let decoder = Decoder::spawn(move |reply| {
+        let decoder = Decoder::spawn(move |event| {
             let sender = sender.clone();
             // The reply is plain data; the window is reached on its own thread.
             glib::MainContext::default().invoke(move || {
                 if let Some(window) = sender.upgrade() {
-                    window.on_decoded(reply);
+                    window.on_decoder_event(event);
                 }
             });
         });
@@ -656,6 +686,17 @@ impl EditorWindow {
         self.imp().decoded.get()
     }
 
+    /// Files the layout band's own builds decoded.
+    ///
+    /// The tests' handle on S14's central claim — the band shares the canvas's
+    /// preview-grade copies, so it costs **0** decodes of its own however many
+    /// candidates it lists ("N decodes, never N×C") — and nothing else reads it:
+    /// the count is a fact about the worker, and the window itself has no use for
+    /// it.
+    pub fn gallery_decodes(&self) -> u64 {
+        self.imp().gallery_decodes.get()
+    }
+
     pub fn guides(&self) -> bool {
         self.imp().guides.get()
     }
@@ -920,6 +961,184 @@ impl EditorWindow {
         self.select(Some(start.min(slots - 1)));
     }
 
+    // ---- the layout stage (S14) -------------------------------------------
+
+    /// The layout gallery: the band under the canvas.
+    pub fn gallery(&self) -> Option<Rc<Gallery>> {
+        self.imp().gallery.get().cloned()
+    }
+
+    /// The template the document is on, by name.
+    pub fn current_template(&self) -> String {
+        self.document().template.name
+    }
+
+    /// How many photos the collage holds. The gallery's candidates are for that
+    /// count, and the count control's two bounds are about it.
+    pub fn photo_count(&self) -> usize {
+        self.document()
+            .cells
+            .iter()
+            .filter(|cell| cell.source.is_some())
+            .count()
+    }
+
+    /// The layouts the gallery lists: every template with the document's own photo
+    /// count, in library order.
+    ///
+    /// `Selection::layouts` is the picker's own query — the same one the CLI's
+    /// `templates --slots` answers with — so this is not a second rule about what
+    /// "the layouts with that count" means.
+    pub fn candidate_templates(&self) -> Vec<Template> {
+        let doc = self.document();
+        let photos: Vec<PathBuf> = doc
+            .cells
+            .iter()
+            .filter_map(|cell| cell.source.clone())
+            .collect();
+        Selection::new(photos)
+            .map(|selection| selection.layouts())
+            .unwrap_or_default()
+    }
+
+    /// Switches the document to the layout `name`.
+    ///
+    /// The click on a candidate, the CLI's `edit --template` and the sidebar this
+    /// replaced all end in `Command::SetTemplate`, so a layout change keeps the
+    /// surviving cells' photos and framing one way.
+    pub fn select_layout(&self, name: &str) {
+        if self.current_template() == name {
+            // The layout the document is already on: not an edit, and an undo step
+            // that changes nothing is a step the user has to press `Ctrl+Z`
+            // through.
+            self.highlight_gallery();
+            return;
+        }
+        let Some(template) = templates::get(name) else {
+            return;
+        };
+        let _ = self.apply(Command::SetTemplate { template });
+    }
+
+    /// Writes the gallery's highlight from the document.
+    fn highlight_gallery(&self) {
+        if let Some(gallery) = self.imp().gallery.get() {
+            let current = self.current_template();
+            gallery.highlight(Some(&current));
+        }
+    }
+
+    /// Drops the last photo, keeping the cell so `+` can bring it back (ruling 7).
+    ///
+    /// The token is the same `remove_last` the command applies to the same
+    /// document, so the two cannot disagree about which cell it was.
+    pub fn remove_photo(&self) {
+        if self.photo_count() <= MIN_PHOTOS {
+            self.toast(&fill(
+                gettext("A collage needs at least {} photos"),
+                &[MIN_PHOTOS],
+            ));
+            return;
+        }
+        let mut probe = self.document();
+        let Some(removed) = pixlay_core::remove_last(&mut probe) else {
+            return;
+        };
+        if self.apply(Command::RemoveLastPhoto).is_ok() {
+            self.imp().removed.borrow_mut().push(removed);
+        }
+    }
+
+    /// Puts the last removed cell back where it was.
+    pub fn restore_photo(&self) {
+        let Some(removed) = self.imp().removed.borrow_mut().pop() else {
+            return;
+        };
+        let _ = self.apply(Command::RestorePhoto(removed));
+    }
+
+    /// The count control's `+`: bring the last removed photo back, or ask for a
+    /// file to append.
+    ///
+    /// Ruling 7's LIFO rule: the batch control drops the last photo and brings it
+    /// back, so `+` restores while it can and only then asks the user for a file.
+    pub fn add_photo(&self) {
+        if self.photo_count() >= MAX_PHOTOS {
+            self.toast(&fill(
+                gettext("A collage takes at most {} photos"),
+                &[MAX_PHOTOS],
+            ));
+            return;
+        }
+        if !self.imp().removed.borrow().is_empty() {
+            self.restore_photo();
+            return;
+        }
+        self.choose_photos();
+    }
+
+    /// Appends `paths` in the order they arrive, one command.
+    pub fn add_photos(&self, paths: Vec<PathBuf>) {
+        if paths.is_empty() {
+            return;
+        }
+        let _ = self.apply(Command::AddPhotos { photos: paths });
+    }
+
+    /// Asks for photos to append (`GtkFileDialog::open_multiple`, which is the
+    /// multi-file half of the chooser the canvas's single-slot path uses).
+    pub fn choose_photos(&self) {
+        let window = self.clone();
+        let filter = photo_filter();
+        let filters = gio::ListStore::new::<gtk::FileFilter>();
+        filters.append(&filter);
+        let dialog = gtk::FileDialog::builder()
+            .title(gettext("Add photos to the collage"))
+            .filters(&filters)
+            .default_filter(&filter)
+            .modal(true)
+            .build();
+        dialog.open_multiple(
+            Some(self),
+            gio::Cancellable::NONE,
+            glib::clone!(
+                #[strong]
+                window,
+                move |result: Result<gio::ListModel, glib::Error>| {
+                    let Ok(files) = result else {
+                        // A dismissed dialog is not a failure: the user changed
+                        // their mind, which is a normal thing to do.
+                        return;
+                    };
+                    let paths: Vec<PathBuf> = (0..files.n_items())
+                        .filter_map(|index| files.item(index))
+                        .filter_map(|item| item.downcast::<gio::File>().ok())
+                        .filter_map(|file| file.path())
+                        .collect();
+                    window.add_photos(paths);
+                }
+            ),
+        );
+    }
+
+    /// Waits until the gallery's build has arrived, pumping the main context.
+    pub fn wait_for_gallery(&self, timeout: Duration) -> bool {
+        let context = glib::MainContext::default();
+        let deadline = Instant::now() + timeout;
+        loop {
+            while context.pending() {
+                context.iteration(false);
+            }
+            if !self.imp().gallery_pending.get() {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(4));
+        }
+    }
+
     // ---- project ----------------------------------------------------------
 
     pub fn set_template(&self, name: &str) {
@@ -1064,13 +1283,7 @@ impl EditorWindow {
 
     pub fn choose_photo(&self, slot: usize) {
         let window = self.clone();
-        let filter = gtk::FileFilter::new();
-        filter.set_name(Some(&gettext("Photos")));
-        for pattern in [
-            "*.jpg", "*.jpeg", "*.png", "*.heic", "*.avif", "*.webp", "*.tif", "*.tiff",
-        ] {
-            filter.add_pattern(pattern);
-        }
+        let filter = photo_filter();
         let filters = gio::ListStore::new::<gtk::FileFilter>();
         filters.append(&filter);
         let dialog = gtk::FileDialog::builder()
@@ -1199,7 +1412,7 @@ impl EditorWindow {
         self.set_progress(0.0, &gettext("Preparing…"));
         let doc = self.display_document();
         let weak = glib::SendWeakRef::from(self.downgrade());
-        let report = move |event: Event| {
+        let report = move |event: export::Event| {
             let weak = weak.clone();
             glib::MainContext::default().invoke(move || {
                 if let Some(window) = weak.upgrade() {
@@ -1228,9 +1441,9 @@ impl EditorWindow {
         export::run(&doc, &sources.paths, settings, &|_| ())
     }
 
-    fn on_export_event(&self, event: Event) {
+    fn on_export_event(&self, event: export::Event) {
         match event {
-            Event::Progress(progress) => {
+            export::Event::Progress(progress) => {
                 let label = match progress {
                     Progress::Decoding { done, total } => {
                         fill(gettext("Preparing photo {} of {}"), &[done, total])
@@ -1240,7 +1453,7 @@ impl EditorWindow {
                 };
                 self.set_progress(progress.fraction(), &label);
             }
-            Event::Finished(result) => {
+            export::Event::Finished(result) => {
                 self.imp().exporting.set(false);
                 self.show_progress(false);
                 match result {
@@ -1275,12 +1488,21 @@ impl EditorWindow {
     /// The grid the widget would like; asks for a decode when it changed.
     pub fn request_grid_for(&self, width: i32, height: i32) {
         let aspect = self.document().template.aspect;
-        let wanted = self.gesture_aware_grid(canvas::preferred_grid(aspect, width, height));
+        let resting = canvas::preferred_grid(aspect, width, height);
+        let wanted = self.gesture_aware_grid(resting);
         let (current, _) = self.images();
         if wanted == current || self.imp().requested.get() == Some(wanted) {
             return;
         }
         self.request_decode(wanted);
+        // The band follows the *resting* document: its thumbnails are the committed
+        // doc's, so a live gesture's coarse grid must not rebuild them (74.6 ms per
+        // drag, `docs/CONTRACT.md` §8 "S14"), and at rest the request goes out with
+        // the canvas's own — which is what lets the worker put the preview-grade
+        // copies in the cache before the band reads them.
+        if wanted == resting {
+            self.request_gallery();
+        }
     }
 
     /// The grid the canvas rests at: the widget's own, whatever a gesture is doing.
@@ -1309,6 +1531,68 @@ impl EditorWindow {
         ));
     }
 
+    /// Queues the gallery's build: every layout with the document's photo count,
+    /// drawn with the document's own photos.
+    ///
+    /// On the canvas's own worker (`decode.rs`), and the step's criterion is that
+    /// `decoded_sources` does not move when the band is rebuilt.
+    fn request_gallery(&self) {
+        // The band is the *editor* stage's surface: while the picker is on screen a
+        // build would be work nobody can see — and it is not cheap in a debug build,
+        // where the picker's own tests share this one main thread with it (the
+        // highlight check in `tests/picker.rs` needs a frame inside 200 ms, and a
+        // band rebuild competing for that frame is exactly what it cannot afford).
+        // Every path that shows the editor rebuilds the document afterwards, so
+        // nothing is skipped that would be seen.
+        if self.stage() != Stage::Editor {
+            return;
+        }
+        let candidates: Vec<(Template, PixelSize)> = self
+            .candidate_templates()
+            .into_iter()
+            .map(|template| {
+                let grid = crate::layout::thumb_grid(template.aspect);
+                (template, grid)
+            })
+            .collect();
+        // The canvas's own edge: the band's copies *are* the canvas's copies, and
+        // the two jobs go out together only while the canvas is at rest — the two
+        // conditions under which this call happens (`refresh_document` after an
+        // edit, `request_grid_for` when the resting grid moved) are also the ones
+        // that send the canvas job for that same edge.
+        let source_edge = preview_source_long_edge(self.resting_grid());
+        let sources = self.imp().editor.borrow().sources();
+        let doc = self.display_document();
+        let mut decoder = self.imp().decoder.borrow_mut();
+        let Some(decoder) = decoder.as_mut() else {
+            return;
+        };
+        let generation = decoder.request_gallery(&doc, sources.paths, candidates, source_edge);
+        self.imp().gallery_generation.set(generation);
+        self.imp().gallery_pending.set(true);
+    }
+
+    /// One gallery build arrived.
+    fn on_gallery(&self, reply: GalleryReply) {
+        // Counted like the canvas's decodes (and for the same reason): the claim
+        // "the whole gallery costs one decode per photo" is a claim about this
+        // number, and a superseded build decoded the same files all the same.
+        self.imp()
+            .decoded
+            .set(self.imp().decoded.get() + reply.decodes);
+        self.imp()
+            .gallery_decodes
+            .set(self.imp().gallery_decodes.get() + reply.decodes);
+        if reply.generation != self.imp().gallery_generation.get() {
+            return;
+        }
+        self.imp().gallery_pending.set(false);
+        let Some(gallery) = self.imp().gallery.get() else {
+            return;
+        };
+        gallery.show(self, reply.candidates);
+    }
+
     fn request_decode(&self, grid: PixelSize) {
         let sources = self.imp().editor.borrow().sources();
         let doc = self.display_document();
@@ -1321,6 +1605,14 @@ impl EditorWindow {
         self.imp().requested.set(Some(grid));
         self.imp().missing.replace(sources.missing);
         self.update_banner();
+    }
+
+    /// One answer from the decoding thread, routed by what was asked for.
+    fn on_decoder_event(&self, event: crate::decode::Event) {
+        match event {
+            crate::decode::Event::Canvas(reply) => self.on_decoded(reply),
+            crate::decode::Event::Gallery(reply) => self.on_gallery(reply),
+        }
     }
 
     fn on_decoded(&self, reply: Reply) {
@@ -1369,10 +1661,15 @@ impl EditorWindow {
         self.canvas_widget().queue_draw();
     }
 
-    /// Waits until no decode is outstanding, pumping the main context.
+    /// Waits until nothing is in flight — neither a canvas decode, nor a gallery
+    /// build, nor an export — pumping the main context.
     ///
     /// This is the tests' handle on an asynchronous pipeline, and the same loop
     /// the widget's own draw runs in — the window has one thread, and this is it.
+    /// The band counts here as work of the same kind (S14): it runs on the same
+    /// worker and its decodes land in `decoded_sources`, so a caller that waited
+    /// only for the canvas could read a number the band was about to move — the
+    /// measurement race `tests/gesture.rs` was seeing as a live gesture decoding.
     pub fn wait_for_idle(&self, timeout: Duration) -> bool {
         let context = glib::MainContext::default();
         let deadline = Instant::now() + timeout;
@@ -1380,7 +1677,10 @@ impl EditorWindow {
             while context.pending() {
                 context.iteration(false);
             }
-            if self.imp().requested.get().is_none() && !self.imp().exporting.get() {
+            if self.imp().requested.get().is_none()
+                && !self.imp().gallery_pending.get()
+                && !self.imp().exporting.get()
+            {
                 return true;
             }
             std::thread::sleep(Duration::from_millis(4));
@@ -1461,7 +1761,16 @@ impl EditorWindow {
         self.update_actions();
         self.update_title();
         self.update_banner();
+        self.update_gallery_control();
         self.canvas_widget().queue_draw();
+    }
+
+    /// Writes the count control: the number of photos and the two bounds it acts
+    /// on (`MIN_PHOTOS` / `MAX_PHOTOS`, the picker's own).
+    fn update_gallery_control(&self) {
+        if let Some(gallery) = self.imp().gallery.get() {
+            gallery.update_control(self.photo_count());
+        }
     }
 
     /// The same, plus new bitmaps: what every document edit calls.
@@ -1471,7 +1780,27 @@ impl EditorWindow {
         // gesture lands.
         let grid = self.resting_grid();
         self.refresh();
+        // A canvas with no allocation cannot show a grid, and `preferred_grid`
+        // answers an unallocated widget with 1x1: a decode of every photo into a
+        // single pixel, plus a preview-grade copy of each at that size (measured
+        // 2026-09-23: seven decodes on every open, 21 for eight photos instead of
+        // 14). Opening a document from the picker is exactly that state — the
+        // editor's page is not laid out yet — and the first draw asks with a real
+        // size (`request_grid_for`), so nothing is lost by not asking now.
+        if !self.canvas_allocated() {
+            return;
+        }
         self.request_decode(grid);
+        // The gallery shows the same document with another template, so every
+        // committed edit is a new band — on the same worker, at the same edge, and
+        // its own builds decode nothing the canvas has not decoded already.
+        self.request_gallery();
+    }
+
+    /// Whether the canvas has an allocation to draw into.
+    fn canvas_allocated(&self) -> bool {
+        let area = self.canvas_widget();
+        area.width() > 0 && area.height() > 0
     }
 
     fn update_actions(&self) {
@@ -1640,6 +1969,17 @@ fn main_menu() -> gio::Menu {
     menu.append_section(None, &help);
 
     menu
+}
+
+/// The filter both photo choosers use: the extensions `pixlay-imaging` lists as
+/// photos (`PHOTO_EXTENSIONS`, which `scan` walks with).
+fn photo_filter() -> gtk::FileFilter {
+    let filter = gtk::FileFilter::new();
+    filter.set_name(Some(&gettext("Photos")));
+    for extension in pixlay_imaging::PHOTO_EXTENSIONS {
+        filter.add_pattern(&format!("*{extension}"));
+    }
+    filter
 }
 
 fn icon_button(icon: &str, label: &str) -> gtk::Button {

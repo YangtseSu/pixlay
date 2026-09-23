@@ -9,7 +9,7 @@ use std::io::Write;
 
 use std::path::{Path, PathBuf};
 
-use pixlay_core::{PixelSize, Project};
+use pixlay_core::{Command as Edit, CropTransform, History, PixelSize, Project};
 use pixlay_imaging::preview::GESTURE_STEP_DEG;
 use pixlay_imaging::{Export, Format, Preview, Rgb8View, SlotBitmap, gesture_grid, icc};
 use pixlay_render::Images;
@@ -172,48 +172,118 @@ fn save_project(args: SaveArgs) -> Result<u8, Failure> {
 fn edit_project(args: EditArgs) -> Result<u8, Failure> {
     let project =
         Project::load(&args.project).map_err(|error| Failure::Failed(error.to_string()))?;
-    let sources = project
+    // Every cell has to resolve before anything is edited: like `save`, `edit`
+    // refuses a project that points at a deleted photo instead of rewriting it
+    // around the hole.
+    project
         .sources()
         .map_err(|error| Failure::Failed(error.to_string()))?;
-    let mut doc = project.doc().clone();
-    args.frame.apply(&mut doc.frame);
+    // Photos named by this run are checked and rebased the way `init --photo` does
+    // it: a photo that is not there is refused rather than written into the
+    // project, and what is stored is relative to the project file the document is
+    // expressed against (`Project::save_as` then rebases the copy).
+    let added = stored_photos(&args.add_photos, &args.project)?;
+    let replaced = match &args.photo {
+        Some(photo) => stored_photos(std::slice::from_ref(photo), &args.project)?.pop(),
+        None => None,
+    };
+
+    // Every structural change goes through the same `Command`s the GUI sends, so
+    // "the same document" is a property of one implementation rather than of two
+    // editors kept in step by hand (S14's criterion: the new flags round-trip onto
+    // the document the window's own operations produce).
+    let mut history =
+        History::new(project.doc().clone()).map_err(|error| Failure::Failed(error.to_string()))?;
+
+    if let Some(name) = &args.template {
+        let template = pixlay_core::templates::get(name).ok_or_else(|| {
+            Failure::Usage(format!(
+                "unknown template {name}; this build knows: {}",
+                pixlay_core::templates::names().join(", ")
+            ))
+        })?;
+        apply(&mut history, Edit::SetTemplate { template })?;
+    }
+    if !added.is_empty() {
+        apply(&mut history, Edit::AddPhotos { photos: added })?;
+    }
+    if args.remove_photo {
+        apply(&mut history, Edit::RemoveLastPhoto)?;
+    }
 
     if let Some(slot) = args.slot {
-        if slot >= doc.cells.len() {
+        // Checked against the document the structural flags produced: a layout
+        // switch can drop the cell the framing was meant for.
+        let slots = history.doc().cells.len();
+        if slot >= slots {
             return Err(Failure::Usage(format!(
-                "--slot {slot} does not exist; the template has {} slots",
-                doc.cells.len()
+                "--slot {slot} does not exist; the template has {slots} slots"
             )));
         }
         if args.clear {
-            doc.cells[slot] = pixlay_core::Cell::default();
+            // "Empty the cell" is no photo *and* no framing, which is the default
+            // cell: two commands, and the same document the sidebar's clear wrote.
+            apply(&mut history, Edit::SetSource { slot, source: None })?;
+            apply(
+                &mut history,
+                Edit::SetCrop {
+                    slot,
+                    crop: CropTransform::IDENTITY,
+                },
+            )?;
         } else {
-            let request = doc.cells[slot].crop.normalized();
-            let request = pixlay_core::CropTransform {
-                zoom: args.zoom.unwrap_or(request.zoom),
-                offset: args.offset.unwrap_or(request.offset),
-                rotation_deg: args.rotate.unwrap_or(request.rotation_deg),
+            if let Some(photo) = replaced {
+                apply(
+                    &mut history,
+                    Edit::SetSource {
+                        slot,
+                        source: Some(photo),
+                    },
+                )?;
             }
-            .normalized();
-            doc.cells[slot].crop = match sources.get(slot).and_then(Option::as_ref) {
+            if args.rotate.is_some() || args.zoom.is_some() || args.offset.is_some() {
+                let request = history.doc().cells[slot].crop.normalized();
+                let request = CropTransform {
+                    zoom: args.zoom.unwrap_or(request.zoom),
+                    offset: args.offset.unwrap_or(request.offset),
+                    rotation_deg: args.rotate.unwrap_or(request.rotation_deg),
+                }
+                .normalized();
+                let doc = history.doc().clone();
+                let photo = doc.cells[slot].source.as_deref().map(|source| {
+                    if source.is_absolute() {
+                        source.to_path_buf()
+                    } else {
+                        project.dir().join(source)
+                    }
+                });
                 // The fit is taken in the document's own space — the template's
                 // aspect, not a preview grid's — because this is the number that
                 // gets written. It is the *edited* request that is fitted, not the
                 // crop the document already had: `fit_crop` is the same reference
                 // `draw` will use.
-                Some(photo) => {
-                    let source = pixlay_imaging::Source::decode(photo)
-                        .map_err(|error| Failure::Failed(error.to_string()))?;
-                    doc.fit_crop(slot, request, doc.template.aspect, source.aspect())
-                        .map_err(|error| Failure::Failed(error.to_string()))?
-                        .transform
-                }
-                // Nothing to cover: the request is stored as it stands, and the fit
-                // is applied when the cell gets a photo (`draw` recomputes it).
-                None => request,
-            };
+                let fitted = match photo {
+                    Some(photo) => {
+                        let source = pixlay_imaging::Source::decode(&photo)
+                            .map_err(|error| Failure::Failed(error.to_string()))?;
+                        doc.fit_crop(slot, request, doc.template.aspect, source.aspect())
+                            .map_err(|error| Failure::Failed(error.to_string()))?
+                            .transform
+                    }
+                    // Nothing to cover: the request is stored as it stands, and the
+                    // fit is applied when the cell gets a photo (`draw` recomputes
+                    // it).
+                    None => request,
+                };
+                apply(&mut history, Edit::SetCrop { slot, crop: fitted })?;
+            }
         }
     }
+
+    let mut doc = history.doc().clone();
+    // The frame is a document field and not a command of its own: `edit` is the
+    // CLI's only writer for it, and it has been applied this way since S11.
+    args.frame.apply(&mut doc.frame);
 
     // Validating before writing is what keeps a bug in the library from shipping as
     // an unloadable file, and it is what refuses a gap that empties a cell.
@@ -260,23 +330,43 @@ fn edit_project(args: EditArgs) -> Result<u8, Failure> {
     Ok(EXIT_SUCCESS)
 }
 
-/// `templates`: the library, optionally filtered to one layout shape.
+/// One command of S14's structural vocabulary, applied to a project's history.
+///
+/// The same call the window makes, so "the same document" is a property of the
+/// implementation rather than of two editors kept in step by hand.
+fn apply(history: &mut History, command: Edit) -> Result<(), Failure> {
+    history
+        .apply(command)
+        .map_err(|error| Failure::Failed(error.to_string()))
+}
+
+/// `templates`: the library, optionally filtered to one layout shape or one slot
+/// count.
 ///
 /// This is the query S7's picker runs and the one a caller needs before it can
-/// name a template. The list stays in library order (by slot count), so the
-/// output is stable.
+/// name a template. `--slots` is the layout gallery's own query (S14): the
+/// candidates for a collage of n photos are exactly the templates with n slots, and
+/// this is that list from the outside. The list stays in library order (by slot
+/// count), so the output is stable.
 fn list_templates(args: TemplatesArgs) -> Result<u8, Failure> {
-    // The filter is the library's own query, so `templates --aspect 4:3` and the
-    // picker cannot disagree about what "the same aspect" means.
-    let listed = match args.aspect {
+    // The filters are the library's own queries, so `templates --aspect 4:3`,
+    // `templates --slots 5` and the picker cannot disagree about what "the same
+    // aspect" or "the layouts with that count" mean.
+    let mut listed = match args.aspect {
         Some(aspect) => pixlay_core::templates::of_aspect(aspect),
         None => pixlay_core::templates::all(),
     };
+    if let Some(slots) = args.slots {
+        listed.retain(|template| template.slots.len() == slots);
+    }
     let mut report = Report::new();
     report.text("status", "ok");
     report.text("command", "templates");
     if let Some(aspect) = args.aspect {
         report.text("aspect", ratio_label(aspect));
+    }
+    if let Some(slots) = args.slots {
+        report.int("slots", slots as i64);
     }
     for (index, template) in listed.iter().enumerate() {
         let prefix = report.row("template", index);

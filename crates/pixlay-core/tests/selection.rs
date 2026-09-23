@@ -10,8 +10,8 @@
 use std::path::PathBuf;
 
 use pixlay_core::{
-    Cell, CollageDoc, CropTransform, MAX_PHOTOS, MIN_PHOTOS, Removed, Selection, SelectionError,
-    last_photo, remove_last, templates,
+    ASPECT_TOLERANCE, Cell, CollageDoc, CropTransform, Family, MAX_PHOTOS, MIN_PHOTOS, Removed,
+    Selection, SelectionError, last_photo, layout_for, remove_last, templates,
 };
 
 fn photo(name: &str) -> PathBuf {
@@ -249,12 +249,158 @@ fn restore_refuses_a_cell_that_is_no_longer_free() {
     assert!(refused.to_string().contains("slot 2"), "{refused}");
     assert_eq!(doc.cells[2].source, Some(photo("other")));
 
-    // A document that shrank under the removed cell (a template change) refuses
-    // too, rather than writing past the end.
+    // A document that shrank under the removed cell grows back to the layout the
+    // cell was taken from — the token carries it — and one that cannot is refused
+    // rather than written past the end. (The one that *can* is
+    // `restore_returns_the_layout_it_was_taken_from` below.)
     let mut small = occupied("strip-2-2x1");
     let removed = Removed {
         slot: 5,
         cell: Cell::default(),
+        template: templates::get("strip-2-2x1").expect("registered"),
     };
     assert!(removed.restore(&mut small).is_err());
+    assert_eq!(small.cells.len(), 2, "a refused restore changes nothing");
+}
+
+#[test]
+fn restore_returns_the_layout_it_was_taken_from() {
+    // Ruling 7's control "drops the last photo and brings it back", and the count
+    // moves the layout with it. For four photos of `grid-4-2x2` (1:1) there is no
+    // three-slot *grid* and no three-slot 1:1 layout at all, so the count rule's
+    // own answer on the way down (a 2:3 strip, the nearest aspect) cannot lead back
+    // to a grid on the way up: the token has to carry the layout.
+    let before = occupied("grid-4-2x2");
+    let mut doc = before.clone();
+    doc.cells[3].crop = CropTransform {
+        zoom: 2.1,
+        offset: (-0.2, 0.1),
+        rotation_deg: 31.0,
+    };
+    let before = doc.clone();
+    let removed = remove_last(&mut doc).expect("a photo");
+    assert_eq!(removed.template.name, "grid-4-2x2");
+    // The document shrinks to what the survivors need — that is the count rule, and
+    // it is a *different* layout.
+    let shrunk =
+        layout_for(3, doc.template.aspect, doc.template.family()).expect("a three-slot layout");
+    doc.template = shrunk.clone();
+    doc.cells.truncate(3);
+    assert_ne!(shrunk.name, "grid-4-2x2");
+
+    removed
+        .clone()
+        .restore(&mut doc)
+        .expect("the cell comes back");
+    assert_eq!(
+        doc, before,
+        "remove then restore is the exact inverse, layout included"
+    );
+
+    // A layout the user picked while the cell was out is kept when it can host the
+    // cell: that pick is newer than the token, and the cell only needs its slot.
+    let mut doc = occupied("grid-4-2x2");
+    let removed = remove_last(&mut doc).expect("a photo");
+    doc.template = templates::get("mosaic-4-hero").expect("registered");
+    doc.cells.resize(4, Cell::default());
+    removed.restore(&mut doc).expect("the slot is free");
+    assert_eq!(
+        doc.template.name, "mosaic-4-hero",
+        "the user's own layout survives the add-back"
+    );
+    assert_eq!(doc.cells[3].source, Some(photo("cell3")));
+}
+
+#[test]
+fn the_count_rule_picks_the_layout_that_follows_the_document() {
+    // S14's count control: when the photo count changes there is no single layout
+    // to pick, so `layout_for` answers with a preference order — same aspect, then
+    // same recipe family, then the nearest aspect, then library order. Each
+    // assertion below is one rung of that order, with the rungs above it absent or
+    // tied.
+    let named = |count: usize, aspect: f64, family: Option<Family>| {
+        layout_for(count, aspect, family).map(|template| template.name)
+    };
+    let thirds = 4.0 / 3.0;
+
+    // 1. The same aspect wins, whatever the family asks for: `mosaic-5-hero` is
+    //    the library's only 4:3 five-slot layout.
+    assert_eq!(
+        named(5, thirds, Some(Family::Strip)),
+        Some("mosaic-5-hero".to_string())
+    );
+    assert_eq!(
+        named(5, 16.0 / 9.0, Some(Family::Mosaic)),
+        Some("strip-5-5x1".to_string())
+    );
+    // The aspect comparison is the picker's own tolerance, so a ratio that only
+    // prints approximately still matches.
+    assert_eq!(
+        named(5, 1.3333333333333333, Some(Family::Mosaic)),
+        Some("mosaic-5-hero".to_string())
+    );
+
+    // 2. With no aspect match, the family decides — *before* the distance does:
+    //    1.5 is 0.833 away from `strip-3-1x3` (2:3) and only 0.167 away from
+    //    `mosaic-3-hero` (4:3), and the strip is still chosen for a strip.
+    assert_eq!(
+        named(3, 1.5, Some(Family::Strip)),
+        Some("strip-3-3x1".to_string())
+    );
+    // Within one family the nearer aspect wins: 1:1 is 0.33 away from
+    // `grid-6-2x3` (2:3) and 0.5 away from `grid-6-3x2` (3:2).
+    assert_eq!(
+        named(6, 1.0, Some(Family::Grid)),
+        Some("grid-6-2x3".to_string())
+    );
+    // And a family the count has no member of falls through to the aspect: no
+    // five-slot grid exists, so the 4:3 mosaic is chosen for a 4:3 count.
+    assert_eq!(
+        named(5, thirds, Some(Family::Grid)),
+        Some("mosaic-5-hero".to_string())
+    );
+
+    // 3. The nearest aspect, when nothing above it decided: 1.1 is closest to the
+    //    two square four-slot grids, and the earlier recipe is the answer.
+    assert_eq!(named(4, 1.1, None), Some("grid-4-2x2".to_string()));
+
+    // 4. Library order breaks a tie the three rungs above leave standing: 1.25 is
+    //    exactly as far from 3:2 as from 1:1, so the earlier recipe is chosen.
+    assert_eq!(
+        named(2, 1.25, None),
+        Some("strip-2-2x1".to_string()),
+        "a tie on the aspect keeps library order"
+    );
+
+    // 5. Every count the product offers has an answer, and it has that count: the
+    //    rule is total over `MIN_PHOTOS..=MAX_PHOTOS`, which is what lets the
+    //    count control walk the range one step at a time.
+    for count in MIN_PHOTOS..=MAX_PHOTOS {
+        for aspect in [1.0, thirds, 16.0 / 9.0, 2.0 / 3.0] {
+            for family in [None, Some(Family::Strip), Some(Family::Grid)] {
+                let template = layout_for(count, aspect, family)
+                    .unwrap_or_else(|| panic!("{count} photos, aspect {aspect}, {family:?}"));
+                assert_eq!(template.slots.len(), count, "{}", template.name);
+            }
+        }
+    }
+    // Outside the range there is nothing to offer — one photo has no layout, and
+    // ten left the library with S12c.
+    for count in [0, 1, 10, 11] {
+        assert_eq!(named(count, 1.0, None), None, "{count} photos");
+    }
+
+    // The rule is a preference *among the count's own layouts*: every answer is a
+    // template the gallery would list for that count.
+    for template in templates::all() {
+        let count = template.slots.len();
+        let chosen = layout_for(count, template.aspect, template.family())
+            .expect("its own count has a layout");
+        assert!(
+            (chosen.aspect - template.aspect).abs() <= ASPECT_TOLERANCE,
+            "{}: {} was chosen over a template of the same aspect",
+            chosen.name,
+            template.name
+        );
+    }
 }

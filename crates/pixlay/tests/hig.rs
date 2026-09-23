@@ -84,7 +84,12 @@ fn the_interface_meets_the_machine_checkable_hig() {
         window.wait_for_idle(support::WAIT),
         "the open decode finished"
     );
+    assert!(
+        window.wait_for_gallery(support::WAIT),
+        "the layout band was built"
+    );
     check_accessible_names(&window, &mut failures);
+    check_gallery(&window, &mut failures);
     check_editor_minimum(&window, &mut failures);
     check_colour_schemes(&window, &mut failures);
     check_about(&mut failures);
@@ -745,6 +750,76 @@ fn check_picker_minimum(window: &EditorWindow, failures: &mut Vec<String>) {
     }
 }
 
+/// The layout band (S14): the count control and the candidates, against the two HIG
+/// chapters a band of controls has to answer — `guidelines/pointer-touch` (a click
+/// target has a size) and `guidelines/accessibility` (a control has a name).
+///
+/// What the band *lists* and what its candidates look like is `tests/layout.rs`'s
+/// subject; this is the part that is the same question for every control in the
+/// window.
+fn check_gallery(window: &EditorWindow, failures: &mut Vec<String>) {
+    /// HIG `guidelines/pointer-touch`: "ensure that all interactive elements are
+    /// at least 24x24 pixels". The band's cells are [`THUMB_BOX`] wide by
+    /// construction; the check is here so a later change cannot make them small.
+    const MIN_TARGET: i32 = 24;
+
+    let Some(gallery) = window.gallery() else {
+        failures.push("the editor has no layout band".into());
+        return;
+    };
+    let photos = window.photo_count();
+    if window.candidate_templates().len() < 3 {
+        failures.push(format!(
+            "{photos} photos have only {} layouts to choose from",
+            window.candidate_templates().len()
+        ));
+    }
+    let candidates = gallery.candidates();
+    if candidates.len() != window.candidate_templates().len() {
+        failures.push(format!(
+            "the band lists {} candidates for {} candidate templates",
+            candidates.len(),
+            window.candidate_templates().len()
+        ));
+    }
+    for name in &candidates {
+        let Some(cell) = gallery.cell(name) else {
+            failures.push(format!("{name} has no cell in the band"));
+            continue;
+        };
+        if cell.width() < MIN_TARGET || cell.height() < MIN_TARGET {
+            failures.push(format!(
+                "{name}'s cell is {}x{}, below the {MIN_TARGET} px target",
+                cell.width(),
+                cell.height()
+            ));
+        }
+        let widget = cell.clone().upcast::<gtk4::Widget>();
+        if !has_accessible_name(&widget) {
+            failures.push(format!("{name}'s cell has no accessible name"));
+        }
+        // The keyboard path (`guidelines/keyboard`): a candidate is reachable and
+        // activatable without a pointer, or the main path is not walkable.
+        if !cell.is_focusable() {
+            failures.push(format!("{name}'s cell cannot be reached with the keyboard"));
+        }
+    }
+    for (what, button) in [
+        ("the remove control", gallery.minus_button()),
+        ("the add control", gallery.plus_button()),
+    ] {
+        if button.tooltip_text().is_none() {
+            failures.push(format!("{what} has no tooltip"));
+        }
+        if !button.is_focusable() {
+            failures.push(format!("{what} cannot be reached with the keyboard"));
+        }
+    }
+    if gallery.count_label().label().is_empty() {
+        failures.push("the band's count has no label".into());
+    }
+}
+
 /// At the minimum size the sheet is still drawn in full inside the canvas
 /// (HIG `guidelines/adaptive`) — the editor's stage of the same rule.
 fn check_editor_minimum(window: &EditorWindow, failures: &mut Vec<String>) {
@@ -752,6 +827,22 @@ fn check_editor_minimum(window: &EditorWindow, failures: &mut Vec<String>) {
     window.set_default_size(minimum.0, minimum.1);
     window.pump(Duration::from_millis(500));
 
+    // The band shares the page with the canvas, so "the canvas is drawn in full"
+    // and "the band exists" are one criterion at this size.
+    if let Some(gallery) = window.gallery() {
+        let band = gallery.root();
+        if band.height() <= 0 || gallery.strip().width() <= 0 {
+            failures.push(format!(
+                "at the minimum size {}x{} the layout band is {}x{} tall",
+                minimum.0,
+                minimum.1,
+                band.width(),
+                band.height()
+            ));
+        }
+    } else {
+        failures.push("the editor has no layout band".into());
+    }
     let area = window.canvas_widget();
     let (width, height) = (area.width(), area.height());
     if width <= 0 || height <= 0 {

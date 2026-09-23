@@ -10,6 +10,50 @@ use crate::{MAX_SLOTS, MIN_SLOTS};
 /// 1e-6 of a sheet edge is 0.014 px on the 14043-px reference grid.
 pub const AREA_TOLERANCE: f64 = 1e-6;
 
+/// The recipe family a template's name declares (S14).
+///
+/// The name is `<family>-<slots>-<variant>` (`docs/CONTRACT.md` §3), and the
+/// family is how the geometry is laid out: one band, a rectangular tiling, or
+/// mixed splits. The count rule
+/// ([`layout_for`](crate::selection::layout_for)) uses it as its second
+/// preference, so that a document that grows from five photos to six stays in the
+/// kind of layout the user was looking at when the library offers one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Family {
+    /// `strip-<slots>-<cols>x<rows>`: one band, one row or one column.
+    Strip,
+    /// `grid-<slots>-<cols>x<rows>`: a rectangular tiling.
+    Grid,
+    /// `mosaic-<slots>-<variant>`: mixed splits, or a slot that is not a rectangle.
+    Mosaic,
+}
+
+impl Family {
+    /// The family `name` declares, or `None` for a name outside the scheme.
+    ///
+    /// Read off the prefix rather than stored on [`Template`], because the name is
+    /// the library's own identifier and a second field would be a second thing to
+    /// keep in agreement (`templates::names`, the generator and a `.pixlay` all
+    /// carry the name).
+    pub fn of(name: &str) -> Option<Self> {
+        match name.split('-').next()? {
+            "strip" => Some(Self::Strip),
+            "grid" => Some(Self::Grid),
+            "mosaic" => Some(Self::Mosaic),
+            _ => None,
+        }
+    }
+
+    /// The family's own name, the prefix it is parsed from.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Strip => "strip",
+            Self::Grid => "grid",
+            Self::Mosaic => "mosaic",
+        }
+    }
+}
+
 /// One template cell: where it is and how much of the canvas it covers.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -44,6 +88,14 @@ pub struct Template {
 }
 
 impl Template {
+    /// The recipe family this template's name declares, if it is one.
+    ///
+    /// A convenience for [`Family::of`]: the count rule and the layout gallery both
+    /// ask "the same kind of layout as this one" about a document's own template.
+    pub fn family(&self) -> Option<Family> {
+        Family::of(&self.name)
+    }
+
     pub fn validate(&self) -> Result<(), CoreError> {
         if self.name.trim().is_empty() {
             return Err(CoreError::EmptyTemplateName);

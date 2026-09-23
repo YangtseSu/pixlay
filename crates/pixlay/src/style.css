@@ -50,6 +50,23 @@
   border-color: var(--accent-bg-color);
 }
 
+/* The layout band's cells (S14). The same shape as a picker cell and, for the
+ * layout the document is on, the same accent border — the app has one way of
+ * saying "this is the one that is chosen", and it is not the platform's check box
+ * (the deviation recorded in `docs/HIG-REVIEW.md` §3). The cell's own toggle state
+ * is the platform's, so a checked cell also carries the theme's pressed look; the
+ * border is what makes the choice readable at a glance in either colour scheme and
+ * in high contrast, because it is the theme's own accent colour. */
+.layout-cell {
+  margin: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+}
+
+.layout-cell.picked {
+  border-color: var(--accent-bg-color);
+}
+
 /* gthumb's `.statusbar { padding: 4px }` (`data/css/style.css`), with the horizontal
  * margin a window's edge wants and the band's own height: 24 px of content plus the
  * padding is the reference's measured 32 px status band (`docs/2026-09-22-STEPS.md`,
