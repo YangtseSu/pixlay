@@ -66,8 +66,10 @@ fn the_compose_stage_edits_the_selected_cell_and_the_document() {
     let strip = controls.strip();
     assert!(strip.is_visible(), "the selected cell's controls are shown");
     assert!(
-        support::allocated(&strip.clone().upcast::<gtk4::Widget>(), &window),
-        "the strip was never allocated"
+        laid_out(&window, &strip, true),
+        "the strip was never laid out as a row ({}x{})",
+        strip.width(),
+        strip.height()
     );
     for (index, button) in controls.strip_buttons().into_iter().enumerate() {
         let widget = button.clone().upcast::<gtk4::Widget>();
@@ -121,6 +123,62 @@ fn the_compose_stage_edits_the_selected_cell_and_the_document() {
         strip.height()
     );
 
+    // ---- a cell too narrow for the row gets the column ---------------------
+    // The library's narrow panes are 61-122 device px wide at the default window, and
+    // five 32-px controls cannot fit in one: the strip turns into a column inside the
+    // cell instead of covering its neighbour (`strip-9-9x1`, the 16:9 strip, is the
+    // layout the test uses; its panes measure 122x551 here).
+    window.select_layout("strip-9-9x1");
+    settle(&window);
+    window.select(Some(0));
+    settle(&window);
+    let (width, height) = support::canvas_size(&window);
+    controls.sync_in(&window, width, height);
+    let strip = controls.strip();
+    assert_eq!(
+        strip.orientation(),
+        gtk4::Orientation::Vertical,
+        "a pane narrower than the row must get the column"
+    );
+    assert!(
+        laid_out(&window, &strip, false),
+        "the strip was never laid out as a column ({}x{})",
+        strip.width(),
+        strip.height()
+    );
+    let (grid, _) = window.images();
+    let placement = canvas::placement(grid, width, height);
+    let pane = window.document().template.slots[0].outline.bbox();
+    let (pane_left, pane_top) = placement.to_widget(Point::new(pane.x0, pane.y0));
+    let (pane_right, pane_bottom) = placement.to_widget(Point::new(pane.x1, pane.y1));
+    let origin = strip
+        .compute_point(&canvas_widget, &gtk4::graphene::Point::new(0.0, 0.0))
+        .expect("the strip is in the canvas's own space");
+    let (left, top) = (f64::from(origin.x()), f64::from(origin.y()));
+    let (right, bottom) = (
+        left + f64::from(strip.width()),
+        top + f64::from(strip.height()),
+    );
+    assert!(
+        left >= pane_left - 0.5
+            && right <= pane_right + 0.5
+            && top >= pane_top - 0.5
+            && bottom <= pane_bottom + 0.5,
+        "the column ({left:.0},{top:.0})-({right:.0},{bottom:.0}) is not inside its \
+         pane ({pane_left:.0},{pane_top:.0})-({pane_right:.0},{pane_bottom:.0})"
+    );
+    eprintln!(
+        "the narrow pane's strip: {}x{} at {left:.0},{top:.0}; its pane is \
+         {pane_left:.0},{pane_top:.0}-{pane_right:.0},{pane_bottom:.0}",
+        strip.width(),
+        strip.height()
+    );
+    // Back to the verification project's own layout for the rest of the walk.
+    window.select_layout("mosaic-8-s14");
+    settle(&window);
+    window.select(Some(0));
+    settle(&window);
+
     // ---- the two families never cover one cell at once ---------------------
     // A cell that holds a photo has no `+` over it (S14b): the strip is what a
     // pointer gets there.
@@ -141,9 +199,18 @@ fn the_compose_stage_edits_the_selected_cell_and_the_document() {
         !controls.strip().is_visible(),
         "an empty cell must not carry a photo's controls"
     );
+    let empty_button = controls.button(8).expect("the ninth `+`");
     assert!(
-        controls.button(8).expect("the ninth `+`").is_visible(),
-        "the empty cell is the control that asks for a photo"
+        empty_button.is_visible(),
+        "the empty cell is the control that asks for a photo: {} cells on {}, slot 8 \
+         {:?}, canvas {width}x{height}",
+        window.document().cells.len(),
+        window.current_template(),
+        window
+            .document()
+            .cells
+            .get(8)
+            .map(|cell| cell.source.clone()),
     );
     window.undo();
     settle(&window);
@@ -412,6 +479,29 @@ fn the_compose_stage_edits_the_selected_cell_and_the_document() {
     // And the whole document is still one the library can render: the frame's rows
     // and the cell edits above went through the same commands the CLI sends.
     window.document().validate().expect("a valid document");
+}
+
+/// Waits until the strip has been laid out **in the shape it now has**.
+///
+/// `support::allocated` answers "it has an allocation", and after a re-orientation the
+/// *old* one is still there: the column was measured as the row's own 186x34 in one run
+/// (measured 2026-09-23), which is a measurement of the previous frame's layout rather
+/// than of this one. A control is 32 px across, so a row is 34 tall and a column 34 wide,
+/// and waiting for the shape is waiting for the frame that made it.
+fn laid_out(window: &pixlay::EditorWindow, strip: &gtk4::Box, horizontal: bool) -> bool {
+    let deadline = Instant::now() + support::WAIT;
+    while Instant::now() < deadline {
+        let shaped = if horizontal {
+            strip.height() > 0 && strip.height() < 40
+        } else {
+            strip.width() > 0 && strip.width() < 40
+        };
+        if shaped {
+            return true;
+        }
+        window.pump(Duration::from_millis(20));
+    }
+    false
 }
 
 /// Waits until neither a decode, nor a band build, nor an export is in flight.

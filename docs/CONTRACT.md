@@ -1033,11 +1033,16 @@ may rely on:
   cell that holds a photo **and** is selected shows the strip, an empty cell shows its `+`, and a cell that
   is neither shows nothing. The strip is one widget moved to the selection, not nine copies of it.
 - **The strip is placed from the cell's own rectangle** through `Placement::to_widget`, the same arithmetic
-  that drew the cell: its bottom edge sits `CONTROL_INSET` (6 px) above the cell's, and it is centred in the
-  cell when the cell can hold it — clamped to the cell's left inset otherwise, because the library's 1/16
-  columns (68 device px at the default window) are narrower than five 32-px controls. A control is 32x32,
-  past HIG `guidelines/pointer-touch`'s 24x24 floor; measured 2026-09-23 in the canvas's own coordinates:
-  the strip is **176x34** at the bottom of a 3/8 x 3/8 cell and inside it on both axes.
+  that drew the cell, and **it is a row when the cell can hold one and a column when it cannot**: five 32-px
+  controls are 176 px long, and the library's narrow panes are 61–122 device px wide at the default window
+  (a 1/16 column of the 16:9 sheet measures 61, `strip-9-9x1`'s panes 122 — measured 2026-09-23), so a row
+  there would start at the cell's left edge and cover the neighbouring photo, taking its clicks. The
+  same five controls stacked need 32 px across and 176 down, which those panes have, so the strip turns.
+  A row sits `CONTROL_INSET` (6 px) above the cell's bottom edge and is centred in the cell; a column sits
+  at its right edge, 6 px inside. A control is 32x32, past HIG `guidelines/pointer-touch`'s 24x24 floor;
+  measured 2026-09-23 in the canvas's own coordinates: the row is **186x34** inside a 3/8 x 3/8 cell
+  (182,12–458,219) and the column is **34x186** inside one of `strip-9-9x1`'s panes (60,12–182,563) — both
+  inside on every side, which is what the criterion asks of the buttons.
 - **Each control is one finished step** (`Gesture::Step`, so it is committed and drawn at the resting grid):
   the zoom pair multiplies the *fitted* zoom — what the user is looking at — by `ZOOM_STEP` = 1.06, the same
   notch the wheel and the `+`/`-` keys use; rotate adds `ROTATE_STEP_DEG` = 15° to the free angle (S11: never

@@ -33,7 +33,7 @@
 //! [`Gesture::Step`] instead, and is drawn at the resting grid, because one frame
 //! the user is meant to look at is worth the pixels.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -637,8 +637,13 @@ pub struct CellControls {
     /// One `+` per slot index, built at construction and never replaced.
     buttons: Vec<gtk::Button>,
     /// The selected cell's own controls, moved as one widget: five buttons in a
-    /// row, and the row's own margins are what place it inside the cell.
+    /// row — or a column, on a cell too narrow for the row — and the strip's own
+    /// margins are what place it inside the cell.
     strip: gtk::Box,
+    /// Whether the strip is currently laid out as a row, so a cell of the other shape
+    /// re-orients it (`GtkBox::set_orientation` is cheap, but the comparison is what
+    /// says *when*).
+    horizontal: Cell<bool>,
     zoom_out: gtk::Button,
     zoom_in: gtk::Button,
     rotate: gtk::Button,
@@ -657,13 +662,13 @@ const CONTROL_SPACING: i32 = 4;
 /// How far the strip's own edges are kept from the cell's, in device pixels.
 const CONTROL_INSET: f64 = 6.0;
 
-/// The strip's width in device pixels: five buttons and the gaps between them.
+/// The strip's long side in device pixels: five buttons and the gaps between them.
 ///
 /// **Written down rather than measured**, because it is what places the strip
 /// inside its cell before GTK has allocated anything: `sync` runs from the window's
 /// `refresh`, which is not a layout pass, so the arithmetic has to be a constant of
 /// the five controls rather than a question about them.
-const STRIP_WIDTH: f64 = 5.0 * CONTROL_SIZE + 4.0 * CONTROL_SPACING as f64;
+const STRIP_LENGTH: f64 = 5.0 * CONTROL_SIZE + 4.0 * CONTROL_SPACING as f64;
 
 impl CellControls {
     /// Builds the controls over `canvas`: nine hidden `+`s and one hidden strip.
@@ -732,6 +737,7 @@ impl CellControls {
             overlay,
             buttons,
             strip,
+            horizontal: Cell::new(true),
             zoom_out,
             zoom_in,
             rotate,
@@ -847,21 +853,44 @@ impl CellControls {
             return;
         };
         let box_ = geometry.outline.bbox();
-        let (left, _) = placement.to_widget(Point::new(box_.x0, box_.y0));
+        let (left, top) = placement.to_widget(Point::new(box_.x0, box_.y0));
         let (right, bottom) = placement.to_widget(Point::new(box_.x1, box_.y1));
-        let centred = (left + right) / 2.0 - STRIP_WIDTH / 2.0;
-        let last = right - CONTROL_INSET - STRIP_WIDTH;
-        let x = if last > left + CONTROL_INSET {
-            centred.clamp(left + CONTROL_INSET, last)
+        // **A row when the cell can hold one, a column when it cannot.** The library's
+        // narrow panes are narrower than five 32-px controls: a row would have to start
+        // at the cell's left edge and cover the neighbouring photo, taking its clicks.
+        // The same five controls stacked need 32 px across and 176 down, which those
+        // panes have, so the strip turns (measured 2026-09-23: `strip-9-9x1`'s panes are
+        // 122x551 device px at the default window, and the library's narrowest, a 1/16
+        // column of the 16:9 sheet, is 61). A cell too small for *both* keeps the row and
+        // its clamp — the last resort, and no layout in the library reaches it.
+        let fits_row = right - left >= STRIP_LENGTH + 2.0 * CONTROL_INSET;
+        let fits_column = bottom - top >= STRIP_LENGTH + 2.0 * CONTROL_INSET;
+        let horizontal = fits_row || !fits_column;
+        if self.horizontal.get() != horizontal {
+            self.strip.set_orientation(if horizontal {
+                gtk::Orientation::Horizontal
+            } else {
+                gtk::Orientation::Vertical
+            });
+            self.horizontal.set(horizontal);
+        }
+        if horizontal {
+            let centred = (left + right) / 2.0 - STRIP_LENGTH / 2.0;
+            let last = right - CONTROL_INSET - STRIP_LENGTH;
+            let x = if last > left + CONTROL_INSET {
+                centred.clamp(left + CONTROL_INSET, last)
+            } else {
+                left + CONTROL_INSET
+            };
+            self.strip.set_margin_start(x.round() as i32);
+            self.strip
+                .set_margin_top((bottom - CONTROL_INSET - CONTROL_SIZE).round() as i32);
         } else {
-            // A pane narrower than the strip (the library's 1/16 columns): the cell
-            // cannot hold the five controls, so they start at its left edge and run
-            // over the neighbour rather than being pushed off the sheet.
-            left + CONTROL_INSET
-        };
-        self.strip.set_margin_start(x.round() as i32);
-        self.strip
-            .set_margin_top((bottom - CONTROL_INSET - CONTROL_SIZE).round() as i32);
+            self.strip
+                .set_margin_start((right - CONTROL_INSET - CONTROL_SIZE).round() as i32);
+            self.strip
+                .set_margin_top((top + CONTROL_INSET).round() as i32);
+        }
         self.strip.set_visible(true);
     }
 }

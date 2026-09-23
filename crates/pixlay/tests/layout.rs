@@ -53,6 +53,14 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
     settle(&window);
     assert_eq!(window.stage(), Stage::Editor, "the band is the editor's");
     let gallery = window.gallery().expect("the editor has a layout band");
+    // The band's height is the claim below, and a widget is measured on the frame after
+    // the one that laid it out: wait for the allocation rather than assume it
+    // (`support::allocated`; measured 2026-09-23: a band of 0x0 in one run of several,
+    // which is the same class of failure as the `+` further down).
+    assert!(
+        support::allocated(&gallery.root().upcast::<gtk4::Widget>(), &window),
+        "the band was never allocated"
+    );
     let filled = (window.canvas_widget().height(), gallery.root().height());
     assert_eq!(
         placeholder, filled,
