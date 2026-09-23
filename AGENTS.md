@@ -52,6 +52,13 @@ lists what this build ships, and `pixlay-render init --template <name> --out x.p
 project to start from. Since S7 `cargo test` also builds the GUI; its tests need a display and re-run
 themselves under `xvfb-run` where there is none (pinning `GTK_IM_MODULE=gtk-im-context-simple`, because
 GTK's ibus module recurses without a session bus), so the entry still works on a build box.
+**On a workstation somebody is using, run them with the display hidden** —
+`env -u DISPLAY -u WAYLAND_DISPLAY cargo test` — because with a session display they map real windows
+and take the focus away from whatever that person is doing (measured 2026-09-23: the first `cargo test`
+of the S15 turn did exactly that while the human was working). Which display the GUI tests run on is the
+caller's choice: an `xvfb-run` pass and a session pass are not the same display server, and the pixel
+tests pass on both (measured 2026-09-23: `tests/canvas.rs` under Xvfb with `GSK_RENDERER` at its default,
+`gl` and `vulkan`).
 
 Measurement rules that go with it:
 

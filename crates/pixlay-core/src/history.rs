@@ -26,14 +26,16 @@ use std::path::PathBuf;
 use crate::crop::CropTransform;
 use crate::doc::CollageDoc;
 use crate::error::CoreError;
+use crate::frame::Frame;
 use crate::template::Template;
 
 /// One edit to a document.
 ///
 /// Deliberately small: it covers what a user changes — which photo a slot shows,
-/// how it is framed, the template. It is not a serialization format (nothing
-/// writes a command to disk, and no version tracks it), and it is not an editing
-/// language: a command does one thing, and the GUI sends a sequence of them.
+/// how it is framed, the template, the canvas frame. It is not a serialization
+/// format (nothing writes a command to disk, and no version tracks it), and it is
+/// not an editing language: a command does one thing, and the GUI sends a sequence
+/// of them.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
     /// Point a cell at a photo, or empty it (`None`), which renders the slot
@@ -113,6 +115,36 @@ pub enum Command {
     /// than silently accepted: an edit that changes nothing is a step the user has
     /// to press `Ctrl+Z` through.
     SwapCells { left: usize, right: usize },
+    /// Empty one cell: no photo, and its framing back to the default (S15).
+    ///
+    /// **One intent, so one command and one undo step.** "Clear this cell" is not two
+    /// edits the user makes in sequence — it is the cell returning to what a fresh
+    /// cell is — and a surface that sent `SetSource { None }` and then
+    /// `SetCrop { IDENTITY }` would leave the user pressing `Ctrl+Z` twice for one
+    /// press. The CLI's `edit --slot i --clear` has written both halves since S7
+    /// (through two commands, because it keeps no undo stack); S15 made the window's
+    /// own clear mean the same thing, and this is the shape that lets both be one
+    /// step.
+    ///
+    /// It is deliberately *not* what [`Command::SetSource`]'s `None` does: that keeps
+    /// the framing, which is what makes replacing a photo keep the area the user
+    /// framed (`docs/CONTRACT.md` §1). Clearing is the other half of that rule: the
+    /// cell starts over.
+    ClearCell { slot: usize },
+    /// Replace the document's canvas frame (S15).
+    ///
+    /// The frame is a document field, and since S15 this is its only writer: the
+    /// `Frame…` dialog's three rows and the CLI's `edit --gap/--radius/
+    /// --border-color` both commit it here, so setting the frame is one undo step
+    /// from either surface and the CLI cannot write a frame the window would refuse.
+    /// It is *not* a relayout — the geometry the frame clips against is the
+    /// template's — which is what makes one whole `Frame` the unit rather than a
+    /// field at a time.
+    ///
+    /// Refused by validation like any other command: a length outside
+    /// `0..=MAX_FRAME_REL`, a translucent colour, or a gap that leaves a cell with
+    /// nothing visible names the slot it empties.
+    SetFrame { frame: Frame },
 }
 
 impl Command {
@@ -202,6 +234,12 @@ impl Command {
                 }
                 doc.cells.swap(*left, *right);
             }
+            Self::ClearCell { slot } => {
+                let cell = cell_mut(doc, *slot)?;
+                cell.source = None;
+                cell.crop = CropTransform::IDENTITY;
+            }
+            Self::SetFrame { frame } => doc.frame = *frame,
         }
         Ok(())
     }

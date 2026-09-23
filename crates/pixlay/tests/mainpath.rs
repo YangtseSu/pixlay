@@ -25,7 +25,7 @@ use pixlay::canvas::Gesture;
 use pixlay::export::Settings;
 use pixlay::window::Stage;
 
-use pixlay_core::{CollageDoc, Command, CropTransform, Project};
+use pixlay_core::{CollageDoc, Command, CropTransform, Project, Rgba8};
 use pixlay_imaging::encode::Format;
 
 #[test]
@@ -273,32 +273,146 @@ fn the_main_path_can_be_walked() {
     }
     assert_eq!(window.document().cells[1].crop, framed, "redo comes back");
 
+    // The same edits from the selected cell's own controls (S15): a pointer has a
+    // visible path to the zoom, the rotation and the clear, and each button is one
+    // finished step — the same undo step the wheel's notch and the `+` key make.
+    let controls = window
+        .cell_controls()
+        .expect("the canvas has a cell-control layer");
+    let [zoom_out, zoom_in, rotate, _replace, clear] = controls.strip_buttons();
+    let before = window.document().cells[1].crop;
+    zoom_in.emit_clicked();
+    assert!(
+        window.document().cells[1].crop.zoom > before.zoom,
+        "the strip's zoom-in control zooms in"
+    );
+    rotate.emit_clicked();
+    assert!(
+        window.document().cells[1].crop.rotation_deg > before.rotation_deg,
+        "the strip's rotate control turns the photo"
+    );
+    window.undo();
+    window.undo();
+    assert_eq!(
+        window.document().cells[1].crop,
+        before,
+        "the strip's edits are undo steps like any other"
+    );
+    let _ = (zoom_out, clear);
+
+    // ---- the frame --------------------------------------------------------
+    // Stage 6's document-level question, where ruling 18 left it: three rows behind
+    // the header bar's button, over `frame{gapRel, radiusRel, color}` (ruling 30).
+    // The rows write live — the canvas redraws behind the dialog — and the settled
+    // value is one undo step, which is what `commit` is here.
+    let frame_dialog = window
+        .frame_dialog()
+        .expect("the window has a Frame dialog");
+    assert!(
+        gtk4::prelude::WidgetExt::activate_action(&window, "win.frame", None).is_ok(),
+        "the win.frame action is installed"
+    );
+    assert!(frame_dialog.widget().is_visible());
+    frame_dialog.gap_row().set_value(3.0);
+    frame_dialog.radius_row().set_value(1.5);
+    frame_dialog
+        .color_button()
+        .set_rgba(&gtk4::gdk::RGBA::new(0.25, 0.25, 0.25, 1.0));
+    window.commit();
+    let framed_doc = window.document();
+    assert_eq!(
+        framed_doc.frame.gap_rel, 0.03,
+        "the gap row reached the file"
+    );
+    assert_eq!(framed_doc.frame.radius_rel, 0.015, "and the radius row");
+    assert_eq!(framed_doc.frame.color, Rgba8::rgb(64, 64, 64));
+    assert!(
+        window.wait_for_idle(support::WAIT),
+        "the framed re-decode finished"
+    );
+    support::close_dialog(&frame_dialog.widget(), &window);
+    // The frame is a document field the CLI writes with its own flags, so the same
+    // edit has to be expressible there: the three numbers in `edit`'s vocabulary.
+    let stored_frame = support::artifact("mainpath-framed.pixlay");
+    window
+        .save_to(&stored_frame)
+        .expect("the framed document saves");
+    let framed_edit = support::artifact("mainpath-edged.pixlay");
+    let status = pixlay_cli::cli::run(&[
+        "edit".into(),
+        "--project".into(),
+        stored_frame.clone().into(),
+        "--gap".into(),
+        "0.05".into(),
+        "--out".into(),
+        framed_edit.clone().into(),
+    ])
+    .expect("the CLI edits the frame");
+    assert_eq!(status, 0, "edit --gap succeeds on the window's own project");
+    let reloaded = Project::load(&framed_edit).expect("the edited project loads");
+    assert_eq!(reloaded.doc().frame.gap_rel, 0.05);
+    assert_eq!(
+        reloaded.doc().frame.radius_rel,
+        0.015,
+        "an unnamed flag keeps the document's own value"
+    );
+    assert_eq!(
+        reloaded.doc().frame.color,
+        Rgba8::rgb(64, 64, 64),
+        "and so does the colour"
+    );
+
     // ---- export ----------------------------------------------------------
-    // The export form's state, which ruling 18 moved out of the pane and S15's
-    // `Export…` dialog will show as its rows.
+    // Stage 7 (S15): the `Export…` dialog asks the three questions — the format, the
+    // one size parameter, and the file — and starts the same background export the
+    // menu's action does, with the same progress bar and the same toast.
     let out = support::artifact("mainpath.jpg");
-    let settings = Settings {
+    let export_dialog = window
+        .export_dialog()
+        .expect("the window has an Export dialog");
+    window.set_export_settings(&Settings {
         long_edge: 1500,
         format: Format::Jpeg,
         path: out.clone(),
-    };
-    window.set_export_settings(&settings);
+    });
+    assert!(
+        gtk4::prelude::WidgetExt::activate_action(&window, "win.export", None).is_ok(),
+        "the win.export action is installed"
+    );
+    assert!(export_dialog.widget().is_visible());
+    window.pump(Duration::from_millis(50));
+    assert_eq!(
+        export_dialog.quality_row().value(),
+        1500.0,
+        "the dialog opens on the form's own size"
+    );
+    // The background path: the call has to return while the work happens on the
+    // export thread, or the window would be frozen for the whole render.
+    // The dialog's own affirmative is clicked, which is what a person does: it reads
+    // the rows, stores them, closes and starts the export.
+    let call = Instant::now();
+    export_dialog.export_button().emit_clicked();
+    let returned = call.elapsed();
+    assert!(
+        returned < Duration::from_millis(500),
+        "starting an export blocked for {returned:?}"
+    );
+    assert!(
+        window.progress_revealed(),
+        "the progress bar is raised while the export runs"
+    );
+    // The click started libadwaita's own close transition; the exporter runs in the
+    // background either way, and the harness forces the dismissal so the final
+    // snapshot of the window is of the window without a dialog over it.
+    support::close_dialog(&export_dialog.widget(), &window);
     let echoed = window.export_settings();
     assert_eq!(
         echoed.long_edge, 1500,
         "the form's quality option is read back"
     );
     assert_eq!(echoed.format, Format::Jpeg, "and its format");
-    // The background path: the call has to return while the work happens on the
-    // export thread, or the window would be frozen for the whole render.
-    let call = Instant::now();
-    window.start_export(out.clone());
-    let returned = call.elapsed();
-    assert!(
-        returned < Duration::from_millis(500),
-        "starting an export blocked for {returned:?}"
-    );
     assert!(window.wait_for_idle(support::WAIT), "the export finished");
+    assert!(!window.progress_revealed(), "and the bar goes away again");
     assert!(out.is_file(), "the export landed on disk");
 
     let exported = pixlay_imaging::Source::decode(&out).expect("the export decodes");

@@ -1,0 +1,427 @@
+//! S15's exit criteria, as one test: the compose stage's own controls and its two
+//! dialogs.
+//!
+//! One `#[test]` because GTK lives on one thread (see `support`). What is checked
+//! here, in the order the criteria are written in `docs/2026-09-22-STEPS.md`:
+//!
+//! * the selected cell's strip is real, named, keyboard-reachable GTK and sits inside
+//!   the selected slot's own rectangle (`Placement` is the reference);
+//! * the strip and an empty cell's `+` never cover one cell at once, so "give this
+//!   cell a photo" and "here is a photo's controls" are not two paths for one action;
+//! * the buttons edit the document: the zoom pair, the rotate step, and the clear the
+//!   canvas's own `Delete` performs;
+//! * the `Frame…` dialog's three rows round-trip into the document and the canvas
+//!   redraws with the frame's own colour;
+//! * the `Export…` dialog's three rows round-trip through one background export, with
+//!   the progress bar raised while it runs and the toast carrying the file's name;
+//! * the header bar's two buttons present the two dialogs.
+//!
+//! What only a person can judge — whether a strip lands where the hand expects, and
+//! whether the frame reads well at both ends of its radius range — is the human walk
+//! at S15's gate, and it is listed in `docs/HIG-REVIEW.md` §2.
+
+mod support;
+
+use std::time::{Duration, Instant};
+
+use gtk4::prelude::*;
+use libadwaita::prelude::*;
+use pixlay::canvas;
+use pixlay::export::Settings;
+use pixlay::window::Stage;
+use pixlay_core::{PixelSize, Point, Rgba8};
+use pixlay_imaging::encode::Format;
+
+/// HIG `guidelines/pointer-touch`: "ensure that all interactive elements are at
+/// least 24x24 pixels".
+const MIN_TARGET: i32 = 24;
+
+#[test]
+fn the_compose_stage_edits_the_selected_cell_and_the_document() {
+    support::start();
+    let app = support::app();
+    let window = support::window(&app);
+    window
+        .open_path(&support::verify_project())
+        .expect("the verification project opens");
+    settle(&window);
+    assert_eq!(
+        window.stage(),
+        Stage::Editor,
+        "the editor's stage is showing"
+    );
+
+    let controls = window
+        .cell_controls()
+        .expect("the canvas has a cell-control layer");
+    let canvas_widget = window.canvas_widget().upcast::<gtk4::Widget>();
+
+    // ---- the strip is the selected cell's own controls ---------------------
+    // Cell 0 is the verification template's largest cell (3/8 x 3/8), so the strip
+    // has room for all five controls inside it.
+    window.select(Some(0));
+    settle(&window);
+    let (width, height) = support::canvas_size(&window);
+    controls.sync_in(&window, width, height);
+    let strip = controls.strip();
+    assert!(strip.is_visible(), "the selected cell's controls are shown");
+    assert!(
+        support::allocated(&strip.clone().upcast::<gtk4::Widget>(), &window),
+        "the strip was never allocated"
+    );
+    for (index, button) in controls.strip_buttons().into_iter().enumerate() {
+        let widget = button.clone().upcast::<gtk4::Widget>();
+        assert!(button.is_visible(), "control {index} is on screen");
+        assert!(button.is_focusable(), "control {index} is Tab-reachable");
+        assert!(
+            button.tooltip_text().is_some(),
+            "control {index} has no tooltip"
+        );
+        assert!(
+            button.width() >= MIN_TARGET && button.height() >= MIN_TARGET,
+            "control {index} is {}x{}, below the {MIN_TARGET} px target",
+            button.width(),
+            button.height()
+        );
+        let _ = widget;
+    }
+
+    // **Inside the selected slot's own rectangle**, from the placement: the strip is
+    // measured in the canvas's coordinates and compared with the slot's bbox mapped
+    // through `Placement::to_widget`, which is the same arithmetic the renderer used
+    // to draw the cell underneath it.
+    let (grid, _) = window.images();
+    let (width, height) = support::canvas_size(&window);
+    let placement = canvas::placement(grid, width, height);
+    let slot_box = window.document().template.slots[0].outline.bbox();
+    let (cell_left, cell_top) = placement.to_widget(Point::new(slot_box.x0, slot_box.y0));
+    let (cell_right, cell_bottom) = placement.to_widget(Point::new(slot_box.x1, slot_box.y1));
+    let origin = strip
+        .compute_point(&canvas_widget, &gtk4::graphene::Point::new(0.0, 0.0))
+        .expect("the strip is in the canvas's own space");
+    let (strip_left, strip_top) = (f64::from(origin.x()), f64::from(origin.y()));
+    let (strip_right, strip_bottom) = (
+        strip_left + f64::from(strip.width()),
+        strip_top + f64::from(strip.height()),
+    );
+    assert!(
+        strip_left >= cell_left && strip_right <= cell_right,
+        "the strip ({strip_left:.0}..{strip_right:.0}) is not inside its cell's \
+         width ({cell_left:.0}..{cell_right:.0})"
+    );
+    assert!(
+        strip_top >= cell_top && strip_bottom <= cell_bottom,
+        "the strip ({strip_top:.0}..{strip_bottom:.0}) is not inside its cell's \
+         height ({cell_top:.0}..{cell_bottom:.0})"
+    );
+    eprintln!(
+        "the selected cell's strip: {}x{} at {strip_left:.0},{strip_top:.0}; the cell \
+         is {cell_left:.0},{cell_top:.0}-{cell_right:.0},{cell_bottom:.0}",
+        strip.width(),
+        strip.height()
+    );
+
+    // ---- the two families never cover one cell at once ---------------------
+    // A cell that holds a photo has no `+` over it (S14b): the strip is what a
+    // pointer gets there.
+    assert!(
+        !controls.button(0).expect("a first `+`").is_visible(),
+        "an occupied cell must have no `+`"
+    );
+    // And an empty cell is the `+`, with no strip over it — so "give the cell a
+    // photo" is never two controls saying the same thing.
+    window.add_photo();
+    settle(&window);
+    assert!(window.document().cells[8].source.is_none());
+    window.select(Some(8));
+    settle(&window);
+    let (width, height) = support::canvas_size(&window);
+    controls.sync_in(&window, width, height);
+    assert!(
+        !controls.strip().is_visible(),
+        "an empty cell must not carry a photo's controls"
+    );
+    assert!(
+        controls.button(8).expect("the ninth `+`").is_visible(),
+        "the empty cell is the control that asks for a photo"
+    );
+    window.undo();
+    settle(&window);
+    assert_eq!(
+        window.document().cells.len(),
+        8,
+        "the walk is back on eight"
+    );
+
+    // ---- the buttons edit the cell ----------------------------------------
+    window.select(Some(0));
+    settle(&window);
+    let [zoom_out, zoom_in, rotate, _replace, clear] = controls.strip_buttons();
+    let before = window.document().cells[0].crop;
+    zoom_in.emit_clicked();
+    settle(&window);
+    let zoomed = window.document().cells[0].crop;
+    assert!(
+        zoomed.zoom > before.zoom,
+        "the zoom-in control did not zoom in: {before:?} → {zoomed:?}"
+    );
+    zoom_out.emit_clicked();
+    settle(&window);
+    let back = window.document().cells[0].crop.zoom;
+    assert!(
+        (back - before.zoom).abs() < 1e-9,
+        "one step in and one step out must land where the cell started: \
+         {before:?} → {back}"
+    );
+
+    // Rotate: the angle is free (S11), so the step is the button's own and the fit
+    // is recomputed after it — the cell is still covered, which `fitted_crop` is.
+    let before = window.document().cells[0].crop.rotation_deg;
+    rotate.emit_clicked();
+    settle(&window);
+    let turned = window.document().cells[0].crop;
+    assert!(
+        (turned.rotation_deg - before - pixlay::canvas::ROTATE_STEP_DEG).abs() < 1e-9,
+        "the rotate control's step: {before}° → {}°",
+        turned.rotation_deg
+    );
+    assert!(
+        window
+            .fitted_crop(0)
+            .is_some_and(|fit| fit.rotation_deg == turned.rotation_deg
+                || (fit.rotation_deg - turned.rotation_deg).abs() < 1e-9),
+        "a free angle is never reduced, and the fit keeps it"
+    );
+
+    // Clear: the same edit the canvas's own `Delete` makes (`win.clear-cell`), one
+    // undo step, and the empty cell's own `+` is what appears in its place. It empties
+    // the cell — no photo *and* no framing — which is what the CLI's `edit --clear`
+    // has written since S7, so the word means one thing on every surface.
+    clear.emit_clicked();
+    settle(&window);
+    assert_eq!(
+        window.document().cells[0],
+        pixlay_core::Cell::default(),
+        "the clear control left something in the cell"
+    );
+    let (width, height) = support::canvas_size(&window);
+    controls.sync_in(&window, width, height);
+    assert!(!controls.strip().is_visible(), "the cell has no photo now");
+    assert!(controls.button(0).expect("a first `+`").is_visible());
+    assert!(window.can_undo(), "clearing a cell is one undo step");
+    window.undo();
+    settle(&window);
+    assert!(window.document().cells[0].source.is_some());
+
+    // ---- the Frame… dialog ------------------------------------------------
+    // Ruling 30: three rows in the document's own order — gap, radius, colour — over
+    // `frame{gapRel, radiusRel, color}`.
+    let frame_dialog = window
+        .frame_dialog()
+        .expect("the window has a Frame dialog");
+    // **The probe's own point**: the four-way junction of the verification template's
+    // top-left cells (cell 0 ends at 3/8 of the sheet, and so does cell 3 beside it and
+    // cell 1 under it). With no frame it is photo; with one it is the backdrop, and the
+    // sample is taken through the same `Placement` the canvas drew the sheet with, so
+    // "the canvas redrew" is a coordinate and not an impression.
+    let (grid, _) = window.images();
+    let (width, height) = support::canvas_size(&window);
+    let placement = canvas::placement(grid, width, height);
+    let junction = placement.to_widget(Point::new(3.0 / 8.0, 3.0 / 8.0));
+    let (probe_x, probe_y) = (junction.0.round() as i32, junction.1.round() as i32);
+    // **Nothing is selected while the two snapshots are taken**, because the selection
+    // outline is drawn along the very seams the frame fills — it is interface over
+    // content, and this probe is about the content (measured 2026-09-23: with cell 0
+    // selected, the junction read `[255, 144, 144]`, the outline's own antialiased edge
+    // over the red backdrop).
+    window.select(None);
+    window.pump(Duration::from_millis(50));
+    let plain = support::snapshot(&window.canvas_widget());
+    let plain_pixel = support::pixel(&plain, probe_x, probe_y);
+    assert!(
+        gtk4::prelude::WidgetExt::activate_action(&window, "win.frame", None).is_ok(),
+        "the win.frame action is installed"
+    );
+    assert!(
+        frame_dialog.widget().is_visible(),
+        "the header bar's Frame button presents the dialog"
+    );
+    frame_dialog.seed(&window);
+    assert_eq!(frame_dialog.gap_row().value(), 0.0);
+    assert_eq!(frame_dialog.radius_row().value(), 0.0);
+    assert_eq!(frame_dialog.color_button().rgba(), gtk4::gdk::RGBA::WHITE);
+
+    // The rows are a share of the collage's height, so 4.0 is `gapRel = 0.04`. The
+    // write is **live**: the document the canvas draws carries the row's value while
+    // the dialog is open, and the history only sees it once the value is quiet — the
+    // same pending-command path a slider gesture takes.
+    frame_dialog.gap_row().set_value(4.0);
+    assert_eq!(
+        window.display_document().frame.gap_rel,
+        0.04,
+        "the canvas is drawing the frame the row asks for, before the commit"
+    );
+    assert_eq!(
+        window.document().frame.gap_rel,
+        0.0,
+        "and the history does not have it yet"
+    );
+    window.commit();
+    assert_eq!(
+        window.document().frame.gap_rel,
+        0.04,
+        "the gap row round-trips into the document"
+    );
+    frame_dialog.radius_row().set_value(2.5);
+    window.commit();
+    assert_eq!(window.document().frame.radius_rel, 0.025);
+    frame_dialog
+        .color_button()
+        .set_rgba(&gtk4::gdk::RGBA::new(1.0, 0.0, 0.0, 1.0));
+    window.commit();
+    assert_eq!(
+        window.document().frame.color,
+        Rgba8::rgb(255, 0, 0),
+        "the colour row round-trips into the document"
+    );
+    // The canvas redraws with it: the junction the frame leaves between the four cells
+    // is now the backdrop's own colour where it was a photo's. Taken with the dialog
+    // dismissed, which is not a convenience: **a widget behind a presented `AdwDialog`
+    // snapshots to nothing** (measured 2026-09-23 — the canvas's `WidgetPaintable`
+    // produced no node at all for the 180 s the frame dialog was open), so a pixel probe
+    // of the sheet is taken with the dialog out of the way. The *live* half is the claim
+    // above: the document the canvas draws already carries the row's value.
+    frame_dialog.close_button().emit_clicked();
+    support::close_dialog(&frame_dialog.widget(), &window);
+    settle(&window);
+    let framed = support::snapshot(&window.canvas_widget());
+    let framed_pixel = support::pixel(&framed, probe_x, probe_y);
+    assert_ne!(
+        plain_pixel,
+        [255, 0, 0],
+        "without a frame the junction is the photos', not the backdrop"
+    );
+    assert_eq!(
+        framed_pixel,
+        [255, 0, 0],
+        "the canvas did not redraw the junction with the frame's own colour"
+    );
+    eprintln!(
+        "the frame at the junction ({probe_x},{probe_y}) of the {width}x{height} canvas: \
+         {plain_pixel:?} before, {framed_pixel:?} with a 4% gap and a red backdrop"
+    );
+    // One gesture per settled change, and undo walks them back.
+    window.undo();
+    assert_eq!(window.document().frame.color, Rgba8::WHITE);
+    window.undo();
+    assert_eq!(window.document().frame.radius_rel, 0.0);
+    window.undo();
+    assert_eq!(window.document().frame, pixlay_core::Frame::default());
+
+    // ---- the Export… dialog ----------------------------------------------
+    let export_dialog = window
+        .export_dialog()
+        .expect("the window has an Export dialog");
+    // Seeded from the form the window holds, including the directory: the dialog
+    // asks for the name only, and the path is the two halves together.
+    let dir = support::out_dir();
+    let _ = support::artifact("compose.png");
+    window.set_export_settings(&Settings {
+        long_edge: 1500,
+        format: Format::Jpeg,
+        path: dir.join("compose.jpg"),
+    });
+    assert!(
+        gtk4::prelude::WidgetExt::activate_action(&window, "win.export", None).is_ok(),
+        "the win.export action is installed"
+    );
+    assert!(
+        export_dialog.widget().is_visible(),
+        "the header bar's Export button presents the dialog"
+    );
+    window.pump(Duration::from_millis(50));
+    assert_eq!(export_dialog.name_row().text(), "compose.jpg");
+    assert_eq!(export_dialog.quality_row().value(), 1500.0);
+    // The format row owns the extension, and the filter the chooser would show.
+    export_dialog.format_row().set_selected(1);
+    assert_eq!(
+        export_dialog.name_row().text(),
+        "compose.png",
+        "switching to PNG renames a name that still carried the other extension"
+    );
+    export_dialog.quality_row().set_value(1200.0);
+    export_dialog.name_row().set_text("compose.png");
+
+    let out = dir.join("compose.png");
+    // The affirmative is clicked, which is what a person does: it reads the rows,
+    // stores them, closes the dialog and starts the export.
+    let call = Instant::now();
+    export_dialog.export_button().emit_clicked();
+    let returned = call.elapsed();
+    assert!(
+        returned < Duration::from_millis(500),
+        "starting the export blocked for {returned:?}"
+    );
+    assert!(
+        window.progress_revealed(),
+        "the export's progress bar is raised while the work runs"
+    );
+    // The click started libadwaita's own close transition; the harness forces the
+    // dismissal after it, because a headless X server never finishes that transition
+    // (`support::close_dialog`) and a widget behind a presented dialog snapshots to
+    // nothing.
+    support::close_dialog(&export_dialog.widget(), &window);
+    assert!(
+        window.wait_for_idle(support::WAIT),
+        "the background export finished"
+    );
+    assert!(!window.progress_revealed(), "and the bar goes away again");
+    assert!(out.is_file(), "the export landed at {out:?}");
+    assert!(
+        window
+            .last_toast()
+            .is_some_and(|toast| toast.contains("compose.png")),
+        "the toast names the file: {:?}",
+        window.last_toast()
+    );
+    let exported = pixlay_imaging::Source::decode(&out).expect("the export decodes");
+    let expected = PixelSize::for_long_edge(window.document().template.aspect, 1200)
+        .expect("the grid the export asked for");
+    assert_eq!(
+        (exported.width(), exported.height()),
+        (expected.width as u32, expected.height as u32),
+        "the export is the template's shape at the long edge the row asked for"
+    );
+    assert_eq!(
+        window.export_settings().long_edge,
+        1200,
+        "the form holds what the rows said"
+    );
+    assert_eq!(window.export_settings().path, out);
+
+    // The one control the machine walk cannot press: the chooser is the platform's
+    // own dialog, and what it would answer is a directory the test cannot hand back.
+    // It is named and reachable, and the human walk presses it.
+    let choose = export_dialog.choose_button();
+    assert!(choose.is_focusable());
+    assert_eq!(
+        choose.tooltip_text().as_deref(),
+        Some(pixlay::i18n::gettext("Choose where the export is written").as_str())
+    );
+
+    // And the whole document is still one the library can render: the frame's rows
+    // and the cell edits above went through the same commands the CLI sends.
+    window.document().validate().expect("a valid document");
+}
+
+/// Waits until neither a decode, nor a band build, nor an export is in flight.
+fn settle(window: &pixlay::EditorWindow) {
+    assert!(
+        window.wait_for_idle(support::WAIT),
+        "the background pipeline finished"
+    );
+    assert!(
+        window.wait_for_gallery(support::WAIT),
+        "the layout band was built"
+    );
+}

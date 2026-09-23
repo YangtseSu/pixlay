@@ -234,15 +234,10 @@ fn edit_project(args: EditArgs) -> Result<u8, Failure> {
         }
         if args.clear {
             // "Empty the cell" is no photo *and* no framing, which is the default
-            // cell: two commands, and the same document the sidebar's clear wrote.
-            apply(&mut history, Edit::SetSource { slot, source: None })?;
-            apply(
-                &mut history,
-                Edit::SetCrop {
-                    slot,
-                    crop: CropTransform::IDENTITY,
-                },
-            )?;
+            // cell — one command since S15 (`Command::ClearCell`), so the window's own
+            // clear button and `Delete` mean the same thing as this flag and are one
+            // undo step each.
+            apply(&mut history, Edit::ClearCell { slot })?;
         } else {
             if let Some(photo) = replaced {
                 apply(
@@ -292,15 +287,21 @@ fn edit_project(args: EditArgs) -> Result<u8, Failure> {
         }
     }
 
-    let mut doc = history.doc().clone();
-    // The frame is a document field and not a command of its own: `edit` is the
-    // CLI's only writer for it, and it has been applied this way since S11.
-    args.frame.apply(&mut doc.frame);
+    // The frame is a document field, and since S15 a command of its own: the
+    // `Frame…` dialog commits the same `SetFrame`, so the CLI's three flags and the
+    // window's three rows are one writer rather than two, and an impossible frame is
+    // refused where it is asked for (naming the slot the gap emptied) instead of
+    // later, when the document is validated for writing.
+    if args.frame.any() {
+        let mut frame = history.doc().frame;
+        args.frame.apply(&mut frame);
+        apply(&mut history, Edit::SetFrame { frame })?;
+    }
 
     // Validating before writing is what keeps a bug in the library from shipping as
-    // an unloadable file, and it is what refuses a gap that empties a cell.
-    let edited =
-        Project::new(doc, &args.project).map_err(|error| Failure::Failed(error.to_string()))?;
+    // an unloadable file.
+    let edited = Project::new(history.doc().clone(), &args.project)
+        .map_err(|error| Failure::Failed(error.to_string()))?;
     edited
         .save_as(&args.out)
         .map_err(|error| Failure::Failed(error.to_string()))?;

@@ -23,6 +23,7 @@ use std::time::Duration;
 use gtk4::gio;
 use gtk4::prelude::*;
 use libadwaita as adw;
+use libadwaita::prelude::*;
 
 use pixlay::window::Stage;
 use pixlay::{APP_ID, app, canvas, i18n, window::EditorWindow};
@@ -80,16 +81,21 @@ fn the_interface_meets_the_machine_checkable_hig() {
         Stage::Editor,
         "opening a collage shows the editor's stage"
     );
-    assert!(
-        window.wait_for_idle(support::WAIT),
-        "the open decode finished"
-    );
+    // The editor's page is laid out and its bitmaps are in hand before anything below is
+    // measured: a page that has just been pushed has neither, and every check that
+    // follows reads an allocation or a `Placement` (measured 2026-09-23: without this
+    // the walk read a 0x0 canvas, a band with no candidates and header controls at
+    // position 0 on some runs and was fine on others — `tests/support::canvas_size` is
+    // the harness's answer to exactly that).
+    let _ = support::canvas_size(&window);
     assert!(
         window.wait_for_gallery(support::WAIT),
         "the layout band was built"
     );
     check_accessible_names(&window, &mut failures);
     check_gallery(&window, &mut failures);
+    check_compose(&window, &mut failures);
+    check_editor_chrome(&window, &mut failures);
     check_editor_minimum(&window, &mut failures);
     check_colour_schemes(&window, &mut failures);
     check_about(&mut failures);
@@ -199,26 +205,53 @@ fn check_shortcuts(
 
 /// Every interactive control has an accessible name (`guidelines/accessibility`).
 fn check_accessible_names(window: &EditorWindow, failures: &mut Vec<String>) {
-    let root = window.clone().upcast::<gtk4::Widget>();
-    for widget in support::descendants(&root) {
+    check_accessible_names_in(window.upcast_ref::<gtk4::Widget>(), failures);
+}
+
+/// The same walk over any root: the window's tree is one, and a presented dialog's
+/// own tree is another (a dialog is not a child of the window it belongs to).
+fn check_accessible_names_in(root: &gtk4::Widget, failures: &mut Vec<String>) {
+    for widget in support::descendants(root) {
         if !is_interactive(&widget) || is_platform_chrome(&widget) {
+            continue;
+        }
+        // A control that is not on screen is not one a screen reader can reach — and
+        // libadwaita keeps hidden controls inside its own rows: `AdwEntryRow` carries an
+        // apply button that is hidden unless `show-apply-button` is set, and it has no
+        // name because it is never meant to be seen (measured 2026-09-23, the first
+        // `AdwEntryRow` in this app). Visibility *where it matters* is asserted by the
+        // checks that are about a specific control.
+        if !widget.is_visible() {
             continue;
         }
         if !has_accessible_name(&widget) {
             failures.push(format!(
-                "{} has no accessible name (inside {})",
+                "{} has no accessible name (inside {}); its own text is {:?}",
                 widget.type_().name(),
                 ancestors(&widget),
+                control_text(&widget),
             ));
         }
     }
 }
 
-/// The platform's own toast chrome, which is not this app's control: libadwaita's
-/// `AdwToastWidget` puts its dismiss button in every toast and gives it a tooltip
-/// ("Dismiss") and no label — its own accessibility decision, made in libadwaita and
-/// not something a toast from here can change.
+/// The platform's own chrome, which is not this app's control.
+///
+/// Two cases, both libadwaita's own accessibility decisions rather than this app's:
+///
+/// * `AdwToastWidget` puts a dismiss button in every toast and gives it a tooltip
+///   ("Dismiss") and no label;
+/// * `AdwEntryRow` carries an apply button of its own (`adw-entry-apply-symbolic`, a
+///   tooltip, no accessible label) and shows it in a dialog whatever `show-apply-button`
+///   says — measured 2026-09-23: the row was built with `show-apply-button = false` and
+///   the button was still on screen, unnamed, which would otherwise be a failure of a
+///   control this app never added.
 fn is_platform_chrome(widget: &gtk4::Widget) -> bool {
+    if let Some(button) = widget.downcast_ref::<gtk4::Button>()
+        && button.icon_name().as_deref() == Some("adw-entry-apply-symbolic")
+    {
+        return true;
+    }
     let mut current = Some(widget.clone());
     while let Some(candidate) = current {
         if candidate.type_().name() == "AdwToastWidget" {
@@ -243,6 +276,20 @@ fn is_interactive(widget: &gtk4::Widget) -> bool {
         || widget.is::<gtk4::ColorDialogButton>()
         || widget.is::<gtk4::MenuButton>()
         || widget.is::<gtk4::GridView>()
+}
+
+/// What a control says about itself, for a failure message that can be acted on: an
+/// icon-only button's icon, a labelled one's text, its tooltip.
+fn control_text(widget: &gtk4::Widget) -> String {
+    if let Some(button) = widget.downcast_ref::<gtk4::Button>() {
+        return format!(
+            "icon {:?}, label {:?}, tooltip {:?}",
+            button.icon_name(),
+            button.label(),
+            button.tooltip_text(),
+        );
+    }
+    format!("tooltip {:?}", widget.tooltip_text())
 }
 
 /// The class names of a widget's ancestors, for a failure message that can be
@@ -647,6 +694,11 @@ fn check_picker_theme(window: &EditorWindow, failures: &mut Vec<String>) {
     let mut backgrounds = Vec::new();
     for scheme in [adw::ColorScheme::ForceDark, adw::ColorScheme::ForceLight] {
         manager.set_color_scheme(scheme);
+        // A snapshot replays the widgets' current nodes, so the frame the scheme change
+        // causes has to be asked for: without this the probe can read the *previous*
+        // scheme's pixels (measured 2026-09-23: the media area read the dark colour in
+        // both schemes on one run and differed on the next).
+        window.queue_draw();
         window.pump(Duration::from_millis(300));
         let pixels = support::snapshot(window);
         backgrounds.push((
@@ -787,6 +839,10 @@ fn check_gallery(window: &EditorWindow, failures: &mut Vec<String>) {
             failures.push(format!("{name} has no cell in the band"));
             continue;
         };
+        let widget = cell.clone().upcast::<gtk4::Widget>();
+        // The cells arrive with the band's build, and a widget that has just been added
+        // to the tree is allocated on the next frame.
+        let _ = support::allocated(&widget, window);
         if cell.width() < MIN_TARGET || cell.height() < MIN_TARGET {
             failures.push(format!(
                 "{name}'s cell is {}x{}, below the {MIN_TARGET} px target",
@@ -794,7 +850,6 @@ fn check_gallery(window: &EditorWindow, failures: &mut Vec<String>) {
                 cell.height()
             ));
         }
-        let widget = cell.clone().upcast::<gtk4::Widget>();
         if !has_accessible_name(&widget) {
             failures.push(format!("{name}'s cell has no accessible name"));
         }
@@ -823,7 +878,7 @@ fn check_gallery(window: &EditorWindow, failures: &mut Vec<String>) {
     // already cover it — what is checked here is that the document this check runs
     // on has none of them shown and that the control exists for every slot, so a
     // later change cannot quietly drop it.
-    let Some(empty) = window.empty_cells() else {
+    let Some(empty) = window.cell_controls() else {
         failures.push("the canvas has no empty-cell layer".into());
         return;
     };
@@ -842,6 +897,196 @@ fn check_gallery(window: &EditorWindow, failures: &mut Vec<String>) {
         }
         if button.is_visible() {
             failures.push(format!("slot {slot} holds a photo but its `+` is shown"));
+        }
+    }
+}
+
+/// The compose stage's own controls (S15): the selected cell's strip, and the two
+/// document-level dialogs — against the chapters a control has to answer whichever
+/// surface it is on.
+///
+/// The strip is `guidelines/pointer-touch` (a target has a size) and
+/// `guidelines/keyboard` (every action is reachable without a pointer); the dialogs
+/// are `guidelines/accessibility` (every control is named) and, with
+/// `patterns/feedback/dialogs`, the shape ruling 18 gave them: a header bar with a
+/// heading, the cancel button before the affirmative, and the affirmative carrying
+/// the verb the action is.
+///
+/// What the strip *does* to the document, and where it sits inside its cell, is
+/// `tests/compose.rs`'s subject; what is checked here is the part that is the same
+/// question for every control in the window.
+fn check_compose(window: &EditorWindow, failures: &mut Vec<String>) {
+    /// HIG `guidelines/pointer-touch`: "ensure that all interactive elements are at
+    /// least 24x24 pixels".
+    const MIN_TARGET: i32 = 24;
+
+    let Some(controls) = window.cell_controls() else {
+        failures.push("the canvas has no cell-control layer".into());
+        return;
+    };
+    // A cell that holds a photo is selected, so the strip is the family on screen.
+    let occupied = window
+        .document()
+        .cells
+        .iter()
+        .position(|cell| cell.source.is_some());
+    if let Some(slot) = occupied {
+        window.select(Some(slot));
+        // The strip is shown by `refresh`; the allocation it needs is a frame away
+        // (`support::allocated`).
+        let _ = support::allocated(&controls.strip().upcast::<gtk4::Widget>(), window);
+    }
+    let strip = controls.strip();
+    if !strip.is_visible() {
+        failures.push("the selected cell's controls are not shown".into());
+    }
+    for (index, button) in controls.strip_buttons().into_iter().enumerate() {
+        let widget = button.clone().upcast::<gtk4::Widget>();
+        if !has_accessible_name(&widget) {
+            failures.push(format!(
+                "the strip's control {index} has no accessible name"
+            ));
+        }
+        if button.tooltip_text().is_none() {
+            failures.push(format!("the strip's control {index} has no tooltip"));
+        }
+        // The keyboard path: these are the pointer's *visible* controls, and a
+        // focusable button is what makes them the same controls for the keyboard.
+        if !button.is_focusable() {
+            failures.push(format!(
+                "the strip's control {index} cannot be reached with the keyboard"
+            ));
+        }
+        if button.width() < MIN_TARGET || button.height() < MIN_TARGET {
+            failures.push(format!(
+                "the strip's control {index} is {}x{}, below the {MIN_TARGET} px target",
+                button.width(),
+                button.height()
+            ));
+        }
+    }
+
+    // The two dialogs, each presented so that its own tree can be walked: a dialog
+    // that is not on screen has no allocation and no accessible tree.
+    for (name, dialog) in [
+        ("Frame", window.frame_dialog().map(|dialog| dialog.widget())),
+        (
+            "Export",
+            window.export_dialog().map(|dialog| dialog.widget()),
+        ),
+    ] {
+        let Some(dialog) = dialog else {
+            failures.push(format!("the window has no {name} dialog"));
+            continue;
+        };
+        dialog.present(Some(window));
+        window.pump(Duration::from_millis(50));
+        let root = dialog.clone().upcast::<gtk4::Widget>();
+        check_accessible_names_in(&root, failures);
+        // The heading, and the button that carries the action's verb: an action
+        // dialog has both (HIG `patterns/feedback/dialogs`).
+        let controls = support::descendants(&root);
+        let labels: Vec<String> = controls
+            .iter()
+            .filter_map(|widget| widget.downcast_ref::<gtk4::Label>())
+            .map(|label| label.label().to_string())
+            .collect();
+        if !labels.iter().any(|label| label == name) {
+            failures.push(format!("the {name} dialog has no heading reading {name:?}"));
+        }
+        if !labels.iter().any(|label| label == name || label == "Close") {
+            failures.push(format!(
+                "the {name} dialog has neither an affirmative nor a way out"
+            ));
+        }
+        dialog.force_close();
+    }
+    // Leave the window as this check found it: the colour-scheme probe that follows
+    // samples the sheet near its edges, and a selection outline is interface drawn on
+    // top of the content.
+    window.pump(Duration::from_millis(200));
+    window.select(None);
+}
+
+/// The editor page's header bar, held to the same three alignment points as the
+/// picker's (HIG `patterns/containers/header-bars`, ruling 24): the document's own
+/// controls at the start, the heading in the centre, the menu at the end.
+///
+/// The picker's check is `check_header_chrome`; the editor's controls are the ones
+/// S15 added, so this is the other half of the same rule.
+fn check_editor_chrome(window: &EditorWindow, failures: &mut Vec<String>) {
+    let Some(header) = window.editor_header() else {
+        failures.push("the editor page has no header bar".into());
+        return;
+    };
+    let root = header.clone().upcast::<gtk4::Widget>();
+    let controls = support::descendants(&root);
+    // The controls are found by the *action* they carry, which is what the window
+    // itself binds: an icon-only lookup would miss the export button (its icon lives in
+    // an `AdwButtonContent`, so the button's own `icon-name` is empty) and the menu,
+    // which is a `GtkMenuButton`.
+    let by_action = |action: &str| {
+        controls
+            .iter()
+            .find(|widget| support::action_name(widget).as_deref() == Some(action))
+    };
+    let (Some(frame), Some(export)) = (by_action("win.frame"), by_action("win.export")) else {
+        failures.push("the editor's header is missing the frame or the export control".into());
+        return;
+    };
+    let Some(menu) = controls
+        .iter()
+        .find(|widget| widget.is::<gtk4::MenuButton>())
+    else {
+        failures.push("the editor's header has no primary menu".into());
+        return;
+    };
+    let centre = |widget: &gtk4::Widget| {
+        widget
+            .compute_point(
+                &root,
+                &gtk4::graphene::Point::new(
+                    widget.width() as f32 / 2.0,
+                    widget.height() as f32 / 2.0,
+                ),
+            )
+            .map(|point| point.x())
+    };
+    let title = header
+        .title_widget()
+        .or_else(|| header.first_child())
+        .map(|widget| centre(&widget));
+    match (
+        centre(&frame.clone()),
+        title.flatten(),
+        centre(&menu.clone()),
+    ) {
+        (Some(frame_x), Some(title_x), Some(menu_x)) => {
+            if frame_x >= title_x {
+                failures.push(format!(
+                    "the frame button ({frame_x:.0}) is not left of the heading ({title_x:.0})"
+                ));
+            }
+            if menu_x <= title_x {
+                failures.push(format!(
+                    "the menu ({menu_x:.0}) is not right of the heading ({title_x:.0})"
+                ));
+            }
+        }
+        _ => failures.push("the editor header's controls are not allocated".into()),
+    }
+    // Every control *this app* puts in the editor's header carries a tooltip and a
+    // name (this page's own "tooltips on primary controls").
+    for (name, widget) in [
+        ("the frame button", frame.clone()),
+        ("the export button", export.clone()),
+        ("the menu", menu.clone()),
+    ] {
+        if widget.tooltip_text().is_none() {
+            failures.push(format!("the editor header's {name} has no tooltip"));
+        }
+        if !has_accessible_name(&widget) {
+            failures.push(format!("the editor header's {name} has no accessible name"));
         }
     }
 }
@@ -913,6 +1158,9 @@ fn check_colour_schemes(window: &EditorWindow, failures: &mut Vec<String>) {
     let mut painted: Vec<(String, support::Image)> = Vec::new();
     for scheme in [adw::ColorScheme::ForceDark, adw::ColorScheme::ForceLight] {
         manager.set_color_scheme(scheme);
+        // The repaint the scheme change causes is what this measures, and a snapshot
+        // replays the last nodes: ask for the frame (`check_picker_theme`'s reason).
+        window.queue_draw();
         window.pump(Duration::from_millis(300));
         painted.push((format!("{scheme:?}"), support::snapshot(window)));
     }

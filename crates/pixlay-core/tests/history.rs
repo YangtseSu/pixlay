@@ -10,7 +10,9 @@
 
 use std::path::PathBuf;
 
-use pixlay_core::{Cell, CollageDoc, Command, CoreError, CropTransform, History, templates};
+use pixlay_core::{
+    Cell, CollageDoc, Command, CoreError, CropTransform, Frame, History, Rgba8, templates,
+};
 
 fn document() -> CollageDoc {
     let template = templates::get(templates::SMOKE_TEMPLATE).expect("registered");
@@ -71,6 +73,18 @@ fn sequence() -> Vec<Command> {
         Command::AddCell,
         Command::SwapCells { left: 0, right: 1 },
         Command::RemoveLastCell,
+        // S15's two: the cell the strip's clear button empties — slot 1, which the swap
+        // above moved the framed photo into, so clearing it changes the document — and
+        // the frame the dialog edits. Last, so their numbers are read against a known
+        // layout.
+        Command::ClearCell { slot: 1 },
+        Command::SetFrame {
+            frame: Frame {
+                gap_rel: 0.02,
+                radius_rel: 0.01,
+                color: Rgba8::rgb(250, 250, 250),
+            },
+        },
     ]
 }
 
@@ -716,4 +730,167 @@ fn a_swap_exchanges_two_cells_whole() {
         "{refused}"
     );
     assert_eq!(history.undo_depth(), 0);
+}
+
+#[test]
+fn clearing_a_cell_empties_it_in_one_undo_step() {
+    // S15: "clear this cell" is one intent — photo *and* framing — so it is one
+    // command and one undo step, the same document `edit --clear` writes. `SetSource
+    // { source: None }` is the other thing: it keeps the framing, which is what makes
+    // replacing a photo keep the area the user framed.
+    let mut history = History::new(occupied("grid-4-2x2")).expect("a valid document");
+    let framing = CropTransform {
+        zoom: 2.4,
+        offset: (0.1, -0.2),
+        rotation_deg: 17.0,
+    };
+    history
+        .apply(Command::SetCrop {
+            slot: 2,
+            crop: framing,
+        })
+        .expect("applies");
+    let before = history.doc().cells[2].source.clone();
+    assert!(before.is_some(), "the cell holds a photo to clear");
+
+    let depth = history.undo_depth();
+    history
+        .apply(Command::ClearCell { slot: 2 })
+        .expect("applies");
+    assert_eq!(
+        history.doc().cells[2],
+        Cell::default(),
+        "the cell is empty and its framing is the default"
+    );
+    assert_eq!(
+        history.undo_depth(),
+        depth + 1,
+        "one command, one undo step"
+    );
+    assert!(history.undo());
+    assert_eq!(history.doc().cells[2].source, before);
+    assert_eq!(
+        history.doc().cells[2].crop,
+        framing,
+        "and the framing came back"
+    );
+
+    // The photo-only half is still its own command: it leaves the framing alone.
+    history
+        .apply(Command::SetSource {
+            slot: 2,
+            source: None,
+        })
+        .expect("applies");
+    assert!(history.doc().cells[2].source.is_none());
+    assert_eq!(
+        history.doc().cells[2].crop,
+        framing,
+        "clearing the source is not clearing the cell"
+    );
+
+    // A cell the layout does not have is refused, and nothing moves.
+    let depth = history.undo_depth();
+    let refused = history
+        .apply(Command::ClearCell { slot: 7 })
+        .expect_err("the layout has four cells");
+    assert!(
+        matches!(refused, CoreError::NoSuchSlot { slot: 7, slots: 4 }),
+        "{refused}"
+    );
+    assert_eq!(history.undo_depth(), depth, "the refusal left no step");
+}
+
+#[test]
+fn a_frame_change_is_one_undo_step_and_its_refusals_leave_no_trace() {
+    // S15: the frame is a document field the user edits, so setting it is a command
+    // like any other — one undo step, and a frame the contract cannot render is
+    // refused before it becomes the document. The CLI's `--gap/--radius/
+    // --border-color` and the `Frame…` dialog both send this, which is what makes
+    // `pixlay-cli edit` and the window one writer for the frame.
+    let mut history = History::new(occupied("mosaic-4-hero")).expect("a valid document");
+    let before = history.doc().clone();
+    assert_eq!(before.frame, Frame::default(), "the default is no frame");
+
+    let depth = history.undo_depth();
+    history
+        .apply(Command::SetFrame {
+            frame: Frame {
+                gap_rel: 0.03,
+                radius_rel: 0.02,
+                color: Rgba8::rgb(12, 200, 240),
+            },
+        })
+        .expect("applies");
+    assert_eq!(
+        history.undo_depth(),
+        depth + 1,
+        "one command, one undo step"
+    );
+    let framed = history.doc().frame;
+    assert_eq!(framed.gap_rel, 0.03);
+    assert_eq!(framed.radius_rel, 0.02);
+    assert_eq!(framed.color, Rgba8::rgb(12, 200, 240));
+    assert_eq!(
+        history.doc().cells,
+        before.cells,
+        "a frame is not a relayout: no cell moves"
+    );
+    history.doc().validate().expect("a valid document");
+
+    assert!(history.undo(), "the frame change is undoable");
+    assert_eq!(
+        history.doc(),
+        &before,
+        "undo restores the frame the document had"
+    );
+    assert!(history.redo());
+    assert_eq!(history.doc().frame, framed);
+
+    // A translucent backdrop is refused: the export's surface starts transparent, so
+    // a translucent document would make preview and export two different pictures
+    // (`Frame::validate`).
+    let refused = history
+        .apply(Command::SetFrame {
+            frame: Frame {
+                color: Rgba8 {
+                    r: 10,
+                    g: 10,
+                    b: 10,
+                    a: 128,
+                },
+                ..Frame::default()
+            },
+        })
+        .expect_err("a translucent backdrop is not a document");
+    assert!(matches!(refused, CoreError::OutOfRange { .. }), "{refused}");
+
+    // A length past the whole canvas is a typo, not a frame.
+    let refused = history
+        .apply(Command::SetFrame {
+            frame: Frame {
+                gap_rel: 2.0,
+                ..Frame::default()
+            },
+        })
+        .expect_err("a gap past the canvas is refused");
+    assert!(matches!(refused, CoreError::OutOfRange { .. }), "{refused}");
+
+    // And a gap *inside* the range can still empty the smallest cell of a layout;
+    // that is refused by the per-slot check and the error names the slot.
+    let mut history = History::new(occupied("grid-9-3x3")).expect("a valid document");
+    let refused = history
+        .apply(Command::SetFrame {
+            frame: Frame {
+                gap_rel: 0.5,
+                ..Frame::default()
+            },
+        })
+        .expect_err("a gap that empties a cell is refused");
+    match refused {
+        CoreError::InvalidSlot { slot, .. } => assert!(slot < 9, "slot {slot} is in the layout"),
+        other => panic!("{other}"),
+    }
+    assert_eq!(history.undo_depth(), 0, "the refusals left no step");
+    assert_eq!(history.doc().frame, Frame::default(), "and no frame");
 }

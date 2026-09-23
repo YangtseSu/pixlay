@@ -42,8 +42,8 @@ use gtk4::prelude::*;
 use libadwaita as adw;
 
 use pixlay_core::{
-    CollageDoc, Command, CoreError, CropTransform, MAX_PHOTOS, MIN_PHOTOS, PixelSize, Project,
-    Template, templates,
+    CollageDoc, Command, CoreError, CropTransform, Frame, MAX_PHOTOS, MIN_PHOTOS, PixelSize,
+    Project, Template, templates,
 };
 use pixlay_imaging::{gesture_grid, preview_source_long_edge};
 use pixlay_render::Images;
@@ -51,6 +51,7 @@ use pixlay_render::Images;
 use crate::a11y;
 use crate::canvas::{self, Gesture};
 use crate::decode::{Decoder, GalleryReply, Reply};
+use crate::dialogs;
 use crate::export::{self, Progress, Report, Settings};
 use crate::i18n::{fill, gettext, ngettext};
 use crate::layout::Gallery;
@@ -76,6 +77,13 @@ pub const DEFAULT_TEMPLATE: &str = "mosaic-5-hero";
 /// `MAX_EXPORT_PX` in `crate::export`): the maximum is 12000 because
 /// `12000² = 144 MP < 200 MP`, so every template aspect stays inside the budget.
 pub const DEFAULT_EXPORT_PX: u32 = 4000;
+
+/// How long a test-facing wait pumps for work to *start* before concluding there is
+/// none (`EditorWindow::pump_until`).
+///
+/// Long enough to cover a page push and the frame that lays it out, short enough that a
+/// wait about a document no edit is pending on costs a fraction of a second.
+const WORK_GRACE: Duration = Duration::from_millis(1000);
 
 /// How long a live gesture waits for quiet before it becomes an undo step.
 ///
@@ -118,12 +126,20 @@ mod imp {
         pub selection: Cell<Option<usize>>,
         pub guides: Cell<bool>,
         pub canvas: OnceCell<gtk::DrawingArea>,
-        /// The `+` buttons over the empty cells (S14b), stacked over the canvas.
-        pub empty: OnceCell<Rc<canvas::EmptyCells>>,
+        /// The `+` buttons over the empty cells and the selected cell's own strip
+        /// (S14b, S15), stacked over the canvas.
+        pub cell_controls: OnceCell<Rc<canvas::CellControls>>,
         /// The two stages, and the picker behind the first of them (S13).
         pub pages: OnceCell<adw::NavigationView>,
         pub picker_page: OnceCell<adw::NavigationPage>,
         pub editor_page: OnceCell<adw::NavigationPage>,
+        /// The editor page's header bar, for the HIG checks: the same three
+        /// alignment points the picker's is held to (S15).
+        pub editor_header: OnceCell<adw::HeaderBar>,
+        /// The two document-level dialogs (S15): `Frame…` and `Export…`, built once
+        /// and presented by the header bar's buttons.
+        pub frame_dialog: OnceCell<Rc<dialogs::FrameDialog>>,
+        pub export_dialog: OnceCell<Rc<dialogs::ExportDialog>>,
         pub picker: OnceCell<Rc<Picker>>,
         /// The picker's tile worker: one thread, many small pictures.
         pub thumbs: OnceCell<Rc<thumbs::Thumbs>>,
@@ -139,6 +155,12 @@ mod imp {
         /// share ("the gallery costs no decode the canvas does not already pay
         /// for"), not the thread's total.
         pub gallery_decodes: Cell<u64>,
+        /// Builds of the band that have landed and were accepted (S15).
+        ///
+        /// The tests' handle on "the band was built": the flag above says whether a
+        /// build is *outstanding*, and a wait that only reads it can return before the
+        /// request was ever made — see `pump_until`.
+        pub gallery_builds: Cell<u64>,
         pub banner: OnceCell<adw::Banner>,
         pub toast: OnceCell<adw::ToastOverlay>,
         pub progress: OnceCell<gtk::ProgressBar>,
@@ -180,16 +202,20 @@ mod imp {
                 selection: Cell::new(None),
                 guides: Cell::new(false),
                 canvas: OnceCell::new(),
-                empty: OnceCell::new(),
+                cell_controls: OnceCell::new(),
                 pages: OnceCell::new(),
                 picker_page: OnceCell::new(),
                 editor_page: OnceCell::new(),
+                editor_header: OnceCell::new(),
+                frame_dialog: OnceCell::new(),
+                export_dialog: OnceCell::new(),
                 picker: OnceCell::new(),
                 thumbs: OnceCell::new(),
                 gallery: OnceCell::new(),
                 gallery_generation: Cell::new(0),
                 gallery_pending: Cell::new(false),
                 gallery_decodes: Cell::new(0),
+                gallery_builds: Cell::new(0),
                 banner: OnceCell::new(),
                 toast: OnceCell::new(),
                 progress: OnceCell::new(),
@@ -283,6 +309,14 @@ impl EditorWindow {
         export.add_css_class("suggested-action");
         export.set_action_name(Some("win.export"));
         a11y::label(&export, &gettext("Export the collage"));
+        // The frame's own settings (S15): a document-level question, so it is a
+        // dialog behind a button rather than a permanent row (ruling 18). Icon only,
+        // with a tooltip and a name, which is what a header bar holds.
+        let frame = icon_button(
+            "document-properties-symbolic",
+            &gettext("Frame the collage"),
+        );
+        frame.set_action_name(Some("win.frame"));
         let menu = gtk::MenuButton::builder()
             .icon_name("open-menu-symbolic")
             .tooltip_text(gettext("Main menu"))
@@ -293,10 +327,16 @@ impl EditorWindow {
 
         // HIG `patterns/containers/header-bars`: navigation actions at the *start*,
         // the heading in the centre, the menu at the *end* (S13c; S13b packed every
-        // control at the end).
+        // control at the end), and related buttons grouped with a spacer rather than
+        // linked. The start slot holds the document-editing controls: undo and redo
+        // are one pair, and the frame's own settings are a second concern.
+        let spacer = gtk::Separator::new(gtk::Orientation::Vertical);
+        spacer.add_css_class("spacer");
         let header = adw::HeaderBar::new();
         header.pack_start(&undo);
         header.pack_start(&redo);
+        header.pack_start(&spacer);
+        header.pack_start(&frame);
         header.pack_end(&menu);
         header.pack_end(&export);
         header.pack_end(&save);
@@ -318,11 +358,12 @@ impl EditorWindow {
             .build();
 
         // ---- the editor page's content --------------------------------------
-        // The canvas is wrapped in an overlay (S14b): the `+` buttons of the empty
-        // cells are real GTK controls over it (ruling 9), and only the buttons claim
-        // a press — the canvas keeps every drag and click that is not on one.
-        let empty = Rc::new(canvas::EmptyCells::new(self, &canvas::build(self)));
-        let canvas = empty.canvas();
+        // The canvas is wrapped in an overlay (S14b, S15): the empty cells' `+` and
+        // the selected cell's own strip are real GTK controls over it (ruling 9), and
+        // only the controls claim a press — the canvas keeps every drag and click
+        // that is not on one.
+        let controls = Rc::new(canvas::CellControls::new(self, &canvas::build(self)));
+        let canvas = controls.canvas();
         // The layout band sits under the canvas (S14): the candidates are the
         // editor's own document with another template, and S15's compose controls
         // attach to the canvas above them, so the two are one page.
@@ -334,7 +375,7 @@ impl EditorWindow {
         banner.set_button_label(Some(&gettext("Find it…")));
         let editor_body = gtk::Box::new(gtk::Orientation::Vertical, 0);
         editor_body.append(&banner);
-        editor_body.append(&empty.root());
+        editor_body.append(&controls.root());
         editor_body.append(&gallery.root());
         let editor_view = adw::ToolbarView::new();
         editor_view.add_top_bar(&header);
@@ -346,6 +387,38 @@ impl EditorWindow {
         editor_view.set_top_bar_style(adw::ToolbarStyle::Raised);
         let editor_page =
             adw::NavigationPage::with_tag(&editor_view, &gettext("Collage"), "editor");
+
+        // **The canvas's size is read where the surface reports it, not only from a
+        // draw.** GTK4 has no `size-allocate` and no `width` property, so a window
+        // resize is visible only at the surface (`GdkSurface::layout`) — the hook the
+        // picker's own pane uses (S13c) — and the editor needs the same one: a page
+        // that has just been pushed is allocated before it is painted, and a window
+        // resized while it is not being painted must still decode for its new size.
+        // The canvas's own draw asks for its grid too, and this is the half that does
+        // not depend on a paint: measured 2026-09-23, a headless run could allocate the
+        // editor's page and never paint it, which left the canvas on a 1x1 grid for the
+        // whole test.
+        let window = self.clone();
+        editor_page.connect_realize(glib::clone!(
+            #[weak]
+            window,
+            move |page| {
+                let Some(surface) = page.native().and_then(|native| native.surface()) else {
+                    return;
+                };
+                surface.connect_layout(glib::clone!(
+                    #[weak]
+                    window,
+                    move |_, _, _| {
+                        let area = window.canvas_widget();
+                        window.request_grid_for(area.width(), area.height());
+                        // The controls over the canvas are placed from the same
+                        // allocation, so they follow the layout too.
+                        window.refresh();
+                    }
+                ));
+            }
+        ));
 
         // ---- the picker page ------------------------------------------------
         let picker = Picker::build(self);
@@ -369,7 +442,12 @@ impl EditorWindow {
         self.set_title(Some(&gettext("Untitled collage")));
 
         imp.canvas.set(canvas).ok();
-        imp.empty.set(empty).ok();
+        imp.cell_controls.set(controls).ok();
+        imp.editor_header.set(header).ok();
+        imp.frame_dialog.set(dialogs::FrameDialog::build(self)).ok();
+        imp.export_dialog
+            .set(dialogs::ExportDialog::build(self))
+            .ok();
         imp.pages.set(pages).ok();
         imp.picker_page.set(picker_page).ok();
         imp.editor_page.set(editor_page).ok();
@@ -552,10 +630,10 @@ impl EditorWindow {
             }),
         );
         add(
-            "choose-export-path",
+            "frame",
             true,
             Box::new(|window| {
-                window.choose_export_path();
+                window.frame();
             }),
         );
         add(
@@ -568,11 +646,11 @@ impl EditorWindow {
             }),
         );
         add(
-            "clear-photo",
+            "clear-cell",
             false,
             Box::new(|window| {
                 if let Some(slot) = window.selection() {
-                    window.clear_slot(slot);
+                    window.clear_cell(slot);
                 }
             }),
         );
@@ -596,10 +674,25 @@ impl EditorWindow {
         self.imp().canvas.get().expect("the canvas exists").clone()
     }
 
-    /// The `+` buttons over the empty cells (S14b), for the widget tree and the
-    /// tests.
-    pub fn empty_cells(&self) -> Option<Rc<canvas::EmptyCells>> {
-        self.imp().empty.get().cloned()
+    /// The controls over the canvas (S14b, S15): the empty cells' `+` and the
+    /// selected cell's own strip, for the widget tree and the tests.
+    pub fn cell_controls(&self) -> Option<Rc<canvas::CellControls>> {
+        self.imp().cell_controls.get().cloned()
+    }
+
+    /// The editor page's header bar, for the HIG checks.
+    pub fn editor_header(&self) -> Option<adw::HeaderBar> {
+        self.imp().editor_header.get().cloned()
+    }
+
+    /// The `Frame…` dialog (S15).
+    pub fn frame_dialog(&self) -> Option<Rc<dialogs::FrameDialog>> {
+        self.imp().frame_dialog.get().cloned()
+    }
+
+    /// The `Export…` dialog (S15).
+    pub fn export_dialog(&self) -> Option<Rc<dialogs::ExportDialog>> {
+        self.imp().export_dialog.get().cloned()
     }
 
     /// The picker, for the tests and for the widgets that call into it.
@@ -900,6 +993,46 @@ impl EditorWindow {
         }
     }
 
+    /// Multiplies the selected cell's zoom by `factor` (S15: the strip's two zoom
+    /// buttons).
+    ///
+    /// The factor is a ratio of the *fitted* crop, which is what the user is looking
+    /// at, and the result is fitted again — the same path the wheel takes, so a
+    /// button and a notch cannot land on different numbers.
+    pub fn zoom_by(&self, factor: f64) {
+        let Some(slot) = self.selection() else {
+            return;
+        };
+        let Some(crop) = self.fitted_crop(slot) else {
+            return;
+        };
+        self.set_zoom(crop.zoom * factor);
+    }
+
+    /// Turns the selected cell's photo by `degrees` (S15: the strip's rotate
+    /// button).
+    ///
+    /// A step on the free angle (S11): the value is wrapped into `(-180, 180]` and
+    /// never reduced, and the fit is recomputed after it, so the cell stays covered
+    /// at whatever angle the button reaches.
+    pub fn rotate_by(&self, degrees: f64) {
+        let Some(slot) = self.selection() else {
+            return;
+        };
+        let Some(crop) = self.fitted_crop(slot) else {
+            return;
+        };
+        let next = self.fit_for(
+            slot,
+            CropTransform {
+                rotation_deg: crop.rotation_deg + degrees,
+                ..crop
+            }
+            .normalized(),
+        );
+        self.gesture(Gesture::Step { slot, crop: next });
+    }
+
     /// The straightening slider: a live gesture, so the guides are on while it
     /// moves and the value is committed once it stops.
     pub fn straighten(&self, degrees: f64) {
@@ -928,8 +1061,13 @@ impl EditorWindow {
         });
     }
 
-    pub fn clear_slot(&self, slot: usize) {
-        let _ = self.apply(Command::SetSource { slot, source: None });
+    /// Empties one cell: no photo, and its framing back to the default (S15).
+    ///
+    /// One command, so one undo step (`Command::ClearCell`) — and the same meaning
+    /// the CLI's `edit --clear` has, because a control the strip offers has to be
+    /// expressible on the machine surface too.
+    pub fn clear_cell(&self, slot: usize) {
+        let _ = self.apply(Command::ClearCell { slot });
     }
 
     pub fn place_photo(&self, slot: usize, path: PathBuf) {
@@ -1158,19 +1296,63 @@ impl EditorWindow {
         );
     }
 
-    /// Waits until the gallery's build has arrived, pumping the main context.
+    /// Waits until the band's build has arrived, pumping the main context.
+    ///
+    /// A build that has *landed* is the answer, not "nothing is outstanding": the flag
+    /// is false before the request has even gone out, and the request goes out with the
+    /// canvas's own — from the first draw that knows the widget's size. So this pumps a
+    /// few frames first ([`pump_until`]) and then waits for the count to move, which is
+    /// what makes it usable right after a window has been shown or the editor's page
+    /// pushed (measured 2026-09-23: without it the HIG walk read a 0x0 canvas and a
+    /// band with no candidates, where the same window after a 500 ms pump was laid out).
+    ///
+    /// A caller that asks about a document no edit is waiting on (a bare selection
+    /// change rebuilds nothing) is answered `true` as soon as the frames show that
+    /// nothing was asked for.
     pub fn wait_for_gallery(&self, timeout: Duration) -> bool {
+        let baseline = self.imp().gallery_builds.get();
         let context = glib::MainContext::default();
         let deadline = Instant::now() + timeout;
+        self.pump_until(|| {
+            self.imp().gallery_pending.get() || self.imp().gallery_builds.get() > baseline
+        });
         loop {
             while context.pending() {
                 context.iteration(false);
+            }
+            if self.imp().gallery_builds.get() > baseline {
+                return true;
             }
             if !self.imp().gallery_pending.get() {
                 return true;
             }
             if Instant::now() >= deadline {
                 return false;
+            }
+            std::thread::sleep(Duration::from_millis(4));
+        }
+    }
+
+    /// Pumps the main context for a few frames, or until `started` says the work a wait
+    /// is about has been asked for.
+    ///
+    /// **The requests a wait is about are not queued synchronously.** A decode and the
+    /// band's build both go out from `request_grid_for`, which the canvas's draw calls —
+    /// and a widget is asked to draw only once it has an allocation, which a window that
+    /// has just been shown (or that has just pushed the editor's page) does not have for
+    /// its first frames. A wait that only reads the flags therefore returns before the
+    /// work exists, and the test that follows reads an empty window: measured
+    /// 2026-09-23, the HIG walk saw a 0x0 canvas and a band with no candidates, while the
+    /// same window after a 500 ms pump was fully laid out.
+    fn pump_until(&self, started: impl Fn() -> bool) {
+        let context = glib::MainContext::default();
+        let deadline = Instant::now() + WORK_GRACE;
+        while Instant::now() < deadline {
+            while context.pending() {
+                context.iteration(false);
+            }
+            if started() {
+                return;
             }
             std::thread::sleep(Duration::from_millis(4));
         }
@@ -1349,52 +1531,36 @@ impl EditorWindow {
 
     // ---- export -----------------------------------------------------------
 
+    /// Presents the `Export…` dialog (S15): the format, the one size parameter and
+    /// the file, asked as rows rather than as a permanent form (ruling 18).
+    ///
+    /// `Ctrl+E` and the header bar's button both land here, so the menu item, the
+    /// accelerator and the button cannot ask three different questions.
     pub fn export(&self) {
-        let chosen = self.imp().export.borrow().path.clone();
-        if chosen.as_os_str().is_empty() {
-            self.choose_export_path();
-            return;
+        if let Some(dialog) = self.export_dialog() {
+            dialog.present(self);
         }
-        self.start_export(chosen);
     }
 
-    /// Asks where the export goes and starts it.
-    ///
-    /// Since ruling 18 removed the pane that held the export form, choosing a
-    /// file is the last question the window asks, so it *starts* the export rather
-    /// than filling a row that no longer exists.
-    pub fn choose_export_path(&self) {
-        let window = self.clone();
-        let format = self.export_settings().format;
-        let filter = gtk::FileFilter::new();
-        filter.set_name(Some(&gettext("Images")));
-        for pattern in ["*.jpg", "*.jpeg", "*.png"] {
-            filter.add_pattern(pattern);
+    /// Presents the `Frame…` dialog (S15): the document's frame as three rows.
+    pub fn frame(&self) {
+        if let Some(dialog) = self.frame_dialog() {
+            dialog.present(self);
         }
-        let filters = gio::ListStore::new::<gtk::FileFilter>();
-        filters.append(&filter);
-        let dialog = gtk::FileDialog::builder()
-            .title(gettext("Export the collage"))
-            .filters(&filters)
-            .default_filter(&filter)
-            .initial_name(suggested_export_name(self, format))
-            .build();
-        dialog.save(
-            Some(self),
-            gio::Cancellable::NONE,
-            glib::clone!(
-                #[strong]
-                window,
-                move |result: Result<gio::File, glib::Error>| {
-                    if let Ok(file) = result
-                        && let Some(path) = file.path()
-                    {
-                        window.imp().export.borrow_mut().path = path.clone();
-                        window.start_export(path);
-                    }
-                }
-            ),
-        );
+    }
+
+    /// Sets the document's frame as a live edit (S15): the canvas redraws while the
+    /// dialog's rows move, and the change becomes one undo step once the value is
+    /// quiet.
+    ///
+    /// The same machinery a drag uses (`live` + `schedule_commit`), and for the same
+    /// reason: a spin row emits a value per keystroke, and forty undo steps for one
+    /// number is not what the user made. A frame change also moves the clamp every
+    /// cell is fitted against, so the commit re-decodes at the resting grid — the
+    /// bitmaps a framed cell needs are not the ones an unframed one had.
+    pub fn set_frame(&self, frame: Frame) {
+        self.live(Command::SetFrame { frame });
+        self.schedule_commit();
     }
 
     /// What the export form asks for, with the path this window holds.
@@ -1505,6 +1671,18 @@ impl EditorWindow {
                 }
             }
         }
+    }
+
+    /// Whether the export's progress bar is on screen.
+    ///
+    /// The tests' handle on "the dialog's export runs the same background path the
+    /// menu's action does": the bar is raised while an export is in flight and taken
+    /// away when it ends, whichever surface asked for it.
+    pub fn progress_revealed(&self) -> bool {
+        self.imp()
+            .progress_revealer
+            .get()
+            .is_some_and(|revealer| revealer.reveals_child())
     }
 
     fn show_progress(&self, show: bool) {
@@ -1624,6 +1802,9 @@ impl EditorWindow {
             return;
         }
         self.imp().gallery_pending.set(false);
+        self.imp()
+            .gallery_builds
+            .set(self.imp().gallery_builds.get() + 1);
         let Some(gallery) = self.imp().gallery.get() else {
             return;
         };
@@ -1710,6 +1891,12 @@ impl EditorWindow {
     pub fn wait_for_idle(&self, timeout: Duration) -> bool {
         let context = glib::MainContext::default();
         let deadline = Instant::now() + timeout;
+        // The work this waits for has to have been asked for first (`pump_until`).
+        self.pump_until(|| {
+            self.imp().requested.get().is_some()
+                || self.imp().gallery_pending.get()
+                || self.imp().exporting.get()
+        });
         while Instant::now() < deadline {
             while context.pending() {
                 context.iteration(false);
@@ -1799,11 +1986,12 @@ impl EditorWindow {
         self.update_title();
         self.update_banner();
         self.update_gallery_control();
-        // The empty cells' `+` buttons follow the document, so they are written here
-        // rather than from a draw: showing a widget inside GTK's own traversal
-        // leaves it snapshotted before it is allocated (`EmptyCells::sync`).
-        if let Some(empty) = self.empty_cells() {
-            empty.sync(self);
+        // The cells' own controls follow the document and the selection, so they are
+        // written here rather than from a draw: showing a widget inside GTK's own
+        // traversal leaves it snapshotted before it is allocated
+        // (`CellControls::sync`).
+        if let Some(controls) = self.cell_controls() {
+            controls.sync(self);
         }
         self.canvas_widget().queue_draw();
     }
@@ -1875,10 +2063,12 @@ impl EditorWindow {
             let enabled = match action.name().as_str() {
                 "undo" => undo,
                 "redo" => redo,
-                "save" | "save-as" => editing,
+                // The frame edits the document, so it belongs to the stage that
+                // shows one, like Save (S15).
+                "save" | "save-as" | "frame" => editing,
                 "export" => editing && has_any_photo,
                 "choose-folder" => !editing,
-                "add-photo" | "clear-photo" | "reset-framing" => editing && selected,
+                "add-photo" | "clear-cell" | "reset-framing" => editing && selected,
                 _ => action.is_enabled(),
             };
             action.set_enabled(enabled);

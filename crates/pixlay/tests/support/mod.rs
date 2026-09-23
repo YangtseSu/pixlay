@@ -22,6 +22,7 @@ use gtk4 as gtk;
 use gtk4::glib;
 use gtk4::prelude::*;
 use libadwaita as adw;
+use libadwaita::prelude::*;
 
 use pixlay::{EditorWindow, i18n};
 
@@ -162,6 +163,80 @@ pub fn pump(duration: Duration) {
     }
 }
 
+/// Waits for `widget` to be allocated, pumping frames.
+///
+/// A widget that has just been shown, or added to the tree by a reply from a worker
+/// thread, is allocated on the display's *next* frame — and the harness's other waits
+/// stop as soon as the reply they were about has arrived, which can be one frame before
+/// the widgets it created are laid out. Measured 2026-09-23: the HIG walk read candidate
+/// cells of 0x0 on two runs of four.
+pub fn allocated(widget: &gtk::Widget, window: &EditorWindow) -> bool {
+    let deadline = Instant::now() + WAIT;
+    while Instant::now() < deadline {
+        if widget.width() > 0 && widget.height() > 0 {
+            return true;
+        }
+        window.pump(Duration::from_millis(20));
+    }
+    false
+}
+
+/// The canvas's own size, once it has one **and its bitmaps are in hand**.
+///
+/// Everything the per-cell controls do is computed from the canvas's allocation *and*
+/// from the grid its bitmaps were decoded for (`placement` is expressed in that grid),
+/// and a window whose editor page has just been pushed has neither: a `sync` against a
+/// 0x0 canvas — or against a stale 1x1 grid, whose placement stretches the sheet to the
+/// canvas's own height — leaves the buttons with margins GTK answers with a 0x0
+/// allocation, and no later frame fixes them. Measured 2026-09-23: `tests/layout.rs`
+/// waited its full 180 s for a `+` that could not appear. So a test that measures the
+/// controls asks for both, and reads the size after the waits.
+pub fn canvas_size(window: &EditorWindow) -> (i32, i32) {
+    let area = window.canvas_widget();
+    let deadline = Instant::now() + WAIT;
+    while Instant::now() < deadline {
+        if area.width() > 0 && area.height() > 0 {
+            break;
+        }
+        window.pump(Duration::from_millis(20));
+    }
+    assert!(
+        area.width() > 0 && area.height() > 0,
+        "the canvas was never allocated"
+    );
+    let (width, height) = (area.width(), area.height());
+    assert!(
+        window.wait_for_idle(WAIT),
+        "the canvas's own decode never finished: canvas {width}x{height}, images grid \
+         {:?}, requested {:?}, band pending {}, {} source decodes so far",
+        window.images().0,
+        window.requested_grid(),
+        window.gallery_decodes(),
+        window.decoded_sources(),
+    );
+    (width, height)
+}
+
+/// Dismisses a dialog the harness has finished with, and pumps a frame.
+///
+/// The dialogs' own buttons are what a test clicks, and those handlers call
+/// [`adw::Dialog::close`] — which starts libadwaita's close transition **and never
+/// finishes it on a headless X server** (measured 2026-09-23: the dialog was still
+/// `is_visible()` 180 s after an accepted `close()` under `xvfb-run`). Two facts follow,
+/// and both are why this helper exists rather than an assertion of "it is gone":
+///
+/// * a *presented* dialog (measured: `close()` on one that had already accepted a close
+///   is refused — "Trying to close AdwDialog … that's not presented") owns the frame it
+///   is over, and **a widget behind it snapshots to nothing** — so a pixel probe of the
+///   canvas needs the dialog off the tree, and that is what [`adw::Dialog::force_close`]
+///   is for;
+/// * whether the *widget* is still mapped afterwards is libadwaita's transition and not
+///   this product's contract, so no test asserts it.
+pub fn close_dialog(dialog: &adw::Dialog, window: &EditorWindow) {
+    dialog.force_close();
+    window.pump(Duration::from_millis(200));
+}
+
 /// The pixels a widget draws, as straight RGB, through a real render node.
 ///
 /// This is the window's own drawing path — the widget's snapshot, rendered by GSK
@@ -188,7 +263,16 @@ pub fn snapshot(widget: &impl IsA<gtk::Widget>) -> Image {
                 widget.queue_draw();
                 pump(Duration::from_millis(20));
             }
-            None => panic!("the widget never produced a render node"),
+            None => panic!(
+                "the widget never produced a render node: a {} of {}x{}, visible {}, \
+                 mapped {}, {} child(ren)",
+                widget.type_().name(),
+                widget.width(),
+                widget.height(),
+                widget.is_visible(),
+                widget.is_mapped(),
+                widget.first_child().is_some() as u8,
+            ),
         }
     };
     let surface = widget

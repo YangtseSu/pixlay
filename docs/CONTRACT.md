@@ -395,7 +395,7 @@ three on both commands, and the difference between them is scope:
 
 | Item | Rule |
 |---|---|
-| `--gap <rel>` / `--radius <rel>` | fractions of the sheet height, `0..=1` (exit 1 outside). On `render` they override the document **for that render only** — the file is not touched — and on `edit` they are written into the document |
+| `--gap <rel>` / `--radius <rel>` | fractions of the sheet height, `0..=1` (exit 1 outside). On `render` they override the document **for that render only** — the file is not touched — and on `edit` they are written into the document through `Command::SetFrame` (S15), so the CLI's edit is one undo step of the same command the window's `Frame…` dialog sends, and a gap that empties a cell is refused where it is asked for rather than when the file is validated |
 | `--border-color <r,g,b>` | three channels `0..=255`, stored opaque (the frame's alpha rule is §2). The report prints it back the same way |
 | what `render` reports | `gap`, `radius` and `border` always, so "which frame did that render use" is answerable without counting pixels — the document's own values, unless a flag overrode one |
 | `edit --slot <i>` | the cell the framing flags apply to; `--rotate`/`--zoom`/`--offset`/`--clear` without it are exit 1 **naming the flag**, because taking them as "the frame, then" would drop them silently. `--slot` past the last cell is exit 1 naming the count |
@@ -497,7 +497,7 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
 | Item | Lands in | Shape |
 |---|---|---|
 | clamp math | **S3, landed**; the angle-reduction half retired and the visible-region reference landed in **S11 (2026-09-22)** | `CropTransform::fit(slot, covering, canvas_aspect, photo_aspect) -> CropFit { transform }`: the angle is never reduced and the coverage reference is the cell's visible region (`Frame::covering`), applied by `draw`; the fit is idempotent and never exceeds `MAX_ZOOM`. `CollageDoc::fitted_crop` / `fit_crop` are the two entry points that pair the frame with the clamp |
-| canvas decoration (the frame) | **S11, landed** | `CollageDoc::frame`: `Frame { gapRel, radiusRel, color }`, plus `Frame::covering` / `Frame::clip` and the backdrop + clip stage in `draw`; the CLI's `render --gap/--radius/--border-color` (render-time) and `edit` (§5). Measured cost at A0: none — the frame is a clip path and a fill (§8, "S11") |
+| canvas decoration (the frame) | **S11, landed**; its editor is a command since **S15** | `CollageDoc::frame`: `Frame { gapRel, radiusRel, color }`, plus `Frame::covering` / `Frame::clip` and the backdrop + clip stage in `draw`; the CLI's `render --gap/--radius/--border-color` (render-time) and `edit` (§5), and since S15 `Command::SetFrame { frame }` is the one writer both `edit` and the window's `Frame…` dialog send (one undo step, validated per slot). Measured cost at A0: none — the frame is a clip path and a fill (§8, "S11") |
 | template generator | **S2, landed** | `pixlay_core::templates` (`generator` recipes + the committed `frozen` data) and the `templates` / `init` subcommands; see §3 and §5 |
 | the image pipeline | **S4, landed**; the preview-grade reduction landed in **S12b**; the grading stage removed by **S12c** | `pixlay-imaging`: `Source::decode`, `resample`, `slot_bitmap`/`slot_bitmaps`, `probe`, and the preview's `Preview` caches + `reduce::PreviewSource`; the buffer ladder and the colour decisions are §4.1 |
 | command history / hit testing / project writing | **S6.5, landed**; `SetTemplate` added by **S7**; the grade/filter/text commands removed by **S12c** | `pixlay-core`: `Command` (one edit: source, framing, or the template) and `History` (snapshot undo/redo; `apply` is all-or-nothing and the document has no mutable accessor; the GUI commits **one command per gesture**, §9), `Template::slot_at(point)` for hit testing, `CollageDoc::save` / `Project::save` / `Project::save_as` for writing a document. The CLI's `hit` and `save` are the machine surface of the first and the last; the command history is a test surface only, on purpose (§5) |
@@ -1020,6 +1020,48 @@ rely on:
   same grid by **0.11–0.23 RMSE** (threshold 6). Reducing its own thumbnail-sized copies instead would
   decode every photo a second time and differ by up to 3.42 — that measurement is on
   `pixlay_imaging::Preview::build_at_source_edge`.
+
+**S15 landed the compose stage's own controls and the two document-level dialogs**
+(`crates/pixlay/src/canvas.rs`, `dialogs.rs`), which is what ruling 18 left of the utility pane: each of
+its groups already had a home, and the two that did not — the frame's three settings and the export's three
+questions — became dialogs of one shape behind header-bar buttons rather than permanent rows. What a caller
+may rely on:
+
+- **The selected cell carries five real GTK controls** — zoom out, zoom in, rotate, replace, clear — in one
+  `GtkBox` over the canvas, the same `GtkOverlay` the empty cells' `+` lives in (`canvas::CellControls`;
+  ruling 9, so the accessible-name and keyboard checks see them). One family per cell, by construction: a
+  cell that holds a photo **and** is selected shows the strip, an empty cell shows its `+`, and a cell that
+  is neither shows nothing. The strip is one widget moved to the selection, not nine copies of it.
+- **The strip is placed from the cell's own rectangle** through `Placement::to_widget`, the same arithmetic
+  that drew the cell: its bottom edge sits `CONTROL_INSET` (6 px) above the cell's, and it is centred in the
+  cell when the cell can hold it — clamped to the cell's left inset otherwise, because the library's 1/16
+  columns (68 device px at the default window) are narrower than five 32-px controls. A control is 32x32,
+  past HIG `guidelines/pointer-touch`'s 24x24 floor; measured 2026-09-23 in the canvas's own coordinates:
+  the strip is **176x34** at the bottom of a 3/8 x 3/8 cell and inside it on both axes.
+- **Each control is one finished step** (`Gesture::Step`, so it is committed and drawn at the resting grid):
+  the zoom pair multiplies the *fitted* zoom — what the user is looking at — by `ZOOM_STEP` = 1.06, the same
+  notch the wheel and the `+`/`-` keys use; rotate adds `ROTATE_STEP_DEG` = 15° to the free angle (S11: never
+  capped, never reduced) and refits; replace opens the same `GtkFileDialog` the double click opens; clear is
+  the window's own `win.clear-cell` — the cell empties, photo *and* framing, which is what `Delete` on the
+  canvas does and what `edit --clear` writes (one command, `Command::ClearCell`, since S15: one press is
+  one undo step). Every one of those edits has a keyboard path on the same cell (`+`/`-`, `Ctrl`+scroll,
+  `Delete`, `Return`), and each is its own undo step.
+- **`Frame…` is three rows in the document's own order** (ruling 30, 2026-09-23): gap, radius, colour, over
+  `frame{gapRel, radiusRel, color}`, with both lengths typed as per cent of the collage's height (the
+  document keeps fractions; `edit --gap` takes them). The rows write **live** — the canvas redraws behind the
+  dialog and `Ctrl+Z` is the way back — through `EditorWindow::set_frame`, which is the gesture path a slider
+  uses: the command is kept pending while the value moves and committed once it is quiet
+  (`COMMIT_QUIET`, 250 ms), so one settled frame is one undo step. Its only button is *Close*: there is
+  nothing left to confirm, and a Cancel would be a second undo stack.
+- **`Export…` is the export's three questions as rows** — the format (JPEG/PNG), the long edge in pixels
+  (`MIN_EXPORT_PX`..`=MAX_EXPORT_PX`), and the file name with the platform's own `GtkFileDialog` as its
+  chooser — and its affirmative button starts the same background export the menu's action does
+  (`EditorWindow::start_export`), with the same progress bar in the bottom bar and the same toast. The
+  format row owns the file's extension, and the chooser's filter follows it.
+- **The frame is a command since S15**: `Command::SetFrame { frame }`. One edit, one undo step, validated
+  like every other command — a length outside `0..=MAX_FRAME_REL`, a translucent backdrop, or a gap that
+  empties a cell (the error names the slot) changes nothing — and it is the one writer both `edit`'s three
+  flags and the dialog use, so "the CLI and the window produce the same document" holds for the frame too.
 
 What the picker stage is, as of S13c (`crates/pixlay/src/picker.rs`), and what a caller may rely on
 without looking at a widget:

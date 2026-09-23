@@ -279,6 +279,23 @@ fn draw_outline(
     Ok(())
 }
 
+/// One notch of the zoom controls: the wheel, `+`/`-`, and the selected cell's own
+/// zoom buttons.
+///
+/// A ratio rather than a step in absolute zoom, because the displayed zoom is
+/// absolute (S11 retired "a multiple of fill"): a notch has to feel the same near
+/// 1.0 and near 8.0, and it did since S7 — this name only collects the three
+/// callers of the number that used to be written out three times.
+const ZOOM_STEP: f64 = 1.06;
+
+/// How far the selected cell's rotate button turns the photo, in degrees.
+///
+/// The cycle is free (S11: the angle is never capped and never reduced), so this is
+/// a step and not a limit: 15° is coarse enough that six presses are a quarter turn
+/// and fine enough to straighten a hand-held horizon, and `Ctrl`+scroll is the same
+/// axis one degree at a time (`GESTURE_STEP_DEG`).
+pub const ROTATE_STEP_DEG: f64 = 15.0;
+
 /// What a gesture asks the window to do to the selected slot.
 ///
 /// The canvas owns the arithmetic (widget pixels to slot-relative offsets) and the
@@ -298,10 +315,10 @@ pub enum Gesture {
 
 /// Builds the canvas widget: the drawing area, its gestures, and its keyboard.
 ///
-/// The `+` buttons over the empty cells are a sibling widget
-/// ([`EmptyCells`]), stacked by the window's overlay; the draw function asks the
-/// window for them, because the draw is the one moment that knows the widget's own
-/// size and the current document at once.
+/// The `+` buttons over the empty cells and the selected cell's strip are sibling
+/// widgets ([`CellControls`]), stacked by the window's overlay; the draw function
+/// asks the window for them, because the draw is the one moment that knows the
+/// widget's own size and the current document at once.
 pub fn build(window: &EditorWindow) -> gtk::DrawingArea {
     let area = gtk::DrawingArea::new();
     area.set_focusable(true);
@@ -477,7 +494,7 @@ fn add_scroll(area: &gtk::DrawingArea, window: &EditorWindow) {
                 }
                 .normalized()
             } else {
-                let factor = if up { 1.06 } else { 1.0 / 1.06 };
+                let factor = if up { ZOOM_STEP } else { 1.0 / ZOOM_STEP };
                 CropTransform {
                     zoom: crop.zoom * factor,
                     ..crop
@@ -558,11 +575,11 @@ fn add_keys(area: &gtk::DrawingArea, window: &EditorWindow) {
                     ..crop
                 }),
                 gdk::Key::plus | gdk::Key::equal | gdk::Key::KP_Add => Some(CropTransform {
-                    zoom: crop.zoom * 1.06,
+                    zoom: crop.zoom * ZOOM_STEP,
                     ..crop
                 }),
                 gdk::Key::minus | gdk::Key::KP_Subtract => Some(CropTransform {
-                    zoom: crop.zoom / 1.06,
+                    zoom: crop.zoom / ZOOM_STEP,
                     ..crop
                 }),
                 gdk::Key::_0 | gdk::Key::KP_0 => Some(CropTransform::IDENTITY),
@@ -573,7 +590,7 @@ fn add_keys(area: &gtk::DrawingArea, window: &EditorWindow) {
                     return glib::Propagation::Stop;
                 }
                 gdk::Key::Delete => {
-                    window.clear_slot(slot);
+                    window.clear_cell(slot);
                     return glib::Propagation::Stop;
                 }
                 _ => None,
@@ -590,34 +607,66 @@ fn add_keys(area: &gtk::DrawingArea, window: &EditorWindow) {
     area.add_controller(keys);
 }
 
-/// The `+` controls over the empty cells (S14b).
+/// The pointer's controls over the canvas: the `+` of every empty cell, and the
+/// selected cell's own strip (S14b, S15).
 ///
-/// **Real GTK buttons over the canvas rather than a glyph drawn into it** (ruling
+/// **Real GTK buttons over the canvas rather than glyphs drawn into it** (ruling
 /// 9): `tests/hig.rs` walks the widget tree for accessible names and the Tab order,
-/// and a cairo-drawn `+` is invisible to both. They are the visible control the
-/// ruling asked for — `+` grows the layout, and a *cell* that is empty is what asks
-/// for a photo — so this is where "click the empty cell to give it a picture" lives
-/// for a pointer.
+/// and a cairo-drawn button is invisible to both. Two families live here, and they
+/// are mutually exclusive by construction:
 ///
-/// **Each button is a child of the canvas's own `GtkOverlay`**, placed by its own
+/// * a `+` for a cell that holds **no photo** (S14b, ruling 27) — the cell itself is
+///   how a pointer gives it one;
+/// * the **selected** cell's strip of five controls (S15) when that cell *does* hold
+///   a photo: zoom out, zoom in, rotate, replace, clear. A photo's controls and
+///   "give me a photo" are never both on screen for one cell.
+///
+/// **Each widget is a child of the canvas's own `GtkOverlay`**, placed by its own
 /// margins. That is deliberate: a `GtkFixed` holding them measures only its
 /// children, so a document whose empty cells come and go leaves the container
 /// 0x0 — and GTK snapshots an unallocated child with a warning (measured
 /// 2026-09-23). An overlay child is always allocated the overlay's own area, so a
-/// button that is shown on one frame is positioned and allocated on that same
+/// widget that is shown on one frame is positioned and allocated on that same
 /// frame, whatever the document did.
 ///
-/// **One button per slot is built once**, at construction, and shown or hidden as
-/// the document changes. Nine is the format's own slot ceiling, so the set is
-/// complete.
-pub struct EmptyCells {
+/// **One `+` per slot is built once**, at construction, and shown or hidden as the
+/// document changes; the strip is one widget that moves to the selected cell.
+/// Nine is the format's own slot ceiling, so the set of `+`s is complete.
+pub struct CellControls {
     overlay: gtk::Overlay,
-    /// One button per slot index, built at construction and never replaced.
+    /// One `+` per slot index, built at construction and never replaced.
     buttons: Vec<gtk::Button>,
+    /// The selected cell's own controls, moved as one widget: five buttons in a
+    /// row, and the row's own margins are what place it inside the cell.
+    strip: gtk::Box,
+    zoom_out: gtk::Button,
+    zoom_in: gtk::Button,
+    rotate: gtk::Button,
+    replace: gtk::Button,
+    clear: gtk::Button,
 }
 
-impl EmptyCells {
-    /// Builds the overlay around `canvas`, with its nine hidden buttons.
+/// A control over the canvas is 32x32: HIG `guidelines/pointer-touch` asks for
+/// 24x24 at least, and 32 is a comfortable pointer target at the cell sizes the
+/// library ships. The same size the empty cell's `+` has had since S14b.
+const CONTROL_SIZE: f64 = 32.0;
+
+/// Space between two buttons of the selected cell's strip, in device pixels.
+const CONTROL_SPACING: i32 = 4;
+
+/// How far the strip's own edges are kept from the cell's, in device pixels.
+const CONTROL_INSET: f64 = 6.0;
+
+/// The strip's width in device pixels: five buttons and the gaps between them.
+///
+/// **Written down rather than measured**, because it is what places the strip
+/// inside its cell before GTK has allocated anything: `sync` runs from the window's
+/// `refresh`, which is not a layout pass, so the arithmetic has to be a constant of
+/// the five controls rather than a question about them.
+const STRIP_WIDTH: f64 = 5.0 * CONTROL_SIZE + 4.0 * CONTROL_SPACING as f64;
+
+impl CellControls {
+    /// Builds the controls over `canvas`: nine hidden `+`s and one hidden strip.
     pub fn new(window: &EditorWindow, canvas: &gtk::DrawingArea) -> Self {
         let overlay = gtk::Overlay::builder().child(canvas).build();
         let buttons: Vec<gtk::Button> = (0..pixlay_core::MAX_SLOTS)
@@ -628,10 +677,70 @@ impl EmptyCells {
                 button
             })
             .collect();
-        Self { overlay, buttons }
+        let zoom_out = strip_button("zoom-out-symbolic", &gettext("Zoom out"));
+        let zoom_in = strip_button("zoom-in-symbolic", &gettext("Zoom in"));
+        let rotate = strip_button("object-rotate-right-symbolic", &gettext("Rotate right"));
+        let replace = strip_button("document-open-symbolic", &gettext("Replace the photo"));
+        let clear = strip_button("edit-clear-symbolic", &gettext("Clear the cell"));
+        let strip = gtk::Box::new(gtk::Orientation::Horizontal, CONTROL_SPACING);
+        for button in [&zoom_out, &zoom_in, &rotate, &replace, &clear] {
+            strip.append(button);
+        }
+        strip.set_halign(gtk::Align::Start);
+        strip.set_valign(gtk::Align::Start);
+        strip.set_visible(false);
+        overlay.add_overlay(&strip);
+
+        // The five edits, all of them about the *selected* cell: the strip is one
+        // widget that follows the selection, so each handler asks the window which
+        // cell that is rather than remembering one.
+        zoom_out.connect_clicked(glib::clone!(
+            #[weak]
+            window,
+            move |_| window.zoom_by(1.0 / ZOOM_STEP)
+        ));
+        zoom_in.connect_clicked(glib::clone!(
+            #[weak]
+            window,
+            move |_| window.zoom_by(ZOOM_STEP)
+        ));
+        rotate.connect_clicked(glib::clone!(
+            #[weak]
+            window,
+            move |_| window.rotate_by(ROTATE_STEP_DEG)
+        ));
+        replace.connect_clicked(glib::clone!(
+            #[weak]
+            window,
+            move |_| {
+                if let Some(slot) = window.selection() {
+                    window.choose_photo(slot);
+                }
+            }
+        ));
+        clear.connect_clicked(glib::clone!(
+            #[weak]
+            window,
+            move |_| {
+                if let Some(slot) = window.selection() {
+                    window.clear_cell(slot);
+                }
+            }
+        ));
+
+        Self {
+            overlay,
+            buttons,
+            strip,
+            zoom_out,
+            zoom_in,
+            rotate,
+            replace,
+            clear,
+        }
     }
 
-    /// The widget the editor page appends: the canvas, with the buttons over it.
+    /// The widget the editor page appends: the canvas, with the controls over it.
     pub fn root(&self) -> gtk::Overlay {
         self.overlay.clone()
     }
@@ -651,7 +760,24 @@ impl EmptyCells {
         self.buttons.get(slot).cloned()
     }
 
-    /// Puts every `+` over its own empty cell, and hides the rest (S14b).
+    /// The selected cell's own strip, for the tests and the HIG checks.
+    pub fn strip(&self) -> gtk::Box {
+        self.strip.clone()
+    }
+
+    /// The strip's five controls, in the order they are laid out.
+    pub fn strip_buttons(&self) -> [gtk::Button; 5] {
+        [
+            self.zoom_out.clone(),
+            self.zoom_in.clone(),
+            self.rotate.clone(),
+            self.replace.clone(),
+            self.clear.clone(),
+        ]
+    }
+
+    /// Puts every `+` over its own empty cell, and the strip over the selected
+    /// cell that holds a photo; hides the rest (S14b, S15).
     ///
     /// **Called from the window's `refresh`, never from a draw or a snapshot.**
     /// Showing a widget changes the tree, and a tree that changes while GTK is
@@ -664,10 +790,11 @@ impl EmptyCells {
     /// The size is the canvas's own allocation: `placement` is the one description
     /// of where the sheet is, and the canvas is what the placement is measured on.
     ///
-    /// A button past the document's own cell count is hidden — a layout with fewer
-    /// cells leaves the rest of them with nowhere to be. A slot is also hidden when
-    /// its cell holds a photo: an occupied cell is dragged and clicked to reframe,
-    /// and a `+` on top of a photo would take that press for itself.
+    /// A `+` past the document's own cell count is hidden — a layout with fewer
+    /// cells leaves the rest of them with nowhere to be — and so is one on a cell
+    /// that holds a photo: an occupied cell is dragged and clicked to reframe, and a
+    /// `+` on top of a photo would take that press for itself. The strip is the
+    /// mirror image: it exists only for a selected cell that *does* hold a photo.
     pub fn sync(&self, window: &EditorWindow) {
         let canvas = self.canvas();
         self.sync_in(window, canvas.width(), canvas.height());
@@ -679,10 +806,6 @@ impl EmptyCells {
         let doc = window.document();
         let (grid, _) = window.images();
         let placement = placement(grid, width, height);
-        // One cell tall/wide enough to hit: HIG `guidelines/pointer-touch` asks for
-        // 24x24 at least, and 32 is a comfortable pointer target at the cell sizes
-        // the library ships.
-        const SIZE: f64 = 32.0;
         for (slot, button) in self.buttons.iter().enumerate() {
             let empty = doc
                 .cells
@@ -700,10 +823,46 @@ impl EmptyCells {
             // The overlay aligns a child to its start corner and lets its margins
             // place it, so the cell's centre in device pixels is the margin the
             // button needs: rounded, because a margin is an integer.
-            button.set_margin_start((centre.0 - SIZE / 2.0).round() as i32);
-            button.set_margin_top((centre.1 - SIZE / 2.0).round() as i32);
+            button.set_margin_start((centre.0 - CONTROL_SIZE / 2.0).round() as i32);
+            button.set_margin_top((centre.1 - CONTROL_SIZE / 2.0).round() as i32);
             button.set_visible(true);
         }
+
+        // The strip, over the selected cell that holds a photo. Its bottom edge
+        // sits `CONTROL_INSET` above the cell's, and it is centred in the cell when
+        // the cell can hold it — a narrow pane (the library's 1/16 columns) gets the
+        // strip at its left edge instead, since a strip outside its own cell would
+        // read as belonging to the neighbouring one (`docs/HIG-REVIEW.md` §2, judged
+        // at the walk).
+        let Some(slot) = window.selection() else {
+            self.strip.set_visible(false);
+            return;
+        };
+        let occupied = doc
+            .cells
+            .get(slot)
+            .is_some_and(|cell| cell.source.is_some());
+        let Some(geometry) = doc.template.slots.get(slot).filter(|_| occupied) else {
+            self.strip.set_visible(false);
+            return;
+        };
+        let box_ = geometry.outline.bbox();
+        let (left, _) = placement.to_widget(Point::new(box_.x0, box_.y0));
+        let (right, bottom) = placement.to_widget(Point::new(box_.x1, box_.y1));
+        let centred = (left + right) / 2.0 - STRIP_WIDTH / 2.0;
+        let last = right - CONTROL_INSET - STRIP_WIDTH;
+        let x = if last > left + CONTROL_INSET {
+            centred.clamp(left + CONTROL_INSET, last)
+        } else {
+            // A pane narrower than the strip (the library's 1/16 columns): the cell
+            // cannot hold the five controls, so they start at its left edge and run
+            // over the neighbour rather than being pushed off the sheet.
+            left + CONTROL_INSET
+        };
+        self.strip.set_margin_start(x.round() as i32);
+        self.strip
+            .set_margin_top((bottom - CONTROL_INSET - CONTROL_SIZE).round() as i32);
+        self.strip.set_visible(true);
     }
 }
 
@@ -731,6 +890,25 @@ fn empty_cell_button(window: &EditorWindow, slot: usize) -> gtk::Button {
         window,
         move |_| window.choose_photo(slot)
     ));
+    button
+}
+
+/// One of the selected cell's five controls: the same `osd circular` button as the
+/// empty cell's `+`, which is what HIG `patterns/controls/buttons` asks for where
+/// "a number of smaller buttons are positioned in close proximity".
+fn strip_button(icon: &str, label: &str) -> gtk::Button {
+    let button = gtk::Button::builder()
+        .icon_name(icon)
+        .tooltip_text(label)
+        .halign(gtk::Align::Start)
+        .valign(gtk::Align::Start)
+        .width_request(CONTROL_SIZE as i32)
+        .height_request(CONTROL_SIZE as i32)
+        .build();
+    button.add_css_class("osd");
+    button.add_css_class("circular");
+    a11y::label(&button, label);
+    button.set_can_focus(true);
     button
 }
 

@@ -317,22 +317,28 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
         "so the photo count is one below the cell count"
     );
     // The empty cell is what asks for a photo, and it is a real control over the
-    // canvas (`EmptyCells`), reachable by the Tab order like any other button.
+    // canvas (`CellControls`), reachable by the Tab order like any other button.
     let empty = window
-        .empty_cells()
-        .expect("the canvas has an empty-cell layer");
+        .cell_controls()
+        .expect("the canvas has a cell-control layer");
     // The buttons follow the canvas's own allocation, which the window writes on
     // every refresh; this call makes the geometry the test measures explicit.
-    let area = window.canvas_widget();
-    empty.sync_in(&window, area.width(), area.height());
+    let (width, height) = support::canvas_size(&window);
+    empty.sync_in(&window, width, height);
     let add = empty.button(7).expect("the empty cell has a `+` button");
     assert!(add.is_visible(), "and the `+` is on screen");
     assert!(add.is_focusable(), "and reachable with the keyboard");
     // **The button is really allocated and really over its own cell**, which is the
     // number behind "the empty cell shows a `+`": the widget's own corners, in the
     // canvas's coordinates, against the slot's own rectangle from the placement.
+    //
+    // A widget it has just been told to show is allocated on the *next* frame, and a
+    // display's frame clock is not this test's to schedule (`support::snapshot` waits
+    // for the same reason), so the allocation is waited for rather than assumed —
+    // measured 2026-09-23: under `xvfb-run` the button reads 0x0 without this wait,
+    // where a session display happened to have drawn the frame already.
     assert!(
-        add.width() > 0 && add.height() > 0,
+        support::allocated(&add.clone().upcast::<gtk4::Widget>(), &window),
         "the `+` was never allocated ({}x{})",
         add.width(),
         add.height()

@@ -26,6 +26,7 @@ pub mod a11y;
 pub mod app;
 pub mod canvas;
 pub mod decode;
+pub mod dialogs;
 pub mod export;
 pub mod i18n;
 pub mod layout;
