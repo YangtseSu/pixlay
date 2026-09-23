@@ -907,6 +907,12 @@ one document, one renderer, one gesture per command. The library and the gallery
 the document — a candidate thumbnail is `render_rgb8` of the same drawn document at a smaller size, and
 S14's criteria hold it to that.
 
+> **Read S14's own section for that step's shape** (`docs/2026-09-22-STEPS.md`, "S14 · The layout stage"
+> and "S14 · Ruling"): the layout stage is a **band on the document's page**, not a third page — a second
+> page would have to own a second canvas, and S15's compose controls attach to the canvas the gallery sits
+> under. The sentence "will sit between them" above means the stage's place in the *flow*, not a second
+> `AdwNavigationPage`; S14 rewrites this paragraph when it lands.
+
 What the picker stage is, as of S13c (`crates/pixlay/src/picker.rs`), and what a caller may rely on
 without looking at a widget:
 
