@@ -95,15 +95,6 @@ pub const PLACEHOLDER_GRID: PixelSize = PixelSize {
 /// wait about a document no edit is pending on costs a fraction of a second.
 const WORK_GRACE: Duration = Duration::from_millis(1000);
 
-/// How long [`EditorWindow::pump`] lets a window go without a frame before it asks for
-/// the window again.
-///
-/// A live session's compositor stops driving a window it is not compositing, and GTK
-/// only lays out on a frame, so a test waiting on an allocation has to get the window
-/// back in front. Two seconds is several frames' worth at any refresh rate and far
-/// below the waits' own 180 s ceiling.
-const FRAME_STALL: Duration = Duration::from_secs(2);
-
 /// How long a live gesture waits for quiet before it becomes an undo step.
 ///
 /// A slider has no "drag ended" signal, so the commit is triggered by the value
@@ -199,17 +190,9 @@ mod imp {
         /// message cannot tell one report from two (`S13c`).
         pub toasts: Cell<u64>,
         pub actions: RefCell<Vec<gio::SimpleAction>>,
-        /// Frames this window's own frame clock has ticked since it was built.
-        ///
-        /// For the tests' waits, and nothing else: a wait that timed out has to say
-        /// whether frames were arriving at all, because "the canvas never produced a
-        /// render node" and "the compositor never ticked this window" are different
-        /// failures (measured 2026-09-24: the GUI tests' 180 s waits fired on a machine
-        /// whose session display was not driving the test window, and the message named
-        /// neither).
-        pub frames: Rc<Cell<u64>>,
         /// What the canvas's draw function last refused, if anything: the other
-        /// failure mode, where frames do arrive and the canvas paints nothing.
+        /// failure mode a test's wait has to be able to name, where frames do arrive
+        /// and the canvas paints nothing.
         pub last_draw_error: RefCell<Option<String>>,
     }
 
@@ -262,7 +245,6 @@ mod imp {
                 last_toast: RefCell::new(None),
                 toasts: Cell::new(0),
                 actions: RefCell::new(Vec::new()),
-                frames: Rc::new(Cell::new(0)),
                 last_draw_error: RefCell::new(None),
             }
         }
@@ -281,13 +263,6 @@ mod imp {
             // SAFETY of the cast: the object this imp belongs to is the window.
             let window = self.obj();
             window.build();
-            // One counter for the window's own frame clock, so a test's wait can say
-            // whether frames were arriving while it waited.
-            let frames = self.frames.clone();
-            window.add_tick_callback(move |_, _| {
-                frames.set(frames.get() + 1);
-                gtk4::glib::ControlFlow::Continue
-            });
         }
     }
 
@@ -815,15 +790,6 @@ impl EditorWindow {
     /// grid it was requested at, so this is the grid the next bitmaps will be.
     pub fn requested_grid(&self) -> Option<PixelSize> {
         self.imp().requested.get()
-    }
-
-    /// Frames this window's frame clock has ticked since it was built.
-    ///
-    /// The tests' handle on "was this window being drawn at all while my wait ran":
-    /// two counts, a second apart, distinguish a frame that never arrived from a frame
-    /// that arrived and painted nothing.
-    pub fn frames(&self) -> u64 {
-        self.imp().frames.get()
     }
 
     /// What the canvas's draw function last refused, if it refused anything.
@@ -1985,28 +1951,9 @@ impl EditorWindow {
     pub fn pump(&self, duration: Duration) {
         let context = glib::MainContext::default();
         let deadline = Instant::now() + duration;
-        let mut last_frames = self.imp().frames.get();
-        let mut raised_at = Instant::now();
         while Instant::now() < deadline {
             while context.pending() {
                 context.iteration(false);
-            }
-            // A window the compositor has stopped compositing — a test window behind
-            // the rest of a live session — is sent almost no frame callbacks, and GTK's
-            // layout only advances on a frame, so a wait that pumps such a window
-            // measures a stale one (measured 2026-09-24: 91 frames in a 180 s wait with
-            // `active false`, where the same window ticked at 60 fps a moment earlier).
-            // Two seconds without a frame asks for the window again, which is what puts
-            // it back in front of the session.
-            let frames = self.imp().frames.get();
-            if frames != last_frames {
-                last_frames = frames;
-                raised_at = Instant::now();
-            } else if raised_at.elapsed() > FRAME_STALL {
-                // GTK4 has no "keep above" (that was GTK3), so asking for the
-                // window again is the only way to put it back in front of the session.
-                self.present();
-                raised_at = Instant::now();
             }
             std::thread::sleep(Duration::from_millis(2));
         }

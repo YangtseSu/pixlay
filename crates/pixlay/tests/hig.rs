@@ -85,9 +85,9 @@ fn the_interface_meets_the_machine_checkable_hig() {
     // measured: a page that has just been pushed has neither, and every check that
     // follows reads an allocation or a `Placement` (measured 2026-09-23: without this
     // the walk read a 0x0 canvas, a band with no candidates and header controls at
-    // position 0 on some runs and was fine on others — `tests/support::canvas_size` is
+    // position 0 on some runs and was fine on others — `tests/support::canvas_bitmaps` is
     // the harness's answer to exactly that).
-    let _ = support::canvas_size(&window);
+    let _ = support::canvas_bitmaps(&window);
     assert!(
         window.wait_for_gallery(support::WAIT),
         "the layout band was built"

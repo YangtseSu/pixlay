@@ -50,7 +50,11 @@ generator (`pixlay-core/src/templates/generator.rs`) under the same name and the
 `templateVersion`; `--stats` makes each round's ruler machine-readable. `pixlay-render templates`
 lists what this build ships, and `pixlay-render init --template <name> --out x.pixlay` writes a
 project to start from. Since S7 `cargo test` also builds the GUI; its tests need a display and run on one
-the harness provides, so the entry still works on a build box and on a machine that is in use.
+the harness provides — a private headless `mutter` it starts itself, which is the *test environment* and
+not a dependency of the product (no manifest and no `depends` names a compositor). `mutter` therefore has
+to be installed to run `cargo test`; a machine without it can run the GUI tests on a display of its own
+instead — any headless compositor, e.g. `PIXLAY_TEST_CHILD=1 xvfb-run -a cargo test` — and the harness's own
+failure says so. So the entry works on a build box and on a machine that is in use.
 
 
 Measurement rules that go with it:
