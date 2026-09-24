@@ -13,69 +13,10 @@ mod support;
 use std::time::Duration;
 
 use gtk4::prelude::*;
-use libadwaita as adw;
 
 use pixlay::export::Settings;
 use pixlay::i18n::gettext;
-use pixlay::window::EditorWindow;
 use pixlay_imaging::encode::Format;
-
-/// The alert dialog the window is currently showing, if it is showing one.
-///
-/// The confirmation is an `AdwAlertDialog` over the export dialog, and finding it in
-/// the widget tree is how a test answers it, since the binding exposes no `response()`
-/// to call (S15c).
-fn alert(window: &EditorWindow) -> Option<adw::AlertDialog> {
-    support::descendants(window.upcast_ref::<gtk4::Widget>())
-        .into_iter()
-        .find_map(|widget| widget.downcast::<adw::AlertDialog>().ok())
-}
-
-/// The button carrying `label` in that alert.
-fn alert_button(window: &EditorWindow, label: &str) -> Option<gtk4::Button> {
-    let alert = alert(window)?;
-    let mut found = None;
-    walk(alert.upcast_ref::<gtk4::Widget>(), &mut |widget| {
-        if found.is_none()
-            && let Some(button) = widget.downcast_ref::<gtk4::Button>()
-            && button.label().as_deref() == Some(label)
-        {
-            found = Some(button.clone());
-        }
-    });
-    found
-}
-
-/// The alert's own buttons, in the order the alert lays them out.
-///
-/// A walk over `first_child` / `next_sibling`, in order, rather than
-/// [`support::descendants`] — whose depth-first stack visits siblings in reverse, and
-/// HIG's criterion here *is* an order (the cancel button comes first), so a check that
-/// read the tree backwards would pass for the wrong reason.
-fn alert_labels(window: &EditorWindow) -> Vec<String> {
-    let Some(alert) = alert(window) else {
-        return Vec::new();
-    };
-    let mut labels = Vec::new();
-    walk(alert.upcast_ref::<gtk4::Widget>(), &mut |widget| {
-        if let Some(button) = widget.downcast_ref::<gtk4::Button>()
-            && let Some(label) = button.label()
-        {
-            labels.push(label.to_string());
-        }
-    });
-    labels
-}
-
-/// Calls `visit` on every widget under `root`, in tree order.
-fn walk(root: &gtk4::Widget, visit: &mut impl FnMut(&gtk4::Widget)) {
-    visit(root);
-    let mut child = root.first_child();
-    while let Some(widget) = child {
-        walk(&widget, visit);
-        child = widget.next_sibling();
-    }
-}
 
 #[test]
 fn the_export_refuses_a_source_image_and_confirms_a_replacement() {
@@ -190,7 +131,7 @@ fn the_export_refuses_a_source_image_and_confirms_a_replacement() {
         "the dialog stays open for the name to be fixed"
     );
     assert!(
-        alert_button(&window, &gettext("Replace")).is_none(),
+        support::alert_button(&window, &gettext("Replace")).is_none(),
         "a refusal is not a replacement to confirm"
     );
     assert_eq!(
@@ -211,12 +152,12 @@ fn the_export_refuses_a_source_image_and_confirms_a_replacement() {
     // HIG `patterns/feedback/dialogs`, "Confirmation Dialogs": the cancel button comes
     // first, before the affirmative, and the two are the whole alert.
     assert_eq!(
-        alert_labels(&window),
+        support::alert_labels(&window),
         vec![gettext("Cancel"), gettext("Replace")],
         "the confirmation's buttons are not Cancel then Replace"
     );
 
-    let cancel = alert_button(&window, &gettext("Cancel"))
+    let cancel = support::alert_button(&window, &gettext("Cancel"))
         .expect("replacing an existing file is confirmed before it happens");
     cancel.emit_clicked();
     support::pump(Duration::from_millis(50));
@@ -234,8 +175,8 @@ fn the_export_refuses_a_source_image_and_confirms_a_replacement() {
     // And the same click again, answered: the export runs and the file is replaced.
     dialog.export_button().emit_clicked();
     support::pump(Duration::from_millis(50));
-    let replace =
-        alert_button(&window, &gettext("Replace")).expect("the confirmation is asked again");
+    let replace = support::alert_button(&window, &gettext("Replace"))
+        .expect("the confirmation is asked again");
     replace.emit_clicked();
     assert!(
         window.progress_revealed(),

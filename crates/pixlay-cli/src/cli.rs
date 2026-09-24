@@ -347,10 +347,15 @@ fn edit_project(args: EditArgs) -> Result<u8, Failure> {
 /// One command of S14's structural vocabulary, applied to a project's history.
 ///
 /// The same call the window makes, so "the same document" is a property of the
-/// implementation rather than of two editors kept in step by hand.
+/// implementation rather than of two editors kept in step by hand. The history's
+/// own answer — whether the command was a *step* — is not the CLI's question: it
+/// keeps no undo stack, and a command that asks for the state the document is
+/// already in is the same success as one that changes it, with the report
+/// describing the document that came out either way (S15d).
 fn apply(history: &mut History, command: Edit) -> Result<(), Failure> {
     history
         .apply(command)
+        .map(|_step| ())
         .map_err(|error| Failure::Failed(error.to_string()))
 }
 

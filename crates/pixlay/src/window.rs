@@ -59,6 +59,14 @@ use crate::picker::Picker;
 use crate::state::Editor;
 use crate::thumbs;
 
+/// What happens once a boundary's question has been answered, or a save has a path:
+/// the two continuations the window's boundaries hand each other (S15d).
+///
+/// `Boundary` is "the thing the caller was about to do" — replace the document, or
+/// close the window — and `Saved` is the same thing once a file has been written to.
+type Boundary = Rc<dyn Fn(&EditorWindow)>;
+type Saved = Rc<dyn Fn(&EditorWindow, &Path)>;
+
 /// The template a new document starts from: 4:3 like an album page, five slots,
 /// so the main path starts with a layout that does not need ten photos.
 pub const DEFAULT_TEMPLATE: &str = "mosaic-5-hero";
@@ -514,6 +522,10 @@ impl EditorWindow {
         imp.thumbs.set(Rc::new(thumbs)).ok();
 
         // ---- unsaved work ---------------------------------------------------
+        // **One question, every boundary** (PIX-002, 2026-09-24): closing the
+        // window, `New` and `Open` all replace or end the document, so all three
+        // ask the same question — and each of them commits the pending edit first,
+        // so what the question is about is what is on screen.
         let close_weak = self.downgrade();
         self.connect_close_request(glib::clone!(
             #[strong]
@@ -522,47 +534,11 @@ impl EditorWindow {
                 let Some(window) = close_weak.upgrade() else {
                     return glib::Propagation::Proceed;
                 };
-                if !window.imp().editor.borrow().is_dirty() {
-                    return glib::Propagation::Proceed;
+                window.commit();
+                if window.ask_to_save(Rc::new(|window| window.destroy())) {
+                    return glib::Propagation::Stop;
                 }
-                let dialog = adw::AlertDialog::new(
-                    Some(&gettext("Save the changes?")),
-                    Some(&gettext(
-                        "This collage has changes that are not saved anywhere yet.",
-                    )),
-                );
-                dialog.add_response("cancel", &gettext("Cancel"));
-                dialog.add_response("discard", &gettext("Discard"));
-                dialog.add_response("save", &gettext("Save"));
-                dialog.set_response_appearance("discard", adw::ResponseAppearance::Destructive);
-                dialog.set_response_appearance("save", adw::ResponseAppearance::Suggested);
-                dialog.set_default_response(Some("save"));
-                dialog.set_close_response("cancel");
-                let dialog_weak = window.downgrade();
-                dialog.connect_response(
-                    None,
-                    glib::clone!(
-                        #[strong]
-                        dialog_weak,
-                        move |_, response| {
-                            let Some(window) = dialog_weak.upgrade() else {
-                                return;
-                            };
-                            match response {
-                                "discard" => window.destroy(),
-                                "save" => {
-                                    window.save();
-                                    if !window.imp().editor.borrow().is_dirty() {
-                                        window.destroy();
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                    ),
-                );
-                dialog.present(Some(&window));
-                glib::Propagation::Stop
+                glib::Propagation::Proceed
             }
         ));
 
@@ -1402,8 +1378,26 @@ impl EditorWindow {
     ///
     /// `Ctrl+N` used to hand the user an empty sheet of the default template; on
     /// the re-routed path (ruling 12) a new collage starts by picking photos, so
-    /// this resets the document and shows the picker.
+    /// this resets the document and shows the picker — after the unsaved-work
+    /// question the window's own close asks (PIX-002, 2026-09-24). New used to
+    /// replace the document outright, which meant `Ctrl+N` destroyed work that
+    /// closing the window would have offered to save.
     pub fn new_document(&self) {
+        self.commit();
+        if self.ask_to_save(Rc::new(|window: &EditorWindow| window.reset_document())) {
+            return;
+        }
+        self.reset_document();
+    }
+
+    /// Replaces the document with a fresh one, whatever the current one holds.
+    ///
+    /// The pending edit is committed rather than dropped even here, where the
+    /// document is about to go: an undo after `New` is not a promise this makes,
+    /// but a boundary that silently swallowed a gesture would be the same defect
+    /// one step earlier (PIX-002's ruling).
+    fn reset_document(&self) {
+        self.commit();
         match Editor::new(default_document()) {
             Ok(editor) => {
                 *self.imp().editor.borrow_mut() = editor;
@@ -1441,14 +1435,39 @@ impl EditorWindow {
                     if let Ok(file) = result
                         && let Some(path) = file.path()
                     {
-                        let _ = window.open_path(&path);
+                        window.open_asking(&path);
                     }
                 }
             ),
         );
     }
 
+    /// Opens `path` once the unsaved-work question is answered.
+    ///
+    /// The file is chosen first and the question asked second, which is the order
+    /// that cannot lose anything: a `Cancel` in the chooser never reaches the
+    /// question, and a `Discard` here is about a document that is about to be
+    /// replaced. Public because it is the half of `open` a test can drive — the
+    /// chooser itself is a native dialog with nothing to type into — and because
+    /// "open this, asking first" is the honest description of what the chooser's
+    /// own callback does.
+    pub fn open_asking(&self, path: &Path) {
+        self.commit();
+        let path = path.to_path_buf();
+        let open: Boundary = Rc::new(move |window: &EditorWindow| {
+            let _ = window.open_path(&path);
+        });
+        if self.ask_to_save(Rc::clone(&open)) {
+            return;
+        }
+        open(self);
+    }
+
     pub fn open_path(&self, path: &Path) -> Result<(), CoreError> {
+        // The boundary's commit at the innermost level, so no caller — a test, the
+        // picker's own Next, the chooser above — can replace the document and drop
+        // the edit the user was in the middle of making.
+        self.commit();
         let project = Project::load(path)?;
         match Editor::from_project(project) {
             Ok(editor) => {
@@ -1467,15 +1486,82 @@ impl EditorWindow {
         }
     }
 
-    pub fn save(&self) {
-        if self.imp().editor.borrow().path().is_none() {
-            self.save_as();
-            return;
+    /// Asks the unsaved-work question when there is unsaved work, and runs `then`
+    /// once the user has answered it.
+    ///
+    /// **One question in one place** (PIX-002, 2026-09-24): the window closing,
+    /// `New` and `Open` all end or replace the document, so all three have to offer
+    /// the same three answers. `Discard` continues at once, `Save` continues only
+    /// when the file was actually written — a save that failed leaves the document
+    /// where it is, which is the whole reason for asking — and `Cancel` does
+    /// nothing at all.
+    ///
+    /// Returns whether the question was presented, which is how a caller knows to
+    /// stop what it was about to do and wait for the answer. The *commit* is not
+    /// here: every caller commits the pending edit before asking, so the document
+    /// the question is about is the one on screen.
+    fn ask_to_save(&self, then: Boundary) -> bool {
+        if !self.is_dirty() {
+            return false;
         }
-        self.save_now(None);
+        let dialog = adw::AlertDialog::new(
+            Some(&gettext("Save the changes?")),
+            Some(&gettext(
+                "This collage has changes that are not saved anywhere yet.",
+            )),
+        );
+        dialog.add_response("cancel", &gettext("Cancel"));
+        dialog.add_response("discard", &gettext("Discard"));
+        dialog.add_response("save", &gettext("Save"));
+        dialog.set_response_appearance("discard", adw::ResponseAppearance::Destructive);
+        dialog.set_response_appearance("save", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("save"));
+        dialog.set_close_response("cancel");
+        let window = self.downgrade();
+        dialog.connect_response(None, move |_, response| {
+            let Some(window) = window.upgrade() else {
+                return;
+            };
+            match response {
+                "discard" => then(&window),
+                "save" => window.save_then(then.clone()),
+                _ => {}
+            }
+        });
+        dialog.present(Some(self));
+        true
     }
 
-    pub fn save_as(&self) {
+    /// Saves the document, and runs `then` once the file is on disk.
+    ///
+    /// The two halves are what the unsaved-work question needs: `Save` means "the
+    /// boundary happens once the save is done", and a document that has no name yet
+    /// asks for one first — a dialog, so the continuation has to survive it. The
+    /// save itself is the ordinary one (`Editor::save`), which commits the pending
+    /// edit and adopts the rebased document; `then` runs only if the document is
+    /// no longer dirty, so a failed save continues nothing.
+    fn save_then(&self, then: Boundary) {
+        if self.imp().editor.borrow().path().is_some() {
+            self.save_now(None);
+            if !self.is_dirty() {
+                then(self);
+            }
+            return;
+        }
+        self.choose_save_path(Rc::new(move |window: &EditorWindow, path: &Path| {
+            window.save_now(Some(path.to_path_buf()));
+            if !window.is_dirty() {
+                then(window);
+            }
+        }));
+    }
+
+    /// Presents the save dialog and calls `then` with the path the user chose.
+    ///
+    /// One dialog for both callers: `Save As` saves there, and the unsaved-work
+    /// question's `Save` continues its boundary there. A cancelled chooser runs
+    /// nothing.
+    fn choose_save_path(&self, then: Saved) {
         let window = self.clone();
         let filter = gtk::FileFilter::new();
         filter.set_name(Some(&gettext("Pixlay collages")));
@@ -1498,11 +1584,25 @@ impl EditorWindow {
                     if let Ok(file) = result
                         && let Some(path) = file.path()
                     {
-                        window.save_now(Some(path));
+                        then(&window, &path);
                     }
                 }
             ),
         );
+    }
+
+    pub fn save(&self) {
+        if self.imp().editor.borrow().path().is_none() {
+            self.save_as();
+            return;
+        }
+        self.save_now(None);
+    }
+
+    pub fn save_as(&self) {
+        self.choose_save_path(Rc::new(|window: &EditorWindow, path: &Path| {
+            window.save_now(Some(path.to_path_buf()));
+        }));
     }
 
     /// Saves without a dialog, which is also what the tests and the main path
@@ -1630,6 +1730,11 @@ impl EditorWindow {
 
     /// Exports on a worker thread, with the progress bar in the bottom bar.
     pub fn start_export(&self, path: PathBuf) {
+        // A boundary like the others (PIX-002's ruling): the export is of the
+        // document on screen, so a frame change still inside its quiet interval is
+        // committed here — one undo step — rather than exported as a difference
+        // between the canvas and the file.
+        self.commit();
         if self.imp().exporting.replace(true) {
             return;
         }
@@ -1669,6 +1774,7 @@ impl EditorWindow {
 
     /// Exports synchronously; the same function the worker calls.
     pub fn export_to(&self, settings: &Settings) -> Result<Report, String> {
+        self.commit();
         let sources = self.imp().editor.borrow().sources();
         if !sources.missing.is_empty() {
             return Err(fill(

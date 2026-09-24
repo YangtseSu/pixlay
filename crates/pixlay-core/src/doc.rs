@@ -1,7 +1,7 @@
 //! The document itself, and the project file around it.
 
 use std::io::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -337,21 +337,30 @@ impl Project {
         self.doc.save(&self.path)
     }
 
-    /// Writes this project to `path`: the same document, for a copy.
+    /// Writes this project to `path` and returns the project that was written: the
+    /// same document, for a copy.
     ///
     /// A relative `source` is relative to the *project file*, so a copy in
     /// another directory would otherwise quietly point at nothing. Every relative
     /// source is therefore rebased onto the new directory; an absolute source is
     /// left alone, as the contract accepts it as it stands. The rebase is part of
-    /// writing the copy and does not change this project.
-    pub fn save_as(&self, path: &Path) -> Result<(), CoreError> {
+    /// writing the copy and does not change this project — but the copy it returns
+    /// is the document the file now holds, spelling included, which is what a
+    /// caller that keeps the document in memory has to adopt (PIX-005,
+    /// 2026-09-24: the window used to keep the old spellings and resolve the photos
+    /// against the wrong directory).
+    pub fn save_as(&self, path: &Path) -> Result<Project, CoreError> {
         let dir = project_dir(path);
-        if dir == self.dir {
-            return self.doc.save(path);
-        }
         let mut doc = self.doc.clone();
-        rebase_sources(&mut doc, &self.dir, dir);
-        doc.save(path)
+        if dir != self.dir {
+            rebase_sources(&mut doc, &self.dir, dir);
+        }
+        doc.save(path)?;
+        Ok(Project {
+            doc,
+            path: path.to_path_buf(),
+            dir: dir.to_path_buf(),
+        })
     }
 
     /// Resolves every cell's source path against the project directory.
@@ -381,22 +390,23 @@ impl Project {
 }
 
 /// Rewrites every relative `source` so it means the same file when the document
-/// is read from `to_dir` instead of `from_dir`.
+/// is read from `to_dir` instead of `from_dir`; `true` when any spelling moved.
 ///
 /// Lexical, and deliberately so: the filesystem resolves `..` against the
 /// directory it is standing in, so a purely lexical answer is the same path, and
 /// nothing here needs the filesystem — a project can be copied while its photos
 /// are on a drive that is not mounted. A path whose `..` components cancel stays
 /// correct for the same reason.
-fn rebase_sources(doc: &mut CollageDoc, from_dir: &Path, to_dir: &Path) {
+pub(crate) fn rebase_sources(doc: &mut CollageDoc, from_dir: &Path, to_dir: &Path) -> bool {
     // Both are absolutized with `std::path::absolute` (lexical: no symlink
     // resolution, no filesystem access) because a relative answer needs a common
     // root to walk up from. Without one — no current directory — the paths are
     // left exactly as they are, which is at worst a copy that needs its photos
     // moved in beside it.
     let (Ok(from), Ok(to)) = (std::path::absolute(from_dir), std::path::absolute(to_dir)) else {
-        return;
+        return false;
     };
+    let mut changed = false;
     for cell in &mut doc.cells {
         let Some(source) = cell.source.as_deref() else {
             continue;
@@ -404,18 +414,25 @@ fn rebase_sources(doc: &mut CollageDoc, from_dir: &Path, to_dir: &Path) {
         if source.is_absolute() {
             continue;
         }
-        if let Some(relative) = relative_to(&to, &from.join(source)) {
+        if let Some(relative) = relative_to(&to, &from.join(source))
+            && relative != source
+        {
             cell.source = Some(relative);
+            changed = true;
         }
     }
+    changed
 }
 
 /// `target` expressed relative to the directory `from`.
 ///
-/// `None` when the two share no root, which two absolute paths cannot. The
-/// components of both sides come from [`Path::components`], so `.` and repeated
-/// separators are already gone and `..` is compared literally — the same thing the
-/// filesystem does with it.
+/// `None` when the two share no root, which two absolute paths cannot. Both sides
+/// are lexically normalized first ([`normalize_lexical`]) — `.` dropped and `..`
+/// resolved against the component before it — so that a `..` in either spelling
+/// cannot produce an answer that points somewhere else: the common prefix has to
+/// be counted on the directories the paths *mean*, not on the way they are spelled
+/// (PIX-006, 2026-09-24: `/a/b` to `/a/b/../copy.pixlay` used to hand back one
+/// `..` too many, and the copy pointed at a file that was not there).
 ///
 /// Public because it is the rule a *written* `source` follows, and two writers
 /// apply it: [`Project::save_as`] rebasing a copy, and the CLI's `init --photo`
@@ -423,6 +440,8 @@ fn rebase_sources(doc: &mut CollageDoc, from_dir: &Path, to_dir: &Path) {
 /// lexically so neither has to touch the filesystem, and so a project can be
 /// expressed while its photos are on a drive that is not mounted.
 pub fn relative_to(from: &Path, target: &Path) -> Option<PathBuf> {
+    let from = normalize_lexical(from);
+    let target = normalize_lexical(target);
     let from: Vec<_> = from.components().collect();
     let target: Vec<_> = target.components().collect();
     let common = from.iter().zip(&target).take_while(|(a, b)| a == b).count();
@@ -443,4 +462,40 @@ pub fn relative_to(from: &Path, target: &Path) -> Option<PathBuf> {
     } else {
         relative
     })
+}
+
+/// A path made lexical: `.` dropped, `..` resolved against the component before
+/// it, nothing else touched.
+///
+/// **Lexical, and deliberately so**: no filesystem access and no symlink
+/// resolution, so `a/../b` is `b` whether or not `a` exists, and a project whose
+/// photos are behind an unmounted drive still has an answer. `..` with nothing to
+/// go back to stays where it is — `..` in a relative path, `/` at the root — which
+/// is what walking up from there means. `a/..` is the directory `a` stands in, and
+/// `.` is how a path says that; an empty path names nothing and stays empty.
+///
+/// Two rules mean this by a path: the alias refusal that stops an export from
+/// being written over a source image (`pixlay_imaging::destination`) and the
+/// rebasing a project copy's sources go through ([`relative_to`]).
+pub fn normalize_lexical(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => match normalized.components().next_back() {
+                // `a/..` is the directory `a` stands in; `/..` is `/`.
+                Some(Component::Normal(_)) => {
+                    normalized.pop();
+                }
+                Some(Component::Prefix(_) | Component::RootDir) => {}
+                // Nothing to go back to, or already walking up: keep walking.
+                _ => normalized.push(".."),
+            },
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    if normalized.as_os_str().is_empty() && !path.as_os_str().is_empty() {
+        return PathBuf::from(".");
+    }
+    normalized
 }

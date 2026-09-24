@@ -136,10 +136,18 @@ impl FrameDialog {
         close.connect_clicked(glib::clone!(
             #[strong]
             weak,
+            #[weak]
+            window,
             move |_| {
-                if let Some(dialog) = weak.upgrade() {
-                    dialog.dialog.close();
-                }
+                let Some(dialog) = weak.upgrade() else {
+                    return;
+                };
+                // Closing the dialog is a boundary (S15d, PIX-002): the frame change
+                // that is still inside its quiet interval becomes the undo step it
+                // looked like, and the window's own commit drops the timer so it
+                // cannot fire again a moment later.
+                window.commit();
+                dialog.dialog.close();
             }
         ));
         // Live: every settled change is a document edit, and the canvas behind the

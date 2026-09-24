@@ -283,6 +283,75 @@ fn save_as_beside_the_original_is_a_plain_copy() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn a_dot_dot_in_any_path_still_rebases_to_the_same_file() {
+    // PIX-006 (S15d): the rebase compares `Path::components` literally, so a `..`
+    // in the project path, the copy path or the source itself used to produce a
+    // relative source that resolved somewhere else — `/a/b` to `/a/b/../copy.pixlay`
+    // handed back one `..` too many. `normalize_lexical` is what both sides go
+    // through now, and this is the round trip the finding's own example names.
+    let dir = temp_dir("dot-dot");
+    let project_dir = dir.join("a").join("b");
+    std::fs::create_dir_all(project_dir.join("photos")).expect("create the photos");
+    let photo = project_dir.join("photos/p.png");
+    std::fs::write(&photo, b"not really a photo").expect("write");
+
+    let mut doc = document();
+    doc.cells[0].source = Some(PathBuf::from("photos/p.png"));
+    // A source that walks into a subdirectory and back out: the same file, spelled
+    // the long way. The subdirectory has to exist for the *filesystem* to resolve
+    // it — the kernel walks every component, `..` included — which is exactly why
+    // the rebase collapses the spelling rather than leaving it to the reader.
+    std::fs::create_dir_all(project_dir.join("sub")).expect("create the subdirectory");
+    doc.cells[1].source = Some(PathBuf::from("sub/../photos/p.png"));
+    let original = project_dir.join("a.pixlay");
+    doc.save(&original).expect("saves");
+    let project = Project::load(&original).expect("loads");
+    let resolved = project.sources().expect("resolves");
+    assert_eq!(
+        canonical(resolved[0].as_ref().expect("a source")),
+        canonical(&photo)
+    );
+
+    // The copy is spelled with a `..` that lands in the directory above the
+    // project: `/a/b/../copy.pixlay` is `/a/copy.pixlay`, so the photos one
+    // directory down are `b/photos/p.png` from there.
+    let copy = dir.join("a").join("b").join("..").join("copy.pixlay");
+    let written = project.save_as(&copy).expect("saves the copy");
+    assert_eq!(
+        written.doc().cells[0].source,
+        Some(PathBuf::from("b/photos/p.png")),
+        "the copy's source does not resolve to the photo"
+    );
+    assert_eq!(
+        written.doc().cells[1].source,
+        Some(PathBuf::from("b/photos/p.png")),
+        "a `..` inside the source was not collapsed"
+    );
+    let copied = Project::load(&copy).expect("loads the copy");
+    let copied_sources = copied.sources().expect("resolves");
+    for (index, (copied, original)) in copied_sources.iter().zip(&resolved).enumerate() {
+        assert_eq!(
+            copied.clone().map(|path| canonical(&path)),
+            original.clone().map(|path| canonical(&path)),
+            "cell {index}: the copy points at a different file than the original"
+        );
+    }
+
+    // A project *path* with a `..` is the same document read from the directory it
+    // means, and saving it beside itself rewrites nothing.
+    let spelled = dir.join("a").join("b").join("..").join("copy.pixlay");
+    let loaded = Project::load(&spelled).expect("loads a `..` spelling");
+    let again = dir.join("a").join("second.pixlay");
+    loaded.save_as(&again).expect("saves beside itself");
+    assert_eq!(
+        std::fs::read(&again).expect("read"),
+        std::fs::read(&copy).expect("read"),
+        "saving beside itself is a plain copy, `..` or not"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Every temporary file this build's writer left behind, by the name it gives them.
 fn temporary_files(dir: &Path) -> Vec<String> {
     std::fs::read_dir(dir)

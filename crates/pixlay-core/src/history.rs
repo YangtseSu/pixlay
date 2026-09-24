@@ -21,7 +21,7 @@
 //! refused and changes nothing, which is the same all-or-nothing rule loading a
 //! file follows.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::crop::CropTransform;
 use crate::doc::CollageDoc;
@@ -327,19 +327,48 @@ impl History {
         self.redo.len()
     }
 
-    /// Applies one command as one undoable step.
+    /// Applies one command as one undoable step; `false` when the command is valid
+    /// but asks for the document it already has.
     ///
     /// All-or-nothing: the command is applied to a copy, the copy is validated,
     /// and only then does it become the current document and the old one becomes
     /// the top of the undo stack. An error therefore leaves the document and both
     /// stacks exactly as they were.
-    pub fn apply(&mut self, command: Command) -> Result<(), CoreError> {
+    ///
+    /// **A command that changes nothing is not a step** (PIX-022, 2026-09-24): an
+    /// empty undo step is one the user has to press `Ctrl+Z` through for no reason,
+    /// it forks the redo path for an edit nobody made, and it makes a document that
+    /// is back at the file's own state look edited. The GUI's pending-gesture path
+    /// had this rule already; it lives here so that every command, from every
+    /// surface, gets it.
+    pub fn apply(&mut self, command: Command) -> Result<bool, CoreError> {
         let next = command.applied_to(&self.doc)?;
+        if next == self.doc {
+            return Ok(false);
+        }
         self.undo.push(std::mem::replace(&mut self.doc, next));
         // The redo stack is a path, and applying a command after an undo forks
         // it: what was undone is no longer reachable from here.
         self.redo.clear();
-        Ok(())
+        Ok(true)
+    }
+
+    /// Rewrites every state's relative sources the way a save into another
+    /// directory rewrites the document it writes: the current document, and the
+    /// states an undo returns to.
+    ///
+    /// The memory document and the file are one document, so they have to spell
+    /// their sources the same way (PIX-005, 2026-09-24). A Save As that rebases the
+    /// copy and leaves the window holding the old spellings leaves the window
+    /// resolving the photos against the wrong directory — and a stack that undid
+    /// back into the old spelling would do the same. `false` when nothing moved,
+    /// which is the ordinary save: same directory, nothing to rewrite.
+    pub fn rebase(&mut self, from_dir: &Path, to_dir: &Path) -> bool {
+        let mut changed = crate::doc::rebase_sources(&mut self.doc, from_dir, to_dir);
+        for state in self.undo.iter_mut().chain(self.redo.iter_mut()) {
+            changed |= crate::doc::rebase_sources(state, from_dir, to_dir);
+        }
+        changed
     }
 
     /// Steps back one command; `false` when there is nothing to undo.

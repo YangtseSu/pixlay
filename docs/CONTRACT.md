@@ -387,7 +387,7 @@ comparable, and `--quality` was deliberately not added — a knob nobody tests b
 | order | **argument order is cell order**; the source of cell *i* is the *i*-th `--photo` |
 | count | 2..=9 inclusive (ruling 3). Outside it: usage error (exit 1) naming both bounds (`a collage needs 2..=9 photos, got 10`). Omitting `--photo` entirely is still the photo-free project S2 shipped |
 | template | the slot count must equal the number of photos; a mismatch is a usage error (exit 1) naming the template, its slots and the photo count |
-| paths | a **photo that is not there** is a failure (exit 2, the path named) — the same rule a project that points at a deleted file follows. Each stored `source` is relative to the project file when the two share a root (`pixlay_core::relative_to`, the function `Project::save_as` rebases with) and absolute otherwise, so a project whose photos sit beside it can be moved |
+| paths | a **photo that is not there** is a failure (exit 2, the path named) — the same rule a project that points at a deleted file follows. Each stored `source` is relative to the project file when the two share a root (`pixlay_core::relative_to`, the function `Project::save_as` rebases with) and absolute otherwise, so a project whose photos sit beside it can be moved. Both sides of that comparison are lexically normalized first (`pixlay_core::normalize_lexical`, S15d), so a `..` in the project path or the copy path cannot produce a relative source that resolves somewhere else |
 | the policy itself | `pixlay_core::selection`: `Selection` (ordered photos, the 2..=9 clamp, `layouts()` = the templates with that many slots), `layout_for` (the count rule, S14: same aspect → same recipe family → nearest aspect → library order), `remove_last` / `Removed::restore` (the LIFO batch rule: the last **occupied** cell, because a per-cell clear leaves holes, and the cell comes back in its own slot with its framing — **and the token carries the document's template**, because ruling 7's "brings it back" is exact only if the layout comes back too: the count moves the layout with it, and no three-slot *grid* exists for a four-photo `grid-4-2x2` to grow back into). Pure functions, no filesystem |
 
 **S11 added one subcommand (`edit`) and three shared flags**, because the free rotation and the frame are things a *person*
@@ -406,7 +406,7 @@ three on both commands, and the difference between them is scope:
 | `--clear` | empties the cell: no photo, and the framing back to its default. Exclusive with the framing flags (exit 1) |
 | what `edit` stores | **the fit** of what was asked for, not the request: a crop is a request and what is drawn is what covers it, so the written file says what it draws. A cell with no photo has no photo aspect to fit against and keeps the numbers as given |
 | idempotence | fitting a fit returns it bit for bit, so `edit` applied twice to the same project writes the same bytes — asserted on a rotation that has to be paid for *and* a pan that has to be clamped. A frame is likewise idempotent |
-| writing | through `Project::save_as`, the same call `save` makes: atomic, and relative photo paths are rebased when the copy lands in another directory. `--out` may be `--project` (edit in place) |
+| writing | through `Project::save_as`, the same call `save` makes: atomic, and relative photo paths are rebased when the copy lands in another directory. Since S15d it **returns the project it wrote** — the rebased copy — so a caller that keeps the document in memory (the window) adopts the file's own spellings rather than keeping the old ones. `--out` may be `--project` (edit in place) |
 | what `edit` reports | `template`, `version`, `cells`, `photos`, the frame's three fields, `bytes`, and — when `--slot` was given — `slot`, `occupied`, `zoom`, `offset`, `rotation_deg` |
 | no `--long-edge` | an edit changes a cell's framing, the document's frame, its layout and the photos it holds; how big an export is another command's question. `--photo` joined the framing flags in S14 (`edit --slot <i> --photo <file>`), with the rules S14 added further down |
 
@@ -501,7 +501,7 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
 | canvas decoration (the frame) | **S11, landed**; its editor is a command since **S15** | `CollageDoc::frame`: `Frame { gapRel, radiusRel, color }`, plus `Frame::covering` / `Frame::clip` and the backdrop + clip stage in `draw`; the CLI's `render --gap/--radius/--border-color` (render-time) and `edit` (§5), and since S15 `Command::SetFrame { frame }` is the one writer both `edit` and the window's `Frame…` dialog send (one undo step, validated per slot). Measured cost at A0: none — the frame is a clip path and a fill (§8, "S11") |
 | template generator | **S2, landed** | `pixlay_core::templates` (`generator` recipes + the committed `frozen` data) and the `templates` / `init` subcommands; see §3 and §5 |
 | the image pipeline | **S4, landed**; the preview-grade reduction landed in **S12b**; the grading stage removed by **S12c** | `pixlay-imaging`: `Source::decode`, `resample`, `slot_bitmap`/`slot_bitmaps`, `probe`, and the preview's `Preview` caches + `reduce::PreviewSource`; the buffer ladder and the colour decisions are §4.1 |
-| command history / hit testing / project writing | **S6.5, landed**; `SetTemplate` added by **S7**; the grade/filter/text commands removed by **S12c** | `pixlay-core`: `Command` (one edit: source, framing, or the template) and `History` (snapshot undo/redo; `apply` is all-or-nothing and the document has no mutable accessor; the GUI commits **one command per gesture**, §9), `Template::slot_at(point)` for hit testing, `CollageDoc::save` / `Project::save` / `Project::save_as` for writing a document. The CLI's `hit` and `save` are the machine surface of the first and the last; the command history is a test surface only, on purpose (§5) |
+| command history / hit testing / project writing | **S6.5, landed**; `SetTemplate` added by **S7**; the grade/filter/text commands removed by **S12c** | `pixlay-core`: `Command` (one edit: source, framing, or the template) and `History` (snapshot undo/redo; `apply` is all-or-nothing, answers whether the command was a **step** — one that changes nothing is not (S15d) — and the document has no mutable accessor; the GUI commits **one command per gesture**, §9), `Template::slot_at(point)` for hit testing, `CollageDoc::save` / `Project::save` / `Project::save_as` for writing a document. The CLI's `hit` and `save` are the machine surface of the first and the last; the command history is a test surface only, on purpose (§5) |
 | encoding and metadata | **S6, landed**; TIFF and the chroma request removed by **S12c**, resolutions by **S12d** | `pixlay_imaging::encode`: one pass per format writing pixels, sampling and the ICC profile (`icc`), for PNG / JPEG; the CLI's `--long-edge` and the per-format rules are §5, the profile is §4.1 |
 | the library and the selection | **S9, landed** | `pixlay_core::selection`: `Selection` (the ordered photo list, the 2..=9 clamp, `layouts()`), `last_photo` / `remove_last` / `Removed::restore` (the LIFO batch rule) — pure, no filesystem. `pixlay_imaging::thumb`: `thumbnail(source, long_edge)`, the same `resample` at a preview grid. The CLI's `scan` / `thumb` / `init --photo` are the machine surface (the rules are §5) |
 
@@ -1190,6 +1190,25 @@ without looking at a widget:
   gesture ends. A gesture is *pending* while it happens (`Editor::begin`), so the canvas shows
   the drag without the undo stack recording forty states; a slider, which has no end signal,
   commits when its value has been quiet for 250 ms.
+- **A boundary commits the pending edit, and only then asks** (S15d, PIX-002's ruling of
+  2026-09-24). Save, close, `New`, `Open` and export all mean "the document as it is on screen":
+  each commits the pending command first — `Editor::save` for the write, `EditorWindow::commit`
+  for the window's own boundaries, and the `Frame…` dialog's Close — so nothing that is visible
+  can be lost inside the quiet interval. Closing the window, `New` and `Open` then ask the *same*
+  Cancel / Discard / Save question (`EditorWindow::ask_to_save`), and `Save` continues the
+  boundary only once the file was written; a failed save leaves the document exactly where it
+  was. "Dirty" is a comparison rather than a flag (`Editor::is_dirty`: the document against the
+  one the file holds), so an edit undone back to the saved state is not unsaved work, and a
+  command that changes nothing is not an undo step at all (`History::apply` answers whether it
+  was one — the same rule the pending path had, now for every command from every surface).
+- **A Save As adopts what it wrote** (S15d, PIX-005/PIX-006). `Project::save_as` returns the
+  project it wrote, rebased copy included, and the window adopts the file's own spellings,
+  rebasing every state its history holds the same way (`History::rebase`): the memory document
+  and the file are one document, so an undo that went back to the old spelling cannot resolve
+  the photos against the directory they were moved away from. The rebase is lexical
+  (`pixlay_core::normalize_lexical`: `.` dropped, `..` resolved against the component before it,
+  no filesystem access, no symlink resolution), so a `..` in the project path, the copy path or
+  the source itself still produces a copy that points at the same files.
 - **The rotation control is free-angle** (S11): the straightening slider spans `-180..=180` and
   the wheel/keyboard step wraps the angle into that range, because the document accepts any
   finite angle and never reduces it. A gesture fits its own candidate numbers against the same

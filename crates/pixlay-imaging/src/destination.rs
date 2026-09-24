@@ -18,7 +18,7 @@
 //!   no identity and cannot be a source — a source is decoded, so it is there — which
 //!   is why this compares what exists instead of canonicalizing what might.
 
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
@@ -57,29 +57,16 @@ pub struct SourceAlias {
 
 /// `path` made absolute and lexically normalized: `.` dropped, `..` resolved against
 /// the component before it, nothing else touched.
+///
+/// The rule itself is `pixlay_core::normalize_lexical` — one implementation, because
+/// the rebasing a project copy goes through means the same thing by "a path" (S15d).
 fn absolute_normalized(path: &Path) -> PathBuf {
-    let Ok(absolute) = std::path::absolute(path) else {
+    match std::path::absolute(path) {
+        Ok(absolute) => pixlay_core::normalize_lexical(&absolute),
         // No current directory to be absolute against: the caller's own spelling is
         // the best available answer, and the identity rule below still applies.
-        return path.to_path_buf();
-    };
-    let mut normalized = PathBuf::new();
-    for component in absolute.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => match normalized.components().next_back() {
-                // `a/..` is the directory `a` stands in; `/..` is `/`.
-                Some(Component::Normal(_)) => {
-                    normalized.pop();
-                }
-                Some(Component::Prefix(_) | Component::RootDir) => {}
-                // Nothing to go back to, or already walking up: keep walking.
-                _ => normalized.push(".."),
-            },
-            other => normalized.push(other.as_os_str()),
-        }
+        Err(_) => path.to_path_buf(),
     }
-    normalized
 }
 
 /// Whether the two paths name one file, by the filesystem's own answer: device and

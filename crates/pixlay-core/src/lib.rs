@@ -48,7 +48,7 @@ pub mod templates;
 
 pub use canvas::PixelSize;
 pub use crop::{CropFit, CropTransform, DisplayRegion};
-pub use doc::{Cell, CollageDoc, Project, relative_to};
+pub use doc::{Cell, CollageDoc, Project, normalize_lexical, relative_to};
 pub use error::CoreError;
 pub use frame::{Frame, MAX_FRAME_REL, Rgba8};
 pub use geometry::{EPSILON, Point, Polygon, Rect};

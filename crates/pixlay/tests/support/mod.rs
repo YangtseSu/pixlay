@@ -644,3 +644,64 @@ pub fn descendants(root: &gtk::Widget) -> Vec<gtk::Widget> {
     }
     found
 }
+
+/// The alert dialog the window is showing, if it is showing one.
+///
+/// The confirmations are `AdwAlertDialog`s over a dialog or over the window, and
+/// finding one in the widget tree is how a test answers it: the binding exposes no
+/// `response()` to call (S15c). "Showing" means *presented*: a closed alert's own
+/// widget can stay in the tree — S15b measured a closed `AdwDialog` staying visible
+/// for as long as anyone waited under a headless X server — so a test that is about
+/// to answer the *next* question must not be handed the last one's buttons.
+pub fn alert(window: &EditorWindow) -> Option<adw::AlertDialog> {
+    descendants(window.upcast_ref::<gtk::Widget>())
+        .into_iter()
+        .filter_map(|widget| widget.downcast::<adw::AlertDialog>().ok())
+        .find(|alert| alert.is_visible())
+}
+
+/// The button carrying `label` in that alert.
+pub fn alert_button(window: &EditorWindow, label: &str) -> Option<gtk::Button> {
+    let alert = alert(window)?;
+    let mut found = None;
+    walk(alert.upcast_ref::<gtk::Widget>(), &mut |widget| {
+        if found.is_none()
+            && let Some(button) = widget.downcast_ref::<gtk::Button>()
+            && button.label().as_deref() == Some(label)
+        {
+            found = Some(button.clone());
+        }
+    });
+    found
+}
+
+/// The alert's own buttons, in the order the alert lays them out.
+///
+/// A walk over `first_child` / `next_sibling`, in order, rather than
+/// [`descendants`] — whose depth-first stack visits siblings in reverse, and HIG's
+/// criterion for a confirmation *is* an order (the cancel button comes first), so a
+/// check that read the tree backwards would pass for the wrong reason.
+pub fn alert_labels(window: &EditorWindow) -> Vec<String> {
+    let Some(alert) = alert(window) else {
+        return Vec::new();
+    };
+    let mut labels = Vec::new();
+    walk(alert.upcast_ref::<gtk::Widget>(), &mut |widget| {
+        if let Some(button) = widget.downcast_ref::<gtk::Button>()
+            && let Some(label) = button.label()
+        {
+            labels.push(label.to_string());
+        }
+    });
+    labels
+}
+
+/// Calls `visit` on every widget under `root`, in tree order.
+fn walk(root: &gtk::Widget, visit: &mut impl FnMut(&gtk::Widget)) {
+    visit(root);
+    let mut child = root.first_child();
+    while let Some(widget) = child {
+        walk(&widget, visit);
+        child = widget.next_sibling();
+    }
+}

@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: pixlay\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-24 18:25+0800\n"
+"POT-Creation-Date: 2026-09-24 19:37+0800\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -19,17 +19,17 @@ msgstr ""
 "Plural-Forms: nplurals=INTEGER; plural=EXPRESSION;\n"
 
 #: crates/pixlay/src/app.rs:77 crates/pixlay/src/picker.rs:2079
-#: crates/pixlay/src/window.rs:2238
+#: crates/pixlay/src/window.rs:2344
 msgid "New collage"
 msgstr ""
 
 #: crates/pixlay/src/app.rs:78 crates/pixlay/src/picker.rs:2080
-#: crates/pixlay/src/window.rs:2239
+#: crates/pixlay/src/window.rs:2345
 msgid "Open…"
 msgstr ""
 
 #: crates/pixlay/src/app.rs:79 crates/pixlay/src/picker.rs:2088
-#: crates/pixlay/src/window.rs:2253
+#: crates/pixlay/src/window.rs:2359
 msgid "Keyboard shortcuts"
 msgstr ""
 
@@ -37,11 +37,12 @@ msgstr ""
 msgid "Quit Pixlay"
 msgstr ""
 
-#: crates/pixlay/src/app.rs:81 crates/pixlay/src/window.rs:313
+#: crates/pixlay/src/app.rs:81 crates/pixlay/src/window.rs:321
+#: crates/pixlay/src/window.rs:1515
 msgid "Save"
 msgstr ""
 
-#: crates/pixlay/src/app.rs:82 crates/pixlay/src/window.rs:2240
+#: crates/pixlay/src/app.rs:82 crates/pixlay/src/window.rs:2346
 msgid "Save as…"
 msgstr ""
 
@@ -49,8 +50,8 @@ msgstr ""
 msgid "Close the window"
 msgstr ""
 
-#: crates/pixlay/src/app.rs:84 crates/pixlay/src/dialogs.rs:557
-#: crates/pixlay/src/window.rs:322 crates/pixlay/src/window.rs:326
+#: crates/pixlay/src/app.rs:84 crates/pixlay/src/dialogs.rs:565
+#: crates/pixlay/src/window.rs:330 crates/pixlay/src/window.rs:334
 msgid "Export the collage"
 msgstr ""
 
@@ -59,19 +60,19 @@ msgstr ""
 msgid "Choose a folder of photos"
 msgstr ""
 
-#: crates/pixlay/src/app.rs:86 crates/pixlay/src/window.rs:2245
+#: crates/pixlay/src/app.rs:86 crates/pixlay/src/window.rs:2351
 msgid "Insert a photo"
 msgstr ""
 
-#: crates/pixlay/src/app.rs:87 crates/pixlay/src/window.rs:309
+#: crates/pixlay/src/app.rs:87 crates/pixlay/src/window.rs:317
 msgid "Undo"
 msgstr ""
 
-#: crates/pixlay/src/app.rs:88 crates/pixlay/src/window.rs:311
+#: crates/pixlay/src/app.rs:88 crates/pixlay/src/window.rs:319
 msgid "Redo"
 msgstr ""
 
-#: crates/pixlay/src/app.rs:89 crates/pixlay/src/window.rs:2247
+#: crates/pixlay/src/app.rs:89 crates/pixlay/src/window.rs:2353
 msgid "Reset the framing"
 msgstr ""
 
@@ -150,63 +151,63 @@ msgstr ""
 msgid "Close"
 msgstr ""
 
-#: crates/pixlay/src/dialogs.rs:266 crates/pixlay/src/dialogs.rs:269
+#: crates/pixlay/src/dialogs.rs:274 crates/pixlay/src/dialogs.rs:277
 msgid "Format"
 msgstr ""
 
-#: crates/pixlay/src/dialogs.rs:276
+#: crates/pixlay/src/dialogs.rs:284
 msgid "Long edge"
 msgstr ""
 
-#: crates/pixlay/src/dialogs.rs:277
+#: crates/pixlay/src/dialogs.rs:285
 msgid "In pixels"
 msgstr ""
 
-#: crates/pixlay/src/dialogs.rs:278
+#: crates/pixlay/src/dialogs.rs:286
 msgid "Long edge in pixels"
 msgstr ""
 
-#: crates/pixlay/src/dialogs.rs:279
+#: crates/pixlay/src/dialogs.rs:287
 msgid "File name"
 msgstr ""
 
-#: crates/pixlay/src/dialogs.rs:282 crates/pixlay/src/dialogs.rs:286
+#: crates/pixlay/src/dialogs.rs:290 crates/pixlay/src/dialogs.rs:294
 msgid "Choose where the export is written"
 msgstr ""
 
-#: crates/pixlay/src/dialogs.rs:290 crates/pixlay/src/dialogs.rs:301
-#: crates/pixlay/src/dialogs.rs:303 crates/pixlay/src/dialogs.rs:305
-#: crates/pixlay/src/dialogs.rs:315 crates/pixlay/src/window.rs:319
+#: crates/pixlay/src/dialogs.rs:298 crates/pixlay/src/dialogs.rs:309
+#: crates/pixlay/src/dialogs.rs:311 crates/pixlay/src/dialogs.rs:313
+#: crates/pixlay/src/dialogs.rs:323 crates/pixlay/src/window.rs:327
 msgid "Export"
 msgstr ""
 
-#: crates/pixlay/src/dialogs.rs:291
+#: crates/pixlay/src/dialogs.rs:299
 msgid "The format, the size and the file"
 msgstr ""
 
-#: crates/pixlay/src/dialogs.rs:299 crates/pixlay/src/dialogs.rs:300
-#: crates/pixlay/src/dialogs.rs:481
+#: crates/pixlay/src/dialogs.rs:307 crates/pixlay/src/dialogs.rs:308
+#: crates/pixlay/src/dialogs.rs:489 crates/pixlay/src/window.rs:1513
 msgid "Cancel"
 msgstr ""
 
-#: crates/pixlay/src/dialogs.rs:475
+#: crates/pixlay/src/dialogs.rs:483
 msgid "Replace the existing file?"
 msgstr ""
 
-#: crates/pixlay/src/dialogs.rs:477
+#: crates/pixlay/src/dialogs.rs:485
 #, rust-format
 msgid "{} is already there. The export replaces it."
 msgstr ""
 
-#: crates/pixlay/src/dialogs.rs:482
+#: crates/pixlay/src/dialogs.rs:490
 msgid "Replace"
 msgstr ""
 
-#: crates/pixlay/src/dialogs.rs:548
+#: crates/pixlay/src/dialogs.rs:556
 msgid "Images"
 msgstr ""
 
-#: crates/pixlay/src/dialogs.rs:595
+#: crates/pixlay/src/dialogs.rs:603
 #, rust-format
 msgid "{} in per cent"
 msgstr ""
@@ -227,13 +228,13 @@ msgstr ""
 msgid "Layouts"
 msgstr ""
 
-#: crates/pixlay/src/layout.rs:327 crates/pixlay/src/window.rs:1219
+#: crates/pixlay/src/layout.rs:327 crates/pixlay/src/window.rs:1195
 #, rust-format
 msgid "A collage needs at least {} photos"
 msgstr ""
 
 #: crates/pixlay/src/layout.rs:332 crates/pixlay/src/picker.rs:1742
-#: crates/pixlay/src/window.rs:1244
+#: crates/pixlay/src/window.rs:1220
 #, rust-format
 msgid "A collage takes at most {} photos"
 msgstr ""
@@ -252,7 +253,7 @@ msgid "Layout {}"
 msgstr ""
 
 #: crates/pixlay/src/picker.rs:454 crates/pixlay/src/picker.rs:562
-#: crates/pixlay/src/window.rs:2264
+#: crates/pixlay/src/window.rs:2370
 msgid "Photos"
 msgstr ""
 
@@ -279,7 +280,7 @@ msgid "Nothing picked yet"
 msgstr ""
 
 #: crates/pixlay/src/picker.rs:700 crates/pixlay/src/picker.rs:704
-#: crates/pixlay/src/window.rs:337 crates/pixlay/src/window.rs:341
+#: crates/pixlay/src/window.rs:345 crates/pixlay/src/window.rs:349
 msgid "Main menu"
 msgstr ""
 
@@ -292,8 +293,8 @@ msgstr ""
 msgid "Open the picked photos in a collage"
 msgstr ""
 
-#: crates/pixlay/src/picker.rs:728 crates/pixlay/src/window.rs:439
-#: crates/pixlay/src/window.rs:2151
+#: crates/pixlay/src/picker.rs:728 crates/pixlay/src/window.rs:447
+#: crates/pixlay/src/window.rs:2257
 msgid "Pick photos"
 msgstr ""
 
@@ -330,7 +331,7 @@ msgstr ""
 msgid "Choose folder…"
 msgstr ""
 
-#: crates/pixlay/src/picker.rs:2089 crates/pixlay/src/window.rs:2254
+#: crates/pixlay/src/picker.rs:2089 crates/pixlay/src/window.rs:2360
 msgid "About Pixlay"
 msgstr ""
 
@@ -343,111 +344,123 @@ msgstr ""
 msgid "Remove {} from the collage"
 msgstr ""
 
-#: crates/pixlay/src/window.rs:332
+#: crates/pixlay/src/window.rs:340
 msgid "Frame the collage"
 msgstr ""
 
-#: crates/pixlay/src/window.rs:368
+#: crates/pixlay/src/window.rs:376
 msgid "Export progress"
 msgstr ""
 
-#: crates/pixlay/src/window.rs:390
+#: crates/pixlay/src/window.rs:398
 msgid "Find it…"
 msgstr ""
 
-#: crates/pixlay/src/window.rs:404
+#: crates/pixlay/src/window.rs:412
 msgid "Collage"
 msgstr ""
 
-#: crates/pixlay/src/window.rs:455 crates/pixlay/src/window.rs:762
-#: crates/pixlay/src/window.rs:1414 crates/pixlay/src/window.rs:2128
+#: crates/pixlay/src/window.rs:463 crates/pixlay/src/window.rs:738
+#: crates/pixlay/src/window.rs:1408 crates/pixlay/src/window.rs:2234
 msgid "Untitled collage"
 msgstr ""
 
-#: crates/pixlay/src/window.rs:1299
+#: crates/pixlay/src/window.rs:1275
 msgid "Add photos to the collage"
 msgstr ""
 
-#: crates/pixlay/src/window.rs:1425 crates/pixlay/src/window.rs:1481
+#: crates/pixlay/src/window.rs:1419 crates/pixlay/src/window.rs:1567
 msgid "Pixlay collages"
 msgstr ""
 
-#: crates/pixlay/src/window.rs:1430
+#: crates/pixlay/src/window.rs:1424
 msgid "Open a collage"
 msgstr ""
 
-#: crates/pixlay/src/window.rs:1486
+#: crates/pixlay/src/window.rs:1508
+msgid "Save the changes?"
+msgstr ""
+
+#: crates/pixlay/src/window.rs:1510
+msgid "This collage has changes that are not saved anywhere yet."
+msgstr ""
+
+#: crates/pixlay/src/window.rs:1514
+msgid "Discard"
+msgstr ""
+
+#: crates/pixlay/src/window.rs:1572
 msgid "Save the collage"
 msgstr ""
 
-#: crates/pixlay/src/window.rs:1523
+#: crates/pixlay/src/window.rs:1623
 #, rust-format
 msgid "Saved {}"
 msgstr ""
 
-#: crates/pixlay/src/window.rs:1537
+#: crates/pixlay/src/window.rs:1637
 msgid "Choose a photo"
 msgstr ""
 
-#: crates/pixlay/src/window.rs:1641
+#: crates/pixlay/src/window.rs:1746
 #, rust-format
 msgid "{} photo is missing and has to be found before the export"
 msgid_plural "{} photos are missing and have to be found before the export"
 msgstr[0] ""
 msgstr[1] ""
 
-#: crates/pixlay/src/window.rs:1655
+#: crates/pixlay/src/window.rs:1760
 msgid "Preparing…"
 msgstr ""
 
-#: crates/pixlay/src/window.rs:1676
+#: crates/pixlay/src/window.rs:1782
 #, rust-format
 msgid "{} photo is missing"
 msgid_plural "{} photos are missing"
 msgstr[0] ""
 msgstr[1] ""
 
-#: crates/pixlay/src/window.rs:1692
+#: crates/pixlay/src/window.rs:1798
 #, rust-format
 msgid "Preparing photo {} of {}"
 msgstr ""
 
-#: crates/pixlay/src/window.rs:1694
+#: crates/pixlay/src/window.rs:1800
 msgid "Compositing…"
 msgstr ""
 
-#: crates/pixlay/src/window.rs:1695
+#: crates/pixlay/src/window.rs:1801
 msgid "Writing the file…"
 msgstr ""
 
-#: crates/pixlay/src/window.rs:1706
+#: crates/pixlay/src/window.rs:1812
 #, rust-format
 msgid "Exported {} ({} MB)"
 msgstr ""
 
-#: crates/pixlay/src/window.rs:1710
+#: crates/pixlay/src/window.rs:1816
 #, rust-format
 msgid "Export failed: {}"
 msgstr ""
 
-#: crates/pixlay/src/window.rs:1918
+#: crates/pixlay/src/window.rs:2024
 #, rust-format
 msgid "{} photo could not be read"
 msgid_plural "{} photos could not be read"
 msgstr[0] ""
 msgstr[1] ""
 
-#: crates/pixlay/src/window.rs:2166
+#: crates/pixlay/src/window.rs:2272
 #, rust-format
 msgid "{} photo could not be loaded"
 msgid_plural "{} photos could not be loaded"
 msgstr[0] ""
 msgstr[1] ""
 
-#: crates/pixlay/src/window.rs:2241
+#: crates/pixlay/src/window.rs:2347
 msgid "Export…"
 msgstr ""
 
-#: crates/pixlay/src/window.rs:2289 crates/pixlay/src/window.rs:2306
+#: crates/pixlay/src/window.rs:2395 crates/pixlay/src/window.rs:2412
 msgid "collage"
 msgstr ""

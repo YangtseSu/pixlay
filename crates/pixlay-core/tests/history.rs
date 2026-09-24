@@ -8,7 +8,7 @@
 //! is measured here is the document itself, which is the stronger statement —
 //! identical documents render identically by construction.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use pixlay_core::{
     Cell, CollageDoc, Command, CoreError, CropTransform, Frame, History, Rgba8, templates,
@@ -156,6 +156,126 @@ fn undo_and_redo_walk_the_exact_states() {
     assert!(!history.redo(), "there is nothing past the end");
     assert_eq!(history.doc(), states.last().expect("a final state"));
     assert_eq!(history.undo_depth(), sequence().len());
+}
+
+#[test]
+fn a_command_that_changes_nothing_is_not_a_step() {
+    // PIX-022 (S15d): the rule the GUI's pending-gesture path had already is now
+    // the history's own, so every command from every surface gets it.
+    let mut history = History::new(document()).expect("a valid document");
+    let source = Command::SetSource {
+        slot: 0,
+        source: Some(PathBuf::from("photos/a.jpg")),
+    };
+    assert!(
+        history.apply(source.clone()).expect("applies"),
+        "the first one changes the document"
+    );
+    assert_eq!(history.undo_depth(), 1);
+
+    let before = history.doc().to_json().expect("serializes");
+    assert!(
+        !history.apply(source.clone()).expect("applies"),
+        "the same command again changes nothing"
+    );
+    assert_eq!(history.undo_depth(), 1, "and is not an undo step");
+    assert_eq!(history.doc().to_json().expect("serializes"), before);
+
+    // The redo path is not forked by an edit that is not an edit: a no-op after an
+    // undo leaves the undone state reachable.
+    history
+        .apply(Command::SetCrop {
+            slot: 0,
+            crop: CropTransform {
+                zoom: 1.4,
+                offset: (0.2, -0.3),
+                rotation_deg: 12.0,
+            },
+        })
+        .expect("applies");
+    assert!(history.undo(), "there is a step to undo");
+    assert_eq!(history.redo_depth(), 1);
+    assert!(
+        !history
+            .apply(Command::SetSource {
+                slot: 0,
+                source: Some(PathBuf::from("photos/a.jpg")),
+            })
+            .expect("applies"),
+        "the state the undo returned to already has this source"
+    );
+    assert_eq!(
+        history.redo_depth(),
+        1,
+        "a command that changes nothing forked the redo path"
+    );
+
+    // The other direction too: `ClearCell` on a cell that is already empty is not a
+    // step either, which is the "Reset an already-identity crop" case the review
+    // named (the direct paths, not the gesture one).
+    let mut fresh = History::new(document()).expect("a valid document");
+    assert!(
+        !fresh
+            .apply(Command::ClearCell { slot: 0 })
+            .expect("applies"),
+        "clearing an empty cell changes nothing"
+    );
+    assert_eq!(fresh.undo_depth(), 0);
+}
+
+#[test]
+fn a_rebase_rewrites_every_state_the_history_holds() {
+    // PIX-005 (S15d): the document a Save As wrote and the document the window
+    // holds are one document, so every state in the stacks has to spell its sources
+    // the way the file does — an undo that went back to the old spelling would
+    // resolve the photos against the directory they were moved away from.
+    let mut history = History::new(document()).expect("a valid document");
+    history
+        .apply(Command::SetSource {
+            slot: 0,
+            source: Some(PathBuf::from("photos/a.jpg")),
+        })
+        .expect("applies");
+    history
+        .apply(Command::SetSource {
+            slot: 1,
+            source: Some(PathBuf::from("photos/b.jpg")),
+        })
+        .expect("applies");
+    // Lexical, so the directories need not exist: the project moves from
+    // `/proj/one` to `/proj/two`, which is one `..` per source.
+    assert!(
+        history.rebase(Path::new("/proj/one"), Path::new("/proj/two")),
+        "the sources moved"
+    );
+    assert_eq!(
+        history.doc().cells[0].source,
+        Some(PathBuf::from("../one/photos/a.jpg"))
+    );
+    assert!(
+        !history.rebase(Path::new("/proj/one"), Path::new("/proj/two")),
+        "rebasing twice is not a second move"
+    );
+    assert!(history.undo(), "there is a step to undo");
+    assert_eq!(
+        history.doc().cells[0].source,
+        Some(PathBuf::from("../one/photos/a.jpg")),
+        "the state an undo returns to kept the old spelling"
+    );
+    assert_eq!(history.doc().cells[1].source, None);
+    // An absolute source is nobody's business but the format's, exactly as the
+    // written document has it.
+    history
+        .apply(Command::SetSource {
+            slot: 2,
+            source: Some(PathBuf::from("/elsewhere/c.jpg")),
+        })
+        .expect("applies");
+    history.rebase(Path::new("/proj/two"), Path::new("/proj/three"));
+    assert_eq!(
+        history.doc().cells[2].source,
+        Some(PathBuf::from("/elsewhere/c.jpg"))
+    );
 }
 
 #[test]

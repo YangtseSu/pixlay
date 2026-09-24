@@ -2,9 +2,10 @@
 //! and the gesture that is in flight.
 //!
 //! `pixlay-core` owns the document, the commands and the two undo stacks
-//! (S6.5); this module adds what only a window has — a project path, the
-//! difference between a saved and an unsaved edit, resolving a cell's `source`
-//! against the project directory, and **one gesture in flight**.
+//! (S6.5); this module adds what only a window has — a project path, the document
+//! as the file on disk holds it (so that "unsaved" is a difference rather than a
+//! flag, PIX-022), resolving a cell's `source` against the project directory, and
+//! **one gesture in flight**.
 //!
 //! The gesture is the interesting part. "One gesture = one command, committed
 //! when the drag ends" (S6.5) means a drag may not push forty commands, so while
@@ -12,6 +13,11 @@
 //! applies it to a copy for the canvas to draw, [`Editor::commit`] turns it into
 //! the single undo step the user expects, and [`Editor::cancel`] drops it. The
 //! history never sees a state the user did not finish making.
+//!
+//! **A boundary commits the pending edit before it does anything else** (S15d,
+//! PIX-002's ruling of 2026-09-24): save, close, New, Open and export all mean "the
+//! document as it is on screen", so [`Editor::save`] and the window's own
+//! boundaries commit first and only then ask whether there is unsaved work.
 //!
 //! Nothing here touches GTK, and nothing here decodes anything.
 
@@ -37,8 +43,14 @@ pub struct Editor {
     /// What a relative `source` resolves against: the project's directory, or the
     /// current directory for an unsaved document.
     dir: PathBuf,
-    /// True once the document has changed since the last save.
-    dirty: bool,
+    /// The document as the file on disk holds it, or as the window started: the
+    /// baseline [`Editor::is_dirty`] is a difference from.
+    ///
+    /// The whole document rather than a flag (PIX-022, 2026-09-24): "the document
+    /// differs from the file" is a comparison, and only the saved document can
+    /// answer it — a save, an edit and an undo back to the saved state is not an
+    /// unsaved edit, and a boolean that is set by every command cannot say so.
+    saved: CollageDoc,
     /// The command a gesture is currently making, if any.
     pending: Option<Command>,
 }
@@ -46,10 +58,10 @@ pub struct Editor {
 impl Editor {
     pub fn new(doc: CollageDoc) -> Result<Self, CoreError> {
         Ok(Self {
-            history: History::new(doc)?,
+            history: History::new(doc.clone())?,
             path: None,
             dir: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            dirty: false,
+            saved: doc,
             pending: None,
         })
     }
@@ -59,7 +71,7 @@ impl Editor {
             history: History::new(project.doc().clone())?,
             path: Some(project.path().to_path_buf()),
             dir: project.dir().to_path_buf(),
-            dirty: false,
+            saved: project.doc().clone(),
             pending: None,
         })
     }
@@ -76,8 +88,17 @@ impl Editor {
         &self.dir
     }
 
+    /// Whether the document differs from the file on disk.
+    ///
+    /// A comparison, not a flag (PIX-022, 2026-09-24). "Dirty" has to mean "there is
+    /// work here that the file does not have", and a boolean set by every command
+    /// gets three cases wrong: a command that changed nothing, a save followed by an
+    /// edit and an undo back to the saved state, and a save — the document is the
+    /// file's again. A document that has never been saved is compared against the
+    /// document the window started with, so an untouched one is nothing to ask
+    /// about and the first edit is.
     pub fn is_dirty(&self) -> bool {
-        self.dirty
+        self.history.doc() != &self.saved
     }
 
     pub fn can_undo(&self) -> bool {
@@ -90,32 +111,22 @@ impl Editor {
 
     /// Applies one command as one undo step. A refused command changes nothing,
     /// including the pending gesture (it is cleared, because the caller is about
-    /// to draw the document the history holds).
+    /// to draw the document the history holds). A command that changes nothing is
+    /// not a step either — the history's own rule (PIX-022).
     pub fn apply(&mut self, command: Command) -> Result<(), CoreError> {
         self.pending = None;
         self.history.apply(command)?;
-        self.dirty = true;
         Ok(())
     }
 
     pub fn undo(&mut self) -> bool {
         self.pending = None;
-        if self.history.undo() {
-            self.dirty = true;
-            true
-        } else {
-            false
-        }
+        self.history.undo()
     }
 
     pub fn redo(&mut self) -> bool {
         self.pending = None;
-        if self.history.redo() {
-            self.dirty = true;
-            true
-        } else {
-            false
-        }
+        self.history.redo()
     }
 
     /// Replaces the pending gesture with `command` and returns the document the
@@ -136,28 +147,19 @@ impl Editor {
     /// nothing pending, when the history refused it, or when the gesture ended on
     /// the value it started from.
     ///
-    /// The last case matters: a wheel or a slider can land on the value it began
-    /// with (a rotation already at its limit, a drag that came back), and an undo
-    /// step that changes nothing is a step the user has to press `Ctrl+Z` through
-    /// for no reason — S6.5's own walk asserts that every command in a sequence
-    /// changes the document.
+    /// The last case is the history's own rule now (PIX-022, 2026-09-24): a wheel
+    /// or a slider can land on the value it began with (a rotation already at its
+    /// limit, a drag that came back), and an undo step that changes nothing is a
+    /// step the user has to press `Ctrl+Z` through for no reason — S6.5's own walk
+    /// asserts that every command in a sequence changes the document.
     pub fn commit(&mut self) -> bool {
         let Some(command) = self.pending.take() else {
             return false;
         };
-        if command
-            .applied_to(self.history.doc())
-            .is_ok_and(|next| next == *self.history.doc())
-        {
-            return false;
-        }
-        match self.history.apply(command) {
-            Ok(()) => {
-                self.dirty = true;
-                true
-            }
-            Err(_) => false,
-        }
+        // A refusal cannot happen for a command `begin` accepted — the document it
+        // was applied to has not changed since — so the error is the same "no step"
+        // answer the equality case gets.
+        self.history.apply(command).unwrap_or(false)
     }
 
     pub fn cancel(&mut self) {
@@ -213,12 +215,22 @@ impl Editor {
     /// Writes the document to the file it came from, or to `path` when it has
     /// none; returns the path that was written.
     ///
+    /// **A boundary commits the pending edit first** (PIX-002's ruling,
+    /// 2026-09-24): what the canvas is showing is what the file has to hold, so a
+    /// frame or crop change that is still inside its quiet interval is committed
+    /// here rather than dropped.
+    ///
     /// A document that has never been saved needs a path from the caller (the
     /// GUI's save dialog), and one that has a path is written through the same
     /// atomic write the CLI uses. A save into another directory rebases every
     /// relative source, which is what `Project::save_as` does and why this goes
-    /// through `Project` instead of `CollageDoc::save`.
+    /// through `Project` instead of `CollageDoc::save` — and the document that
+    /// comes back is the one the file holds, so the window adopts it: the history's
+    /// own states are rebased the same way, and an undo back into the old spelling
+    /// cannot resolve the photos against the directory they were moved away from
+    /// (PIX-005, PIX-006).
     pub fn save(&mut self, path: Option<&Path>) -> Result<PathBuf, CoreError> {
+        self.commit();
         let target = match (path, &self.path) {
             (Some(path), _) => path.to_path_buf(),
             (None, Some(existing)) => existing.clone(),
@@ -237,14 +249,11 @@ impl Editor {
             None => target.clone(),
         };
         let project = Project::new(self.doc().clone(), anchor)?;
-        project.save_as(&target)?;
-        self.path = Some(target.clone());
-        self.dir = target
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-            .unwrap_or_else(|| Path::new("."))
-            .to_path_buf();
-        self.dirty = false;
-        Ok(target)
+        let written = project.save_as(&target)?;
+        self.history.rebase(project.dir(), written.dir());
+        self.path = Some(written.path().to_path_buf());
+        self.dir = written.dir().to_path_buf();
+        self.saved = self.history.doc().clone();
+        Ok(written.path().to_path_buf())
     }
 }
