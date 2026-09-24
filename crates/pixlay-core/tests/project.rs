@@ -282,3 +282,120 @@ fn save_as_beside_the_original_is_a_plain_copy() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Every temporary file this build's writer left behind, by the name it gives them.
+fn temporary_files(dir: &Path) -> Vec<String> {
+    std::fs::read_dir(dir)
+        .expect("read directory")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.ends_with(".tmp"))
+        .collect()
+}
+
+/// The mode of a file, as the permission bits alone.
+fn mode(path: &Path) -> u32 {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    std::fs::metadata(path).expect("stat").permissions().mode() & 0o777
+}
+
+#[test]
+fn saving_over_a_private_project_keeps_it_private() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    // A project the user made private — `umask 077`, a `chmod`, whatever the reason —
+    // may not come back readable by everyone because it was written through a
+    // temporary file (S15c, PIX-016): the mode belongs to the file, not to the way
+    // this build replaces it.
+    let dir = temp_dir("save-mode");
+    let path = dir.join("private.pixlay");
+    document().save(&path).expect("saves");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).expect("chmod");
+    document().save(&path).expect("saves again");
+    assert_eq!(mode(&path), 0o600, "the save widened a private file's mode");
+
+    // The other direction too: a mode the user chose is kept, not replaced by a
+    // default of this build's.
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).expect("chmod");
+    document().save(&path).expect("saves again");
+    assert_eq!(
+        mode(&path),
+        0o644,
+        "the save narrowed a readable file's mode"
+    );
+
+    // A file that is not there yet gets what any new file gets: the process's umask
+    // default, measured against a file this test writes with `std::fs::write` rather
+    // than written down, because the umask is the environment's.
+    let reference = dir.join("reference");
+    std::fs::write(&reference, b"x").expect("write");
+    let fresh = dir.join("fresh.pixlay");
+    document().save(&fresh).expect("saves");
+    assert_eq!(
+        mode(&fresh),
+        mode(&reference),
+        "a new project does not get the umask's default"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_write_that_fails_in_the_middle_leaves_the_previous_file_byte_identical() {
+    use pixlay_core::atomic;
+    use std::io::Write as _;
+
+    // The failure an export hits when the disk fills up or an encoder breaks: the
+    // body has already written bytes and then fails. What must not happen is the
+    // previous file disappearing with them (S15c, PIX-011) — and the writer under
+    // test is the one a project save and an image export both go through.
+    let dir = temp_dir("atomic-body-failure");
+    let path = dir.join("project.pixlay");
+    document().save(&path).expect("saves");
+    let before = std::fs::read(&path).expect("read");
+
+    let failure = atomic::write_atomic(&path, |file| {
+        file.write_all(b"{ half a document")
+            .and_then(|()| Err(std::io::Error::other("the disk is full")))
+    })
+    .expect_err("the body failed");
+    match failure {
+        atomic::Failure::Body(source) => assert_eq!(source.to_string(), "the disk is full"),
+        other => panic!("the body's own error must come back, got {other:?}"),
+    }
+    assert_eq!(
+        std::fs::read(&path).expect("read"),
+        before,
+        "the previous file changed under a failed write"
+    );
+    assert_eq!(
+        temporary_files(&dir),
+        Vec::<String>::new(),
+        "the temporary file survived a failed write"
+    );
+
+    // And the same when the failure is the rename's rather than the body's: a
+    // directory sits at the target's name, so the content is written and cannot be
+    // put where it was asked to go. The directory is untouched and the temporary
+    // file is gone.
+    let blocked = dir.join("blocked.pixlay");
+    std::fs::create_dir(&blocked).expect("create directory");
+    let failure = atomic::write_atomic(&blocked, |file| file.write_all(b"content"))
+        .expect_err("a directory cannot be replaced");
+    assert!(
+        matches!(failure, atomic::Failure::Io(_)),
+        "a rename that cannot happen is the writer's own failure"
+    );
+    assert!(blocked.is_dir(), "the directory was replaced by a file");
+    assert_eq!(
+        std::fs::read_dir(&blocked).expect("read").count(),
+        0,
+        "something was written into the directory"
+    );
+    assert_eq!(
+        temporary_files(&dir),
+        Vec::<String>::new(),
+        "the temporary file survived a failed rename"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

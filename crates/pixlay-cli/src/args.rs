@@ -80,7 +80,10 @@ RENDER OPTIONS:
     --project <file>    Project to render. Paths inside it are relative to it.
     --template <name>   Render a template with no photos (see `templates`).
     --out <file>        Output file. Format comes from the extension:
-                        .png, .jpg, .jpeg. Required.
+                        .png, .jpg, .jpeg. Required. An existing file is
+                        replaced; a path that names one of the project's own
+                        photos is refused (exit 1), because a source image is
+                        never written to.
     --long-edge <n>     Export a long edge of exactly n pixels, 1..=30000.
                         Default 4000. The other edge follows the template's
                         aspect ratio, rounded half away from zero, so a square
@@ -134,7 +137,8 @@ THUMB OPTIONS:
     --px <n>            Long edge of the preview, 1..=8192. Required. The other
                         edge keeps the photo's ratio, at least 1 pixel.
     --out <file>        Preview file, .png / .jpg / .jpeg.
-                        Required (a screen-sized image).
+                        Required (a screen-sized image). An existing file is
+                        replaced; --photo itself is refused (exit 1).
 
 GESTURE OPTIONS:
     --project <file>    Project to measure a live gesture on. Required, and every
@@ -182,9 +186,9 @@ SAVE OPTIONS:
     --out <file>        Project to write, .pixlay. Required. An existing file is
                         **replaced** — that is what saving is — and the write is
                         atomic (a temporary file in the same directory, renamed
-                        over the target). Relative photo paths are rebased when
-                        the copy lands in another directory, so it still finds
-                        its photos.
+                        over the target), keeping the file's own permissions.
+                        Relative photo paths are rebased when the copy lands in
+                        another directory, so it still finds its photos.
 
 INIT OPTIONS:
     --template <name>   Template of the project to create. Required.
@@ -264,7 +268,8 @@ OUTPUT:
 
 EXIT CODES:
     0  success
-    1  usage error (unknown flag, out-of-range value, unknown template)
+    1  usage error (unknown flag, out-of-range value, unknown template, an
+       --out that names one of the project's own photos)
     2  project, decode, render or write failure, or a probe verdict of `failed`
        (the failing path or the failing check is on stderr)
 ";

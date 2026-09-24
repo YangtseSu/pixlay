@@ -434,16 +434,72 @@ impl ExportDialog {
         }
     }
 
-    /// Runs the export these rows describe and closes the dialog.
+    /// Runs the export these rows describe, or refuses to.
     ///
     /// The one path an export takes from the GUI: the window stores the form's state
     /// and starts the same background export the menu's action does, so the progress
     /// bar, the toast and the worker thread are unchanged by the dialog that asked.
+    ///
+    /// Three answers, and the dialog stays open for the first two (S15c):
+    ///
+    /// * the path names one of the document's own photos — refused with the same
+    ///   message `render` and `thumb` give, and nothing is written;
+    /// * a file is already there — asked about, because replacing a file the user
+    ///   already has is their decision (ruling 2026-09-24);
+    /// * otherwise, the export starts.
     pub fn export(&self, window: &EditorWindow) {
         let settings = self.settings();
+        match window.export_destination(&settings.path) {
+            Err(reason) => {
+                window.toast(&reason);
+            }
+            Ok(false) => self.start(window, &settings),
+            Ok(true) => self.confirm_replacement(window, settings),
+        }
+    }
+
+    /// Closes the dialog and starts the export.
+    fn start(&self, window: &EditorWindow, settings: &Settings) {
         self.dialog.close();
-        window.set_export_settings(&settings);
+        window.set_export_settings(settings);
         window.start_export(settings.path.clone());
+    }
+
+    /// Asks before an export replaces a file that is already there.
+    ///
+    /// `AdwAlertDialog` over this dialog rather than over the window, so cancelling
+    /// leaves the rows exactly as they were — the name is still there to edit — and
+    /// only *Replace* is destructive, which is what the response's appearance says.
+    fn confirm_replacement(&self, window: &EditorWindow, settings: Settings) {
+        let alert = adw::AlertDialog::new(
+            Some(&gettext("Replace the existing file?")),
+            Some(&fill(
+                gettext("{} is already there. The export replaces it."),
+                &[settings.path.display().to_string()],
+            )),
+        );
+        alert.add_response("cancel", &gettext("Cancel"));
+        alert.add_response("replace", &gettext("Replace"));
+        alert.set_response_appearance("replace", adw::ResponseAppearance::Destructive);
+        alert.set_default_response(Some("cancel"));
+        alert.set_close_response("cancel");
+        let this = self.clone();
+        let window = window.clone();
+        alert.connect_response(
+            None,
+            glib::clone!(
+                #[strong]
+                this,
+                #[strong]
+                window,
+                move |_, response| {
+                    if response == "replace" {
+                        this.start(&window, &settings);
+                    }
+                }
+            ),
+        );
+        alert.present(Some(&self.dialog));
     }
 
     /// Puts the window's own export form into the rows.

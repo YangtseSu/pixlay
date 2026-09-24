@@ -10,6 +10,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use pixlay_core::{Command as Edit, CropTransform, History, PixelSize, Project};
+use pixlay_imaging::destination::refuse_source_alias;
 use pixlay_imaging::preview::GESTURE_STEP_DEG;
 use pixlay_imaging::{Export, Format, Preview, Rgb8View, SlotBitmap, gesture_grid, icc};
 use pixlay_render::Images;
@@ -428,17 +429,33 @@ fn init_project(args: InitArgs) -> Result<u8, Failure> {
     // shipping as an unloadable file.
     doc.validate()
         .map_err(|error| Failure::Failed(error.to_string()))?;
-    if args.out.exists() {
-        return Err(Failure::Failed(format!(
-            "{} exists; init never overwrites a project",
-            args.out.display()
-        )));
-    }
     let json = doc
         .to_json()
         .map_err(|error| Failure::Failed(error.to_string()))?;
-    std::fs::write(&args.out, &json)
-        .map_err(|error| Failure::Failed(format!("{}: {error}", args.out.display())))?;
+    // Created, not looked up and then written: `create_new` is the refusal itself, so
+    // two `init`s that race leave exactly one winner rather than both seeing an absent
+    // path and one truncating the other's project — and a symbolic link at the path,
+    // dangling or not, is a file that is already there rather than a name to write
+    // through (S15c, PIX-015).
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&args.out)
+        .map_err(|error| match error.kind() {
+            std::io::ErrorKind::AlreadyExists => Failure::Failed(format!(
+                "{} exists; init never overwrites a project",
+                args.out.display()
+            )),
+            _ => Failure::Failed(format!("{}: {error}", args.out.display())),
+        })?;
+    if let Err(error) = file.write_all(json.as_bytes()) {
+        // The file is this call's own — `create_new` is what created it — so a failed
+        // write takes it away again rather than leaving a truncated project that every
+        // later `init` refuses to replace.
+        drop(file);
+        let _ = std::fs::remove_file(&args.out);
+        return Err(Failure::Failed(format!("{}: {error}", args.out.display())));
+    }
 
     let mut report = Report::new();
     report.text("status", "ok");
@@ -560,6 +577,11 @@ fn render(args: RenderArgs) -> Result<u8, Failure> {
             (pixlay_core::templates::document(&template), Vec::new())
         }
     };
+    // The output may not be one of the document's own photos: source images are
+    // read-only, and a render that wrote its pixels over one would destroy the
+    // user's photo after reading it (S15c, PIX-001). Asked before a single decode,
+    // so a refused render costs nothing and writes nothing.
+    refuse_source_alias(&args.out, &sources).map_err(|alias| Failure::Usage(alias.to_string()))?;
     // The frame flags are an override for this render, applied before the document
     // is validated: a gap that leaves a cell with nothing visible is a failure of
     // *this* run, and the error names the cell. Nothing is written back — `edit` is
@@ -839,6 +861,11 @@ fn thumb(args: ThumbArgs) -> Result<u8, Failure> {
             Format::EXTENSIONS
         ))
     })?;
+    // The output may not be the photo itself: `thumb --photo a.jpg --out a.jpg` would
+    // replace the photo with its own preview (S15c, PIX-001). One source, because
+    // this command has one.
+    refuse_source_alias(&args.out, &[Some(args.photo.clone())])
+        .map_err(|alias| Failure::Usage(alias.to_string()))?;
     let stopwatch = stats::Stopwatch::start();
     let source = pixlay_imaging::Source::decode(&args.photo)
         .map_err(|error| Failure::Failed(error.to_string()))?;

@@ -1616,6 +1616,18 @@ impl EditorWindow {
         *self.imp().export.borrow_mut() = settings.clone();
     }
 
+    /// Whether an export to `path` may start, and whether it would replace a file
+    /// that is already there.
+    ///
+    /// The form asks this before it closes or spawns anything (S15c): a path that is
+    /// one of the document's own photos is refused on the spot — the same rule
+    /// `render` and `thumb` apply to the same path, with the same message — and a file
+    /// that is already there is the user's question to answer, not the writer's.
+    pub fn export_destination(&self, path: &Path) -> Result<bool, String> {
+        let sources = self.imp().editor.borrow().sources();
+        export::destination(path, &sources.paths)
+    }
+
     /// Exports on a worker thread, with the progress bar in the bottom bar.
     pub fn start_export(&self, path: PathBuf) {
         if self.imp().exporting.replace(true) {

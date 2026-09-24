@@ -25,7 +25,8 @@
 //!   transparent and `pixlay-render` sees only opaque pixels.
 //! * **Whether it is the user's file**: untouched. Every stage reads; nothing
 //!   here opens a source for writing, ever (`AGENTS.md`, "Source images are
-//!   read-only").
+//!   read-only") — and the export destination is checked against the document's own
+//!   photos before anything is written ([`destination`]).
 //!
 //! # The pipeline, in the frozen order
 //!
@@ -49,6 +50,7 @@
 //! — and because both the CLI and the GUI export through it.
 
 pub mod decode;
+pub mod destination;
 mod driver;
 pub mod encode;
 pub mod exif;

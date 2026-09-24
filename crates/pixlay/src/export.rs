@@ -9,11 +9,19 @@
 //!
 //! Only two things cross the thread boundary: a [`Progress`] value and the final
 //! [`Result`]. The caller turns both into a `GtkProgressBar` update and a toast.
+//!
+//! **Two questions are asked before an export starts** (S15c): whether the path may
+//! be written at all — it may not be one of the document's own photos, the rule
+//! `render` and `thumb` apply to the same path ([`destination`]) — and whether the
+//! form has to confirm a file that is already there. The window asks the first one
+//! so a refusal does not have to travel through a worker, and [`run`] asks it again
+//! because it is the writer, so no caller can reach the file without it.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use pixlay_core::{CollageDoc, PixelSize};
+use pixlay_imaging::destination::refuse_source_alias;
 use pixlay_imaging::encode::{Export, Format, write};
 use pixlay_imaging::{Rgb8View, Source, slot_bitmap};
 use pixlay_render::{Bitmap, Images, render_rgb8};
@@ -82,6 +90,21 @@ pub struct Report {
     pub ms: u128,
 }
 
+/// Whether `path` may be written, and whether a file is already there.
+///
+/// The two questions the export form asks before it does anything: `Err` is the
+/// reason to show and the export must not start, `Ok(true)` means the file exists and
+/// replacing it is the user's to confirm (ruling 2026-09-24: an existing file is
+/// confirmed before it is replaced).
+///
+/// The alias rule is `pixlay_imaging::destination`'s — the same one `render` and
+/// `thumb` apply to the same path — so the GUI's refusal and the CLI's are one rule
+/// with one message.
+pub fn destination(path: &Path, sources: &[Option<PathBuf>]) -> Result<bool, String> {
+    refuse_source_alias(path, sources).map_err(|alias| alias.to_string())?;
+    Ok(path.exists())
+}
+
 /// Renders and writes one export. Synchronous: the background and the test paths
 /// differ only in which thread calls it.
 pub fn run(
@@ -90,6 +113,10 @@ pub fn run(
     settings: &Settings,
     progress: &(dyn Fn(Progress) + Sync),
 ) -> Result<Report, String> {
+    // The writer's own guard, not only the form's: an export may never be the way one
+    // of the document's photos is lost, and this is the function that reaches the file
+    // (S15c, PIX-001).
+    refuse_source_alias(&settings.path, sources).map_err(|alias| alias.to_string())?;
     let started = Instant::now();
     let canvas_px = grid(doc, settings)?;
 

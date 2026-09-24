@@ -427,3 +427,150 @@ fn the_format_follows_the_extension() {
         "the usage message lists what this build writes"
     );
 }
+
+#[test]
+fn a_jpeg_past_its_own_size_fields_is_refused_before_anything_is_written() {
+    // JPEG records its width and height in 16-bit fields, so 65535 px is the widest
+    // grid the format can name. A larger one used to be truncated into those fields
+    // and written as a file whose header disagreed with its pixels (S15c, PIX-024);
+    // it is now refused, and refused *before* the file exists.
+    let dir = out_dir("jpeg-boundary");
+    let pixels = vec![0u8; 65535 * 3];
+    let export = |width: i32, height: i32| Export {
+        format: Format::Jpeg,
+        image: Rgb8View {
+            width,
+            height,
+            data: &pixels,
+        },
+    };
+
+    // The boundary itself is a file: one pixel column of 65535 rows, small enough to
+    // write in a test.
+    let path = dir.join("widest.jpg");
+    let bytes = pixlay_imaging::encode::write(&path, &export(1, 65535)).expect("65535 fits");
+    assert!(bytes > 0);
+    let written = std::fs::read(&path).expect("read back");
+    let (_, frame) = jpeg_segments(&written)
+        .into_iter()
+        .find(|(marker, _)| *marker == 0xc0)
+        .expect("a baseline SOF0");
+    assert_eq!(
+        (i32::from(be16(frame, 1)), i32::from(be16(frame, 3))),
+        (65535, 1),
+        "the file records the size it was given"
+    );
+
+    for (width, height) in [(65536, 1), (1, 65536), (70000, 1)] {
+        let refused = dir.join(format!("refused-{width}x{height}.jpg"));
+        let error = pixlay_imaging::encode::write(&refused, &export(width, height))
+            .expect_err("past the format's fields");
+        assert!(error.to_string().contains("65535"), "{error}");
+        assert!(
+            !refused.exists(),
+            "{width}x{height} was refused but a file was created anyway"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_export_replaces_the_file_rather_than_rewriting_it() {
+    // The write goes through a temporary file and one rename, which is what makes a
+    // failure in the middle harmless (S15c, PIX-011). The visible consequence is that
+    // the target is a *new* file: another name that pointed at the old one — a hard
+    // link — still has the old bytes, where rewriting the target in place would have
+    // changed both.
+    let dir = out_dir("replace");
+    let path = dir.join("export.jpg");
+    let first = encode(&dir, "export.jpg", Format::Jpeg);
+
+    let other = dir.join("linked.jpg");
+    std::fs::hard_link(&path, &other).expect("hard link");
+    assert_eq!(std::fs::read(&other).expect("read"), first);
+
+    // The second export carries different pixels, so "the file was replaced" is a
+    // claim about the bytes rather than about the name.
+    let mut inverted = gradient();
+    for byte in &mut inverted {
+        *byte = 255 - *byte;
+    }
+    let export = Export {
+        format: Format::Jpeg,
+        image: Rgb8View {
+            width: WIDTH,
+            height: HEIGHT,
+            data: &inverted,
+        },
+    };
+    let bytes = pixlay_imaging::encode::write(&path, &export).expect("the second export");
+    let second = std::fs::read(&path).expect("read back");
+    assert_eq!(bytes, second.len() as u64);
+    assert_ne!(second, first, "the second export is a different file");
+    assert_eq!(
+        std::fs::read(&other).expect("read"),
+        first,
+        "rewriting the target changed a file that merely pointed at it"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_failed_export_leaves_the_previous_file_and_no_litter() {
+    // Every failure mode this writer has, against a target that is already there:
+    // a refusal (the buffer does not match the size it claims), and a write that
+    // cannot be completed at all (a directory sits at the target's name, so the
+    // pixels are encoded and the rename cannot happen).
+    let dir = out_dir("failed-export");
+    let path = dir.join("export.png");
+    let first = encode(&dir, "export.png", Format::Png);
+
+    let short = gradient();
+    let mismatched = Export {
+        format: Format::Png,
+        image: Rgb8View {
+            width: WIDTH,
+            height: HEIGHT,
+            data: &short[..short.len() - 3],
+        },
+    };
+    let error = pixlay_imaging::encode::write(&path, &mismatched).expect_err("refused");
+    assert!(error.to_string().contains("the buffer holds"), "{error}");
+    assert_eq!(
+        std::fs::read(&path).expect("read"),
+        first,
+        "a refused export changed the file that was already there"
+    );
+
+    let blocked = dir.join("blocked.png");
+    std::fs::create_dir(&blocked).expect("create directory");
+    let pixels = gradient();
+    let export = Export {
+        format: Format::Png,
+        image: Rgb8View {
+            width: WIDTH,
+            height: HEIGHT,
+            data: &pixels,
+        },
+    };
+    let error = pixlay_imaging::encode::write(&blocked, &export)
+        .expect_err("a directory cannot be replaced");
+    assert!(
+        error.to_string().contains("blocked.png"),
+        "the error names the file that was asked for, not the temporary one: {error}"
+    );
+    assert!(blocked.is_dir(), "the directory was replaced by a file");
+    let litter: Vec<String> = std::fs::read_dir(&dir)
+        .expect("read directory")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.ends_with(".tmp"))
+        .collect();
+    assert_eq!(litter, Vec::<String>::new(), "a failed export left litter");
+    assert_eq!(
+        std::fs::read(&path).expect("read"),
+        first,
+        "a failed export changed another file in the same directory"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

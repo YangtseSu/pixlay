@@ -30,12 +30,24 @@
 //! JPEG quality is 90, the S0/S4 baseline. Chroma subsampling is **4:4:4**, fixed
 //! rather than chosen: `AGENTS.md` fixes libjpeg-turbo 4:4:4 as the product's
 //! sampling, and S12c removed the `--chroma` flag that made it a request.
+//!
+//! # The write itself (S15c)
+//!
+//! Everything above is about what a *successful* export contains. Two rules are about
+//! whether it happens at all: the destination may not be one of the document's own
+//! photos ([`crate::destination`], checked by the caller before anything is decoded),
+//! and the pixels reach the file through [`pixlay_core::atomic`] — a temporary file
+//! beside the target, one rename — so a failure in the middle of encoding leaves the
+//! export that was already there exactly as it was (PIX-011). The JPEG's own grid is
+//! refused past 65535 px on either edge before the temporary file exists, because the
+//! format's size fields are 16 bits (PIX-024).
 
 use std::borrow::Cow;
 use std::fs::File;
-use std::io::{BufWriter, Write};
+use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 
+use pixlay_core::atomic;
 use thiserror::Error;
 
 use crate::Rgb8View;
@@ -85,42 +97,51 @@ pub struct Export<'a> {
 }
 
 /// Writes `export` to `path` in one pass and returns the number of bytes written.
+///
+/// The size is validated against the format's own limits before anything is
+/// created, and the pixels then go to a temporary file that is renamed over `path`:
+/// an export that fails in the middle — a full disk, a broken encoder, a kill —
+/// leaves the file that was already there exactly as it was (S15c, PIX-011).
+/// Whether `path` may be written at all is the caller's question, and the answer for
+/// a source image is [`crate::destination::refuse_source_alias`].
 pub fn write(path: &Path, export: &Export<'_>) -> Result<u64, EncodeError> {
     let (width, height) = (export.image.width, export.image.height);
     if width <= 0 || height <= 0 {
         return Err(EncodeError::Empty { width, height });
     }
-    let expected = width as usize * height as usize * 3;
-    if export.image.data.len() != expected {
+    // JPEG's own size fields hold 16 bits, so a grid wider or taller than 65535 px
+    // has no representation in the file it would be written to (S15c, PIX-024). It
+    // is refused here, before the temporary file exists, rather than truncated on
+    // the way into the encoder. PNG's fields are 32-bit, so its only bound is the
+    // buffer length below.
+    if export.format == Format::Jpeg
+        && (u16::try_from(width).is_err() || u16::try_from(height).is_err())
+    {
+        return Err(EncodeError::JpegSize { width, height });
+    }
+    // 64-bit arithmetic: `width * height * 3` in `i32` overflows for the largest
+    // grids a caller may legally ask about, and the answer would be a panic in a
+    // debug build.
+    let expected = width as u64 * height as u64 * 3;
+    if expected != export.image.data.len() as u64 {
         return Err(EncodeError::BufferSize {
             width,
             height,
+            expected,
             found: export.image.data.len(),
         });
     }
-    let file = File::create(path).map_err(|error| EncodeError::Io {
-        path: path.to_path_buf(),
-        source: error,
-    })?;
-    // Buffered for the formats that write in many small pieces, flushed by hand
-    // because `BufWriter`'s own drop swallows the error.
-    let mut buffered = BufWriter::new(file);
-    let result = match export.format {
-        Format::Png => write_png(&mut buffered, export),
-        Format::Jpeg => write_jpeg(&mut buffered, export),
-    };
-    result.map_err(|error| error.at(path))?;
-    buffered.flush().map_err(|error| EncodeError::Io {
-        path: path.to_path_buf(),
-        source: error,
-    })?;
-    let bytes = std::fs::metadata(path)
-        .map_err(|error| EncodeError::Io {
+    match atomic::write_atomic(path, |writer| match export.format {
+        Format::Png => write_png(writer, export),
+        Format::Jpeg => write_jpeg(writer, export),
+    }) {
+        Ok(bytes) => Ok(bytes),
+        Err(atomic::Failure::Io(source)) => Err(EncodeError::Io {
             path: path.to_path_buf(),
-            source: error,
-        })?
-        .len();
-    Ok(bytes)
+            source,
+        }),
+        Err(atomic::Failure::Body(failure)) => Err(failure.at(path)),
+    }
 }
 
 fn write_png(writer: &mut BufWriter<File>, export: &Export<'_>) -> Result<(), Failure> {
@@ -151,6 +172,9 @@ fn write_jpeg(writer: &mut BufWriter<File>, export: &Export<'_>) -> Result<(), F
     encoder
         .add_icc_profile(icc::srgb_profile())
         .map_err(Failure::Jpeg)?;
+    // The pair fits by construction: `write` refuses a JPEG past 65535 px on either
+    // edge before the temporary file exists, because these are the format's own
+    // 16-bit fields (PIX-024).
     encoder
         .encode(
             export.image.data,
@@ -194,12 +218,20 @@ pub enum EncodeError {
     #[error("image is {width}x{height}, which is not a size to encode")]
     Empty { width: i32, height: i32 },
 
-    #[error("{width}x{height} needs {} bytes, the buffer holds {found}", width * height * 3)]
+    #[error("{width}x{height} needs {expected} bytes, the buffer holds {found}")]
     BufferSize {
         width: i32,
         height: i32,
+        /// `width * height * 3` in 64-bit arithmetic, so the number in this message
+        /// is the one the check compared against even for the largest grids.
+        expected: u64,
         found: usize,
     },
+
+    /// JPEG's size fields are 16 bits wide, so a larger grid has no representation
+    /// in the file (S15c, PIX-024). Refused before anything is created.
+    #[error("{width}x{height} is too large for JPEG, whose size fields hold 65535 px")]
+    JpegSize { width: i32, height: i32 },
 
     #[error("{path}: cannot write PNG: {source}")]
     Png {

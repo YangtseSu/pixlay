@@ -1,9 +1,11 @@
 //! The document itself, and the project file around it.
 
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::atomic;
 use crate::crop::{CropFit, CropTransform};
 use crate::error::CoreError;
 use crate::frame::Frame;
@@ -246,19 +248,26 @@ impl CollageDoc {
 
     /// Writes the document to `path`, atomically (S6.5).
     ///
-    /// The JSON goes to a temporary file *in the same directory* — `rename` is
-    /// only atomic within one filesystem — is flushed to disk, and is then
-    /// renamed over `path`. A crash, a full disk or a kill in the middle
-    /// therefore leaves either the previous file or the new one, never half of
-    /// either; this is the one place a `.pixlay` the user changed is written
-    /// (docs/CONTRACT.md §6).
-    ///
     /// The document is validated first: a file this build writes has to be a file
     /// this build can read back, and `validate` is the only thing that knows.
+    ///
+    /// The write is [`atomic::write_atomic`]'s: the JSON goes to a temporary file in
+    /// the target's own directory and is renamed over it, so a crash, a full disk or
+    /// a kill leaves either the previous file or the new one, never half of either.
+    /// A file that is already there keeps its mode, so a project saved while it is
+    /// readable only by its owner does not come back world-readable because it was
+    /// saved again (S15c, PIX-016). This is the one place a `.pixlay` the user
+    /// changed is written (`docs/CONTRACT.md` §6).
     pub fn save(&self, path: &Path) -> Result<(), CoreError> {
         self.validate()?;
         let json = self.to_json()?;
-        write_atomic(path, json.as_bytes())
+        atomic::write_atomic(path, |file| file.write_all(json.as_bytes())).map_err(|failure| {
+            CoreError::Io {
+                path: path.to_path_buf(),
+                source: failure.into_io(),
+            }
+        })?;
+        Ok(())
     }
 }
 
@@ -269,47 +278,6 @@ fn project_dir(path: &Path) -> &Path {
     path.parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."))
-}
-
-/// Writes `bytes` to `path` through a temporary file and a rename.
-///
-/// Errors name `path`, the file the caller asked for; the temporary file is an
-/// implementation detail, and a message that named it would send the user looking
-/// for something they never asked to write. A failed write removes it.
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), CoreError> {
-    use std::io::Write as _;
-
-    let dir = project_dir(path);
-    let name = path
-        .file_name()
-        .unwrap_or_else(|| std::ffi::OsStr::new("project"));
-    // Unique per process, and a dotfile inside the target's own directory: two
-    // saves cannot collide, and the rename cannot land on another filesystem.
-    // Assembled as an `OsString` so a path that is not valid UTF-8 stays exact.
-    let mut temp_name = std::ffi::OsString::from(".");
-    temp_name.push(name);
-    temp_name.push(format!(".{}.tmp", std::process::id()));
-    let temp = dir.join(temp_name);
-    let failed = |source: std::io::Error| CoreError::Io {
-        path: path.to_path_buf(),
-        source,
-    };
-
-    let mut file = std::fs::File::create(&temp).map_err(failed)?;
-    // `sync_all` before the rename: without it a crash can leave the new name
-    // pointing at a file whose bytes never reached the disk, which is the one way
-    // an atomic rename can still lose a document.
-    let written = file.write_all(bytes).and_then(|()| file.sync_all());
-    drop(file);
-    if let Err(source) = written {
-        let _ = std::fs::remove_file(&temp);
-        return Err(failed(source));
-    }
-    std::fs::rename(&temp, path).map_err(|source| {
-        // The old file is untouched; only the temporary one is litter.
-        let _ = std::fs::remove_file(&temp);
-        failed(source)
-    })
 }
 
 /// A `.pixlay` that has been read, parsed and validated, plus where it came from.

@@ -26,6 +26,9 @@
 //! Template generation (S2), the framing clamp (S3) and command history, project
 //! writing and hit testing (S6.5) build on these types.
 
+/// Writing a file that may already exist: a temporary file, one rename, and the
+/// previous file intact unless the whole write succeeded.
+pub mod atomic;
 mod canvas;
 mod crop;
 mod doc;

@@ -4136,3 +4136,296 @@ fn gesture_keeps_the_usage_and_locale_rules() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The photo `write_project` put in cell 0, as the path the CLI is asked to write over.
+fn project_photo(dir: &Path) -> PathBuf {
+    dir.join("photo.png")
+}
+
+#[test]
+fn an_output_that_is_one_of_the_projects_photos_is_refused() {
+    // `AGENTS.md`: source images are read-only. `render --out <a photo of this very
+    // project>` used to decode the photo and then write the render over it, which is
+    // irreversible user-data loss (S15c, PIX-001). Every spelling of "that same file"
+    // is refused, and the refusal is a usage error: nothing is rendered, nothing is
+    // written, and the photo is byte-identical afterwards.
+    let dir = out_dir("render-alias");
+    let project = write_project(&dir, "aliased.pixlay", true);
+    let photo = project_photo(&dir);
+    let original = std::fs::read(&photo).expect("read the photo");
+
+    // A second directory, so `..` has somewhere to come back from.
+    std::fs::create_dir(dir.join("nested")).expect("create nested");
+    let literal = photo.clone();
+    let dotdot = dir.join("nested").join("..").join("photo.png");
+    let link = dir.join("link.png");
+    std::os::unix::fs::symlink(&photo, &link).expect("symlink to the photo");
+    let hard = dir.join("hard.png");
+    std::fs::hard_link(&photo, &hard).expect("hard link to the photo");
+
+    for (name, out) in [
+        ("literal", literal),
+        ("dot-dot", dotdot),
+        ("symlink", link),
+        ("hard link", hard),
+    ] {
+        let refused = run(&[
+            "render",
+            "--project",
+            project.to_str().unwrap(),
+            "--long-edge",
+            "400",
+            "--out",
+            out.to_str().unwrap(),
+        ]);
+        assert_eq!(code(&refused), 1, "{name}: {}", stderr(&refused));
+        assert!(
+            stdout(&refused).is_empty(),
+            "{name}: stdout must stay empty"
+        );
+        assert!(
+            stderr(&refused).contains("refusing to write"),
+            "{name}: {}",
+            stderr(&refused)
+        );
+        assert!(
+            stderr(&refused).contains("photo.png"),
+            "{name}: the message names the photo: {}",
+            stderr(&refused)
+        );
+        assert_eq!(
+            std::fs::read(&photo).expect("read the photo"),
+            original,
+            "{name}: the photo changed"
+        );
+    }
+
+    // A render that fails for another reason does not touch its output either: the
+    // target keeps what it had until the whole render has succeeded (S15c, PIX-011).
+    let other = dir.join("other.png");
+    std::fs::write(&other, b"not a picture yet").expect("write");
+    let doc = Project::load(&project).expect("loads");
+    let mut doc = doc.doc().clone();
+    doc.cells[0].source = Some(PathBuf::from("gone.png"));
+    std::fs::write(&project, doc.to_json().expect("serializes")).expect("write");
+    let failed = run(&[
+        "render",
+        "--project",
+        project.to_str().unwrap(),
+        "--long-edge",
+        "400",
+        "--out",
+        other.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&failed), 2, "{}", stderr(&failed));
+    assert!(
+        stderr(&failed).contains("gone.png"),
+        "the missing photo is what failed: {}",
+        stderr(&failed)
+    );
+    assert_eq!(
+        std::fs::read(&other).expect("read"),
+        b"not a picture yet",
+        "a failed render replaced the file it was writing"
+    );
+
+    // With the photo back, the same command succeeds and replaces the target — the
+    // alias rule is about the photos alone, not about "any output that exists".
+    std::fs::write(&photo, &original).expect("restore the photo");
+    doc.cells[0].source = Some(PathBuf::from("photo.png"));
+    std::fs::write(&project, doc.to_json().expect("serializes")).expect("write");
+    let rendered = run(&[
+        "render",
+        "--project",
+        project.to_str().unwrap(),
+        "--long-edge",
+        "400",
+        "--out",
+        other.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&rendered), 0, "{}", stderr(&rendered));
+    assert_ne!(std::fs::read(&other).expect("read"), b"not a picture yet");
+    assert_eq!(field(&rendered, "out_w"), "400");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn thumb_refuses_to_write_over_the_photo_it_reads() {
+    let dir = out_dir("thumb-alias");
+    let photo = dir.join("photo.png");
+    std::fs::write(&photo, include_bytes!("fixtures/photos/square.png")).expect("write photo");
+    let original = std::fs::read(&photo).expect("read");
+
+    for out in [photo.clone(), {
+        let link = dir.join("link.png");
+        std::os::unix::fs::symlink(&photo, &link).expect("symlink");
+        link
+    }] {
+        let refused = run(&[
+            "thumb",
+            "--photo",
+            photo.to_str().unwrap(),
+            "--px",
+            "128",
+            "--out",
+            out.to_str().unwrap(),
+        ]);
+        assert_eq!(code(&refused), 1, "{}", stderr(&refused));
+        assert!(stdout(&refused).is_empty());
+        assert!(
+            stderr(&refused).contains("refusing to write"),
+            "{}",
+            stderr(&refused)
+        );
+        assert_eq!(std::fs::read(&photo).expect("read"), original);
+    }
+
+    // The spelling rule is the paths' and not the filesystem's: a photo that is not
+    // there is still refused as an output rather than reported as a photo that cannot
+    // be decoded, because the check comes before the decode (S15c).
+    let absent = dir.join("absent.png");
+    let refused = run(&[
+        "thumb",
+        "--photo",
+        absent.to_str().unwrap(),
+        "--px",
+        "128",
+        "--out",
+        absent.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&refused), 1, "{}", stderr(&refused));
+    assert!(
+        stderr(&refused).contains("refusing to write"),
+        "{}",
+        stderr(&refused)
+    );
+
+    // The same command to a path of its own writes a preview, as it always did.
+    let preview = dir.join("preview.png");
+    let ok = run(&[
+        "thumb",
+        "--photo",
+        photo.to_str().unwrap(),
+        "--px",
+        "128",
+        "--out",
+        preview.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&ok), 0, "{}", stderr(&ok));
+    assert_eq!(field(&ok, "out_w"), "128");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn two_concurrent_inits_leave_exactly_one_winner() {
+    // `init` never overwrites a project, and the refusal is the creation itself:
+    // `create_new` makes "is it there" and "make it" one operation, so two processes
+    // racing leave one project rather than both seeing an absent path and one
+    // truncating the other's (S15c, PIX-015).
+    let dir = out_dir("init-race");
+    let path = dir.join("raced.pixlay");
+    let spawn = || {
+        Command::new(BIN)
+            .args([
+                "init",
+                "--template",
+                "mosaic-8-s14",
+                "--out",
+                path.to_str().unwrap(),
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("LANG", "C")
+            .env("LC_ALL", "C")
+            .env("HOME", "/nonexistent")
+            .spawn()
+            .expect("spawn pixlay-render")
+    };
+    let children = [spawn(), spawn()];
+    let outcomes: Vec<Output> = children
+        .into_iter()
+        .map(|child| child.wait_with_output().expect("wait"))
+        .collect();
+    let codes: Vec<i32> = outcomes.iter().map(code).collect();
+    assert_eq!(
+        codes.iter().filter(|code| **code == 0).count(),
+        1,
+        "exactly one init must win, got {codes:?}: {}",
+        outcomes.iter().map(stderr).collect::<Vec<_>>().join(" | ")
+    );
+    let loser = outcomes
+        .iter()
+        .find(|outcome| code(outcome) != 0)
+        .expect("one of them lost");
+    assert_eq!(code(loser), 2);
+    assert!(
+        stderr(loser).contains("never overwrites"),
+        "{}",
+        stderr(loser)
+    );
+
+    // The winner's file is a whole project, not a truncated one.
+    let doc = CollageDoc::load(&path).expect("the winner's project loads");
+    assert_eq!(doc.template.name, "mosaic-8-s14");
+    assert_eq!(doc.cells.len(), doc.template.slots.len());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn init_refuses_a_symbolic_link_at_the_output_path() {
+    // A link at `--out` is a path that is already there: `create_new` refuses it
+    // whether or not its target exists, so a dangling link cannot be followed into a
+    // file `init` was never asked to write (S15c, PIX-015).
+    let dir = out_dir("init-symlink");
+    let real = dir.join("real.pixlay");
+    let created = run(&[
+        "init",
+        "--template",
+        "mosaic-8-s14",
+        "--out",
+        real.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&created), 0, "{}", stderr(&created));
+    let before = std::fs::read(&real).expect("read");
+
+    let link = dir.join("link.pixlay");
+    std::os::unix::fs::symlink(&real, &link).expect("symlink");
+    let refused = run(&[
+        "init",
+        "--template",
+        "grid-4-2x2",
+        "--out",
+        link.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&refused), 2, "{}", stderr(&refused));
+    assert!(
+        stderr(&refused).contains("never overwrites"),
+        "{}",
+        stderr(&refused)
+    );
+    assert_eq!(
+        std::fs::read(&real).expect("read"),
+        before,
+        "init wrote through the link into the project it points at"
+    );
+
+    let dangling = dir.join("dangling.pixlay");
+    let nowhere = dir.join("nowhere.pixlay");
+    std::os::unix::fs::symlink(&nowhere, &dangling).expect("symlink");
+    let refused = run(&[
+        "init",
+        "--template",
+        "mosaic-8-s14",
+        "--out",
+        dangling.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&refused), 2, "{}", stderr(&refused));
+    assert!(
+        !nowhere.exists(),
+        "init followed a dangling link and created its target"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
