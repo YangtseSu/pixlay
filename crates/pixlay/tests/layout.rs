@@ -8,7 +8,7 @@
 //!   the same pixel size (the RMSE threshold) — the gallery is not a second
 //!   renderer;
 //! * a layout change and a LIFO removal keep every surviving cell's photo and
-//!   framing, and the add-back returns the removed cell to its own slot;
+//!   framing, and `+` adds one empty cell back — a layout edit, not a restore;
 //! * the whole band costs one decode per photo, never one per candidate;
 //! * the CLI's new flags land on the same document the window's own operations
 //!   produce.

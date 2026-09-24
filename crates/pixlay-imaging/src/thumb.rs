@@ -1,7 +1,8 @@
 //! Photo previews: one whole photo, resampled to a size a picker can hold.
 //!
-//! The picker's grid (S13) and its fit-and-zoom preview both show *the photo*,
-//! and `AGENTS.md`'s rule for a visual claim applies to them too: the pixels the
+//! The picker's grid (S13) and its preview both show *the photo* — the preview is
+//! a `Contain` fit, with no zoom (ruling 2, `docs/CONTRACT.md` §9) — and
+//! `AGENTS.md`'s rule for a visual claim applies to them too: the pixels the
 //! GUI puts on screen have to be a machine-checkable number somewhere, so this is
 //! the CLI's `thumb` as well as the widget's texture (`pixlay-render thumb`, and
 //! S13 asserts the two are the same picture).

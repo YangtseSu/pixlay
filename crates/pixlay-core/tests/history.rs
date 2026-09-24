@@ -518,10 +518,8 @@ fn a_history_refuses_a_document_that_is_not_valid() {
 fn a_template_change_keeps_the_photos_it_can_and_never_leaves_a_dangling_slot() {
     // S7's command. The template picker is why it exists: a user who has placed
     // photos must be able to try another layout without starting over, so the
-    // cells that still exist keep what they hold, and a text layer that named a
-    // slot the new template does not have keeps its text and loses only the
-    // reference (the alternative — dropping the layer — deletes a user's
-    // watermark, and keeping the index would make the document invalid).
+    // cells that still exist keep what they hold and a smaller template drops the
+    // tail — one cell per slot, so the result stays valid.
     let mut history = History::new(document()).expect("a valid document");
     for (slot, name) in [(0usize, "photos/a.jpg"), (4, "photos/b.png")] {
         history

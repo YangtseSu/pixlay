@@ -66,6 +66,22 @@ pub const SHORTCUT_SECTIONS: &[(&str, &[&str])] = &[
     ("Editing", &["win.undo", "win.redo", "win.reset-framing"]),
 ];
 
+/// What a shortcut section is called in the dialog.
+///
+/// A `match` on the section's own name, for the reason [`shortcut_title`] gives:
+/// the names in [`SHORTCUT_SECTIONS`] are data, and `gettext` on a variable is a
+/// call no extraction pass can see — every section would keep its English heading
+/// in every language while the freshness check stayed green (PIX-026, S15i).
+pub fn shortcut_section_title(section: &str) -> String {
+    match section {
+        "General" => gettext("General"),
+        "Collage" => gettext("Collage"),
+        "Photos" => gettext("Photos"),
+        "Editing" => gettext("Editing"),
+        _ => String::new(),
+    }
+}
+
 /// What a shortcut is called in the dialog.
 ///
 /// A `match` on the action rather than a table of `(action, title)` pairs,
@@ -196,7 +212,7 @@ fn add_action(app: &adw::Application, name: &str, run: impl Fn(&adw::Application
 pub fn shortcuts_dialog() -> adw::ShortcutsDialog {
     let dialog = adw::ShortcutsDialog::new();
     for (section, actions) in SHORTCUT_SECTIONS {
-        let group = adw::ShortcutsSection::new(Some(&gettext(*section)));
+        let group = adw::ShortcutsSection::new(Some(&shortcut_section_title(section)));
         for action in *actions {
             let accelerator = ACCELERATORS
                 .iter()

@@ -220,7 +220,7 @@ Images                            // slot → Bitmap; absent = that cell is left
   so at any `scale` the band sizes sum to exactly the whole image. It previously partitioned by canvas rows, rounding each band on its own,
   and at 72dpi/scale=0.3 three bands totaled 759 rows while the whole image was 758 rows — `round` is not additive, and this could only be fixed this way.
   Measured, the whole image vs the three-band stitching has RMSE 0.033 (scale 1.0; see below), and scale 0.1/0.3/0.5 was measured too.
-  **Banding is a genuinely usable memory-saving measure**: A0 landscape 10 slots @300dpi is 1470 MB for the whole image → 597 MB for 16 bands (see §8).
+  **Banding is a genuinely usable memory-saving measure**: A0 landscape at 300dpi is 1470 MB for the whole image → 597 MB for 16 bands (see §8; measured on the ten-slot strip that shipped at the time, the library's ceiling having been nine since S12c).
 ### 4.1 The image pipeline (S4): what arrives at `draw`
 
 `AGENTS.md`: "All resampling belongs upstream; the canvas only blits and clips."
@@ -238,7 +238,16 @@ decode (upright, sRGB, straight, at the file's own depth)
 **Colour.** A source carrying its own ICC profile is converted to sRGB by the
 loader; a source without one is interpreted as sRGB. Output is always sRGB, and
 no colour code is ours (no `lcms2`): the conversion is the loader's, measured
-against ImageMagick's. Source alpha is preserved through the resample
+against ImageMagick's. **That is the whole rule, and it is narrower than a file
+can be** (measured, S15i): a source that declares BT.2020 primaries with the PQ
+transfer function through CICP alone, and carries no profile, decodes to its own
+code values — no PQ decode, no gamut matrix — and a profile whose bytes are not a
+profile is ignored the same way rather than refusing the file. Measured
+2026-09-25 through this decoder against an independent ffmpeg/zimg BT.2020+PQ →
+sRGB conversion: the neutral patches read their code values (`0x80` → 128) where
+that conversion reads 24, and the whole render is **RMSE 0.239919** of full scale
+away from it. Both are this boundary's documented limitation, and
+`crates/pixlay-imaging/tests/decode.rs` is its canary. Source alpha is preserved through the resample
 (premultiplied in linear light, so a transparent neighbourhood cannot bleed into
 an opaque pixel) and flattened onto white at the end, which is the same rule as
 §4's "composite onto opaque white".
@@ -251,8 +260,12 @@ the piecewise transfer function, the Bradford adaptation into the D50 profile
 connection space — rather than shipped as a blob, because v1 pulls in no colour
 library to generate or validate one. The shape is ICC v4 (`mntr` / `RGB ` / `XYZ `,
 `para` transfer curves, `chad`), the shape lcms2 writes, and it is deterministic:
-the creation date and the profile id are zero, so the same document yields the
-same bytes. Measured against the sRGB profile committed in a fixture (lcms2's, via
+the profile id is zero and the creation date is the fixed constant `CREATED`, so
+the same document yields the same bytes. The date is a real one rather than a
+zeroed field (S15i, PIX-025): ICC 1:2010 §7.2.8 requires the header to record the
+profile's creation time and §4.2 defines month as 1..=12 and day as 1..=31, so
+zero is a date a strict validator rejects — the sentinel role belongs to the
+profile id alone. Measured against the sRGB profile committed in a fixture (lcms2's, via
 ImageMagick): the colorants agree to 2.2e-4, the curve parameters to one unit in
 the last place, and converting an export from this profile to that one moves the
 pixels by 0.0015/255 (§8, "S6").
@@ -279,10 +292,11 @@ reduction at all).
 
 `Σ dst_px = O(output pixels)`: a bitmap holds the part of the photo the slot can
 show, not the whole displayed photo. That is not an optimization but a
-requirement — a slot in the ten-column strip needs its photo magnified 6x, so
-handing over the whole displayed photo would allocate 3.33 GB of bitmaps for a
-110.9 MP canvas **on top of** the 443 MB output surface, where the region crop
-measures 1182 MB peak for the whole render (§8). `decoding is one source at a
+requirement — a narrow pane magnifies its photo several times over (6x in the
+ten-column strip this was measured on, retired by S12c), so handing over the whole
+displayed photo would allocate 3.33 GB of bitmaps for a 110.9 MP canvas **on top
+of** the 443 MB output surface, where the region crop measures 1182 MB peak for
+the whole render (§8). `decoding is one source at a
 time` follows from the same table: `N` concurrent slots need
 `N × source + Σ bitmaps + output ≤ budget`.
 
@@ -404,14 +418,14 @@ comparable, and `--quality` was deliberately not added — a knob nobody tests b
 | unknown template | — | usage error (exit 1), stderr lists the names this build knows |
 | content | the whole library in library order (by slot count) | a photo-free project at the template's aspect, written by `CollageDoc::to_json` and loadable by `Project::load`; **with `--photo` the arguments fill the cells in order** (below) |
 
-**S9's two subcommands are the library's machine surface** — stages 1–2 of the main path, "browse a folder" and "show me this photo" — plus the extension of `init` that turns a selection into a document. The picker's grid and its fit-and-zoom preview call the same two pieces of code, so what the GUI shows has a number behind it.
+**S9's two subcommands are the library's machine surface** — stages 1–2 of the main path, "browse a folder" and "show me this photo" — plus the extension of `init` that turns a selection into a document. The picker's grid and its `Contain`-fitted preview call the same two pieces of code, so what the GUI shows has a number behind it.
 
 | Item | `scan` | `thumb` |
 |---|---|---|
 | shape | `dir`, `recursive`, `count`, `failed`, and one `file.<i>` row per photo: `path`, `status`, and either `mime` / `width` / `height` / `date` / `mtime`, or `reason`. `dir` and every `file.<i>.path` are **byte paths** — the path's own OS bytes, escaped by the rule above — so a filename with a newline cannot forge a line and a name that is not UTF-8 survives instead of becoming U+FFFD (S15h, PIX-018) | `format`, `mime`, `src_w`, `src_h`, `px`, `out_w`, `out_h`, `bytes` |
 | what it is for | what a picker needs from a folder, and the key S12's decode cache invalidates on: `mtime`, whole seconds since the Unix epoch | the picker's expensive half — decode plus resample to a tile's size — as a CLI number; `--stats` is the budget number S12's decisions are measured against |
 | size | `height`/`width` are the size **after EXIF rotation** (`ImageDetails`' early dimensions are a hint and are *not* post-rotation, which is why a full decode happens), so `image` and `scan` cannot disagree about a file | `--px n` is the exact long edge, 1..=**8192**; the other edge keeps the photo's ratio (`round`, at least 1 px). The bound is the product's largest preview with room: a full-window 4K photo preview is 3840 px and a HiDPI one 7680, so past 8192 the caller wants `render --preview-px` |
-| candidates | files whose extension is in `PHOTO_EXTENSIONS` (`.jpg .jpeg .png .heic .heif .avif .jxl .webp .tif .tiff` — TIFF is still read even though it is no longer written), case-insensitively; **no recursion unless `--recursive`**, and only real directories are descended into (a symlink to a parent would never terminate). A non-photo extension is neither a row nor an error — the alternative is a folder's README becoming an error row | `--out`'s extension, the same four formats `render` writes |
+| candidates | files whose extension is in `PHOTO_EXTENSIONS` (`.jpg .jpeg .png .heic .heif .avif .jxl .webp .tif .tiff` — TIFF is still read even though it is no longer written), case-insensitively; **no recursion unless `--recursive`**, and only real directories are descended into (a symlink to a parent would never terminate). A non-photo extension is neither a row nor an error — the alternative is a folder's README becoming an error row | `--out`'s extension, the same two formats `render` writes (`.png` / `.jpg` / `.jpeg` — S12c removed TIFF) |
 | refusal | a file with a photo extension that does not decode **is** a row (`status = failed`) with the decoder's own reason, and the command still exits **0**: the listing is the result. A `--dir` that is not a directory is exit **2** with the path named | a photo that does not decode, or an `--out` this build cannot write, is exit **2**; `--px` outside the range is exit **1**, and an `--out` that *is* `--photo` is exit **1** (the destination row above, asked before the decode) |
 | pixels | — | the whole photo, resampled once at the preview's own grid — the same `resample` (Lanczos3, linear light, kernel widened by the downscale ratio) and the same `over_white` + quantize as a slot, so a preview is not a second picture of the same file |
 
@@ -423,7 +437,7 @@ comparable, and `--quality` was deliberately not added — a knob nobody tests b
 | count | 2..=9 inclusive (ruling 3). Outside it: usage error (exit 1) naming both bounds (`a collage needs 2..=9 photos, got 10`). Omitting `--photo` entirely is still the photo-free project S2 shipped |
 | template | the slot count must equal the number of photos; a mismatch is a usage error (exit 1) naming the template, its slots and the photo count |
 | paths | a **photo that is not there** is a failure (exit 2, the path named) — the same rule a project that points at a deleted file follows. Each stored `source` is relative to the project file when the two share a root (`pixlay_core::relative_to`, the function `Project::save_as` rebases with) and absolute otherwise, so a project whose photos sit beside it can be moved. Both sides of that comparison are lexically normalized first (`pixlay_core::normalize_lexical`, S15d), so a `..` in the project path or the copy path cannot produce a relative source that resolves somewhere else |
-| the policy itself | `pixlay_core::selection`: `Selection` (ordered photos, the 2..=9 clamp, `layouts()` = the templates with that many slots), `layout_for` (the count rule, S14: same aspect → same recipe family → nearest aspect → library order), `remove_last` / `Removed::restore` (the LIFO batch rule: the last **occupied** cell, because a per-cell clear leaves holes, and the cell comes back in its own slot with its framing — **and the token carries the document's template**, because ruling 7's "brings it back" is exact only if the layout comes back too: the count moves the layout with it, and no three-slot *grid* exists for a four-photo `grid-4-2x2` to grow back into). Pure functions, no filesystem |
+| the policy itself | `pixlay_core::selection`: `Selection` (ordered photos, the 2..=9 clamp, `layouts()` = the templates with that many slots), `layout_for` (the count rule, S14: same aspect → same recipe family → nearest aspect → library order), `last_photo` / `remove_last` (the batch rule: the last **occupied** cell, because a per-cell clear leaves holes — and the removal is now only a removal, since S14b retired ruling 7's add-back: `+` gives the layout a cell back and leaves it empty). Pure functions, no filesystem |
 
 **S11 added one subcommand (`edit`) and three shared flags**, because the free rotation and the frame are things a *person*
 does and a machine has to be able to do too (`AGENTS.md`: nothing may be possible only in the GUI). The flags are the same
@@ -538,7 +552,7 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
 | the image pipeline | **S4, landed**; the preview-grade reduction landed in **S12b**; the grading stage removed by **S12c** | `pixlay-imaging`: `Source::decode`, `resample`, `slot_bitmap`/`slot_bitmaps`, `probe`, and the preview's `Preview` caches + `reduce::PreviewSource`; the buffer ladder and the colour decisions are §4.1 |
 | command history / hit testing / project writing | **S6.5, landed**; `SetTemplate` added by **S7**; the grade/filter/text commands removed by **S12c** | `pixlay-core`: `Command` (one edit: source, framing, or the template) and `History` (snapshot undo/redo; `apply` is all-or-nothing, answers whether the command was a **step** — one that changes nothing is not (S15d) — and the document has no mutable accessor; the GUI commits **one command per gesture**, §9), `Template::slot_at(point)` for hit testing, `CollageDoc::save` / `Project::save` / `Project::save_as` for writing a document. The CLI's `hit` and `save` are the machine surface of the first and the last; the command history is a test surface only, on purpose (§5) |
 | encoding and metadata | **S6, landed**; TIFF and the chroma request removed by **S12c**, resolutions by **S12d** | `pixlay_imaging::encode`: one pass per format writing pixels, sampling and the ICC profile (`icc`), for PNG / JPEG; the CLI's `--long-edge` and the per-format rules are §5, the profile is §4.1 |
-| the library and the selection | **S9, landed** | `pixlay_core::selection`: `Selection` (the ordered photo list, the 2..=9 clamp, `layouts()`), `last_photo` / `remove_last` / `Removed::restore` (the LIFO batch rule) — pure, no filesystem. `pixlay_imaging::thumb`: `thumbnail(source, long_edge)`, the same `resample` at a preview grid. The CLI's `scan` / `thumb` / `init --photo` are the machine surface (the rules are §5) |
+| the library and the selection | **S9, landed** | `pixlay_core::selection`: `Selection` (the ordered photo list, the 2..=9 clamp, `layouts()`), `last_photo` / `remove_last` — pure, no filesystem (the batch add-back left with S14b). `pixlay_imaging::thumb`: `thumbnail(source, long_edge)`, the same `resample` at a preview grid. The CLI's `scan` / `thumb` / `init --photo` are the machine surface (the rules are §5) |
 
 ## 8. Measured (2026-09-20, this machine)
 
@@ -1278,7 +1292,9 @@ without looking at a widget:
   scrolled-back row instant.
 - **The stage has no zoom of its own**: the preview is `Contain`-fitted (ruling 2's "fit and zoom" is the
   photo filling the pane), and magnification is the editor's business. The status bar's zoom percentage is
-  a readout of that fit, not a control.
+  a readout of that fit, not a control. *Ruled 2026-09-24 (PIX-028): this paragraph becomes a **fit ↔ 1:1**
+  toggle with panning at 1:1, no free zoom and no view rotation — **S15j** lands it and replaces this text,
+  so what is written here is what the build does until then.*
 - **The app is dark by default** (ruling 23): `app.rs` sets `Adw.ColorScheme.FORCE_DARK` at startup, as HIG
   `guidelines/ui-styling` recommends for an app that displays rich visual content and as both reference apps
   do. There is no per-app switch (ruling 8 forbids the settings file it would need), and the canvas and the

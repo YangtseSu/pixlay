@@ -69,7 +69,7 @@ type Boundary = Rc<dyn Fn(&EditorWindow)>;
 type Saved = Rc<dyn Fn(&EditorWindow, &Path)>;
 
 /// The template a new document starts from: 4:3 like an album page, five slots,
-/// so the main path starts with a layout that does not need ten photos.
+/// so the main path starts with a layout that does not need nine photos.
 pub const DEFAULT_TEMPLATE: &str = "mosaic-5-hero";
 
 /// The long edge a new export form starts at, in pixels: the one size

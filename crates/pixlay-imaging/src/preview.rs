@@ -31,9 +31,9 @@
 //!   than rest ([`gesture_grid`]) and returns to the resting one when it ends, so
 //!   exactly two grids are in play and a cell nobody touched is carried over
 //!   instead of being resampled twice. The identity rule is S7's, plus what S12
-//!   and S15f had to add: same grid, same template, same canvas, same filter, same
-//!   cell, same source — **the same modification time on that source's file**, the
-//!   **same frame gap** and the **same source edge**. The modification time keeps a
+//!   and S15f had to add: same grid, same template, same cell, same source —
+//!   **the same modification time on that source's file**, the **same frame gap**
+//!   and the **same source edge**. The modification time keeps a
 //!   photo edited in another program from keeping its old bitmap until the cell is
 //!   touched; the gap keeps a set built before a frame change from carrying the
 //!   region that change moved; the edge keeps a set built from coarse copies from

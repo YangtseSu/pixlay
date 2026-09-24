@@ -10,16 +10,6 @@
 //! Each state is also required to *differ* from the one before it: a command that
 //! changed no pixel would make the whole comparison vacuous, which is exactly the
 //! failure mode this test has to be able to catch.
-//!
-//! Text layers are out of scope here on purpose: drawing text needs a font, and
-//! `pixlay-render`'s text measurements run in a child process with a pinned one
-//! (`tests/text/fonts.rs`). Text commands are covered by the document-identity
-//! test in `pixlay-core/tests/history.rs` — identical documents render identically
-//! by construction — and by the 2N/N preview comparison S5 already runs. Grading
-//! and the canvas-wide filter are out of scope for the same kind of reason: they
-//! are applied to the bitmap upstream of `draw`, so `pixlay-cli/tests/history.rs`
-//! measures those through the real pipeline.
-
 use pixlay_core::{CollageDoc, Command, CropTransform, History, PixelSize, Rgba8, templates};
 use pixlay_render::{Bitmap, Images, Rgb8Image, render_rgb8};
 
@@ -113,13 +103,10 @@ fn differing_pixels(a: &Rgb8Image, b: &Rgb8Image) -> usize {
 /// framings, because a framing is the edit that moves pixels without changing the
 /// document's shape.
 ///
-/// What is deliberately not here: `SetGrade` and `SetFilter`, which change the
-/// *bitmap* `pixlay-imaging` hands to `draw` rather than what `draw` does with it
-/// ("all resampling belongs upstream; the canvas only blits and clips"), so the
-/// renderer alone cannot make them visible — they are measured through the real
-/// pipeline in `pixlay-cli/tests/history.rs`; text layers, which need a font and
-/// whose undo is covered by document identity; and the canvas size, which changes
-/// the pixel grid the comparison counts on.
+/// What is deliberately not here: the layout and count commands (`SetTemplate`,
+/// `AddCell`, `RemoveLastCell`, `AddPhotos`), which change the pixel grid the
+/// comparison counts on rather than the pixels at a fixed grid, and the other cell
+/// edits (`SwapCells`, `ClearCell`), whose effect is the two kinds above composed.
 fn sequence() -> Vec<Command> {
     vec![
         Command::SetSource {

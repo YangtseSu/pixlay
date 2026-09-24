@@ -42,7 +42,7 @@ Of the last two: the second one produces a real image, and you must look at it d
 The project is `crates/pixlay-cli/tests/fixtures/verify.pixlay`: eight photos on `mosaic-8-s14`
 (JPEG, PNG, a 16-bit PNG, a HEIC, one carrying EXIF Orientation=6, one carrying a date), so the command
 exercises decode, resample, the clamp, `draw` and the encoder in one run. It carries no text layer any
-more: S12c removed them, and the document is a `docVersion`-2 file. Until S3 the
+more: S12c removed them, and the document is a `docVersion`-3 file. Until S3 the
 command used `--template mosaic-8-s14`, which renders every cell empty and is now a *white sheet*:
 the flag is a geometry smoke (it checks that the template loads and the output path works), not an
 image to judge. `mosaic-8-s14` has been valid since S1 and, since S2, is emitted by the template
@@ -197,7 +197,7 @@ versions**. Everything follows the latest stable release.
 - **edition / style edition / resolver**: the highest the current stable supports (currently
   edition 2024, resolver 3).
 - **System libraries and bindings**: GTK / cairo / pango / libadwaita follow Arch's system versions
-  (currently gtk4 4.22.5, cairo 1.18.4, libadwaita 1.9.4), and the bindings take the latest.
+  (currently gtk4 4.24, cairo 1.18.4, libadwaita 1.10), and the bindings take the latest.
   Downgrade a binding only when it demands a newer system version than Arch ships — never downgrade
   the system.
 - **CI / packaging**: an `archlinux:latest` container, no pinned image tag.
@@ -214,7 +214,7 @@ at `Cargo.lock` diffs during review.
   rendering boundary, never inside `CollageDoc` or a template.
   *Rationale: layout units and device pixels were once mixed, and two consecutive rounds drew wrong
   conclusions from it.*
-- **Preview and export must call the same `render::draw(doc, target)`.** A second renderer is
+- **Preview and export must call the same `render::draw(doc, images, target)`.** A second renderer is
   forbidden.
   *Rationale: the product is the exported image, and two renderers necessarily diverge — measured:
   two engines measuring the same string identically and still differing by 14.6% of pixels.*
@@ -237,7 +237,7 @@ at `Cargo.lock` diffs during review.
   same two rulings. The ICC rule and the per-format field list are in `docs/CONTRACT.md` §5.
 - **The evaluation order is frozen** and must not be reordered:
   `decode + color normalization → geometry (crop / arbitrary rotation) → per-slot
-  slot compositing → canvas decoration → output transform`
+  compositing → canvas decoration → output transform`
   *Rationale: operations that change the coordinate system must run first, and content layers
   positioned relative to the canvas must run last. Counterexample: draw the frame's gaps and then
   composite the photos — the photos would paint straight over the gaps.*
@@ -288,7 +288,7 @@ at `Cargo.lock` diffs during review.
   radius and exactly nothing at `radiusRel = 0`.
 - **GTK types do not implement `Send`/`Sync`.** Background decoding and scaling must return to the
   main thread through a channel; a GTK object must never be held across threads.
-- **`ui` must not touch pixels directly.**
+- **The shell (`pixlay`) must not touch pixels directly.**
 
 ## GNOME HIG (constrains the `pixlay` shell only)
 
@@ -323,8 +323,10 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
   than a statement about the folder (`docs/CONTRACT.md` §9). **The header bar's controls follow HIG
   `patterns/containers/header-bars` and the two references**: primary and navigation actions at the *start*,
   the heading in the centre, a primary menu at the *end*. The editor's
-  per-cell buttons arrive in S15 as a `GtkOverlay` + `GtkFixed`. None of those is custom-drawn, so the
-  shell keeps exactly one.
+  per-cell buttons arrived in S15 as children of the canvas's own `GtkOverlay`, placed by their own
+  margins — a `GtkFixed` was rejected because it measures only its children, so a document whose empty
+  cells come and go would leave the container 0x0 (`crates/pixlay/src/canvas.rs`). None of those is
+  custom-drawn, so the shell keeps exactly one.
 - **Styling**: use only libadwaita style classes and CSS variables; hard-coded colors and spacing
   are forbidden (they break dark mode and high contrast). **The app is dark by default** — ruled
   2026-09-22, superseding "never force light or dark": HIG `guidelines/ui-styling` recommends the dark style
@@ -396,7 +398,7 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
 
     pixlay-core     CollageDoc, templates, geometry, framing transforms, command history, the selection policy. Must not depend on gtk / cairo
     pixlay-imaging  decoding (glycin), resampling, EXIF, color spaces, preview thumbnails, encoding (PNG/JPEG). Must not depend on gtk or cairo
-    pixlay-render   the single draw(doc, target), on Cairo. Must not depend on gtk
+    pixlay-render   the single draw(doc, images, target), on Cairo. Must not depend on gtk
     pixlay-cli      windowless render entry point, automation and verification tooling, and the AI's operating surface. Must not depend on gtk4
     pixlay          gtk4 + libadwaita shell and interaction
 
@@ -485,7 +487,7 @@ policy: track the latest": latest stable only, no upper pin.
 | `cairo-rs` 0.22.9 | `pixlay-render` | The only rendering backend; GTK4 already depends on cairo, so packaging is free | System cairo 1.18.4; the `png` feature is dev-only (golden image read/write) |
 | `png` 0.18.1 | `pixlay-imaging` | The PNG writer of the one-pass encoder (S6). `image`'s PNG writer cannot embed an ICC profile in the same pass as the pixels, and Cairo's emits no `iCCP` at all — and an sRGB file whose numbers are not labelled is a file whose colour depends on who opens it | Pure Rust; it was already in the tree through `image`, so the download set did not grow |
 | `jpeg-encoder` 0.7.1 | `pixlay-imaging` | The JPEG writer of the one-pass encoder (S6): `set_sampling_factor` (4:4:4 / 4:2:2 / 4:2:0) and `add_icc_profile` (`APP2`), which is exactly the "pixels + sampling + ICC in one pass" the constraint names (the JFIF density stays at the encoder's resolution-free default since S12d) | Pure Rust; already in the tree through `glycin-image-rs`. Measured against the previous writer (`image` = zune-jpeg): +1.1% bytes, −27% time on the S6 grid (14043 px, q90, 4:4:4) |
-| `image` 0.25.10 | `pixlay-cli` (**dev only** since S6) | It was S1's encoder stand-in and S6 replaced it (`pixlay_imaging::encode` writes the DPI and the ICC profile that this crate's writers leave at their defaults). What it is still for: the CLI's **tests** read renders back with `image::open` (PNG/JPEG) and write flat photos to render against, and `pixlay-cli/tests/fixtures/generate.py` produced the fixtures | Not a production dependency any more, so the shipped binary no longer links it |
+| `image` 0.25.10 | `pixlay-cli` (**dev only** since S6) | It was S1's encoder stand-in and S6 replaced it (`pixlay_imaging::encode` writes the ICC profile and the JPEG sampling factors that this crate's writers leave at their defaults; the resolutions left with S12d). What it is still for: the CLI's **tests** read renders back with `image::open` (PNG/JPEG) and write flat photos to render against, and `pixlay-cli/tests/fixtures/generate.py` produced the fixtures | Not a production dependency any more, so the shipped binary no longer links it |
 | `glycin` 4.0.0 | `pixlay-imaging` | The decoding backend, measured against the in-process alternative (S4): the sandboxed loader is the only one of the two that decodes HEIC and AVIF, and it works with an empty environment | Pulls `glib`/`gio` and, through `cfg(target_os = "linux")`, `libseccomp` / `bubblewrap` / `fontconfig` / the distro's loader packages — this is what S8's `depends` must name |
 | `glib` 0.22 / `gio` 0.22 | `pixlay-imaging` | The decode is driven on a private `MainContext`: a glycin frame request only completes while one is iterated (measured: every frame hung under a plain executor until glycin's own 60 s limit). `glib`'s `futures` feature provides `MainContext::block_on`; `gio::File` is glycin's own input type | Already in the tree with `glycin`; named here because the API is used directly |
 |`gtk4` 0.11.5 + `libadwaita` 0.9.2|`pixlay`|The shell: the window, the two stages, the rows and the dialogs. `v4_12` is the level the window needs: `GtkListBox::remove_all` and `GtkCssProvider::load_from_string` (S13b rebuilds the picked list and installs the app's one stylesheet) and `GdkSurface::layout` — GTK4's only "the window was resized" signal, which is what the preview pane's own decode size follows, so below it the build would compile and never resize the pane. Below that, `v4_10` carries `GtkFileDialog` and `GtkColorDialogButton` (4.10 dropped the deprecated chooser dialogs) and libadwaita's `v1_8` carries `AdwDialog` / `AdwToastOverlay` / `AdwShortcutsDialog`|System gtk4 4.24 / libadwaita 1.10 through pkg-config; GTK already depends on cairo, pango and gdk-pixbuf, so the download set grows by the bindings alone. Linked by `pixlay` only — the other four crates must not name it|

@@ -47,7 +47,7 @@ pub const MAX_DECODE_EDGE: u32 = 20_000;
 /// How long one decode may take.
 ///
 /// glycin's own default is 60 seconds, which is far too long for a command-line
-/// loop that may be decoding ten photos; 20 s is longer than any decode measured
+/// loop that may be decoding nine photos; 20 s is longer than any decode measured
 /// here (the slowest was 110 ms for a 12-bit HEIC that had to be woken up) and
 /// short enough that a wedged loader is reported as an error.
 pub const DECODE_TIMEOUT: Duration = Duration::from_secs(20);

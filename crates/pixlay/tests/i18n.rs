@@ -14,7 +14,7 @@
 
 mod support;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -64,19 +64,101 @@ fn potfiles() -> BTreeSet<String> {
         .collect()
 }
 
-/// The msgids of a `.pot`, which is what has to stay in step as the code changes.
-fn msgids(pot: &str) -> BTreeSet<String> {
-    pot.lines()
-        .filter_map(|line| {
-            let rest = line
-                .strip_prefix("msgid ")
-                .or_else(|| line.strip_prefix("msgid_plural "))?;
-            if rest == "\"\"" {
-                return None;
+/// One message of a `.pot`: its id, and the source files its references name.
+#[derive(Default, PartialEq, Eq, Debug)]
+struct Message {
+    /// The msgid as a `String` — a multiline entry's continuation lines
+    /// concatenated, which is what makes a changed or removed long description
+    /// visible to the freshness check (PIX-026, S15i). `msgid_plural` is a second
+    /// message, because it is a second string a translator has to write.
+    id: String,
+    /// The files the entry's `#:` references name, without their line numbers:
+    /// the line a string sits on changes with every edit above it, and a check
+    /// that compared those would fail for a reason that says nothing about the
+    /// catalog. Which *file* a message lives in is a fact that does not churn.
+    files: BTreeSet<String>,
+}
+
+/// The messages of a `.pot`, in file order.
+///
+/// A parser rather than a line filter: `xgettext` writes a long string as `msgid
+/// ""` followed by one quoted continuation per line, takes the id of a
+/// `System.String`-built string from nothing at all, and emits a `#:` reference
+/// block before each entry — so reading only the first line after `msgid` sees
+/// neither the multiline entries nor where they come from.
+fn messages(pot: &str) -> Vec<Message> {
+    let mut lines = pot.lines().peekable();
+    let mut files: BTreeSet<String> = BTreeSet::new();
+    let mut found = Vec::new();
+    while let Some(line) = lines.next() {
+        if let Some(references) = line.strip_prefix("#:") {
+            for reference in references.split_whitespace() {
+                // `path:line`; the path may hold a colon of its own, so the split
+                // is on the last one.
+                let file = match reference.rsplit_once(':') {
+                    Some((file, line)) if line.chars().all(|digit| digit.is_ascii_digit()) => file,
+                    _ => reference,
+                };
+                files.insert(file.to_string());
             }
-            Some(rest.trim_matches('"').to_string())
-        })
-        .collect()
+            continue;
+        }
+        let Some(id) = line
+            .strip_prefix("msgid ")
+            .or_else(|| line.strip_prefix("msgid_plural "))
+        else {
+            // An entry ends at the blank line between it and the next reference
+            // block, which is where the references stop belonging to it.
+            if line.is_empty() {
+                files.clear();
+            }
+            continue;
+        };
+        let mut id = po_string(id);
+        // The continuation lines: quoted literals up to the `msgstr` line.
+        while let Some(next) = lines.peek() {
+            if !next.starts_with('"') {
+                break;
+            }
+            id.push_str(&po_string(next));
+            lines.next();
+        }
+        // The header entry is `msgid ""`, and it is not a string a translator
+        // translates.
+        if !id.is_empty() {
+            found.push(Message {
+                id,
+                files: files.clone(),
+            });
+        }
+    }
+    found
+}
+
+/// The value of one quoted PO string literal: the surrounding quotes off, the C
+/// escapes `xgettext` writes (`\n`, `\t`, `\"`, `\\`) undone.
+fn po_string(literal: &str) -> String {
+    let literal = literal.trim();
+    let literal = literal
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+        .unwrap_or(literal);
+    let mut value = String::with_capacity(literal.len());
+    let mut chars = literal.chars();
+    while let Some(character) = chars.next() {
+        if character != '\\' {
+            value.push(character);
+            continue;
+        }
+        match chars.next() {
+            Some('n') => value.push('\n'),
+            Some('t') => value.push('\t'),
+            Some('r') => value.push('\r'),
+            Some(escape) => value.push(escape),
+            None => break,
+        }
+    }
+    value
 }
 
 #[test]
@@ -99,25 +181,53 @@ fn the_strings_are_extractable_and_the_fallback_is_english() {
         sources.difference(&listed).collect::<Vec<_>>(),
     );
 
-    // The committed `.pot` carries every string a fresh extraction finds. The
-    // comparison is on the msgids: the file's header holds a creation date, and a
+    // The committed `.pot` carries every string a fresh extraction finds, and the
+    // entry for each one names the files it really comes from. The comparison is on
+    // the messages, not on bytes: the file's header holds a creation date, and a
     // byte comparison would fail for a reason that says nothing about the strings.
     let extracted = run_xgettext();
     let committed =
         std::fs::read_to_string(root().join("po/pixlay.pot")).expect("po/pixlay.pot is committed");
-    let fresh = msgids(&extracted);
-    let saved = msgids(&committed);
+    let fresh = messages(&extracted);
+    let saved = messages(&committed);
     assert!(
         !fresh.is_empty(),
         "xgettext found no strings at all, which means it was not looking at the sources"
     );
+    let ids = |messages: &[Message]| -> BTreeSet<String> {
+        messages.iter().map(|message| message.id.clone()).collect()
+    };
+    let (fresh_ids, saved_ids) = (ids(&fresh), ids(&saved));
     assert_eq!(
-        saved,
-        fresh,
+        saved_ids,
+        fresh_ids,
         "po/pixlay.pot is out of date:\n  missing: {:?}\n  stale: {:?}\n\
-         regenerate it with:\n  xgettext --language=Rust -f po/POTFILES -o po/pixlay.pot",
-        fresh.difference(&saved).collect::<Vec<_>>(),
-        saved.difference(&fresh).collect::<Vec<_>>(),
+         regenerate it with:\n  xgettext --language=Rust --from-code=UTF-8 --package-name=pixlay \
+         -f po/POTFILES -o po/pixlay.pot",
+        fresh_ids.difference(&saved_ids).collect::<Vec<_>>(),
+        saved_ids.difference(&fresh_ids).collect::<Vec<_>>(),
+    );
+    // Where each string comes from, as files rather than lines (see [`Message`]):
+    // a message that moved to another source file leaves references that mislead,
+    // and that is the half of the freshness question `xgettext` answers for free.
+    let sources = |messages: &[Message]| -> BTreeMap<String, BTreeSet<String>> {
+        messages
+            .iter()
+            .map(|message| (message.id.clone(), message.files.clone()))
+            .collect()
+    };
+    let (fresh_sources, saved_sources) = (sources(&fresh), sources(&saved));
+    let moved: Vec<String> = fresh_sources
+        .iter()
+        .filter_map(|(id, files)| {
+            let saved = saved_sources.get(id)?;
+            (saved != files).then(|| format!("{id:?}: {saved:?} against {files:?}"))
+        })
+        .collect();
+    assert!(
+        moved.is_empty(),
+        "po/pixlay.pot's references are behind the sources (the .pot first):\n  {}",
+        moved.join("\n  ")
     );
 
     // The other half of the wiring: a catalog in a locale directory is found and

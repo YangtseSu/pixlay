@@ -1,19 +1,19 @@
-//! S6.5 through the real pipeline: decode, resample, grade, filter, `draw`.
+//! S6.5 through the real pipeline: decode, resample, `draw`.
 //!
 //! `pixlay-render/tests/history.rs` measures the same criterion at `draw`'s own
-//! boundary, where only two command kinds can be seen: the canvas blits and clips,
+//! boundary, where the caller hands in the bitmaps: the canvas blits and clips,
 //! and everything that changes the photo or its framing reaches it as a different
-//! bitmap. Two commands that *do* change the finished pixels therefore cannot be
-//! measured there at all — `SetGrade` and `SetFilter` are applied to the bitmap by
-//! `pixlay-imaging`, upstream of the renderer — and the canvas size changes the
-//! grid the pixels are counted on.
+//! bitmap. This file closes that gap by running the same walk over the product's
+//! pipeline — committed photos are decoded by the sandboxed decoder, cropped to
+//! the cell's fitted region and resampled by the imaging crate, and composited by
+//! `draw` — so a command's effect is measured where the product produces it.
 //!
-//! This file closes that gap by running the same walk over the real pipeline:
-//! committed photos are decoded by the sandboxed decoder, resampled and graded by
-//! the imaging crate, and composited by `draw`. The commands are the whole
-//! vocabulary except text, whose pixels need a pinned font (S5's child-process
-//! measurement) and whose undo is covered by document identity in
-//! `pixlay-core/tests/history.rs`.
+//! The commands are the two whose effect is a pixel at a fixed grid: `SetSource`,
+//! which decides which photo a cell shows, and `SetCrop`, which decides the region
+//! it shows. Each state is required to differ from the one before it, because a
+//! command that changed no pixel would make the comparison vacuous. The template
+//! and count commands are covered in `pixlay-core/tests/history.rs`, at the
+//! document rather than the pixel boundary.
 
 use std::path::{Path, PathBuf};
 

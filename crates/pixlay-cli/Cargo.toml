@@ -32,8 +32,8 @@ pixlay-render = { path = "../pixlay-render" }
 serde_json = "1.0"
 # The tests read renders back (`image::open`) and write flat photos to render
 # against. The `image` crate is a dev-dependency only from S6 on: production
-# encoding is `pixlay-imaging::encode`, which writes the resolution and the sRGB
-# profile that `image`'s writers leave at their defaults.
+# encoding is `pixlay-imaging::encode`, which writes the sRGB profile that
+# `image`'s writers leave at their default.
 image = { version = "0.25.10", default-features = false, features = [
     "jpeg",
     "png",

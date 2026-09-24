@@ -1,5 +1,4 @@
-//! Decoding, resampling, color adjustment, EXIF, color space handling and
-//! encoding.
+//! Decoding, resampling, colour conversion, EXIF, preview copies and encoding.
 //!
 //! Boundary: no gtk, and no cairo either — a bitmap leaves this crate as a bare
 //! buffer, and the receiving thread (or the caller) wraps it. Threading is the
@@ -35,8 +34,6 @@
 //!   → crop to what the slot shows             layout.rs + resample.rs
 //!   → resample in linear light, Lanczos3      resample.rs  (16-bit from here on)
 //!   → flatten onto the slot's white base      linear.rs
-//!   → per-slot grading                        linear.rs
-//!   → global filter                           linear.rs
 //!   → 8-bit sRGB in Cairo's layout            linear.rs
 //! ```
 //!
@@ -44,8 +41,8 @@
 //! for one slot, and [`resample`] is public because the tests measure it directly
 //! (the aliasing and RMSE criteria are about that one stage).
 //!
-//! The mirror image of the pipeline is the export: [`encode`] writes PNG, JPEG or
-//! TIFF with the resolution and the sRGB profile ([`icc`]) in the same pass as the
+//! The mirror image of the pipeline is the export: [`encode`] writes PNG or JPEG
+//! with the sRGB profile ([`icc`]) and the sampling factors in the same pass as the
 //! pixels. It lives here because it is pixels in and pixels out — no cairo, no gtk
 //! — and because both the CLI and the GUI export through it.
 

@@ -1,6 +1,6 @@
 [package]
 name = "pixlay-render"
-description = "The single rendering path: draw(doc, target) on Cairo."
+description = "The single rendering path: draw(doc, images, target) on Cairo."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

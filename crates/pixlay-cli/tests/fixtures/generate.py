@@ -11,11 +11,15 @@ The content is deterministic (no randomness, no timestamps) and deliberately not
 flat, so a decode or resample bug cannot hide behind uniform pixels. All the
 images are generated here, so their licence is the repository's: CC0.
 
-Three of the files are produced by an external tool and only *committed* here —
+Four of the files are produced by an external tool and only *committed* here —
 the build and the tests never call it, so the repository stays offline-buildable:
 
   * `photo.heic` — `heif-enc`, because Pillow cannot write HEIC. S4's exit
     criterion "HEIC decodes" needs a real HEIC file to decode.
+  * `wide-gamut-cicp.avif` — `avifenc`, because Pillow cannot write AVIF and no
+    Pillow API declares CICP. A file that says "BT.2020 primaries, PQ transfer"
+    and carries *no* ICC profile is the only way to ask what the decode path
+    does with a wide gamut that is not sRGB and not an embedded profile.
   * `adobe-rgb.jpg` — the 4:3 fixture with the colour profile of
     `/usr/share/color/icc/colord/AdobeRGB1998.icc` attached, which is a file
     whose *numbers* are Adobe RGB. S4's colour decision (the source profile is
@@ -27,6 +31,7 @@ the build and the tests never call it, so the repository stays offline-buildable
 """
 
 import pathlib
+import struct
 import subprocess
 
 from PIL import Image, ImageDraw
@@ -34,6 +39,33 @@ from PIL import Image, ImageDraw
 ROOT = pathlib.Path(__file__).parent / "photos"
 ADOBE_RGB = pathlib.Path("/usr/share/color/icc/colord/AdobeRGB1998.icc")
 SRGB = pathlib.Path("/usr/share/color/icc/colord/sRGB.icc")
+
+# The patch row shared by `wide-gamut-cicp.avif` and `malformed-icc.png`. Left to
+# right the 8-bit code values are 0x20 0x40 0x60 0x80 0xA0 0xC0 0xE0, then the
+# three primaries red (255,0,0), green (0,255,0), blue (0,0,255). Patch `i`
+# spans x in `i * PATCH_W .. (i+1) * PATCH_W` and is sampled at its centre,
+# `(i * PATCH_W + PATCH_W // 2, PATCH_Y)`, so a measurement names a patch by its
+# code value instead of by a coordinate. The content is flat on purpose: any
+# colour conversion the decoder applies to the whole file shows up in every
+# patch, and there is nothing an encoder's resampler can smear between them.
+PATCH_NEUTRALS = (0x20, 0x40, 0x60, 0x80, 0xA0, 0xC0, 0xE0)
+PATCH_PRIMARIES = ((255, 0, 0), (0, 255, 0), (0, 0, 255))
+PATCHES = tuple((value, value, value) for value in PATCH_NEUTRALS) + PATCH_PRIMARIES
+PATCH_SIZE = (320, 240)
+PATCH_W = PATCH_SIZE[0] // len(PATCHES)
+PATCH_BAND = (32, 208)
+PATCH_Y = (PATCH_BAND[0] + PATCH_BAND[1]) // 2
+
+
+def patch_row() -> Image.Image:
+    """The row of flat patches described above, on black."""
+    image = Image.new("RGB", PATCH_SIZE, (0, 0, 0))
+    pixels = image.load()
+    for index, colour in enumerate(PATCHES):
+        for y in range(*PATCH_BAND):
+            for x in range(index * PATCH_W, (index + 1) * PATCH_W):
+                pixels[x, y] = colour
+    return image
 
 
 def bands(width: int, height: int, phase: int) -> Image.Image:
@@ -95,15 +127,23 @@ def main() -> None:
     oriented.save(ROOT / "oriented-6.jpg", quality=88, subsampling=0, exif=exif)
     print("oriented-6.jpg: 600x1200 stored, EXIF Orientation=6")
 
-    # A photo with a date, for the `{date}` text field (S5 reads it through
+    # A photo with a date, which `scan` and `image` report (S5 reads it through
     # `pixlay_imaging::exif`). EXIF stores it as `YYYY:MM:DD HH:MM:SS` and the
     # contract says it is used verbatim, with no timezone conversion, so the
-    # letters here are exactly what a watermark should show.
+    # letters here are exactly what the report shows.
     dated = bands(960, 540, 5)
     exif = Image.Exif()
     exif[0x9003] = "2019:07:14 10:32:00"
     dated.save(ROOT / "dated.jpg", quality=88, subsampling=0, exif=exif)
     print("dated.jpg: EXIF DateTimeOriginal=2019:07:14 10:32:00")
+
+    # The same date in the place the standard puts it: `0x9003` inside the Exif
+    # SubIFD, reached from IFD0 by the `0x8769` pointer (EXIF 2.32 §4.6.5). The
+    # two files are the two shapes a writer can leave behind — Pillow's
+    # `exif[0x9003]` above can only write IFD0, and a camera writes the SubIFD —
+    # which is the pair that found PIX-023: the parser saw `dated.jpg` and missed
+    # the SubIFD real photos have.
+    dated_sub_ifd(bands(960, 540, 6), "dated-sub-ifd.jpg")
 
     # Smooth, multi-frequency content at a size large enough that a 4x reduction
     # is a *large-ratio* resample: low-frequency gradients for the overall shape,
@@ -142,6 +182,12 @@ def main() -> None:
     # committed file small; the point is the container and the depth, not size.
     heic(ROOT / "photo-16bit.png", ROOT / "photo.heic")
 
+    # A wide gamut that is declared by CICP and nothing else, and a profile that
+    # is not a profile: the two colour states a decoder can only get right by
+    # looking at the metadata.
+    wide_gamut_cicp("wide-gamut-cicp.avif")
+    malformed_icc("malformed-icc.png")
+
 
 def smooth_source(width: int, height: int) -> Image.Image:
     """Low-frequency gradient plus mid-frequency waves: the content a resampler
@@ -168,6 +214,42 @@ def smooth_source(width: int, height: int) -> Image.Image:
         [width // 8, height // 2, width // 4, height * 3 // 4], fill=(250, 250, 250)
     )
     return image
+
+
+def dated_sub_ifd(image: Image.Image, name: str) -> None:
+    """Writes `image` with its date in the Exif SubIFD: `0x9003` inside the IFD that
+    IFD0's `0x8769` pointer names.
+
+    Built byte by byte rather than through `Exif.get_ifd(0x8769)` — Pillow's own way
+    to write a SubIFD, and it does write a valid one (measured 2026-09-25) — because
+    the shape has to survive a regeneration by some other Pillow: a serializer that
+    dropped the pointer would leave the file IFD0-shaped, the decode test would still
+    pass on the IFD0 fallback, and the SubIFD path would quietly lose its end-to-end
+    coverage. The difference between the two shapes is the defect this file is here
+    for (PIX-023, S15i). Little-endian, IFD0 one entry, the SubIFD one entry.
+    """
+    date = b"2019:07:14 10:32:00\x00"
+    # The header is 8 bytes, IFD0 is 2 + 12 + 4 = 18 and the SubIFD the same, so
+    # the SubIFD is at 26 and the string at 44.
+    ifd0 = (
+        struct.pack("<H", 1)
+        + struct.pack("<HHI", 0x8769, 4, 1)  # the pointer, LONG, one value
+        + struct.pack("<I", 26)
+        + struct.pack("<I", 0)  # no second IFD
+    )
+    sub_ifd = (
+        struct.pack("<H", 1)
+        + struct.pack("<HHI", 0x9003, 2, len(date))  # ASCII, the count holds the NUL
+        + struct.pack("<I", 44)
+        + struct.pack("<I", 0)  # no second IFD
+    )
+    block = b"II" + struct.pack("<H", 42) + struct.pack("<I", 8) + ifd0 + sub_ifd + date
+    assert len(block) == 44 + len(date), "the offsets above are the layout"
+    # The JPEG's APP1 payload is `Exif\0\0` + the TIFF block, and Pillow writes raw
+    # `exif=` bytes as given (measured: without the preamble the block reaches the
+    # decoder, which reports no EXIF at all).
+    image.save(ROOT / name, quality=88, subsampling=0, exif=b"Exif\x00\x00" + block)
+    print(f"{name}: EXIF DateTimeOriginal in the Exif SubIFD (0x8769 -> 0x9003)")
 
 
 def lanczos(image: Image.Image, size: tuple[int, int], name: str) -> None:
@@ -251,6 +333,65 @@ def heic(source: pathlib.Path, target: pathlib.Path) -> None:
         check=True,
     )
     print(f"{target.name}: {Image.open(source).size} 12-bit HEIC by heif-enc")
+
+
+def wide_gamut_cicp(name: str) -> None:
+    """Writes the patch row as an AVIF that declares a wide gamut through CICP
+    alone — no ICC profile anywhere in the file.
+
+    `--cicp 9/16/9` is primaries 9 (BT.2020), transfer 16 (PQ, SMPTE ST 2084)
+    and matrix 9 (BT.2020 non-constant-luminance), which is a gamut and a
+    transfer function no sRGB reader may assume. `-r full` pins the range flag,
+    so the code values are the whole story, and `--ignore-icc` plus a PNG input
+    with no profile keeps the `colr` box the only colour metadata. `-q 100` is
+    the encoder's lossless colour setting; measured, the seven neutrals survive
+    the RGB to YUV444 round trip exactly while the primaries do not (red's 255
+    reads back 254, blue's 255 reads back 253, green's 0 reads back 1), which is
+    why a measurement quotes the decoder's own output rather than the values
+    written here. Both times are pinned so two runs produce the same bytes.
+    """
+    source = ROOT / "_cicp-input.png"
+    patch_row().save(source)
+    subprocess.run(
+        [
+            "avifenc",
+            "-q",
+            "100",
+            "--cicp",
+            "9/16/9",
+            "-r",
+            "full",
+            "--ignore-icc",
+            "--creation-time",
+            "0",
+            "--modification-time",
+            "0",
+            "-o",
+            str(ROOT / name),
+            str(source),
+        ],
+        check=True,
+    )
+    source.unlink()
+    print(
+        f"{name}: {PATCH_SIZE[0]}x{PATCH_SIZE[1]} BT.2020 primaries / PQ transfer"
+        " / BT.2020-NCL matrix, no ICC, by avifenc"
+    )
+
+
+def malformed_icc(name: str) -> None:
+    """Writes the patch row as a PNG with an `iCCP` chunk that is not a profile.
+
+    Pillow compresses whatever bytes it is handed into the chunk, so the file is
+    structurally valid and the chunk's *payload* is what is broken — the case a
+    decoder that trusts the profile's presence without checking its header gets
+    wrong. The bytes are ASCII on purpose: an `iCCP` chunk is a zlib stream that
+    decompresses to a profile whose first bytes are a `size`/`CMM`/`version`
+    header, so these bytes cannot be mistaken for one.
+    """
+    payload = b"not an ICC profile"
+    patch_row().save(ROOT / name, icc_profile=payload)
+    print(f"{name}: {PATCH_SIZE[0]}x{PATCH_SIZE[1]} PNG, iCCP payload {payload!r}")
 
 
 if __name__ == "__main__":

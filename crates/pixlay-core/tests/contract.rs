@@ -818,3 +818,65 @@ fn template_limits() {
     doc.template.aspect = 0.05;
     assert!(doc.validate().is_err());
 }
+
+/// The live text and the code answer the same question the same way (S15i,
+/// PIX-027).
+///
+/// The 2026-09-24 review found the opposite: a live paragraph two `docVersion`s
+/// behind, a template count from before the purity cut, a `draw` signature with an
+/// argument missing. Prose drifts silently — nothing compiles a sentence — so the
+/// claims that have a constant behind them are checked here. **Only the live text
+/// is checked**: a section whose heading names a date, or a step's own "landed"
+/// record, is a statement about what was true then and stays as it is
+/// (`AGENTS.md`, "Session and persistence discipline"). What this test can catch is
+/// a constant that moved without its sentence; what it cannot catch is a sentence
+/// whose subject was deleted, which is why the review's list was worked through by
+/// hand.
+#[test]
+fn the_live_documents_carry_the_codes_numbers() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let read = |name: &str| {
+        std::fs::read_to_string(root.join(name)).unwrap_or_else(|error| panic!("{name}: {error}"))
+    };
+    let contract = read("docs/CONTRACT.md");
+    let agents = read("AGENTS.md");
+
+    let templates = pixlay_core::templates::all();
+    let slots: usize = templates.iter().map(|template| template.slots.len()).sum();
+    let claims = [
+        ("docs/CONTRACT.md", format!("\"docVersion\": {DOC_VERSION}")),
+        ("docs/CONTRACT.md", format!("(currently **{DOC_VERSION}**)")),
+        ("AGENTS.md", format!("`docVersion`-{DOC_VERSION} file")),
+        (
+            "docs/CONTRACT.md",
+            format!("{} templates and {slots} slots", templates.len()),
+        ),
+        (
+            "docs/CONTRACT.md",
+            format!("slot count | 2..={}", pixlay_core::MAX_PHOTOS),
+        ),
+        ("docs/CONTRACT.md", format!("1..={MAX_LONG_EDGE_PX} px")),
+        (
+            "docs/CONTRACT.md",
+            format!("`0 < zoom ≤ {}`", pixlay_core::MAX_ZOOM),
+        ),
+        (
+            "docs/CONTRACT.md",
+            // `{:.1}`: the document writes the bound as a fraction with a decimal
+            // point (`1.0`), which `Display` alone would shorten to `1`.
+            format!("`0 ≤ value ≤ {:.1}`", pixlay_core::MAX_FRAME_REL),
+        ),
+    ];
+    let documents = [("docs/CONTRACT.md", &contract), ("AGENTS.md", &agents)];
+    for (file, claim) in &claims {
+        let text = documents
+            .iter()
+            .find(|(name, _)| name == file)
+            .map(|(_, text)| *text)
+            .expect("the file is in the table above");
+        assert!(
+            text.contains(claim.as_str()),
+            "{file} no longer says {claim:?}: the constant moved and the sentence did not"
+        );
+    }
+}

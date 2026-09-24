@@ -872,10 +872,10 @@ impl CellControls {
 
         // The strip, over the selected cell that holds a photo. Its bottom edge
         // sits `CONTROL_INSET` above the cell's, and it is centred in the cell when
-        // the cell can hold it — a narrow pane (the library's 1/16 columns) gets the
-        // strip at its left edge instead, since a strip outside its own cell would
-        // read as belonging to the neighbouring one (`docs/HIG-REVIEW.md` §2, judged
-        // at the walk).
+        // the cell can hold it — a narrow pane (the library's 1/16 columns) instead
+        // turns the strip into a column at its right edge, since a strip outside its
+        // own cell would read as belonging to the neighbouring one
+        // (`docs/HIG-REVIEW.md` §2, judged at the walk).
         let Some(slot) = window.selection() else {
             self.strip.set_visible(false);
             return;

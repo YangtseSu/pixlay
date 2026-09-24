@@ -246,10 +246,10 @@ impl CropTransform {
 /// `display` pixels wide and tall (the size the bitmap would have if the whole
 /// photo were passed to `draw`), and `rect` is the sub-rectangle the slot's
 /// outline can reach, plus a guard band for filtering. Handing `draw` only that
-/// rectangle is what keeps the memory ladder bounded by the output: a slot in a
-/// ten-column strip needs a photo 6x its own width, and passing the whole
-/// displayed photo would allocate six times the memory to display one tenth of
-/// it.
+/// rectangle is what keeps the memory ladder bounded by the output: a slot in the
+/// library's narrowest pane — a 1/16-wide column of `strip-9-9x1` — needs its
+/// photo magnified 12x for a 4:3 source, and passing the whole displayed photo
+/// would allocate twelve times the memory to show a twelfth of it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DisplayRegion {
     /// Full displayed photo size in output pixels: `(width, height)`.

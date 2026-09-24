@@ -1,15 +1,17 @@
 //! 16-bit linear buffers: the pipeline's intermediate representation.
 //!
 //! Two shapes, in the order the frozen evaluation order uses them
-//! (`AGENTS.md`, "Hard constraints": `geometry → per-slot grading → global
-//! filter → slot compositing`):
+//! (`AGENTS.md`, "Hard constraints": `decode + color normalization → geometry
+//! (crop / arbitrary rotation) → per-slot compositing → canvas decoration →
+//! output transform`). This module is that order's flatten-and-quantize step:
+//! [`LinearRgba16::over_white`] and [`LinearRgb16::to_srgb8`].
 //!
 //! * [`LinearRgba16`] — premultiplied, the resampler's output. Alpha has to
 //!   survive the resample, and premultiplying first is what keeps a transparent
 //!   neighbourhood from bleeding into an opaque pixel.
-//! * [`LinearRgb16`] — opaque, the shape grading works on: the photo has been
-//!   composited onto the slot's white base, so what the grade sees is what the
-//!   user sees.
+//! * [`LinearRgb16`] — opaque, the shape the flatten produces and the quantizer
+//!   consumes: the photo has been composited onto the slot's white base, so what
+//!   is quantized is what the user sees.
 //!
 //! Both store linear light as `u16` fixed point (`0` = 0.0, `65535` = 1.0). The
 //! only quantization in the whole pipeline is [`LinearRgb16::to_argb32`] at the
@@ -62,8 +64,9 @@ impl LinearRgba16 {
     ///
     /// `c = c_premultiplied + (1 - alpha)`. This is the project's rule that an
     /// export is never transparent, applied where it is lossless: after the
-    /// resample (so the transparent parts are not smeared into the photo) and
-    /// before grading (so the grade acts on the visible pixel).
+    /// resample (so the transparent parts are not smeared into the photo), and it
+    /// is what the final 8-bit write needs — the quantizer reads the visible
+    /// pixel.
     pub fn over_white(&self) -> LinearRgb16 {
         let mut data = vec![0u16; self.width as usize * self.height as usize * 3];
         for (source, target) in self

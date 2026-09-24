@@ -313,6 +313,39 @@ fn the_embedded_profile_is_the_srgb_colorimetry_and_says_so() {
     assert_eq!(description(profile), icc::DESCRIPTION);
 }
 
+#[test]
+fn the_profile_header_carries_a_valid_creation_date() {
+    let profile = icc::srgb_profile();
+    // Header bytes 24..36 are the creation time as six `dateTimeNumber`s: year,
+    // month, day, hour, minute, second, each big-endian (ICC.1:2010 §4.2, §7.2.8),
+    // and it is a field a strict validator reads rather than free space — a zeroed
+    // one is a date no reader can accept (PIX-025, S15i). Zero is the sentinel for
+    // the profile id at 84..100 and for nothing else.
+    let field =
+        |index: usize| u16::from_be_bytes([profile[24 + 2 * index], profile[25 + 2 * index]]);
+    let (year, month, day, hour, minute, second) =
+        (field(0), field(1), field(2), field(3), field(4), field(5));
+    assert!(
+        (1..=12).contains(&month),
+        "month {month} is outside the specification's 1..=12"
+    );
+    assert!(
+        (1..=31).contains(&day),
+        "day {day} is outside the specification's 1..=31"
+    );
+    assert!((1900..=9999).contains(&year), "year {year}");
+    assert!(
+        hour < 24 && minute < 60 && second < 60,
+        "the time of day is not a time: {hour}:{minute}:{second}"
+    );
+    // And it is a constant, not the clock: the profile's whole promise is that two
+    // builds write the same bytes.
+    assert_eq!(
+        (year, month, day, hour, minute, second),
+        (2026, 9, 21, 0, 0, 0)
+    );
+}
+
 /// The sRGB profile embedded in the committed fixture — written by ImageMagick
 /// from colord's `sRGB.icc`, so it is lcms2's answer, not this crate's.
 fn reference_profile() -> Vec<u8> {

@@ -6,8 +6,6 @@
 //! decode + color normalization   (decode.rs)
 //!   → geometry: crop to the displayed region, resample in linear light (resample.rs)
 //!   → flatten onto the slot's white base
-//!   → per-slot grading
-//!   → global filter
 //!   → 8-bit sRGB, Cairo's layout
 //! ```
 //!
@@ -26,10 +24,10 @@
 //!
 //! with `src_px ≤ MAX_DECODE_PIXELS` and `Σ dst_px = O(output pixels)`, because
 //! the destination is the part of the photo the slot can show and its area is
-//! the slot's own. A slot in the ten-column strip template needs a photo six
-//! times its width — passing the whole displayed photo would allocate six times
-//! the memory to display a tenth of it, and ten of those is 4.7 GB at A0 instead
-//! of 0.5 GB.
+//! the slot's own. A slot in the library's narrowest pane — a 1/16-wide column of
+//! `strip-9-9x1` — needs its photo magnified 12x for a 4:3 source, so passing the
+//! whole displayed photo would allocate twelve times the memory to display a
+//! twelfth of it.
 //!
 //! Peak = one source + Σ bitmaps + the output surface, and the decoder thread
 //! holds one source at a time, so `N` concurrent slots need

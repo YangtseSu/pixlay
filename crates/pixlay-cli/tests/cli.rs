@@ -420,9 +420,9 @@ fn every_export_format_is_written_with_its_metadata() {
             "{name}"
         );
 
-        // The resolution and the profile are in the file. PNG deflates the
-        // profile into iCCP, so its presence is what this level checks; what the
-        // bytes decode to is `pixlay-imaging`'s test.
+        // The profile and the sampling factors are in the file — no resolution
+        // since S12d. PNG deflates the profile into iCCP, so its presence is what
+        // this level checks; what the bytes decode to is `pixlay-imaging`'s test.
         let bytes = std::fs::read(&out).expect("read back");
         let holds = |needle: &[u8]| bytes.windows(needle.len()).any(|window| window == needle);
         match format {
@@ -1654,11 +1654,7 @@ fn init_and_templates_keep_the_usage_and_locale_rules() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// ---------------------------------------------------------------------------
-// S5: text layers
-// ---------------------------------------------------------------------------
-
-/// The directory the committed fixtures live in (`photos/`, `fonts/`).
+/// The directory the committed fixtures live in (`photos/`).
 fn fixture_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
 }

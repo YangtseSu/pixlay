@@ -115,7 +115,8 @@ fn the_long_edge_is_exact_and_the_ratio_is_kept() {
         // A pillarbox: the short edge must not round to zero.
         ((10000, 1), 100, (100, 1)),
         // An upscale asks for more pixels than the source has — the picker's
-        // fit-and-zoom preview does that — and the ratio still holds.
+        // preview, a `Contain` fit with no zoom, does that — and the ratio still
+        // holds.
         ((100, 75), 400, (400, 300)),
         // Half away from zero, and at least one pixel.
         ((400, 200), 3, (3, 2)),

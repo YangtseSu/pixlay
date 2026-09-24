@@ -303,3 +303,83 @@ fn alpha_and_dated_exif_survive_the_decode() {
     assert_eq!(date, None, "landscape.jpg must not carry a date");
     let _ = Sampler::aspect(&plain);
 }
+
+/// The date EXIF says a camera writes, through the real decoder (S15i, PIX-023).
+///
+/// `dated.jpg` carries `0x9003` in IFD0 — what Pillow's `exif[...]` assignment can
+/// write, and what the parser used to look for. A camera carries it in the Exif
+/// SubIFD, reached from IFD0 by the `0x8769` pointer, and the fixture generator
+/// builds that shape byte for byte (`dated-sub-ifd.jpg`). The pair is the point:
+/// the old parser passed the first file and missed the second, so a test that only
+/// decodes the first is a test that cannot see PIX-023.
+#[test]
+fn the_date_is_read_from_the_exif_sub_ifd_a_camera_writes() {
+    for name in ["dated.jpg", "dated-sub-ifd.jpg"] {
+        let source = Source::decode(&fixture(name)).expect("decodes");
+        let exif = source.exif().expect("the fixture carries an EXIF block");
+        assert_eq!(
+            exif::date_time_original(exif).as_deref(),
+            Some("2019:07:14 10:32:00"),
+            "{name}"
+        );
+    }
+}
+
+/// A colour the file declares and a colour it only claims (S15i, PIX-028A).
+///
+/// Two fixtures, and the answer this pipeline gives both of them today: a declared
+/// colour is **not** applied. `wide-gamut-cicp.avif` declares BT.2020 primaries
+/// with the PQ transfer function through CICP and carries no ICC profile, and it
+/// decodes to its own code values — no PQ decode, no BT.2020 → sRGB matrix —
+/// because the loader is asked to convert an *embedded profile* (`crate::decode`)
+/// and there is none; `malformed-icc.png` carries an `iCCP` chunk that is not a
+/// profile, which is ignored the same way rather than refusing the file.
+///
+/// Measured 2026-09-25 (S15i) through this decoder, against an independent
+/// ffmpeg/zimg BT.2020+PQ → sRGB conversion: every neutral patch reads its code
+/// value (0x80 → 128) where that conversion reads 24, and the whole render sits
+/// RMSE 0.239919 of full scale away from it. Both are the boundary's documented
+/// limitation (`docs/CONTRACT.md` §4.1: a source with no profile is read as sRGB),
+/// and this test is its canary — it fails the day the decoder starts converting,
+/// which is the day the behaviour has to be chosen again.
+#[test]
+fn a_declared_wide_gamut_without_a_profile_is_read_as_srgb() {
+    // The patch row the two fixtures share: seven neutrals then the three
+    // primaries, one 32 px column each, sampled at the middle of the row.
+    let neutrals = [0x20u16, 0x40, 0x60, 0x80, 0xA0, 0xC0, 0xE0];
+    let x = |index: usize| 16 + 32 * index as u32;
+    // 8-bit samples arrive scaled by 257 (`Source::pixel`).
+    let value =
+        |source: &Source, index: usize, channel: usize| source.pixel(x(index), 120)[channel] / 257;
+
+    let declared =
+        Source::decode(&fixture("wide-gamut-cicp.avif")).expect("the CICP-only AVIF decodes");
+    for (index, code) in neutrals.iter().enumerate() {
+        let read = value(&declared, index, 0);
+        assert!(
+            read.abs_diff(*code) <= 2,
+            "patch {code:#04x} reads {read:#04x}: the declared PQ/BT.2020 colour was converted, \
+             which this decoder does not do (the AVIF round trip moves a value by at most 2)"
+        );
+    }
+    // The primaries are the same story, and their own code values are what comes
+    // back (the encoder's YUV444 round trip moves each one by a code value or two).
+    for (index, channel) in [(7, 0), (8, 1), (9, 2)] {
+        assert!(
+            value(&declared, index, channel) > 250,
+            "primary {index} channel {channel} reads {:#04x}",
+            value(&declared, index, channel)
+        );
+    }
+
+    // A profile that is not a profile is not a refusal either: the file's own
+    // numbers come back, and the export is tagged sRGB like any other.
+    let broken =
+        Source::decode(&fixture("malformed-icc.png")).expect("a broken iCCP is not a refusal");
+    for (index, code) in neutrals.iter().enumerate() {
+        assert_eq!(value(&broken, index, 0), *code, "patch {code:#04x}");
+    }
+    assert_eq!(value(&broken, 7, 0), 255, "red");
+    assert_eq!(value(&broken, 8, 1), 255, "green");
+    assert_eq!(value(&broken, 9, 2), 255, "blue");
+}

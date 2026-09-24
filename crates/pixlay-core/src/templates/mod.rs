@@ -18,10 +18,11 @@
 //! * this module serves the data: [`get`], [`all`], [`names`], [`of_aspect`] and
 //!   [`document`].
 //!
-//! The matrix is grouped by aspect ratio, because a canvas and a template only fit
-//! each other when their ratios agree (`CollageDoc::validate` makes a mismatch a
-//! hard error) and the picker offers the matching group. The families, by how the
-//! geometry is laid out:
+//! The matrix is grouped by aspect ratio: a template's aspect *is* the sheet's
+//! shape (S12d removed the canvas it used to have to agree with; the normalized
+//! geometry is stretched onto the render grid, whose long edge is the one
+//! parameter a caller gives), and the picker offers the matching group
+//! ([`of_aspect`]). The families, by how the geometry is laid out:
 //!
 //! * `strip-<slots>-<cols>x<rows>` — one band: a single row or a single column.
 //! * `grid-<slots>-<cols>x<rows>` — a rectangular tiling that repeats the same
@@ -32,8 +33,8 @@
 //! each other, so the slots do not tile the canvas and their areas sum to less
 //! than 1.0 (`grid-4-2x2g`, `strip-2-2x1g`). Since S10 the picker's range carries
 //! at least three layouts for every photo count from 2 to 9, in at least two
-//! aspect families; ten ships the one template it always shipped, because no
-//! picker reaches it (ruling 3).
+//! aspect families; nine is the ceiling, because S12c removed the ten-slot recipe
+//! that used to sit above it.
 //!
 //! `mosaic-8-s14` predates the scheme: it is the template S1 froze and the name
 //! `AGENTS.md`'s verification command uses, so its name, version, aspect, slot

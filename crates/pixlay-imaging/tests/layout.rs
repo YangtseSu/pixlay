@@ -184,8 +184,9 @@ fn a_flat_photo_fills_its_whole_bitmap_at_every_framing() {
     // source has no such excuse — every pixel of the bitmap must be its color.
     //
     // The representative slots are the ones with different shapes: each template's
-    // first slot, the concave slot of `mosaic-8-s14`, and the ten-column strip's
-    // narrow slot, which is the one that needs the largest magnification.
+    // first slot, the concave slot of `mosaic-8-s14`, and the nine-column strip's
+    // narrowest pane (slot 6, 1/16 of the canvas wide, the shape that needs the
+    // largest magnification) beside its 2/16 neighbour (slot 8).
     let color = [1000u16 * 20, 1000u16 * 40, 1000u16 * 60, u16::MAX];
     let source = Flat { color };
     // The 8-bit code a 16-bit sample stands for: `code * 257` is the exact
@@ -207,6 +208,7 @@ fn a_flat_photo_fills_its_whole_bitmap_at_every_framing() {
     ];
     let mut cases: Vec<(&str, usize)> = templates::names().iter().map(|name| (*name, 0)).collect();
     cases.push(("mosaic-8-s14", 6));
+    cases.push(("strip-9-9x1", 6));
     cases.push(("strip-9-9x1", 8));
 
     let mut bitmaps = 0;
@@ -314,9 +316,9 @@ fn a_ramp_photo_lands_at_the_place_the_framing_names() {
 #[test]
 fn a_narrow_slot_holds_only_the_part_of_the_photo_it_shows() {
     // The buffer ladder's claim (`docs/CONTRACT.md` §4): the bitmap is as large as
-    // the slot, not as large as the displayed photo. A pane of the nine-column
-    // strip is 1/16 of the canvas wide and needs its photo magnified 6x for a 4:3
-    // source (the ten-column strip this test used until S12c had the same pane), so
+    // the slot, not as large as the displayed photo. Slot 0 of the nine-column strip
+    // is 2/16 of the canvas wide and needs its photo magnified 6x for a 4:3 source
+    // (the ten-column strip this test framed until S12c was narrower still), so
     // passing the whole displayed photo would allocate six times the memory to show
     // a fraction of it.
     let source = Ramp {
@@ -336,8 +338,9 @@ fn a_narrow_slot_holds_only_the_part_of_the_photo_it_shows() {
         bitmap.display,
         100.0 * region_px / display_px
     );
-    // The pane is 1/16 of the canvas wide, so the region it shows is a fraction of
-    // the displayed width; the guard band and the rounding are the slack.
+    // The pane is 2/16 of the canvas wide and the photo is magnified 6x into it,
+    // so the region it shows is a fraction of the displayed photo; the guard band
+    // and the rounding are the slack.
     assert!(
         region_px < 0.25 * display_px,
         "the bitmap holds {region_px} px of a {display_px} px photo"

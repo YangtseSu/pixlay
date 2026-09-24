@@ -526,10 +526,9 @@ fn every_count_the_picker_offers_carries_three_layouts_in_two_aspect_families() 
     // choice, so every photo count the picker can produce carries at least three
     // layouts, spread over at least two aspect families. The range is the
     // *selection's* own pair of constants — a picker cannot ask for a count it
-    // refuses to select — and its ceiling is 9 rather than the library's
-    // `MAX_SLOTS` of 10 because ten photos is a count the product does not offer
-    // (ruling 3); the coverage test above is the one that still holds 10 to a
-    // layout.
+    // refuses to select — and that pair is the library's `MIN_SLOTS..=MAX_SLOTS`
+    // again since S12c removed the ten-slot recipe (ruling 3 kept the picker's
+    // cap at 9 while the format allowed 10; there is no count above nine now).
     let templates = templates_under_test();
     let mut histogram = Vec::new();
     for count in MIN_PHOTOS..=MAX_PHOTOS {

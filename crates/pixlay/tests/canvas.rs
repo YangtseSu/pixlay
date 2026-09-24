@@ -20,9 +20,8 @@ use gtk4::prelude::*;
 use pixlay::canvas::{self, MARGIN};
 use pixlay_core::{CropTransform, PixelSize, templates};
 
-/// The long edge the test renders at, in pixels. Small enough to stay fast and to
-/// leave the canvas its own space beside the utility pane, large enough that a
-/// one-pixel geometry error is visible.
+/// The long edge the test renders at, in pixels. Small enough to stay fast, large
+/// enough that a one-pixel geometry error is visible.
 const LONG_EDGE: u32 = 640;
 
 /// The threshold from `AGENTS.md`: the same composition at `2N` and `N`,

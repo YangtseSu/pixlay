@@ -446,7 +446,7 @@ fn a_frame_gap_change_rebuilds_the_cells_and_a_colour_change_does_not() {
 
     // The gap is geometry: it narrows the region the clamp has to cover, so the
     // same photo is fitted — and resampled — again. No decode: the copies are the
-    // *file's* grade, not the frame's.
+    // *file's*, not the frame's.
     let mut gapped = doc.clone();
     gapped.frame.gap_rel = 0.04;
     let rebuilt = preview.build(&gapped, &sources, resting());

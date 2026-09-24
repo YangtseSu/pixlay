@@ -175,6 +175,9 @@ fn check_shortcuts(
     // Every action the shortcuts dialog shows is bound, and has a title: a missing
     // arm in `shortcut_title` would show an empty row.
     for (section, actions) in app::SHORTCUT_SECTIONS {
+        if app::shortcut_section_title(section).is_empty() {
+            failures.push(format!("the {section} section has no title in the dialog"));
+        }
         for action in *actions {
             if !app::ACCELERATORS.iter().any(|(name, _)| name == action) {
                 failures.push(format!("{section} lists {action}, which is not bound"));

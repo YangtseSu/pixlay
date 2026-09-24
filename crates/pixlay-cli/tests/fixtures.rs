@@ -138,8 +138,10 @@ fn the_verification_project_loads_and_its_photos_exist() {
     assert_eq!(sources.len(), 8);
     assert!(sources.iter().all(Option::is_some), "{sources:?}");
 
-    // Since S5 the entry command exercises text as well: one layer, whose date
-    // comes from the EXIF-bearing photo, so the render carries a real date and not
+    // The verification entry renders this project end to end, so this is what the
+    // entry command exercises: eight photos on `mosaic-8-s14` take decode,
+    // resample, the covering clamp, `draw` and the encoder through their real
+    // paths.
 }
 
 #[test]
