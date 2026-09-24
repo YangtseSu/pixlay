@@ -16,8 +16,16 @@
 //! slots leave a white cross. And two framings, because a slot's hit region is its
 //! geometry and must not follow the photo: a rotated photo still fills its whole
 //! slot, so the answer may not change.
+//!
+//! **The frame is the same claim seen from the other side** (S15g, the ruling of
+//! 2026-09-24): `draw` clips each cell to `outline ∩ rounded_rect(inset)`, so a
+//! frame's gap and its rounded corners are pixels the *backdrop* owns — while the
+//! hit test keeps answering with the slot's own outline, because the frame is
+//! decoration and the hit region is geometry. The sweep below therefore runs with a
+//! frame as well as without one, and `the_frames_backdrop_pixels_are_still_the_cells_geometry`
+//! pins both halves of that sentence.
 
-use pixlay_core::{CollageDoc, CropTransform, PixelSize, Point, Rgba8, templates};
+use pixlay_core::{CollageDoc, CropTransform, Frame, PixelSize, Point, Rgba8, templates};
 use pixlay_render::{Bitmap, Images, Rgb8Image, render_rgb8};
 
 /// Long edge of the grid the hit sweep measures on, in pixels.
@@ -25,6 +33,15 @@ const LONG_EDGE: u32 = 454;
 
 /// The templates the sweep runs over: a cut template and the one with a gutter.
 const TEMPLATES: [&str; 2] = [templates::SMOKE_TEMPLATE, "grid-4-2x2g"];
+
+/// The frame the framed half of the sweep and the backdrop test render with: a gap
+/// wide enough to sample a pixel in, a radius wide enough to cut a corner, and a
+/// colour no slot colour is.
+const FRAME: Frame = Frame {
+    gap_rel: 0.04,
+    radius_rel: 0.08,
+    color: Rgba8::rgb(20, 200, 120),
+};
 
 /// One flat colour per slot, far apart so a swap or a spill cannot be mistaken for
 /// a blend.
@@ -40,8 +57,13 @@ const COLORS: [Rgba8; 8] = [
 ];
 
 fn doc(name: &str, rotation_deg: f64) -> CollageDoc {
+    framed_doc(name, rotation_deg, Frame::default())
+}
+
+fn framed_doc(name: &str, rotation_deg: f64, frame: Frame) -> CollageDoc {
     let template = templates::get(name).unwrap_or_else(|| panic!("template {name}"));
     let mut doc = CollageDoc::new(template);
+    doc.frame = frame;
     for cell in &mut doc.cells {
         cell.crop = CropTransform {
             rotation_deg,
@@ -139,37 +161,40 @@ fn every_pixel_the_renderer_paints_with_a_slot_colour_hits_that_slot() {
     let mut total_pixels = 0u64;
     for name in TEMPLATES {
         for rotation_deg in [0.0, 30.0] {
-            let doc = doc(name, rotation_deg);
-            let canvas = canvas_px(&doc);
-            let image =
-                render_rgb8(&doc, &images(&doc, canvas), canvas, 1.0, None).expect("renders");
-            let agreement = disagreements(&doc, &image);
-            assert!(
-                agreement.wrong == 0,
-                "{name} at {rotation_deg} degrees: {} painted pixels do not hit their own slot: {:?}",
-                agreement.wrong,
-                agreement.examples
-            );
-            // Every slot has to be painted and sampled, or the sweep is checking
-            // fewer slots than the template has.
-            assert!(
-                agreement.per_slot.iter().all(|&count| count > 0),
-                "{name} at {rotation_deg} degrees: a slot was never sampled ({:?})",
-                agreement.per_slot
-            );
-            let pixels = u64::from(image.width as u32) * u64::from(image.height as u32);
-            assert!(
-                agreement.exact * 2 > pixels,
-                "{name} at {rotation_deg} degrees: only {} of {pixels} pixels are a slot colour, \
-                 so the comparison is measuring mostly blends",
-                agreement.exact
-            );
-            total_exact += agreement.exact;
-            total_pixels += pixels;
+            for frame in [Frame::default(), FRAME] {
+                let what = format!("{name} at {rotation_deg} degrees, frame {frame:?}");
+                let doc = framed_doc(name, rotation_deg, frame);
+                let canvas = canvas_px(&doc);
+                let image =
+                    render_rgb8(&doc, &images(&doc, canvas), canvas, 1.0, None).expect("renders");
+                let agreement = disagreements(&doc, &image);
+                assert!(
+                    agreement.wrong == 0,
+                    "{what}: {} painted pixels do not hit their own slot: {:?}",
+                    agreement.wrong,
+                    agreement.examples
+                );
+                // Every slot has to be painted and sampled, or the sweep is
+                // checking fewer slots than the template has.
+                assert!(
+                    agreement.per_slot.iter().all(|&count| count > 0),
+                    "{what}: a slot was never sampled ({:?})",
+                    agreement.per_slot
+                );
+                let pixels = u64::from(image.width as u32) * u64::from(image.height as u32);
+                assert!(
+                    agreement.exact * 2 > pixels,
+                    "{what}: only {} of {pixels} pixels are a slot colour, so the comparison is \
+                     measuring mostly blends",
+                    agreement.exact
+                );
+                total_exact += agreement.exact;
+                total_pixels += pixels;
+            }
         }
     }
     // The sweep is not allowed to be a handful of pixels: at a 454 px long edge the
-    // two templates and the two framings are a quarter of a million samples.
+    // two templates, the two framings and the two frames are half a million samples.
     assert!(
         total_exact > 100_000,
         "only {total_exact} of {total_pixels} pixels were compared"
@@ -202,4 +227,72 @@ fn the_gutter_belongs_to_no_slot_in_the_rendered_image() {
         samples += 1;
     }
     assert!(samples > 100, "only {samples} gutter samples");
+}
+
+/// The pixel and the hit test for the pixel's centre, in one place.
+fn sample(doc: &CollageDoc, image: &Rgb8Image, x: i32, y: i32) -> ([u8; 3], Option<usize>) {
+    let point = Point::new(
+        (f64::from(x) + 0.5) / f64::from(image.width),
+        (f64::from(y) + 0.5) / f64::from(image.height),
+    );
+    (image.pixel(x, y), doc.template.slot_at(point))
+}
+
+#[test]
+fn the_frames_backdrop_pixels_are_still_the_cells_geometry() {
+    // S15g's pixel-backed half of PIX-008, and the ruling of 2026-09-24: the frame
+    // is *decoration*, so the pixels it takes back are the backdrop's while the hit
+    // test keeps answering with the slot's own outline. Both halves are pinned
+    // here, because either one silently following the other would be a contract
+    // change — the hit region growing a gap it does not have, or the renderer
+    // painting a cell into its own gap.
+    //
+    // `grid-4-2x2` is a 2x2 tiling of a square canvas, so slot 0's box is
+    // `[0, 0.5] x [0, 0.5]` with the canvas's own corner at its top-left: the gap
+    // band beside that corner and the rounded corner inside it are both easy to
+    // point at.
+    let doc = framed_doc("grid-4-2x2", 0.0, FRAME);
+    let canvas = canvas_px(&doc);
+    let image = render_rgb8(&doc, &images(&doc, canvas), canvas, 1.0, None).expect("renders");
+    let [r, g, b] = [FRAME.color.r, FRAME.color.g, FRAME.color.b];
+    let backdrop = [r, g, b];
+    let slot_0 = [COLORS[0].r, COLORS[0].g, COLORS[0].b];
+    let height = f64::from(canvas.height);
+
+    // The gap: half of `gapRel` is taken off every side of the cell, so the band
+    // between the canvas border and the cell's own edge is `gapRel/2` of the canvas
+    // height wide. Sample its middle.
+    let half_gap = FRAME.gap_rel / 2.0 * height;
+    let x = (half_gap / 2.0) as i32;
+    let y = (height / 4.0) as i32;
+    let (pixel, hit) = sample(&doc, &image, x, y);
+    assert_eq!(pixel, backdrop, "the gap at ({x},{y}) is not the backdrop");
+    assert_eq!(
+        hit,
+        Some(0),
+        "the gap at ({x},{y}) is not the geometry of the cell behind it"
+    );
+
+    // The rounded corner: the arc is centred `radius` in from the inset rectangle's
+    // own corner, and the point 0.15 of the radius along the diagonal from that
+    // corner is outside the disc by 1.2 radii — cut away, and far enough from the
+    // arc to be a clean pixel rather than a blend.
+    let radius = FRAME.radius_rel * height;
+    let corner = (half_gap + 0.15 * radius) as i32;
+    let (pixel, hit) = sample(&doc, &image, corner, corner);
+    assert_eq!(
+        pixel, backdrop,
+        "the rounded corner at ({corner},{corner}) is not the backdrop"
+    );
+    assert_eq!(
+        hit,
+        Some(0),
+        "the rounded corner at ({corner},{corner}) is not the geometry of the cell it cuts"
+    );
+
+    // And the agreement the two halves are the exception to: inside the cell, the
+    // pixel is the slot's own colour and the hit test returns that slot.
+    let (pixel, hit) = sample(&doc, &image, 100, 100);
+    assert_eq!(pixel, slot_0, "the cell's own middle is not its colour");
+    assert_eq!(hit, Some(0), "the cell's own middle does not hit the cell");
 }

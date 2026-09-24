@@ -38,6 +38,7 @@ mod geometry;
 mod history;
 mod selection;
 mod template;
+mod topology;
 
 /// The template library: name to frozen geometry.
 ///

@@ -780,9 +780,31 @@ fn a_shape_that_cannot_be_fitted_is_returned_untouched() {
     let slot = rect_slot(0.0, 0.0, 1.0, 1.0);
     let covering = Polygon::rect(0.0, 0.0, 1.0, 1.0);
     let empty = Polygon { points: vec![] };
+    // A region with three vertices and no interior: a vertical segment down the
+    // middle of the slot as three collinear points, and the same segment as two
+    // points with one repeated. `fit`'s boundary is that a degenerate *covering*
+    // returns the request untouched (PIX-027B, S15g); before S15g only a region with
+    // fewer than three vertices took it, so a three-point collinear region reached
+    // the covering arithmetic — and at this request came back panned.
+    let mut segment = vec![Point::new(0.75, 0.0), Point::new(0.75, 0.5)];
+    let collinear = Polygon {
+        points: {
+            let mut points = segment.clone();
+            points.push(Point::new(0.75, 1.0));
+            points
+        },
+    };
+    let repeated = Polygon {
+        points: {
+            segment.push(Point::new(0.75, 0.5));
+            segment
+        },
+    };
     for (what, slot, region, canvas_aspect, photo_aspect) in [
         ("degenerate outline", &degenerate, &covering, 4.0 / 3.0, 1.5),
         ("empty region", &slot, &empty, 4.0 / 3.0, 1.5),
+        ("collinear region", &slot, &collinear, 4.0 / 3.0, 1.5),
+        ("repeated-point region", &slot, &repeated, 4.0 / 3.0, 1.5),
         ("NaN canvas aspect", &slot, &covering, f64::NAN, 1.5),
         ("zero canvas aspect", &slot, &covering, 0.0, 1.5),
         (
@@ -797,6 +819,15 @@ fn a_shape_that_cannot_be_fitted_is_returned_untouched() {
         let fit = request.fit(slot, region, canvas_aspect, photo_aspect);
         assert_eq!(fit.transform, request, "{what}");
     }
+
+    // The control: the same request against a region that *has* an interior is
+    // fitted, so the rows above are the degeneracy branch and not a request the
+    // clamp would leave alone anyway.
+    assert_ne!(
+        request.fit(&slot, &covering, 4.0 / 3.0, 1.5).transform,
+        request,
+        "the control region did not move the request"
+    );
 
     // A request with a NaN in it has no framing to compute, and the clamp hands
     // it back rather than turning it into a different kind of nonsense. Only an

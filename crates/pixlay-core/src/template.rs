@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::CoreError;
 use crate::geometry::{EPSILON, Point, Polygon};
+use crate::topology;
 use crate::{MAX_SLOTS, MAX_TEMPLATE_ASPECT, MIN_SLOTS, MIN_TEMPLATE_ASPECT};
 
 /// Tolerance between a slot's declared area and the area of its outline.
@@ -96,6 +97,16 @@ impl Template {
         Family::of(&self.name)
     }
 
+    /// Checks the template's own shape — name, version, aspect, slot count — each
+    /// slot's outline and declared area, and then **the slots against each other**:
+    /// no overlap, no region sealed off from the canvas border, and no more canvas
+    /// between them than there is (S15g, PIX-007; the rules are `docs/CONTRACT.md`
+    /// §3 and the algorithm is [`crate::topology`]).
+    ///
+    /// Every load runs this, so a geometry a person wrote into a `.pixlay` or a
+    /// script generated is checked like the one this build ships — which is what
+    /// lets a consumer rely on the library's invariants without caring where the
+    /// document came from.
     pub fn validate(&self) -> Result<(), CoreError> {
         if self.name.trim().is_empty() {
             return Err(CoreError::EmptyTemplateName);
@@ -147,6 +158,11 @@ impl Template {
                 });
             }
         }
+        // The slots against each other: no overlap, no interior hole, and no more
+        // than the canvas between them (S15g, PIX-007). Until S15g those invariants
+        // held only for the library this build ships, which is exactly what an
+        // embedded, hand-authored geometry escapes.
+        topology::validate(self)?;
         Ok(())
     }
 
@@ -172,6 +188,12 @@ impl Template {
     /// which of the two slots it lands in is that function's business and not
     /// something a caller should rely on. Nothing in the product needs it —
     /// a press is a pixel, and the hit tests keep a band away from boundaries.
+    ///
+    /// The document's frame is **decoration**, so it is not part of the question
+    /// either: where a gap or a rounded corner has the backdrop painted over a
+    /// cell's own edge, the answer is still that cell. Ruled 2026-09-24 (PIX-008),
+    /// and pinned by pixels in `pixlay-render/tests/hit.rs`; a hit region that
+    /// followed the frame would be a new step, not a change here.
     pub fn slot_at(&self, point: Point) -> Option<usize> {
         self.slots
             .iter()

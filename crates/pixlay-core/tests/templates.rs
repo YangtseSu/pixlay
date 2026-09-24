@@ -22,7 +22,10 @@
 use std::process::Command;
 
 use pixlay_core::templates::{SMOKE_TEMPLATE, TEMPLATE_VERSION, generator};
-use pixlay_core::{MAX_PHOTOS, MAX_SLOTS, MIN_PHOTOS, MIN_SLOTS, Point, Template, templates};
+use pixlay_core::{
+    CoreError, MAX_PHOTOS, MAX_SLOTS, MIN_PHOTOS, MIN_SLOTS, Point, Polygon, Slot, Template,
+    templates,
+};
 
 /// Points sampled per axis when rasterizing a template. 512 per axis is 262144
 /// samples: a multiple of the 32-cell lattice, so the coverage verdict is exact,
@@ -141,76 +144,304 @@ fn slots_never_overlap_and_leave_no_hole() {
     }
 }
 
+/// Uncovered samples the canvas border cannot reach: the raster's own test for an
+/// interior hole, and the independent side of the check the *loader* makes for an
+/// embedded geometry (S15g, `pixlay_core::topology`). A flood fill from the border
+/// over the uncovered samples proves it — a gap sealed between slots cannot be
+/// reached.
+fn sealed_uncovered_samples(template: &Template) -> u64 {
+    let covered = |ix: usize, iy: usize| {
+        let point = (
+            (ix as f64 + 0.5) / SAMPLES as f64,
+            (iy as f64 + 0.5) / SAMPLES as f64,
+        );
+        !inside(template, point.0, point.1).is_empty()
+    };
+    let mut reached = vec![false; SAMPLES * SAMPLES];
+    let mut stack = Vec::new();
+    let push = |index: usize, reached: &mut Vec<bool>, stack: &mut Vec<usize>| {
+        if !reached[index] {
+            reached[index] = true;
+            stack.push(index);
+        }
+    };
+    for axis in 0..SAMPLES {
+        for (ix, iy) in [
+            (axis, 0),
+            (axis, SAMPLES - 1),
+            (0, axis),
+            (SAMPLES - 1, axis),
+        ] {
+            if !covered(ix, iy) {
+                push(iy * SAMPLES + ix, &mut reached, &mut stack);
+            }
+        }
+    }
+    while let Some(index) = stack.pop() {
+        let (ix, iy) = (index % SAMPLES, index / SAMPLES);
+        let mut neighbours = Vec::new();
+        if ix > 0 {
+            neighbours.push((ix - 1, iy));
+        }
+        if ix + 1 < SAMPLES {
+            neighbours.push((ix + 1, iy));
+        }
+        if iy > 0 {
+            neighbours.push((ix, iy - 1));
+        }
+        if iy + 1 < SAMPLES {
+            neighbours.push((ix, iy + 1));
+        }
+        for (nx, ny) in neighbours {
+            if !covered(nx, ny) {
+                push(ny * SAMPLES + nx, &mut reached, &mut stack);
+            }
+        }
+    }
+    (0..SAMPLES * SAMPLES)
+        .filter(|&index| !covered(index % SAMPLES, index / SAMPLES) && !reached[index])
+        .count() as u64
+}
+
 #[test]
 fn a_non_cut_template_is_a_gutter_not_an_interior_hole() {
     // For a non-cut layout, "no interior hole" needs its own check: an uncovered
-    // sample must be able to reach the canvas border without crossing a slot. A
-    // flood fill from the border over the uncovered samples proves it — a gap
-    // sealed between slots cannot be reached.
+    // sample must be able to reach the canvas border without crossing a slot.
     for template in templates_under_test() {
         if is_cut(&template) {
             continue;
         }
-        let step = 1.0 / SAMPLES as f64;
-        let covered = |ix: usize, iy: usize| {
-            let point = (
-                (ix as f64 + 0.5) / SAMPLES as f64,
-                (iy as f64 + 0.5) / SAMPLES as f64,
-            );
-            !inside(&template, point.0, point.1).is_empty()
-        };
-        let mut reached = vec![false; SAMPLES * SAMPLES];
-        let mut stack = Vec::new();
-        let push = |index: usize, reached: &mut Vec<bool>, stack: &mut Vec<usize>| {
-            if !reached[index] {
-                reached[index] = true;
-                stack.push(index);
-            }
-        };
-        for axis in 0..SAMPLES {
-            for (ix, iy) in [
-                (axis, 0),
-                (axis, SAMPLES - 1),
-                (0, axis),
-                (SAMPLES - 1, axis),
-            ] {
-                if !covered(ix, iy) {
-                    push(iy * SAMPLES + ix, &mut reached, &mut stack);
-                }
-            }
-        }
-        while let Some(index) = stack.pop() {
-            let (ix, iy) = (index % SAMPLES, index / SAMPLES);
-            let mut neighbours = Vec::new();
-            if ix > 0 {
-                neighbours.push((ix - 1, iy));
-            }
-            if ix + 1 < SAMPLES {
-                neighbours.push((ix + 1, iy));
-            }
-            if iy > 0 {
-                neighbours.push((ix, iy - 1));
-            }
-            if iy + 1 < SAMPLES {
-                neighbours.push((ix, iy + 1));
-            }
-            for (nx, ny) in neighbours {
-                if !covered(nx, ny) {
-                    push(ny * SAMPLES + nx, &mut reached, &mut stack);
-                }
-            }
-        }
-        let sealed = (0..SAMPLES * SAMPLES)
-            .filter(|&index| !covered(index % SAMPLES, index / SAMPLES) && !reached[index])
-            .count();
+        let sealed = sealed_uncovered_samples(&template);
         assert_eq!(
             sealed,
             0,
             "{}: {sealed} uncovered samples (about {:.4} of the canvas) are sealed off \
              from the border: that is an interior hole, not a gutter",
             template.name,
-            sealed as f64 * step * step
+            sealed as f64 / (SAMPLES * SAMPLES) as f64
         );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Hand-authored geometry (S15g, PIX-007)
+// ---------------------------------------------------------------------------
+//
+// A `.pixlay` embeds its own template, so its slots may be what a person or a
+// script wrote rather than what this build's library ships. Until S15g the global
+// invariants held for the library alone (the tests above); these are the same
+// invariants asked of a file, and the raster oracle is here to disagree with the
+// loader's own validator if it is wrong (`pixlay_core::topology`).
+
+/// A template from hand-written outlines: one vertex list per slot, and each
+/// declared area is its outline's (the format cross-checks the two).
+fn template(name: &str, slots: &[&[(f64, f64)]]) -> Template {
+    let slots = slots
+        .iter()
+        .map(|points| {
+            let outline = Polygon {
+                points: points.iter().map(|&(x, y)| Point::new(x, y)).collect(),
+            };
+            Slot {
+                area: outline.area(),
+                outline,
+            }
+        })
+        .collect();
+    Template {
+        name: name.to_string(),
+        version: 1,
+        aspect: 1.0,
+        slots,
+    }
+}
+
+/// The four corners of `(x0, y0, x1, y1)`, in the order the library's own
+/// rectangles use.
+fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Vec<(f64, f64)> {
+    vec![(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+}
+
+/// The hand-authored cases the loader has to **refuse**.
+fn refusals() -> Vec<Template> {
+    vec![
+        // Overlapping, while still inside the canvas between them.
+        template(
+            "hand-overlap",
+            &[&rect(0.0, 0.0, 0.6, 0.6), &rect(0.4, 0.2, 0.8, 0.8)],
+        ),
+        // Overlapping and over the canvas between them: the areas cannot fit.
+        template(
+            "hand-overflow",
+            &[&rect(0.0, 0.0, 0.6, 1.0), &rect(0.4, 0.0, 1.0, 1.0)],
+        ),
+        // Four bands around a sealed centre.
+        template(
+            "hand-ring",
+            &[
+                &rect(0.0, 0.0, 1.0, 0.4),
+                &rect(0.0, 0.6, 1.0, 1.0),
+                &rect(0.0, 0.4, 0.4, 0.6),
+                &rect(0.6, 0.4, 1.0, 0.6),
+            ],
+        ),
+    ]
+}
+
+/// The hand-authored cases the loader has to **accept**. They are the load-bearing
+/// half: a refusal that also fired on a gutter (uncovered, but reaching the border)
+/// or on a shared edge two slots spell with different arithmetic (a slanted cut off
+/// the library's lattice) would make hand-authored templates unusable.
+fn acceptances() -> Vec<Template> {
+    vec![
+        template(
+            "hand-gutter",
+            &[&rect(0.0, 0.0, 1.0, 0.45), &rect(0.0, 0.55, 1.0, 1.0)],
+        ),
+        template(
+            "hand-slant",
+            &[
+                &[(0.0, 0.0), (0.3, 0.0), (0.7, 1.0), (0.0, 1.0)],
+                &[(0.3, 0.0), (1.0, 0.0), (1.0, 1.0), (0.7, 1.0)],
+            ],
+        ),
+    ]
+}
+
+/// One hand-authored case by name, so a test and the equivalence sweep below work
+/// on one definition rather than two copies of the same geometry.
+fn hand_case(name: &str) -> Template {
+    refusals()
+        .into_iter()
+        .chain(acceptances())
+        .find(|case| case.name == name)
+        .unwrap_or_else(|| panic!("no hand-authored case named {name}"))
+}
+
+/// The raster's verdict about a template's topology: the overlapping slot pairs it
+/// found and the uncovered samples that cannot reach the border.
+fn oracle_verdict(template: &Template) -> (Vec<(usize, usize)>, u64) {
+    let (_, overlaps) = rasterize(template);
+    (overlaps, sealed_uncovered_samples(template))
+}
+
+#[test]
+fn the_loaders_topology_verdict_matches_the_raster_oracle() {
+    // The loader's validator (`pixlay_core::topology`) and the sampling oracle in
+    // this file are two different algorithms: a slab decomposition over the exact
+    // arrangement, and a 512x512 raster with a flood fill. A template the product
+    // ships and every hand-authored case either is refused by both or accepted by
+    // both.
+    let hand_made = refusals().into_iter().chain(acceptances());
+    for case in templates_under_test().into_iter().chain(hand_made) {
+        let (overlaps, sealed) = oracle_verdict(&case);
+        let refuses = case.validate().is_err();
+        assert_eq!(
+            refuses,
+            !overlaps.is_empty() || sealed > 0,
+            "{}: the loader {} it while the raster finds {overlaps:?} overlapping pairs and \
+             {sealed} sealed samples",
+            case.name,
+            if refuses { "refuses" } else { "accepts" }
+        );
+    }
+}
+
+#[test]
+fn overlapping_slots_are_refused_naming_both() {
+    match hand_case("hand-overlap").validate() {
+        Err(CoreError::SlotsOverlap { a, b, x, y }) => {
+            assert_eq!((a, b), (0, 1), "the pair is named in order");
+            // The witness is a point inside the region they share, so it is
+            // something a person can go and look at.
+            assert!(
+                (0.4..=0.6).contains(&x) && (0.2..=0.6).contains(&y),
+                "witness ({x}, {y}) is not in the shared region"
+            );
+        }
+        other => panic!("overlapping slots must be refused, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_geometry_that_takes_more_canvas_than_there_is_is_refused() {
+    match hand_case("hand-overflow").validate() {
+        Err(CoreError::SlotAreasOverCanvas { sum }) => {
+            assert!((sum - 1.2).abs() < 1e-9, "the sum is 1.2, not {sum}");
+        }
+        other => panic!("a geometry over the canvas must be refused, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_region_sealed_off_from_the_border_is_refused() {
+    let case = hand_case("hand-ring");
+    match case.validate() {
+        Err(CoreError::InteriorHole { x, y }) => assert!(
+            (0.4..=0.6).contains(&x) && (0.4..=0.6).contains(&y),
+            "witness ({x}, {y}) is not in the sealed centre"
+        ),
+        other => panic!("a sealed region must be refused, got {other:?}"),
+    }
+    // The raster agrees, which is the claim that the loader is not the only thing
+    // that can see the hole.
+    let (overlaps, sealed) = oracle_verdict(&case);
+    assert!(overlaps.is_empty(), "the ring does not overlap");
+    assert!(sealed > 0, "the raster does not see the sealed centre");
+}
+
+#[test]
+fn a_gutter_and_a_slanted_cut_are_accepted() {
+    for case in acceptances() {
+        case.validate().unwrap_or_else(|error| {
+            panic!(
+                "{} is a template a person may write, refused: {error}",
+                case.name
+            )
+        });
+        let (overlaps, sealed) = oracle_verdict(&case);
+        assert!(
+            overlaps.is_empty() && sealed == 0,
+            "{}: the raster disagrees ({overlaps:?}, {sealed} sealed)",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn an_outline_that_crosses_itself_is_refused() {
+    // A bowtie: its two halves both answer `contains`, so as a slot it would claim
+    // two regions. The area is positive, so it reaches the simplicity check rather
+    // than the zero-area one.
+    let bowtie = template(
+        "hand-bowtie",
+        &[
+            &[(0.0, 0.0), (1.0, 1.0), (1.0, 0.0), (0.0, 0.5)],
+            &rect(0.6, 0.1, 1.0, 0.3),
+        ],
+    );
+    match bowtie.validate() {
+        Err(CoreError::InvalidSlot { slot, reason }) => {
+            assert_eq!(slot, 0);
+            assert_eq!(reason, "outline crosses itself");
+        }
+        other => panic!("a self-crossing outline must be refused, got {other:?}"),
+    }
+    // A spike — consecutive edges doubling back along each other — is the same
+    // rule seen from the other side: its area is positive too.
+    let spike = template(
+        "hand-spike",
+        &[
+            &[(0.0, 0.0), (1.0, 0.0), (0.5, 0.0), (1.0, 1.0)],
+            &rect(0.8, 0.9, 1.0, 1.0),
+        ],
+    );
+    match spike.validate() {
+        Err(CoreError::InvalidSlot { slot, reason }) => {
+            assert_eq!(slot, 0);
+            assert_eq!(reason, "outline crosses itself");
+        }
+        other => panic!("a doubling-back outline must be refused, got {other:?}"),
     }
 }
 

@@ -253,6 +253,74 @@ fn wrong_slot_area_is_rejected() {
     assert!(err.to_string().contains("declares area 0.5"), "{err}");
 }
 
+/// The global topology is the **loader's** rule, not only the library test's
+/// (S15g, PIX-007): a `.pixlay` embeds its own geometry, so a file may carry slots
+/// this build never ships. The three refusals are the ones the ruling names, each
+/// with the reason and a witness a caller can act on.
+#[test]
+fn a_templates_own_topology_is_refused_at_load() {
+    let band = |x0: f64, y0: f64, x1: f64, y1: f64| {
+        let outline = Polygon::rect(x0, y0, x1, y1);
+        pixlay_core::Slot {
+            area: outline.area(),
+            outline,
+        }
+    };
+
+    // Overlap: the second slot moved onto the first. The two areas still sum to
+    // 0.81 of the canvas, so it is the overlap that refuses it.
+    let mut overlap = two_slot_doc();
+    overlap.template.slots[1] = overlap.template.slots[0].clone();
+
+    // A sealed region: four bands around a centre nothing covers.
+    let mut hole = two_slot_doc();
+    hole.template.slots = vec![
+        band(0.0, 0.0, 1.0, 0.4),
+        band(0.0, 0.6, 1.0, 1.0),
+        band(0.0, 0.4, 0.4, 0.6),
+        band(0.6, 0.4, 1.0, 0.6),
+    ];
+    hole.cells = vec![Cell::default(); 4];
+
+    // Over the canvas between them: 0.6 + 0.6 is more than there is.
+    let mut oversize = two_slot_doc();
+    oversize.template.slots = vec![band(0.0, 0.0, 0.6, 1.0), band(0.4, 0.0, 1.0, 1.0)];
+
+    // A slot that crosses itself: a bowtie, whose two halves both answer
+    // `contains`, and whose area is positive — so it reaches the simplicity check
+    // rather than the zero-area one.
+    let bowtie_outline = Polygon {
+        points: vec![
+            Point::new(0.0, 0.0),
+            Point::new(1.0, 1.0),
+            Point::new(1.0, 0.0),
+            Point::new(0.0, 0.5),
+        ],
+    };
+    let mut bowtie = two_slot_doc();
+    bowtie.template.slots[0] = pixlay_core::Slot {
+        area: bowtie_outline.area(),
+        outline: bowtie_outline,
+    };
+
+    for (what, doc, expected) in [
+        ("overlap", &overlap, "template slots 0 and 1 overlap at ("),
+        ("hole", &hole, "template slots leave an interior hole at ("),
+        (
+            "over the canvas",
+            &oversize,
+            "template slots declare 1.2 of the canvas",
+        ),
+        ("self-intersection", &bowtie, "outline crosses itself"),
+    ] {
+        let err = doc
+            .validate()
+            .err()
+            .unwrap_or_else(|| panic!("{what}: must be refused"));
+        assert!(err.to_string().contains(expected), "{what}: {err}");
+    }
+}
+
 /// The one size parameter there is (S12d): the long edge is exact, the other
 /// edge keeps the template's aspect, and the pixel budget is the binding limit.
 #[test]

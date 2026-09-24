@@ -376,8 +376,14 @@ struct Frame<'a> {
 
 impl<'a> Frame<'a> {
     /// `None` when there is no shape to fit against: an outline to cover with
-    /// fewer than three vertices, a degenerate slot, or an aspect that is not a
-    /// positive finite number.
+    /// fewer than three vertices, an outline with **no interior** (three collinear
+    /// vertices, or a repeated one — an outline whose own area is zero), a
+    /// degenerate slot, or an aspect that is not a positive finite number.
+    ///
+    /// The zero-area case is not the 3-vertex check: `fit`'s documented boundary is
+    /// "a degenerate `covering` returns the request untouched", and a valid
+    /// three-point *collinear* polygon is a degenerate covering that used to reach
+    /// the covering arithmetic and come back magnified (PIX-027B, S15g).
     fn new(
         slot: &Slot,
         covering: &'a Polygon,
@@ -385,6 +391,14 @@ impl<'a> Frame<'a> {
         photo_aspect: f64,
     ) -> Option<Self> {
         if covering.points.len() < Polygon::MIN_VERTICES {
+            return None;
+        }
+        // The same test `Polygon::validate` applies to an outline: an area that is
+        // not a positive finite number is a region with no interior to cover, so
+        // there is nothing to fit (`NaN` included, which is why finiteness comes
+        // first).
+        let area = covering.area();
+        if !area.is_finite() || area <= 0.0 {
             return None;
         }
         if !canvas_aspect.is_finite() || canvas_aspect <= 0.0 {

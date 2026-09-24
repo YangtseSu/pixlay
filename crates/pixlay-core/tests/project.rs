@@ -11,7 +11,10 @@
 
 use std::path::{Path, PathBuf};
 
-use pixlay_core::{Cell, CollageDoc, CropTransform, DOC_VERSION, Project, templates};
+use pixlay_core::{
+    Cell, CollageDoc, CropTransform, DOC_VERSION, Point, Polygon, Project, Slot, Template,
+    templates,
+};
 
 fn temp_dir(name: &str) -> PathBuf {
     // Artifacts go to disk, never to tmpfs (`AGENTS.md`, measurement rules).
@@ -182,6 +185,128 @@ fn a_missing_project_and_a_newer_version_report_clearly() {
             .contains("newer than the supported version"),
         "{error}"
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A template from hand-written outlines: the geometry a `.pixlay` may carry and
+/// this build's library never produces (S15g).
+fn hand_made(name: &str, slots: &[&[(f64, f64)]]) -> Template {
+    let slots = slots
+        .iter()
+        .map(|points| {
+            let outline = Polygon {
+                points: points.iter().map(|&(x, y)| Point::new(x, y)).collect(),
+            };
+            Slot {
+                area: outline.area(),
+                outline,
+            }
+        })
+        .collect();
+    Template {
+        name: name.to_string(),
+        version: 1,
+        aspect: 1.0,
+        slots,
+    }
+}
+
+/// The four corners of `(x0, y0, x1, y1)`.
+fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Vec<(f64, f64)> {
+    vec![(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+}
+
+#[test]
+fn a_document_whose_own_geometry_breaks_the_rules_is_refused_at_load() {
+    // S15g's exit criterion: the loader checks the geometry the *file* carries, not
+    // only the geometry this build's library ships (PIX-007, ruled 2026-09-24). The
+    // three cases are the ruling's own — overlapping slots, a region sealed off from
+    // the border, and an outline that crosses itself — and each is written by
+    // `to_json`, which only serializes, so the test can leave exactly the file a
+    // hand edit leaves.
+    let dir = temp_dir("topology");
+    let cases: [(&str, Template, &str); 3] = [
+        (
+            "overlap",
+            hand_made(
+                "hand-overlap",
+                &[&rect(0.0, 0.0, 0.6, 0.6), &rect(0.4, 0.2, 0.8, 0.8)],
+            ),
+            "overlap at",
+        ),
+        (
+            "hole",
+            hand_made(
+                "hand-ring",
+                &[
+                    &rect(0.0, 0.0, 1.0, 0.4),
+                    &rect(0.0, 0.6, 1.0, 1.0),
+                    &rect(0.0, 0.4, 0.4, 0.6),
+                    &rect(0.6, 0.4, 1.0, 0.6),
+                ],
+            ),
+            "interior hole at",
+        ),
+        (
+            "bowtie",
+            hand_made(
+                "hand-bowtie",
+                &[
+                    &[(0.0, 0.0), (1.0, 1.0), (1.0, 0.0), (0.0, 0.5)],
+                    &rect(0.6, 0.1, 1.0, 0.3),
+                ],
+            ),
+            "outline crosses itself",
+        ),
+    ];
+    for (name, template, expected) in cases {
+        let path = dir.join(format!("{name}.pixlay"));
+        let json = CollageDoc::new(template).to_json().expect("serializes");
+        std::fs::write(&path, json).expect("write");
+        let error = Project::load(&path).expect_err("the loader must refuse it");
+        assert!(
+            error.to_string().contains(expected),
+            "{name}: expected a message about {expected:?}, got {error}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_document_whose_geometry_is_fine_still_loads() {
+    // The other half of the criterion, and the one a refusal can quietly break: a
+    // gutter (uncovered, but reaching the border) and a slanted cut (a seam off the
+    // library's lattice) are templates a person may write, so a project with either
+    // loads.
+    let dir = temp_dir("topology-ok");
+    for (name, template) in [
+        (
+            "gutter",
+            hand_made(
+                "hand-gutter",
+                &[&rect(0.0, 0.0, 1.0, 0.45), &rect(0.0, 0.55, 1.0, 1.0)],
+            ),
+        ),
+        (
+            "slant",
+            hand_made(
+                "hand-slant",
+                &[
+                    &[(0.0, 0.0), (0.3, 0.0), (0.7, 1.0), (0.0, 1.0)],
+                    &[(0.3, 0.0), (1.0, 0.0), (1.0, 1.0), (0.7, 1.0)],
+                ],
+            ),
+        ),
+    ] {
+        let path = dir.join(format!("{name}.pixlay"));
+        let json = CollageDoc::new(template.clone())
+            .to_json()
+            .expect("serializes");
+        std::fs::write(&path, json).expect("write");
+        let project = Project::load(&path)
+            .unwrap_or_else(|error| panic!("{name} is a document a person may write: {error}"));
+        assert_eq!(project.doc().template.slots.len(), template.slots.len());
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 

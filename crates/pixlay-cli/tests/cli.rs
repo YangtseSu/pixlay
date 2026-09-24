@@ -1931,6 +1931,51 @@ fn save_reports_a_missing_project_and_a_newer_version() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// S15g: a project whose *own* geometry is broken is refused wherever a document is
+/// read, before anything is decoded or written (PIX-007, ruled 2026-09-24).
+#[test]
+fn a_project_whose_own_geometry_is_broken_is_refused_with_the_reason() {
+    let dir = out_dir("topology");
+    // Slot 1 moved onto slot 0: the overlap a hand edit leaves behind. The two
+    // areas still sum to 1.0, so it is the geometry that refuses this project and
+    // not the sum.
+    let mut doc = CollageDoc::new(templates::get("strip-2-2x1").expect("registered"));
+    doc.template.slots[1] = doc.template.slots[0].clone();
+    let project = dir.join("overlap.pixlay");
+    std::fs::write(&project, doc.to_json().expect("serializes")).expect("write");
+    let path = project.to_str().expect("utf-8 path");
+    let out = dir.join("out.png");
+    let out_path = out.to_str().expect("utf-8 path");
+
+    let hit = run(&["hit", "--project", path, "--at", "0.5,0.5"]);
+    assert_eq!(code(&hit), 2, "{}", stderr(&hit));
+    assert!(stdout(&hit).is_empty(), "stdout must stay empty");
+    assert!(
+        stderr(&hit).contains("slots 0 and 1 overlap"),
+        "the reason must name the pair: {}",
+        stderr(&hit)
+    );
+
+    let render = run(&[
+        "render",
+        "--project",
+        path,
+        "--long-edge",
+        "64",
+        "--out",
+        out_path,
+    ]);
+    assert_eq!(code(&render), 2, "{}", stderr(&render));
+    assert!(stdout(&render).is_empty(), "stdout must stay empty");
+    assert!(
+        stderr(&render).contains("slots 0 and 1 overlap"),
+        "{}",
+        stderr(&render)
+    );
+    assert!(!out.exists(), "a refused render writes nothing");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// `hit` and `save` keep the S1 rules: flags that belong elsewhere are refused,
 /// and no locale changes a byte of either stream.
 #[test]

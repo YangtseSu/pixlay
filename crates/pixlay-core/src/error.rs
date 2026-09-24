@@ -109,4 +109,34 @@ pub enum CoreError {
 
     #[error("canvas would be {pixels} pixels; the limit is {max}")]
     CanvasTooLarge { pixels: u64, max: u64 },
+
+    /// Two slots of a hand-authored template cover the same point (PIX-007, S15g).
+    ///
+    /// A document's geometry is embedded data and may be hand-written or generated,
+    /// so the invariants the library's test alone used to hold have to be checked
+    /// where the file is read: `draw` paints cells in index order while
+    /// [`Template::slot_at`] answers with the first containing slot, so an overlap
+    /// makes the painted pixels and the hit test disagree about who owns a region.
+    ///
+    /// [`Template::slot_at`]: crate::Template::slot_at
+    #[error("template slots {a} and {b} overlap at ({x}, {y})")]
+    SlotsOverlap { a: usize, b: usize, x: f64, y: f64 },
+
+    /// The slots of a hand-authored template leave a region sealed off from the
+    /// canvas border (PIX-007, S15g).
+    ///
+    /// Not the gutter a `g` layout ships: a gutter is uncovered too, and it reaches
+    /// the border. A pocket that does not is a region no cell can show, which no
+    /// frame expresses and the library's own invariant test calls a hole.
+    #[error("template slots leave an interior hole at ({x}, {y})")]
+    InteriorHole { x: f64, y: f64 },
+
+    /// A template's slots declare more of the canvas than there is (PIX-007, S15g).
+    ///
+    /// Each declared area is cross-checked against its own outline before the sum
+    /// is taken, so this can only be geometry that overlaps — but the sum is the
+    /// number a caller can compare against the canvas, so it is the one the message
+    /// names. A sum *below* 1.0 is not an error: that is what a gutter layout is.
+    #[error("template slots declare {sum} of the canvas; at most 1.0 can be covered")]
+    SlotAreasOverCanvas { sum: f64 },
 }

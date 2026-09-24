@@ -128,9 +128,12 @@ impl Polygon {
         }
     }
 
-    /// Structural check only: vertex count, finiteness, the `[0, 1]` bound and a
-    /// non-zero area. Overlap and hole checks between slots belong to the
-    /// template library (S2).
+    /// Structural check only: vertex count, finiteness, the `[0, 1]` bound, a
+    /// non-zero area, and **simplicity** — no edge meets another except at the
+    /// vertex consecutive edges share. Overlap and hole checks *between* slots
+    /// belong to the template library (S2, and `crate::topology` since S15g);
+    /// whether an outline crosses *itself* is a property of the outline, which is
+    /// why it is checked here (PIX-007).
     pub fn validate(&self) -> Result<(), &'static str> {
         if self.points.len() < Self::MIN_VERTICES {
             return Err("outline needs at least 3 vertices");
@@ -146,7 +149,58 @@ impl Polygon {
         if !self.area().is_finite() || self.area() <= 0.0 {
             return Err("outline has zero area");
         }
+        if !self.is_simple() {
+            return Err("outline crosses itself");
+        }
         Ok(())
+    }
+
+    /// True when no two edges of the outline meet except at the vertex two
+    /// consecutive ones share.
+    ///
+    /// The even-odd rule every consumer uses (`contains`, the renderer's fill, the
+    /// framing clamp's vertex test) assumes a simple outline: a bowtie's two halves
+    /// both answer `contains`, so a slot that crosses itself claims two regions and
+    /// `draw` would paint one of them with its neighbours' geometry. Refusing it at
+    /// the polygon is what keeps that assumption true wherever an outline enters
+    /// the product.
+    fn is_simple(&self) -> bool {
+        let n = self.points.len();
+        for i in 0..n {
+            let (a0, a1) = (self.points[i], self.points[(i + 1) % n]);
+            for j in (i + 1)..n {
+                let (b0, b1) = (self.points[j], self.points[(j + 1) % n]);
+                let shared = if j == i + 1 {
+                    // `a1` and `b0` are the same vertex by construction.
+                    Some(a1)
+                } else if i == 0 && j + 1 == n {
+                    Some(a0)
+                } else {
+                    None
+                };
+                match shared {
+                    // Consecutive edges are allowed exactly the vertex between
+                    // them: a spike doubling back along the next edge leaves one of
+                    // the two far endpoints on the other edge, which is a second
+                    // meeting.
+                    Some(vertex) => {
+                        let far = |from: Point, to: Point| if from == vertex { to } else { from };
+                        let (a_far, b_far) = (far(a0, a1), far(b0, b1));
+                        if (a_far != vertex && on_segment(a_far, b0, b1))
+                            || (b_far != vertex && on_segment(b_far, a0, a1))
+                        {
+                            return false;
+                        }
+                    }
+                    None => {
+                        if segments_meet(a0, a1, b0, b1) {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+        true
     }
 
     pub fn bbox(&self) -> Rect {
@@ -278,4 +332,58 @@ impl Polygon {
             .map(|(a, b)| p.distance_to_segment(a, b))
             .fold(f64::INFINITY, f64::min)
     }
+}
+
+/// Signed distance from `p` to the line through `a` and `b`, in normalized units,
+/// and `0.0` when it is on that line within [`EPSILON`].
+///
+/// The distance rather than the raw cross product, so the tolerance means the same
+/// thing on the two axes; and a degenerate `a == b` — a repeated vertex — has no
+/// line, so it answers `0.0` and leaves the decision to the caller's own
+/// projection test.
+fn side_of_line(a: Point, b: Point, p: Point) -> f64 {
+    let (dx, dy) = (b.x - a.x, b.y - a.y);
+    let length = dx.hypot(dy);
+    if length <= 0.0 {
+        return 0.0;
+    }
+    let distance = (dx * (p.y - a.y) - dy * (p.x - a.x)) / length;
+    if distance.abs() <= EPSILON {
+        0.0
+    } else {
+        distance
+    }
+}
+
+/// True when `p` is on the closed segment `a`–`b` within [`EPSILON`].
+fn on_segment(p: Point, a: Point, b: Point) -> bool {
+    if side_of_line(a, b, p) != 0.0 {
+        return false;
+    }
+    let (dx, dy) = (b.x - a.x, b.y - a.y);
+    let length2 = dx * dx + dy * dy;
+    if length2 <= 0.0 {
+        // A repeated vertex: the "segment" is the point itself.
+        return p.distance_to_segment(a, b) <= EPSILON;
+    }
+    let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / length2;
+    (-EPSILON..=1.0 + EPSILON).contains(&t)
+}
+
+/// True when two closed segments share at least one point.
+fn segments_meet(a0: Point, a1: Point, b0: Point, b1: Point) -> bool {
+    let (d1, d2) = (side_of_line(a0, a1, b0), side_of_line(a0, a1, b1));
+    let (d3, d4) = (side_of_line(b0, b1, a0), side_of_line(b0, b1, a1));
+    // A proper crossing: each segment has an endpoint strictly on each side of the
+    // other's line.
+    if d1 * d2 < 0.0 && d3 * d4 < 0.0 {
+        return true;
+    }
+    // Otherwise they meet exactly when an endpoint lies on the other segment,
+    // which covers collinear overlaps too: two collinear segments that share more
+    // than a point have one of their endpoints inside the other.
+    (d1 == 0.0 && on_segment(b0, a0, a1))
+        || (d2 == 0.0 && on_segment(b1, a0, a1))
+        || (d3 == 0.0 && on_segment(a0, b0, b1))
+        || (d4 == 0.0 && on_segment(a1, b0, b1))
 }

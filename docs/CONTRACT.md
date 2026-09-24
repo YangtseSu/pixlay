@@ -122,7 +122,7 @@ Conventions:
 | one slot's bitmap | ≤ 200 MP texels (`MAX_BITMAP_PIXELS`, the same budget at the bitmap boundary — S15e) | a bitmap is the part of the photo the slot can show: the slot's own extent in output pixels plus the axis-aligned box a rotation needs, so it is bounded by the canvas rather than by the zoom. Refused per slot with the slot named and the conversion's peak bytes reported (§8, "S15e") |
 | template aspect ratio | 0.1..=10.0 (`MIN_TEMPLATE_ASPECT` / `MAX_TEMPLATE_ASPECT`) | a template outside this range is not a collage layout. Checked where a template is validated **and** where a pixel grid is derived from one (S15e, PIX-027A): a `NaN`, zero, negative or infinite aspect used to reach the rounding and come back as a one-pixel-by-N grid |
 | the render grid | long edge exact, the other edge `round` (half away from zero, at least 1 px) — asserted as 4:3 at 4000 → 4000x3000 | the whole grid request, frozen so an export's size does not drift between builds |
-| slot outline | ≥ 3 vertices, finite, every vertex inside `[0,1]`, area > 0 | a polygon with no interior is not a slot |
+| slot outline | ≥ 3 vertices, finite, every vertex inside `[0,1]`, area > 0, and **simple** (no edge meets another except at the vertex consecutive edges share — S15g, PIX-007) | a polygon with no interior is not a slot, and neither is one that crosses itself: the even-odd rule every consumer uses would give it two regions |
 | framing rotation | ~~±45°~~ **any finite angle, normalized to `(-180, 180]`** (the cap was removed on 2026-09-22; S11 widens the validation). Clockwise is positive, sheet y points down | the 2026-09-22 ruling, `AGENTS.md` |
 | framing zoom | `0 < zoom ≤ 1000` | the upper bound is necessary: zoom determines the size of the decoded bitmap, and without an upper bound it overflows. S4's decoder sets a limit **separately by memory budget**; the two layers each mind their own. The fit raises the drawn zoom to the covering value and never lowers a larger request |
 | crop offset | every component \|offset\| ≤ 1 (slot widths / heights) | beyond half a slot the photo centre leaves the slot, and no clamp can cover it again. The fit reduces it further whenever the requested pan would uncover the slot |
@@ -142,12 +142,25 @@ limit that is not in this table is a contract gap.
 
 ## 3. Templates
 
-- `Slot::outline` is a **closed polygon** (the last point connects back to the first), with ≥ 3 vertices, finite, inside `[0,1]`, area > 0.
+- `Slot::outline` is a **closed polygon** (the last point connects back to the first), with ≥ 3 vertices, finite, inside `[0,1]`, area > 0, and **simple** (no edge meets another except at the vertex two consecutive ones share — S15g, PIX-007: a bowtie's two halves both answer `contains`, so a slot that crossed itself would claim two regions).
   Polygons only, no curves: S2's review offered "restrict the crop geometry to polygons, or declare a curve discretization tolerance",
   and polygons are what make area, overlap and holes decidable rather than approximate. A path is the outline's command list — **no SVG parser** is involved.
 - `Slot::area` is the declared area and is cross-checked against the outline's actual area (tolerance 1e-6). The two are not allowed to drift.
-- S2 owns the complete invariants (pairwise zero overlap, no interior hole in the union, cut-type areas summing to exactly 1.0);
-  they live in `crates/pixlay-core/tests/templates.rs`.
+- S2 owns the complete invariants (pairwise zero overlap, no interior hole in the union, cut-type areas summing to exactly 1.0), and
+  **since S15g the loader enforces them** (PIX-007, ruled 2026-09-24): a `.pixlay` embeds its own geometry, so a hand-authored or
+  script-generated file keeps the right to its own slots and has them checked like the library's. Three refusals, each with the reason:
+  two slots that **overlap** (`template slots 0 and 1 overlap at (x, y)`), a region **sealed off from the canvas border**
+  (`template slots leave an interior hole at (x, y)` — a gutter is uncovered too and is *not* a hole, because it reaches the border), and
+  areas that **cannot fit the canvas** (`template slots declare 1.2 of the canvas; at most 1.0 can be covered`; a sum *below* 1.0 is what a
+  gutter layout is). The third is the sum clause of the ruling; the second's complementary identity — that a template covering the canvas
+  tiles it with areas summing to exactly 1.0 — needs no separate rule, because no overlap plus full coverage forces it.
+  The algorithm (`pixlay_core::topology`) cuts the canvas into vertical slabs at every vertex x and every crossing between two slots'
+  edges, and samples one x per slab: inside a slab no vertex and no crossing exists, so the y-intervals a vertical line sees through each
+  slot keep their shape and one sample is the whole truth about it. The shipped library's invariants are asserted independently, by a
+  `512`-sample raster with a flood fill, in `crates/pixlay-core/tests/templates.rs`; the hand-authored cases there are checked by both.
+- **A degenerate covering is not a shape to fit** (S15g, PIX-027B): `CropTransform::fit` returns the request untouched when the region to
+  cover has fewer than three vertices **or no interior** (three collinear points, or a repeated one — `Polygon::area()` is 0). Before S15g
+  only the vertex count was checked, so a three-point collinear region reached the covering arithmetic and came back magnified or panned.
 - **The library is a generator plus committed data** (`pixlay_core::templates`): `templates/generator.rs` holds one recipe per
   template on an integer lattice, `templates/frozen.rs` is the committed geometry a build ships, and the module serves both.
   Regeneration is `cargo run -p pixlay-core --bin pixlay-gen-templates` (a **committed bin, not `build.rs`** — the frozen geometry is an
@@ -371,6 +384,7 @@ comparable, and `--quality` was deliberately not added — a knob nobody tests b
 | shape | `template`, `version`, `slots`, `at`, `hit` and `slot` — `slot = <n>` when the point is in a slot, `slot = none` with `hit = false` when it is in a gutter or off the canvas | `template`, `version`, `aspect`, `cells`, `bytes` (the file that was written) |
 | source | `--project` (the document's **embedded** geometry, which is what makes a saved project's hit region stable) or `--template` (this build's library), exclusively | `--project`, required |
 | `--at <x>,<y>` | normalized canvas coordinates, both components in `0..=1` (the limit table). The same space `probe` prints its slot sample points in, so a probe row feeds straight back in | — |
+| what owns a point (S15g) | the slot's **geometry**, and nothing else. The frame's gap and its rounded corners are decoration: the renderer paints the backdrop there, and the hit test still answers with the slot. Both halves are measured in `pixlay-render/tests/hit.rs` — `grid-4-2x2` at `gapRel` 0.04 / `radiusRel` 0.08, a pixel in the gap band and one in a rounded corner are the backdrop's and both hit slot 0. **Ruled 2026-09-24 (PIX-008): the geometry-only hit stays**; a walk that finds a person expects the frame's backdrop to select the cell behind it is a new step after the walk, not a change here | — |
 | `--out` | — | required, `.pixlay`, and **replaced** if it exists: that is what saving is, and `init` is the command that refuses to overwrite. The write is atomic (a temporary file in the target's own directory, `sync_all`, `rename`; `pixlay_core::atomic`), so a crash leaves either the old file or the new one — and a file that is already there **keeps its mode**, so a project saved while it is readable only by its owner does not come back world-readable (S15c, PIX-016). A file that is not there yet gets the process's umask default. The path itself is what is replaced: a symbolic link at it is replaced by the regular file rather than followed |
 | relative sources | not resolved at all: a project whose photos have moved still answers | rewritten when `--out` lands in another directory, so the copy still finds the photos of the project it was copied from; an absolute source is left as it stands |
 | no slot / no file | exit **0**: "no slot owns this point" is an answer, like `templates --aspect 7:5` reporting `count = 0` | a missing `--project`, a refused version or a write failure is exit **2** with stdout empty, and nothing is written |
