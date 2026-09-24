@@ -6,11 +6,18 @@
 //! threads at once and the first warning would be a crash nobody could read. Each
 //! of these files therefore has one test, and it collects the checks it can.
 //!
-//! **A display, one way or another.** On a desktop the tests run in the session's
-//! own display; where there is none (a build box, a packaging chroot) [`start`]
-//! re-runs the whole test binary under `xvfb-run`, which is how a headless
-//! verification of a GUI is possible at all. That path is deliberate: a test that
-//! silently passes without a display would be a check that checks nothing.
+//! **A display of our own, not the session's.** GTK lays out, allocates and caches render
+//! nodes only on a frame, so every check below is really a statement about frames. A
+//! session's compositor has no reason to keep drawing a test window: it is not activated
+//! (focus stealing is refused while the session is in use), it is behind everything else,
+//! and then it gets almost no frame callbacks at all — measured 2026-09-24 on the session's
+//! own Wayland display: **0–1 frames in 2 s** in the foreground and **0 in 5 s** behind
+//! another window, where the same window inside a private headless mutter ticked at
+//! **121 frames in 2 s** and **303 in 5 s** while `active false`. So [`start`] runs the
+//! whole test binary inside a private headless mutter, and [`window`] then *checks* that
+//! frames are arriving instead of letting a wait discover it 180 s later. This path is
+//! deliberate: a test that silently passed on a display that never drew would be a check
+//! that checks nothing.
 
 #![allow(dead_code)]
 
@@ -41,42 +48,69 @@ pub type Image = (i32, i32, Vec<u8>);
 /// still mean "hung", and on this machine it does.
 pub const WAIT: Duration = Duration::from_secs(180);
 
-/// Makes sure this process can talk to a display, re-running the whole binary
-/// under `xvfb-run` when it cannot.
+/// The private compositor's child guard: set on the re-executed binary, so the re-execution
+/// happens exactly once.
+const CHILD: &str = "PIXLAY_MUTTER_CHILD";
+
+/// Makes sure this process talks to a display that keeps drawing, re-running the whole
+/// test binary inside a private headless mutter when it does not.
 ///
-/// Every test that calls this runs on exactly one thread — libtest's worker for
-/// the single `#[test]` its binary has — because GTK has to be initialised and
-/// used from one thread, and a second test in the same binary would be a second
-/// thread.
+/// **mutter, because this is a GNOME application** (`AGENTS.md`, the module boundary:
+/// GTK4 + libadwaita), so mutter is the platform's own compositor and the one whose frame
+/// behaviour these tests are about. The alternatives are named in the failure below and
+/// their invocations are in `AGENTS.md`; none of them is a dependency of the product, and
+/// none of them is a dependency of the test harness either — this is the *environment* a
+/// GUI test needs, and saying which one it is here is what keeps `cargo test` reproducible
+/// on a machine that is also being used.
+///
+/// Every test that calls this runs on exactly one thread — libtest's worker for the single
+/// `#[test]` its binary has — because GTK has to be initialised and used from one thread,
+/// and a second test in the same binary would be a second thread.
 pub fn start() {
-    if gtk::init().is_ok() {
-        return;
+    if std::env::var_os(CHILD).is_none() {
+        // Not the re-executed child yet: become one, inside a display of our own.
+        let exe = std::env::current_exe().expect("the test binary's own path");
+        let status = Command::new("mutter")
+            // A headless compositor with no monitor never draws anything, so a window in
+            // it never gets a surface (measured: the test binary hung for its whole 120 s
+            // timeout with `--headless` alone). The virtual monitor is the display those
+            // frames are drawn on, sized above the app's own default window (1100x760) so
+            // the window is never the thing being constrained.
+            .args([
+                "--wayland",
+                "--headless",
+                "--no-x11",
+                "--virtual-monitor",
+                "1920x1200@60.0",
+                "--",
+            ])
+            .arg(&exe)
+            .env(CHILD, "1")
+            // Without a session there is no ibus to talk to, and GTK's `im-ibus` module
+            // *recurses into itself* trying to reach one (measured: SIGSEGV on a 64 MiB
+            // stack, with `libim-ibus.so` alternating with `g_type_create_instance` in the
+            // backtrace). The built-in simple input context is what a headless run wants,
+            // and the accessibility bridge has no bus either.
+            .env("GTK_IM_MODULE", "gtk-im-context-simple")
+            .env("NO_AT_BRIDGE", "1")
+            .status();
+        match status {
+            Ok(status) if status.success() => std::process::exit(0),
+            Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+            Err(error) => panic!(
+                "the GUI tests run inside a private headless mutter, and mutter could not \
+                 be started ({error}). Any compositor that draws a headless session will \
+                 do: weston, kwin, xwfb-run, wlheadless-run or xvfb-run"
+            ),
+        }
     }
-    if std::env::var_os("PIXLAY_XVFB_CHILD").is_some() {
-        panic!("the GUI tests need a display: xvfb-run could not provide one either");
-    }
-    let exe = std::env::current_exe().expect("the test binary's own path");
-    let status = Command::new("xvfb-run")
-        .arg("-a")
-        .arg(&exe)
-        .env("PIXLAY_XVFB_CHILD", "1")
-        .env_remove("WAYLAND_DISPLAY")
-        // Without a session there is no ibus to talk to, and GTK's `im-ibus`
-        // module *recurses into itself* trying to reach one (measured: SIGSEGV on
-        // a 64 MiB stack, with `libim-ibus.so` alternating with
-        // `g_type_create_instance` in the backtrace). The built-in simple input
-        // context is what a headless run wants, and the accessibility bridge has
-        // no bus either.
-        .env("GTK_IM_MODULE", "gtk-im-context-simple")
-        .env("NO_AT_BRIDGE", "1")
-        .status();
-    match status {
-        Ok(status) if status.success() => std::process::exit(0),
-        Ok(status) => std::process::exit(status.code().unwrap_or(1)),
-        Err(error) => panic!(
-            "no display and xvfb-run is not available ({error}); \
-             the GUI tests need one or the other"
-        ),
+    // First run or re-executed child, GTK is initialised exactly once — and inside the
+    // private compositor rather than against whatever display this process found. That
+    // call is also what sets the locale the strings are looked up in (`i18n`'s module:
+    // `g_gettext` answers in English before it and in the catalog's language after it), so
+    // it is not skipped for a child that already has its display.
+    if gtk::init().is_err() {
+        panic!("the GUI tests need a display, and the private mutter did not provide one");
     }
 }
 
@@ -106,6 +140,12 @@ pub fn second_window(app: &adw::Application) -> EditorWindow {
     window
 }
 
+/// How long [`window`] gives a presented window to produce its first frame.
+///
+/// Two seconds is several frames at any refresh rate, so "nothing in that window" is not
+/// a slow machine: it is a display that is not drawing this window at all.
+const FRAME_PROBE: Duration = Duration::from_secs(2);
+
 /// The window of a registered application, activated and presented.
 pub fn window(app: &adw::Application) -> EditorWindow {
     app.activate();
@@ -113,6 +153,24 @@ pub fn window(app: &adw::Application) -> EditorWindow {
     window.present();
     // One round of the main context gets the window mapped and drawn.
     window.pump(Duration::from_millis(400));
+    // **The display's own check**, and the reason every wait below is a condition: GTK
+    // lays out, allocates and caches render nodes only on a frame, so a display that does
+    // not draw leaves every check reading a stale window — `FRAME_PROBE` per wait, and a
+    // run that looks like a hang (measured 2026-09-24: 0–1 frames in 2 s on a session
+    // display that was in use, where a private one delivered 121 in the same 2 s).
+    let before = window.frames();
+    let deadline = Instant::now() + FRAME_PROBE;
+    while window.frames() == before && Instant::now() < deadline {
+        window.pump(Duration::from_millis(50));
+    }
+    assert_ne!(
+        window.frames(),
+        before,
+        "the test window was presented and no frame arrived in {FRAME_PROBE:?}, so this \
+         display does not draw it: every check would read a stale window. The GUI tests \
+         need a display that composites — a private headless mutter, or any other headless \
+         compositor: weston, kwin, xwfb-run, wlheadless-run, xvfb-run"
+    );
     window
 }
 

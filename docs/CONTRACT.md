@@ -584,7 +584,7 @@ eight photos and one `{date}` layer on a 14043x10532 A0 sheet, per format:
 | the real app | `target/debug/pixlay` runs under the session's Wayland for as long as it is left alone, with nothing on stderr; the window the tests draw is `/var/tmp/pixlay-s7/window.png` |
 | the strings | `po/POTFILES` = the crate's **14** source files; `xgettext --language=Rust` finds **74** parseable msgids after S14 added the layout band's (63 before it). Counted the way `tests/i18n.rs::msgids` counts them — `msgid `/`msgid_plural ` lines, the header's own `msgid ""` excluded — because that is the comparison the test makes against the committed `po/pixlay.pot` |
 | the layout | no utility pane since ruling 18 (S13): at the minimum window size (480x360) the sheet is still drawn in full (asserted) |
-| a display, or none | the four GUI test binaries are one test each and run on the session's display; with none they re-run themselves under `xvfb-run` (pinning `GTK_IM_MODULE=gtk-im-context-simple` and `NO_AT_BRIDGE=1`, because GTK's `im-ibus` module recurses without a session bus), and the whole suite is green headlessly |
+| a display, or none | the four GUI test binaries are one test each and run on a display the harness provides, so the whole suite is green on a build box and on a machine in use; a display that does not draw frames fails the run rather than passing it |
 
 ### S9 (2026-09-22, `--release`, this machine)
 

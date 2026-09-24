@@ -49,9 +49,8 @@ image to judge. `mosaic-8-s14` has been valid since S1 and, since S2, is emitted
 generator (`pixlay-core/src/templates/generator.rs`) under the same name and the same
 `templateVersion`; `--stats` makes each round's ruler machine-readable. `pixlay-render templates`
 lists what this build ships, and `pixlay-render init --template <name> --out x.pixlay` writes a
-project to start from. Since S7 `cargo test` also builds the GUI; its tests need a display and re-run
-themselves under `xvfb-run` where there is none (pinning `GTK_IM_MODULE=gtk-im-context-simple`, because
-GTK's ibus module recurses without a session bus), so the entry still works on a build box.
+project to start from. Since S7 `cargo test` also builds the GUI; its tests need a display and run on one
+the harness provides, so the entry still works on a build box and on a machine that is in use.
 
 
 Measurement rules that go with it:
