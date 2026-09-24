@@ -118,6 +118,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::time::SystemTime;
 
 use adw::prelude::*;
 use gtk4 as gtk;
@@ -280,6 +281,12 @@ pub struct Picker {
     /// known yet is decoded at the pane's own long edge and re-decoded at its fitted
     /// size once the answer arrives.
     sizes: RefCell<HashMap<usize, (u32, u32)>>,
+    /// The file each position's cached pictures were built from, as the filesystem
+    /// described it then (S15f, PIX-012). A position is not an identity: a photo
+    /// edited or replaced under the same name keeps its index, so a cache keyed by
+    /// the index alone would go on showing the file that used to be there.
+    /// [`Picker::restamp`] is the comparison, and it is the only writer.
+    stamps: RefCell<HashMap<usize, Stamp>>,
     /// The preview on screen, and the photo it belongs to. `None` while the pane is
     /// waiting for one.
     shown: RefCell<Option<(PathBuf, Rc<Picture>, u32)>>,
@@ -347,6 +354,34 @@ fn picture_bytes(picture: &Picture) -> usize {
     picture.bytes().len()
 }
 
+/// A file's identity as the filesystem reports it: the modification time and the
+/// byte count.
+///
+/// Both halves earn their place (S15f, PIX-012): the modification time is what a
+/// file edited in place gets, and the byte count is what catches a replacement the
+/// filesystem stamps inside one timestamp tick. It is the same evidence
+/// `pixlay_imaging::Preview` keys its own caches on — and the same limit: two
+/// contents the filesystem describes identically are one identity to any cache that
+/// cannot hash the bytes.
+#[derive(Clone, Copy, PartialEq)]
+struct Stamp {
+    modified: Option<SystemTime>,
+    len: u64,
+}
+
+/// The stamp of `path`, or `None` when the filesystem will not report one.
+///
+/// `None` is not "unchanged": a cache may not answer for a file it cannot name, so
+/// [`Picker::restamp`] treats it as a change and the decode that follows reports the
+/// refusal.
+fn stamp_of(path: &Path) -> Option<Stamp> {
+    let metadata = std::fs::metadata(path).ok()?;
+    Some(Stamp {
+        modified: metadata.modified().ok(),
+        len: metadata.len(),
+    })
+}
+
 /// A bounded cache of decoded pictures, keyed by what was asked for.
 ///
 /// Two of them live in the picker — the grid's tiles and the pane's previews — and
@@ -409,6 +444,22 @@ impl<K: Eq + std::hash::Hash + Clone> Cache<K> {
         self.entries.clear();
         self.order.clear();
         self.bytes = 0;
+    }
+
+    /// Drops every entry whose key `keep` refuses — how everything cached about one
+    /// position goes at once, when the file behind it turned out to be another file
+    /// (S15f, PIX-012). A picture's key carries the size it was built at, so the
+    /// index alone is not a key anything can be `remove`d by.
+    fn retain(&mut self, keep: impl Fn(&K) -> bool) {
+        let dropped: Vec<K> = self
+            .entries
+            .keys()
+            .filter(|key| !keep(key))
+            .cloned()
+            .collect();
+        for key in dropped {
+            self.remove(&key);
+        }
     }
 
     fn len(&self) -> usize {
@@ -766,6 +817,7 @@ impl Picker {
             previews: RefCell::new(Cache::new(PREVIEW_CACHE_BYTES)),
             preview_inflight: RefCell::new(HashSet::new()),
             sizes: RefCell::new(HashMap::new()),
+            stamps: RefCell::new(HashMap::new()),
             shown: RefCell::new(None),
             focused: Cell::new(None),
             requested: Cell::new(0),
@@ -959,6 +1011,7 @@ impl Picker {
         self.preview_inflight.borrow_mut().clear();
         self.failures.borrow_mut().clear();
         self.sizes.borrow_mut().clear();
+        self.stamps.borrow_mut().clear();
         *self.shown.borrow_mut() = None;
         self.focused.set(None);
         self.requested.set(0);
@@ -978,7 +1031,7 @@ impl Picker {
         // subtitle and the status bar, so nothing on the page describes the folder
         // that was open before it.
         self.clear_selection(window);
-        self.show_focused();
+        self.show_focused(window);
     }
 
     /// Opens the session's default folder: `XDG_PICTURES_DIR`, or `~/Pictures`.
@@ -1246,6 +1299,94 @@ impl Picker {
         bounds.intersection(&viewport).is_some()
     }
 
+    /// Whether the file at `index` is still the one its cached pictures were built
+    /// from — dropping them when it is not (S15f, PIX-012).
+    ///
+    /// A position is not an identity: a photo edited or replaced under the same name
+    /// keeps its index, its place in the strip and, usually, its size class, so
+    /// nothing else in this module can tell that the file behind a cell is another
+    /// file. What can is the filesystem: the modification time and the byte count
+    /// [`stamp_of`] reports, one `stat` (~1 µs for the preview's own identity,
+    /// measured 2026-09-22) beside a decode of 30–110 ms, taken wherever a cached
+    /// picture would be answered — a cell being bound, a tile being asked for, the
+    /// pane being (re)focused.
+    ///
+    /// Everything about the position goes: its tiles at every size, its previews,
+    /// the photo's own pixel size (the status bar's pixels and zoom are ratios
+    /// against it) and the decoder's refusal, which belongs to the file that is gone.
+    /// The requests already in flight are dropped too, and cancelled at the worker,
+    /// so a fresh one goes out for the file that is there now — the picker's
+    /// deduping is keyed by the position, and a request made before the replacement
+    /// must not stand in for one made after it.
+    ///
+    /// **The answer is whether the caches still apply**, and `false` requests
+    /// nothing by itself: the caller's ordinary path does that, which is why this
+    /// runs there rather than in a timer. What it cannot see is a replacement the
+    /// filesystem describes identically — the same size, the same modification time
+    /// — and the cache keys on the evidence the filesystem offers rather than
+    /// pretending to a stronger identity (the sentence `pixlay_imaging::Preview`
+    /// carries for its own caches).
+    fn restamp(&self, window: &EditorWindow, index: usize) -> bool {
+        let current = self.file(index).as_deref().and_then(stamp_of);
+        if current.is_some() && self.stamps.borrow().get(&index) == current.as_ref() {
+            return true;
+        }
+        self.tiles.borrow_mut().retain(|(held, _)| *held != index);
+        self.previews
+            .borrow_mut()
+            .retain(|(held, _)| *held != index);
+        self.sizes.borrow_mut().remove(&index);
+        self.failures.borrow_mut().remove(&index);
+        if self.focused.get() == Some(index) {
+            // The pane is showing the file that is gone. Nothing repaints it here:
+            // the next `show_focused` finds no preview for the size it draws and
+            // paints the loading state until the new one arrives.
+            *self.shown.borrow_mut() = None;
+        }
+        let stale_tiles: Vec<u32> = self
+            .inflight
+            .borrow()
+            .iter()
+            .filter(|(_, held, _)| *held == index)
+            .map(|(_, _, px)| *px)
+            .collect();
+        let stale_previews: Vec<u32> = self
+            .preview_inflight
+            .borrow()
+            .iter()
+            .filter(|(_, held, _)| *held == index)
+            .map(|(_, _, px)| *px)
+            .collect();
+        for px in stale_tiles {
+            self.inflight
+                .borrow_mut()
+                .remove(&(self.epoch.get(), index, px));
+            if let Some(worker) = window.thumbs() {
+                worker.cancel_tile(index, px);
+            }
+        }
+        for px in stale_previews {
+            self.preview_inflight
+                .borrow_mut()
+                .remove(&(self.epoch.get(), index, px));
+            if let Some(worker) = window.thumbs() {
+                worker.cancel_preview(index, px);
+            }
+        }
+        match current {
+            Some(stamp) => {
+                self.stamps.borrow_mut().insert(index, stamp);
+            }
+            // No identity to key on: nothing cached, and the next request re-reads
+            // the file (which is how a deleted or unreadable photo reaches
+            // [`Picker::failures`]).
+            None => {
+                self.stamps.borrow_mut().remove(&index);
+            }
+        }
+        false
+    }
+
     /// Asks for the tiles of every bound cell that is on screen now.
     ///
     /// This is what a scroll is, and what the first layout is: GTK binds the cells
@@ -1275,6 +1416,10 @@ impl Picker {
 
     /// Asks for a position's tile, unless it is in hand or already on its way.
     fn ask_for_tile(&self, window: &EditorWindow, position: usize) {
+        // Before the cache is consulted: a tile in hand is only an answer if it is
+        // the file's tile (S15f, PIX-012). This is the path a scroll and a resize
+        // take, so it is where a photo edited in another program is noticed.
+        self.restamp(window, position);
         let Some(worker) = window.thumbs() else {
             return;
         };
@@ -1319,8 +1464,23 @@ impl Picker {
     }
 
     /// A cell is being recycled: drop its request and its highlight.
+    ///
+    /// **Only the row that *is* the position's current binding may do that** (S15f).
+    /// GTK unbinds by position, and a stale row's teardown can arrive *after* the
+    /// same position has been bound again — measured 2026-09-24 on a folder change:
+    /// `bind_tile(0)` was followed by the previous binding's `unbind_tile(0)`, whose
+    /// cell was a different widget. An unconditional removal takes the *live* cell's
+    /// entry with it and, through [`Picker::drop_tile`], cancels the tile request
+    /// that was just made: the cell then sits on its loading state for good — 2831
+    /// frames of pumping changed nothing, and the one-photo folder never showed its
+    /// photo. The comparison is the row's own child against the stored binding, so
+    /// the common case (a row unbinding itself) is unchanged.
     fn unbind_tile(&self, window: &EditorWindow, item: &gtk::ListItem) {
         let position = item.position() as usize;
+        if item.child().and_downcast::<gtk::Stack>().as_ref() != self.bound_cell(position).as_ref()
+        {
+            return;
+        }
         self.cells.borrow_mut().remove(&position);
         self.drop_tile(window, position);
         if let Some(stack) = item.child().and_downcast::<gtk::Stack>() {
@@ -1335,6 +1495,9 @@ impl Picker {
         let Some(stack) = self.bound_cell(position) else {
             return;
         };
+        // The file may be another file than the one the caches hold (S15f,
+        // PIX-012): a cell that is bound again is exactly where that shows.
+        self.restamp(window, position);
         let name = self
             .files
             .borrow()
@@ -1393,7 +1556,7 @@ impl Picker {
             return;
         }
         self.focused.set(Some(index));
-        self.show_focused();
+        self.show_focused(window);
         self.ask_for_preview(window);
         // The photo's pixels, its size and the zoom are all about the focused
         // photo, so the status bar moves with the pane.
@@ -1422,7 +1585,7 @@ impl Picker {
     /// cheap when nothing changed: the decode is asked for by
     /// `(photo, device pixels)`, so an unchanged size asks for nothing.
     pub fn refresh_pane(&self, window: &EditorWindow) {
-        self.show_focused();
+        self.show_focused(window);
         self.ask_for_preview(window);
         self.update_status_line();
         // A resize moves the strip's viewport too, so what is visible can have
@@ -1447,6 +1610,10 @@ impl Picker {
         let Some(index) = self.focused.get() else {
             return;
         };
+        // The pane's photo gets the same check as a cell's tile (S15f, PIX-012):
+        // the file behind the focused position may have been replaced since the
+        // preview in hand was decoded, and the pane shows what it has.
+        self.restamp(window, index);
         let Some(worker) = window.thumbs() else {
             return;
         };
@@ -1531,12 +1698,16 @@ impl Picker {
 
     /// Paints the pane from what it has: the focused photo's preview at the size the
     /// pane draws it, or the state that says it is still coming.
-    fn show_focused(&self) {
+    fn show_focused(&self, window: &EditorWindow) {
         let Some(index) = self.focused.get() else {
             self.preview_stack.set_visible_child_name("empty");
             *self.shown.borrow_mut() = None;
             return;
         };
+        // The pane's own check (S15f, PIX-012), before the cache is consulted: what
+        // it paints must be the file's, and a replaced file leaves the pane on the
+        // loading state until the new preview arrives.
+        self.restamp(window, index);
         let px = self.preview_px();
         let picture = self.previews.borrow_mut().get(&(index, px));
         match picture {

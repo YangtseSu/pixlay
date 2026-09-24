@@ -2260,6 +2260,84 @@ fn edit_is_idempotent_on_the_fit() {
 }
 
 #[test]
+fn a_combined_frame_and_framing_edit_is_fitted_against_the_frame_it_writes() {
+    // PIX-009. `edit` fitted a crop against the document's **old** frame and applied
+    // the requested frame afterwards, so `--slot i --zoom z --gap g` wrote a crop
+    // fitted for a frame the file does not carry: `draw` refits it against the frame
+    // that *is* in the file, and the file stops holding the fit it claims. Both
+    // consequences are checkable, and both are checked here: the stored crop is the
+    // fit of the frame in the same file, and the same edit twice writes the same
+    // bytes (with the old order the second run fitted against the frame the first had
+    // written, and moved the crop).
+    let dir = out_dir("edit-frame-fit");
+    let project = framing_project(&dir, "a.pixlay");
+    let once = dir.join("once.pixlay");
+    let twice = dir.join("twice.pixlay");
+    let combined = [
+        "--slot", "0", "--zoom", "0.8", "--rotate", "30", "--gap", "0.06", "--radius", "0.02",
+    ];
+    let edit = |from: &Path, to: &Path| {
+        let mut args = vec![
+            "edit",
+            "--project",
+            from.to_str().expect("utf-8"),
+            "--out",
+            to.to_str().expect("utf-8"),
+        ];
+        args.extend(combined);
+        let output = run(&args);
+        assert_eq!(code(&output), 0, "{combined:?}: {}", stderr(&output));
+    };
+    edit(&project, &once);
+    edit(&once, &twice);
+    assert_eq!(
+        std::fs::read(&once).expect("read"),
+        std::fs::read(&twice).expect("read"),
+        "the second combined edit moved the framing"
+    );
+
+    // The fit in the file is the fit of the frame in the same file: recomputed here
+    // through the same reference `draw` uses (`CollageDoc::fit_crop`), from the
+    // request the command was given.
+    let doc = CollageDoc::load(&once).expect("the edited project loads");
+    assert_eq!(doc.frame.gap_rel, 0.06, "the frame came with the edit");
+    let sources = Project::load(&once)
+        .expect("loads")
+        .sources()
+        .expect("resolves");
+    let photo = sources[0].clone().expect("cell 0 has a photo");
+    let source = pixlay_imaging::Source::decode(&photo).expect("decode");
+    let request = CropTransform {
+        zoom: 0.8,
+        offset: (0.0, 0.0),
+        rotation_deg: 30.0,
+    }
+    .normalized();
+    let framed = doc
+        .fit_crop(0, request, doc.template.aspect, source.aspect())
+        .expect("fits")
+        .transform;
+    assert_eq!(
+        doc.cells[0].crop, framed,
+        "the file does not hold the fit of its own frame"
+    );
+    // And the unframed fit is a *different* transform — the one the old order
+    // stored — so this test means something only while the gap moves the fit.
+    let mut unframed = doc.clone();
+    unframed.frame.gap_rel = 0.0;
+    let bare = unframed
+        .fit_crop(0, request, unframed.template.aspect, source.aspect())
+        .expect("fits")
+        .transform;
+    assert_ne!(
+        framed, bare,
+        "the gap has to move the fit for this test to be about anything"
+    );
+    assert_ne!(doc.cells[0].crop, bare);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn edit_wraps_a_free_rotation_into_one_turn() {
     // A dial does not accumulate turns: any finite angle is accepted, and what the
     // document stores is the equivalent one in `(-180, 180]`, so a project never
@@ -4041,6 +4119,25 @@ fn gesture_measures_a_step_without_decoding_it() {
     assert_eq!(field(&output, "src_w"), "250");
     assert_eq!(field(&output, "src_h"), "250");
     assert_eq!(field(&output, "budget_ms"), "16.666667");
+    // And the field is about **the cell that step rebuilt**, not about the
+    // document's biggest source (S15f, PIX-027C): cell 1 is `landscape.jpg`
+    // (960x540), so framing *it* reports its own 250x141 copy — the pair is one
+    // copy's two edges and never a width from one beside a height from another.
+    let other = run(&[
+        "gesture",
+        "--project",
+        &path,
+        "--grid",
+        "400",
+        "--steps",
+        "6",
+        "--slot",
+        "1",
+    ]);
+    assert_eq!(code(&other), 0, "{}", stderr(&other));
+    assert_eq!(field(&other, "slot"), "1");
+    assert_eq!(field(&other, "src_w"), "250");
+    assert_eq!(field(&other, "src_h"), "141");
     // The verdict is the warm median against that budget: the test asserts the
     // relation, not a value, so it holds on a slow machine and a fast one.
     assert!(

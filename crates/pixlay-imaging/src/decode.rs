@@ -145,17 +145,26 @@ impl Source {
     }
 
     /// A `Source` holding samples someone else produced: `width` x `height` of
-    /// them, in the same layout, with `photo`'s depth, MIME type and EXIF block.
+    /// them, at `depth`, in the same layout, with `photo`'s MIME type and EXIF
+    /// block.
     ///
     /// The reduction is the only caller, and it is deliberately narrow: what makes
     /// the result usable everywhere a decoded photo is (the framing's aspect, the
     /// `{date}` token, the resampler) is that it *is* the same kind of thing, at a
-    /// smaller size.
-    pub(crate) fn from_samples(photo: &Self, width: u32, height: u32, data: Vec<u8>) -> Self {
+    /// smaller size. The depth is a parameter because a reduction is always 16-bit
+    /// (S15f, PIX-013): it is an intermediate buffer, and quantization happens at
+    /// the final write whatever the file carried.
+    pub(crate) fn from_samples(
+        photo: &Self,
+        width: u32,
+        height: u32,
+        depth: Depth,
+        data: Vec<u8>,
+    ) -> Self {
         Self {
             width,
             height,
-            depth: photo.depth,
+            depth,
             data,
             mime: photo.mime.clone(),
             exif: photo.exif.clone(),

@@ -26,17 +26,20 @@
 //!   edited in place keeps its path and gets a new modification time; a replacement
 //!   that reproduces the same one is not detected, and the cache says so rather
 //!   than pretending otherwise.
-//! * **One bitmap set per grid.** S7's decision was that the preview grid belongs
-//!   to the widget; a live gesture draws at a coarser grid than rest
-//!   ([`gesture_grid`]) and returns to the resting one when it ends, so exactly
-//!   two grids are in play and a cell nobody touched is carried over instead of
-//!   being resampled twice. The identity rule is S7's, plus one thing S12 had to
-//!   add: same grid, same template, same canvas, same filter, same cell, same
-//!   source — **and the same modification time on that source's file**. Without
-//!   the last one a photo edited in another program would keep its old bitmap
-//!   until the cell was touched, which is the stale picture this module exists to
-//!   prevent. A `stat` per occupied cell is ~1 us next to a 30–110 ms decode
-//!   (measured 2026-09-22), so the identity is checked on every build.
+//! * **One bitmap set per grid and source edge.** S7's decision was that the
+//!   preview grid belongs to the widget; a live gesture draws at a coarser grid
+//!   than rest ([`gesture_grid`]) and returns to the resting one when it ends, so
+//!   exactly two grids are in play and a cell nobody touched is carried over
+//!   instead of being resampled twice. The identity rule is S7's, plus what S12
+//!   and S15f had to add: same grid, same template, same canvas, same filter, same
+//!   cell, same source — **the same modification time on that source's file**, the
+//!   **same frame gap** and the **same source edge**. The modification time keeps a
+//!   photo edited in another program from keeping its old bitmap until the cell is
+//!   touched; the gap keeps a set built before a frame change from carrying the
+//!   region that change moved; the edge keeps a set built from coarse copies from
+//!   answering a finer request. A `stat` per occupied cell is ~1 us next to a
+//!   30–110 ms decode (measured 2026-09-22), so the identity is checked on every
+//!   build.
 //!
 //! Both caches are bounded by a constant with its source, and neither is a promise
 //! about *pixels*: everything here is rebuilt from the file when the comparison
@@ -117,9 +120,10 @@ pub fn preview_source_long_edge(grid: PixelSize) -> u32 {
 /// How many grids' bitmaps the preview keeps.
 ///
 /// Two is exactly one gesture's worth: the resting grid and the coarse one it
-/// draws at while it moves ([`gesture_grid`]). Each set is the whole canvas in
-/// pixels, so keeping more would be holding bitmaps of a grid nobody is looking
-/// at — and at 4K a set is already ~40 MB (`3840 * 2560`, four bytes per pixel).
+/// draws at ([`gesture_grid`]) — each at its own source edge, which is a function
+/// of the grid. Each set is the whole canvas in pixels, so keeping more would be
+/// holding bitmaps of a grid nobody is looking at — and at 4K a set is already
+/// ~40 MB (`3840 * 2560`, four bytes per pixel).
 pub const MAX_GRIDS: usize = 2;
 
 /// The grid a live gesture draws at, as a fraction of the resting grid.
@@ -288,6 +292,9 @@ impl Sources {
 /// One grid's bitmaps, with the document they were built for.
 struct Grid {
     grid: PixelSize,
+    /// The long edge the preview-grade copies behind these bitmaps were reduced
+    /// to: a set built from a coarse edge is not the set a finer edge asks for.
+    source_edge: u32,
     doc: CollageDoc,
     sources: Vec<Option<PathBuf>>,
     /// Each source's modification time when its bitmap was built: an edited file
@@ -302,9 +309,25 @@ impl Grid {
     ///
     /// The comparison is S7's, minus the canvas-wide filter it used to carry
     /// (S12c removed it) and minus the canvas itself (S12d removed that too):
-    /// same template geometry, and the slot's own cell and source unchanged. The
-    /// grid is not compared here because the caller only asks a set whose grid is
-    /// the one being built.
+    /// same template geometry, the same **frame gap**, and the slot's own cell and
+    /// source unchanged. The grid and the source edge are not compared here because
+    /// the caller only asks a set whose both are the ones being built.
+    ///
+    /// **The frame gap is part of that identity** (S15f, PIX-004): the fit a bitmap
+    /// is built from reads the frame's `covering`, which is the cell's outline
+    /// clipped to its inset rectangle — so a gap change moves the region the bitmap
+    /// holds, and a set built before it carries another region's pixels *and*
+    /// another displayed-photo size. The other two frame fields are deliberately
+    /// **not** here:
+    ///
+    /// * `radius_rel` is the renderer's clip, never the bitmap's region — the
+    ///   corner radius is not subtracted from the covering polygon (`frame.rs`), so
+    ///   a radius-only change leaves every bitmap this pipeline builds bit for bit
+    ///   identical;
+    /// * `color` is painted after the slots (`AGENTS.md`'s canvas decoration
+    ///   stage), so it moves no slot's pixels either.
+    ///
+    /// Both would be rebuilt for nothing, which on a slider is every motion.
     fn reuses(
         &self,
         doc: &CollageDoc,
@@ -312,7 +335,8 @@ impl Grid {
         modified: &[Option<SystemTime>],
         slot: usize,
     ) -> Option<&SlotBitmap> {
-        let same_shape = self.doc.template == doc.template;
+        let same_shape =
+            self.doc.template == doc.template && self.doc.frame.gap_rel == doc.frame.gap_rel;
         let same_cell = self.doc.cells.get(slot) == doc.cells.get(slot)
             && self.sources.get(slot) == sources.get(slot)
             && self.modified.get(slot) == modified.get(slot);
@@ -333,13 +357,16 @@ pub struct Built {
     /// Files this build decoded, refusals included. Zero means both caches
     /// answered every cell, which is what a live gesture step has to look like.
     pub decodes: u64,
-    /// The largest preview-grade source any cell of this build was resampled from,
-    /// or `0 x 0` when every cell came from the bitmap cache.
+    /// The largest preview-grade source any cell **of this build** was resampled
+    /// from, or `0 x 0` when every cell came from the bitmap cache.
     ///
     /// This is the number that says the reduction happened rather than the
     /// reduction being assumed (S12b): the CLI's `gesture` prints the step's own
     /// copy as `src_w`/`src_h`, and against a 6000-px photo it is the difference
-    /// between a step that reads 24 MP and one that reads one.
+    /// between a step that reads 24 MP and one that reads one. It is the **maximum**
+    /// over the cells this build rebuilt — cells carried over from the bitmap cache
+    /// were not resampled — because with sources of different aspects the last one
+    /// processed is a different number (S15f, PIX-027C).
     pub source_px: PixelSize,
 }
 
@@ -391,6 +418,11 @@ impl Preview {
     /// [`build`](Self::build) with its preview-grade copies taken at `long_edge`
     /// instead of at the one `grid` would ask for.
     ///
+    /// **Both the grid and the edge are the cache's key** (S15f, PIX-004): a set of
+    /// bitmaps built from coarse copies is not the set a finer edge asks for, so a
+    /// request naming another edge rebuilds the cells rather than answering a
+    /// higher-quality question with lower-quality pixels.
+    ///
     /// The copies are keyed by **the edge they were reduced to**, so a caller that
     /// names the edge another consumer is already using shares that consumer's
     /// entries and decodes nothing at all. That is what S14's layout gallery does:
@@ -417,12 +449,22 @@ impl Preview {
         grid: PixelSize,
         long_edge: u32,
     ) -> Built {
+        // One normal form for the edge, because it is half of the key these
+        // bitmaps are cached under: a build that asks for edge 0 asks for edge 1,
+        // and two spellings of one request must not be two cache entries.
+        let long_edge = long_edge.max(1);
         // Taken out for the duration so the source cache can be borrowed at the
-        // same time, and put back at the front when the build is done.
+        // same time, and put back at the front when the build is done. **The source
+        // edge is part of the key** (S15f, PIX-004): a set built from a coarse edge
+        // holds bitmaps made from coarse copies, and handing them to a build that
+        // asked for a finer edge — the layout gallery and the canvas do ask for the
+        // same grid at the same edge, but a caller may ask for another — would
+        // answer a higher-quality request with lower-quality pixels and then store
+        // them as the new edge's own.
         let cache = self
             .grids
             .iter()
-            .position(|cache| cache.grid == grid)
+            .position(|cache| cache.grid == grid && cache.source_edge == long_edge)
             .map(|index| self.grids.remove(index));
         // One `stat` per occupied cell for the whole build: both caches key on the
         // file's identity, and reading it once is also what keeps a file edited in
@@ -439,10 +481,6 @@ impl Preview {
             width: 0,
             height: 0,
         };
-        // One target for the whole build, so every cell this grid rebuilds reads a
-        // copy of the same grade (`preview_source_long_edge`) and the cache keys on
-        // what the build actually asked for.
-        let long_edge = long_edge.max(1);
         for (slot, source) in sources.iter().enumerate() {
             let Some(path) = source else {
                 continue;
@@ -465,10 +503,21 @@ impl Preview {
                     .source(path, modified[slot], long_edge, &DecodeLimits::default())
                 {
                     Ok(reduced) => {
-                        source_px = PixelSize {
+                        // The **maximum** over the cells this build rebuilt
+                        // (S15f, PIX-027C): the field is a claim about the work the
+                        // step did, and with cells of different aspects the last
+                        // processed one understates it. The pair is one copy's own
+                        // two edges — compared by area, so the report never shows a
+                        // width from one copy beside a height from another.
+                        let copy = PixelSize {
                             width: reduced.width() as i32,
                             height: reduced.height() as i32,
                         };
+                        if copy.width as i64 * copy.height as i64
+                            > source_px.width as i64 * source_px.height as i64
+                        {
+                            source_px = copy;
+                        }
                         slot_bitmap(doc, reduced, slot, grid)
                     }
                     Err(error) => Err(error),
@@ -484,6 +533,7 @@ impl Preview {
             0,
             Grid {
                 grid,
+                source_edge: long_edge,
                 doc: doc.clone(),
                 sources: sources.to_vec(),
                 modified,

@@ -37,6 +37,10 @@
 //!   file `pixlay-render thumb` writes for the same photo at the same size, because
 //!   both are `pixlay_imaging::thumbnail`: the stage is not a second resampler, and
 //!   this is the number that says so.
+//! * **A file replaced in place is a different photo** (S15f, PIX-012): the tile and
+//!   the pane are rebuilt from the file that is there now — the stamp the filesystem
+//!   reports is part of the caches' identity — while an untouched file is still
+//!   answered from them.
 
 mod support;
 
@@ -587,6 +591,156 @@ fn the_picker_stage_meets_its_own_criteria() {
     assert!(
         scrolled <= TILE_REQUEST_MAX,
         "scrolling to the 200th photo cost {scrolled} tile requests, past the bound of {TILE_REQUEST_MAX}"
+    );
+
+    // ---- a file replaced in place is a different photo ---------------------
+    // PIX-012. A tile and a preview are cached by `(position, size)`, and a position
+    // is not an identity: a photo edited or replaced under the same name keeps its
+    // index, its cell and its size class. The file's own stamp — modification time
+    // and byte count — is what tells the picker, and every path that would answer
+    // from a cache asks for it first.
+    let replaced = support::out_dir().join("replaced");
+    let _ = std::fs::remove_dir_all(&replaced);
+    std::fs::create_dir_all(&replaced).expect("the folder can be created");
+    let photo = replaced.join("photo.png");
+    std::fs::copy(support::photo("square.png"), &photo).expect("the first photo is copied");
+    picker.open_folder(&window, &replaced);
+    assert_eq!(picker.len(), 1, "the folder lists one photo");
+    picker.focus(&window, 0);
+    assert!(
+        window.wait_for_tiles(support::WAIT),
+        "the replaced folder's tile never arrived ({} requests, {} built, {} in flight, \
+         failures {:?}, cell {:?})",
+        picker.tile_requests(),
+        picker.tiles_built(),
+        picker.pending_tiles(),
+        picker.failures(),
+        picker
+            .cell_widget(0)
+            .and_then(|cell| cell.downcast::<gtk4::Stack>().ok())
+            .and_then(|stack| stack.visible_child_name().map(|name| name.to_string())),
+    );
+    assert!(
+        window.wait_for_preview(support::WAIT),
+        "the folder's preview never arrived"
+    );
+    let (_, before_width, before_height, _) = picker
+        .preview_pixels()
+        .expect("the pane has the first photo");
+    assert_eq!(
+        picker.status_line()[1],
+        "640 × 640",
+        "the status line describes the first photo"
+    );
+    let cell = picker.cell_widget(0).expect("the only cell is bound");
+    let before_tile = support::snapshot(&cell);
+    let requests = picker.tile_requests();
+
+    // The same name, another file — 960x540 rather than 640x640, so the tile, the
+    // pane, the decode size and the status facts all have somewhere to move.
+    std::fs::copy(support::photo("landscape.jpg"), &photo).expect("the second photo is copied");
+    // The stamp is the filesystem's, and these two files differ in size as well; the
+    // modification time is set explicitly anyway, because a test may not depend on
+    // how fast the filesystem's clock ticks (the rule the preview's own cache test
+    // follows).
+    std::fs::File::options()
+        .write(true)
+        .open(&photo)
+        .expect("the replaced file opens")
+        .set_modified(std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000))
+        .expect("the modification time is set");
+
+    // Nothing asks by itself: a picker is idle until someone scrolls, clicks or
+    // resizes the window, and `refresh_pane` is what a resize does — the public entry
+    // the window's own signals call.
+    picker.refresh_pane(&window);
+    assert!(
+        window.wait_for_preview(support::WAIT),
+        "the replacement never reached the pane ({} tiles, {} in flight)",
+        picker.tiles_built(),
+        picker.pending_tiles()
+    );
+    assert!(
+        window.wait_for_tiles(support::WAIT),
+        "the replacement never reached the tile"
+    );
+    let (_, after_width, after_height, after_pixels) = picker
+        .preview_pixels()
+        .expect("the pane has the second photo");
+    assert_ne!(
+        (after_width, after_height),
+        (before_width, before_height),
+        "the pane is still showing a picture decoded from the file that is gone"
+    );
+    assert_eq!(
+        picker.status_line()[1],
+        "960 × 540",
+        "the status line's pixels are the file's own, and the file changed"
+    );
+    let (width, height) = pane_is_the_preview(&picker, 0);
+
+    // And the pane's pixels are the **new** file's, by the same comparison the
+    // stage's pixel criterion uses: the CLI's own `thumb` of that file at the size
+    // the pane decoded.
+    let thumb = support::artifact("picker-replaced-thumb.png");
+    let argv: Vec<std::ffi::OsString> = [
+        "thumb",
+        "--photo",
+        photo.to_str().expect("a UTF-8 path"),
+        "--px",
+        &picker.preview_px().to_string(),
+        "--out",
+        thumb.to_str().expect("a UTF-8 path"),
+    ]
+    .iter()
+    .map(std::ffi::OsString::from)
+    .collect();
+    let status = pixlay_cli::cli::run(&argv).expect("the CLI writes the preview");
+    assert_eq!(status, 0, "pixlay-render thumb succeeds");
+    let from_cli = Source::decode(&thumb).expect("the CLI's preview decodes");
+    assert_eq!(
+        (from_cli.width() as i32, from_cli.height() as i32),
+        (width, height),
+        "a replaced file is decoded at the fitted size the pane asks for"
+    );
+    let difference = rmse_against(&after_pixels, width, height, &from_cli);
+    eprintln!(
+        "the replaced file: the pane moved from {before_width}x{before_height} to {after_width}x{after_height} \
+         and matches the CLI's thumb at RMSE {difference:.4}"
+    );
+    assert!(
+        difference <= RMSE_THRESHOLD,
+        "the pane is not showing the file that is there now: RMSE {difference:.4} > {RMSE_THRESHOLD}"
+    );
+
+    // The tile moved with it (the cell is bound to the same position and already
+    // showed a 128 px tile of the square), and the check is not an invalidation:
+    // when the file is untouched, asking again decodes nothing — one `stat` per ask
+    // is what the identity costs.
+    let after_tile = support::snapshot(&cell);
+    let difference = support::rmse(&before_tile, &after_tile);
+    eprintln!("the replaced file moved the tile by RMSE {difference:.2}");
+    assert!(
+        difference > RMSE_THRESHOLD,
+        "the cell still draws the file that is gone: RMSE {difference:.2}"
+    );
+    let unchanged = picker.tile_requests();
+    picker.refresh_pane(&window);
+    window.pump(Duration::from_millis(100));
+    assert_eq!(
+        picker.tile_requests(),
+        unchanged,
+        "an unchanged file has to be answered from the cache"
+    );
+    assert!(
+        picker.preview_current(),
+        "and the pane is still the focused photo's own picture"
+    );
+    assert!(
+        requests < unchanged,
+        "the replacement has to have cost a decode ({} then {} requests)",
+        requests,
+        unchanged
     );
 
     // ---- what the stage looks like -----------------------------------------

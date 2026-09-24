@@ -56,7 +56,7 @@
 
 use crate::decode::{Depth, Sampler, Source};
 use crate::thumb::thumb_size;
-use crate::transfer::{WGHT, linear_to_srgb8, linear_to_srgb16, srgb_to_linear_f32, to_fixed};
+use crate::transfer::{WGHT, linear_to_srgb16, srgb_to_linear_f32, to_fixed};
 
 /// Output rows reduced per block.
 ///
@@ -76,7 +76,8 @@ const BLOCK_ROWS: usize = 64;
 #[derive(Clone, Debug)]
 pub struct PreviewSource {
     /// The reduced pixels, in the decoder's own layout — one sample per channel,
-    /// in the source's depth, straight sRGB and not premultiplied.
+    /// **16 bits each** (a reduction, unlike a photo handed over unchanged, is an
+    /// intermediate buffer: S15f, PIX-013) — straight sRGB and not premultiplied.
     photo: Source,
     /// The decoded photo's own `width / height`, carried rather than recomputed.
     /// See the module docs: the fit and the region geometry are functions of it.
@@ -102,14 +103,32 @@ impl PreviewSource {
         }
         let data = reduce(source, width as usize, height as usize);
         Self {
-            photo: Source::from_samples(source, width, height, data),
+            // **Sixteen bits, whatever the file carried** (S15f, PIX-013): this is
+            // an intermediate buffer — the resampler reads it, and the quantization
+            // that matters is the final 8-bit write (`AGENTS.md`, "Resampling must
+            // happen in the correct color space") — so an 8-bit source reduced here
+            // and stored back at 8 bits would quantize the picture *before* the
+            // resample that is supposed to be the only lossy step. The copy the
+            // cache holds is therefore twice the bytes of an 8-bit photo's own
+            // samples, which is what [`MAX_SOURCE_BYTES`](crate::preview) counts. A
+            // photo at or below the target is handed over above, untouched: those
+            // are the decoder's own samples, not a reduction, and widening them
+            // would buy nothing.
+            photo: Source::from_samples(source, width, height, Depth::Sixteen, data),
             aspect,
         }
     }
 
     /// How many bytes this reduction occupies — what the preview's cache budgets.
-    pub(crate) fn bytes(&self) -> usize {
+    pub fn bytes(&self) -> usize {
         self.photo.bytes()
+    }
+
+    /// The depth these samples are at: **16 bits** for a reduction, and the file's
+    /// own for a photo that was already small enough to hand over unchanged
+    /// (S15f, PIX-013).
+    pub fn depth(&self) -> Depth {
+        self.photo.depth()
     }
 }
 
@@ -136,8 +155,10 @@ impl Sampler for PreviewSource {
     }
 }
 
-/// The samples of `source` reduced to `dst_w` x `dst_h`, in the source's own
-/// layout and depth.
+/// The samples of `source` reduced to `dst_w` x `dst_h`, **16 bits per sample**.
+///
+/// The output depth is the caller's invariant, not the file's (S15f, PIX-013): the
+/// source's depth is read where the pixels come in ([`read`]) and nowhere after it.
 fn reduce(source: &Source, dst_w: usize, dst_h: usize) -> Vec<u8> {
     let src_w = source.width() as usize;
     let src_h = source.height() as usize;
@@ -149,7 +170,7 @@ fn reduce(source: &Source, dst_w: usize, dst_h: usize) -> Vec<u8> {
     };
     let columns = Weights::new(src_w, dst_w);
     let rows = Weights::new(src_h, dst_h);
-    let mut out = vec![0u8; dst_w * dst_h * 4 * sample];
+    let mut out = vec![0u8; dst_w * dst_h * 4 * 2];
     // One horizontally reduced row per output row a block needs, premultiplied in
     // linear light: the same accumulator layout `resample` uses, for the same
     // reason — alpha has to bound the colour, or a transparent footprint would
@@ -203,8 +224,7 @@ fn reduce(source: &Source, dst_w: usize, dst_h: usize) -> Vec<u8> {
                 };
                 store(
                     &mut out,
-                    (dst_row * dst_w + texel) * 4 * sample,
-                    depth,
+                    (dst_row * dst_w + texel) * 4 * 2,
                     [straight(0), straight(1), straight(2), alpha],
                 );
             }
@@ -233,30 +253,17 @@ fn read(samples: &[u8], sample: usize, width: usize, x: u32, y: u32) -> [u16; 4]
     out
 }
 
-/// Writes one output texel: the three colours through the sRGB table of the
-/// source's depth, the alpha — which is linear coverage, not a transfer-encoded
-/// value — rounded to the same width.
-fn store(out: &mut [u8], at: usize, depth: Depth, rgba: [f32; 4]) {
-    match depth {
-        Depth::Eight => {
-            for (channel, value) in rgba.iter().enumerate() {
-                out[at + channel] = if channel == 3 {
-                    (value * 255.0).round().clamp(0.0, 255.0) as u8
-                } else {
-                    linear_to_srgb8(to_fixed(f64::from(*value)))
-                };
-            }
-        }
-        Depth::Sixteen => {
-            for (channel, value) in rgba.iter().enumerate() {
-                let fixed = if channel == 3 {
-                    to_fixed(f64::from(*value))
-                } else {
-                    linear_to_srgb16(to_fixed(f64::from(*value)))
-                };
-                out[at + channel * 2..at + channel * 2 + 2].copy_from_slice(&fixed.to_ne_bytes());
-            }
-        }
+/// Writes one output texel: the three colours through the 16-bit sRGB table, the
+/// alpha — which is linear coverage, not a transfer-encoded value — rounded to the
+/// same width.
+fn store(out: &mut [u8], at: usize, rgba: [f32; 4]) {
+    for (channel, value) in rgba.iter().enumerate() {
+        let fixed = if channel == 3 {
+            to_fixed(f64::from(*value))
+        } else {
+            linear_to_srgb16(to_fixed(f64::from(*value)))
+        };
+        out[at + channel * 2..at + channel * 2 + 2].copy_from_slice(&fixed.to_ne_bytes());
     }
 }
 

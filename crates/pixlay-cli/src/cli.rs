@@ -224,6 +224,24 @@ fn edit_project(args: EditArgs) -> Result<u8, Failure> {
         apply(&mut history, Edit::AddPhotos { photos: added })?;
     }
 
+    // The frame is a document field, and since S15 a command of its own: the
+    // `Frame…` dialog commits the same `SetFrame`, so the CLI's three flags and the
+    // window's three rows are one writer rather than two, and an impossible frame is
+    // refused where it is asked for (naming the slot the gap emptied) instead of
+    // later, when the document is validated for writing.
+    //
+    // It is applied **before the framing flags below** (S15f, PIX-009): a crop is
+    // stored as its fit, and the fit reads the frame's `covering` — the cell's
+    // outline clipped to its inset rectangle — so `--gap 0.04 --zoom 1.4` has to be
+    // fitted against the frame the file will carry. Fitting first and applying the
+    // frame afterwards wrote a crop the renderer then refits: the file did not hold
+    // the fit it claimed, and the same edit run twice moved the bytes.
+    if args.frame.any() {
+        let mut frame = history.doc().frame;
+        args.frame.apply(&mut frame);
+        apply(&mut history, Edit::SetFrame { frame })?;
+    }
+
     if let Some(slot) = args.slot {
         // Checked against the document the structural flags produced: a layout
         // switch can drop the cell the framing was meant for.
@@ -269,7 +287,8 @@ fn edit_project(args: EditArgs) -> Result<u8, Failure> {
                 // aspect, not a preview grid's — because this is the number that
                 // gets written. It is the *edited* request that is fitted, not the
                 // crop the document already had: `fit_crop` is the same reference
-                // `draw` will use.
+                // `draw` will use, **including the frame applied above** (S15f,
+                // PIX-009).
                 let fitted = match photo {
                     Some(photo) => {
                         let source = pixlay_imaging::Source::decode(&photo)
@@ -286,17 +305,6 @@ fn edit_project(args: EditArgs) -> Result<u8, Failure> {
                 apply(&mut history, Edit::SetCrop { slot, crop: fitted })?;
             }
         }
-    }
-
-    // The frame is a document field, and since S15 a command of its own: the
-    // `Frame…` dialog commits the same `SetFrame`, so the CLI's three flags and the
-    // window's three rows are one writer rather than two, and an impossible frame is
-    // refused where it is asked for (naming the slot the gap emptied) instead of
-    // later, when the document is validated for writing.
-    if args.frame.any() {
-        let mut frame = history.doc().frame;
-        args.frame.apply(&mut frame);
-        apply(&mut history, Edit::SetFrame { frame })?;
     }
 
     // Validating before writing is what keeps a bug in the library from shipping as

@@ -13,6 +13,12 @@
 //! reads a 600-px copy of a 1600-px photo" is an assertion rather than a claim
 //! about the code.
 //!
+//! S15f adds the two halves of the *identity* a cached bitmap is answered by — the
+//! frame's gap, which the fit reads, and the source edge the copies were reduced at
+//! — plus the claim that `source_px` is the maximum over the cells a build
+//! rebuilt, and the depth of a reduction (16 bits: `tests/reduce.rs` for the
+//! pixels, the caller's view of it here).
+//!
 //! Every case uses real files and the real decoder: a cache measured on a
 //! synthetic sampler would be measuring the test.
 
@@ -102,13 +108,12 @@ fn target() -> u32 {
 
 /// The bytes a preview-grade source of `source` occupies at `long_edge` — what the
 /// source cache's budget counts (S12b; before it, the decoded photo did).
+///
+/// The copy's own answer, rather than a recomputation: a reduction is 16-bit
+/// whatever the file carried (S15f, PIX-013), so the byte count is not a function of
+/// the source's depth.
 fn reduced_bytes(source: &Source, long_edge: u32) -> usize {
-    let per_sample = match source.depth() {
-        Depth::Eight => 1,
-        Depth::Sixteen => 2,
-    };
-    let reduced = PreviewSource::new(source, long_edge);
-    reduced.width() as usize * reduced.height() as usize * 4 * per_sample
+    PreviewSource::new(source, long_edge).bytes()
 }
 
 /// Sets a file's modification time to a fixed instant, so the test does not depend
@@ -384,5 +389,241 @@ fn the_gesture_grid_is_half_the_resting_one() {
             width: 1,
             height: 1
         }
+    );
+}
+
+/// The absence of a source: what `Built::source_px` reports when no cell was
+/// resampled at all.
+fn no_source() -> PixelSize {
+    PixelSize {
+        width: 0,
+        height: 0,
+    }
+}
+
+#[test]
+fn a_frame_gap_change_rebuilds_the_cells_and_a_colour_change_does_not() {
+    // PIX-004's first half. A bitmap is built from the fit, and the fit reads the
+    // frame's `covering` — the cell's outline clipped to its inset rectangle — so a
+    // gap change moves the region every bitmap holds. A set carried over from
+    // before it would hold the old region *and* the old displayed-photo size, which
+    // `draw` then places with the new fit: a picture the document no longer has.
+    let sources = sources(&[fixture("landscape.jpg"), fixture("square.png")]);
+    let doc = document(&sources);
+    let mut preview = Preview::new();
+    let first = preview.build(&doc, &sources, resting());
+    assert_eq!(first.decodes, 2, "the first build decodes both photos");
+    assert_ne!(first.source_px, no_source(), "and it resampled both cells");
+
+    // The backdrop colour is painted *after* the slots (`AGENTS.md`'s canvas
+    // decoration stage), so it moves no slot's pixels and nothing is rebuilt for
+    // it. The evidence is `source_px`: a rebuilt cell reports the copy it read, a
+    // carried-over one reports nothing.
+    let mut recoloured = doc.clone();
+    recoloured.frame.color = pixlay_core::Rgba8::rgb(10, 20, 30);
+    let warm = preview.build(&recoloured, &sources, resting());
+    assert_eq!(warm.decodes, 0);
+    assert_eq!(
+        warm.source_px,
+        no_source(),
+        "a colour-only change must be carried over, not resampled"
+    );
+    assert_eq!(pixels(&warm, 0), pixels(&first, 0));
+
+    // The radius is *not* part of that identity, deliberately: it is the renderer's
+    // clip and never the bitmap's region (`Frame::covering` does not subtract it),
+    // so a radius-only change leaves every bitmap bit for bit identical and
+    // rebuilding them would be work for nothing — on a slider, every motion.
+    let mut rounded = doc.clone();
+    rounded.frame.radius_rel = 0.05;
+    let clipped = preview.build(&rounded, &sources, resting());
+    assert_eq!(
+        clipped.source_px,
+        no_source(),
+        "the radius is a clip, not a region: nothing to rebuild"
+    );
+    assert_eq!(pixels(&clipped, 0), pixels(&first, 0));
+
+    // The gap is geometry: it narrows the region the clamp has to cover, so the
+    // same photo is fitted — and resampled — again. No decode: the copies are the
+    // *file's* grade, not the frame's.
+    let mut gapped = doc.clone();
+    gapped.frame.gap_rel = 0.04;
+    let rebuilt = preview.build(&gapped, &sources, resting());
+    assert_eq!(rebuilt.decodes, 0, "the frame does not re-read the file");
+    assert_ne!(
+        rebuilt.source_px,
+        no_source(),
+        "the gap moves the fit, so the cells are rebuilt"
+    );
+    assert_ne!(
+        pixels(&rebuilt, 0),
+        pixels(&first, 0),
+        "a gapped cell shows a different region than an ungapped one"
+    );
+    // And what it rebuilt is the document's own picture, byte for byte: a preview
+    // that never saw the unframed build produces the same cells.
+    let direct = Preview::new().build(&gapped, &sources, resting());
+    for slot in 0..sources.len() {
+        assert_eq!(
+            pixels(&rebuilt, slot),
+            pixels(&direct, slot),
+            "slot {slot}: the rebuilt bitmap is not what a cold build produces"
+        );
+    }
+
+    // Going back to no gap is a geometry change too, in the other direction — and
+    // it lands on the first build's own bytes.
+    let back = preview.build(&doc, &sources, resting());
+    assert_ne!(back.source_px, no_source());
+    assert_eq!(pixels(&back, 0), pixels(&first, 0));
+}
+
+#[test]
+fn one_grid_asked_at_two_source_edges_rebuilds() {
+    // PIX-004's second half: a set of bitmaps is an answer for the **source edge**
+    // it was built at, and for nothing else. The layout gallery names the canvas's
+    // own edge so the two share one reduction (S14); a caller that names another
+    // edge must be given that edge's pixels rather than the ones already in hand —
+    // and the set it produces must not be stored as if it were the new edge's.
+    let photo = fixture("resample-source.png");
+    let sources = sources(&[photo.clone(), photo]);
+    let doc = document(&sources);
+    let mut preview = Preview::new();
+
+    let coarse = preview.build_at_source_edge(&doc, &sources, resting(), 400);
+    assert_eq!(coarse.decodes, 1, "two cells on one file decode it once");
+    assert_eq!(
+        coarse.source_px,
+        PixelSize {
+            width: 400,
+            height: 300
+        },
+        "the coarse edge's own reduction"
+    );
+
+    let fine = preview.build_at_source_edge(&doc, &sources, resting(), 1200);
+    assert_eq!(fine.decodes, 1, "a different edge is a different reduction");
+    assert_eq!(
+        fine.source_px,
+        PixelSize {
+            width: 1200,
+            height: 900
+        }
+    );
+    let direct = Preview::new().build_at_source_edge(&doc, &sources, resting(), 1200);
+    for slot in 0..sources.len() {
+        assert_eq!(
+            pixels(&fine, slot),
+            pixels(&direct, slot),
+            "slot {slot}: the fine build is not the fine copy's own pixels"
+        );
+    }
+    assert_ne!(
+        pixels(&fine, 0),
+        pixels(&coarse, 0),
+        "the two edges are two different pictures at this grid"
+    );
+
+    // The coarse set is still there — the fine build did not overwrite it — and
+    // asking for it again is answered without a decode.
+    let again = preview.build_at_source_edge(&doc, &sources, resting(), 400);
+    assert_eq!(again.decodes, 0);
+    assert_eq!(again.source_px, no_source(), "carried over, not resampled");
+    assert_eq!(pixels(&again, 0), pixels(&coarse, 0));
+    assert_eq!(preview.decodes(), 2, "one decode per edge, per file");
+}
+
+#[test]
+fn the_reported_source_is_the_largest_a_cell_was_resampled_from() {
+    // PIX-027C. `Built::source_px` is a claim about the work the step did, and the
+    // CLI's `gesture` prints it as `src_w`/`src_h`: with sources of different
+    // aspects the last cell processed is a different number from the largest. The
+    // copies below are one long edge (400) at three aspects, so what moves is the
+    // other one — and the pair reported must be a single copy's own two edges.
+    let wide = fixture("resample-source.png"); // 1600x1200 -> 400x300
+    let letterbox = fixture("landscape.jpg"); // 960x540  -> 400x225
+    let square = fixture("square.png"); // 640x640  -> 400x400
+    let largest = PixelSize {
+        width: 400,
+        height: 400,
+    };
+    let build = |paths: &[PathBuf]| {
+        let sources = sources(paths);
+        let doc = document(&sources);
+        Preview::new().build_at_source_edge(&doc, &sources, resting(), 400)
+    };
+
+    // Equal: one file in both cells.
+    assert_eq!(build(&[square.clone(), square.clone()]).source_px, largest);
+    // Descending: the largest first, which is where assigning instead of taking the
+    // maximum reported the *last* copy (400x300).
+    assert_eq!(build(&[square.clone(), wide.clone()]).source_px, largest);
+    // Ascending: the largest last — the order a "last one wins" bug gets right by
+    // luck, asserted anyway so the two directions are one rule.
+    assert_eq!(build(&[wide.clone(), square.clone()]).source_px, largest);
+    // And the smallest of the three is reported when it is the only one resampled:
+    // a build that rebuilds one cell reports that cell's copy, not the document's
+    // biggest source.
+    let sources = sources(&[letterbox.clone(), wide]);
+    let doc = document(&sources);
+    let mut preview = Preview::new();
+    let cold = preview.build_at_source_edge(&doc, &sources, resting(), 400);
+    assert_eq!(
+        cold.source_px,
+        PixelSize {
+            width: 400,
+            height: 300
+        },
+        "the largest of the two cells that were built"
+    );
+    let mut framed = doc.clone();
+    framed.cells[1].crop = CropTransform {
+        zoom: 1.2,
+        ..CropTransform::IDENTITY
+    };
+    let warm = preview.build_at_source_edge(&framed, &sources, resting(), 400);
+    assert_eq!(
+        warm.source_px,
+        PixelSize {
+            width: 400,
+            height: 300
+        },
+        "one cell rebuilt: its own copy, and the maximum of one is itself"
+    );
+}
+
+#[test]
+fn an_eight_bit_reduction_comes_back_sixteen_bit() {
+    // PIX-013. A reduction is an *intermediate buffer* in the frozen order — the
+    // resampler reads it, and the only quantization the pipeline allows is the final
+    // 8-bit write (`AGENTS.md`, "Resampling must happen in the correct color space")
+    // — so an 8-bit file's reduction may not be stored back at 8 bits, which would
+    // quantize the picture before the resample that already quantizes it. The
+    // reduction's own picture is `tests/reduce.rs`'s business; what this checks is
+    // the identity a *caller* sees: the depth, and what the cache pays for it.
+    let source = Source::decode(&fixture("resample-source.png")).expect("decode");
+    assert_eq!(source.depth(), Depth::Eight);
+    let reduced = PreviewSource::new(&source, 400);
+    assert_eq!((reduced.width(), reduced.height()), (400, 300));
+    assert_eq!(
+        reduced.depth(),
+        Depth::Sixteen,
+        "a reduction is an intermediate buffer, whatever the file carried"
+    );
+    assert_eq!(
+        reduced.bytes(),
+        400 * 300 * 8,
+        "and the cache holds the 16-bit samples, not the file's own"
+    );
+
+    // A photo at or below the target is *not* a reduction: its samples are the
+    // decoder's own, bit for bit, and widening them would buy nothing.
+    let small = Source::decode(&fixture("square.png")).expect("decode");
+    let whole = PreviewSource::new(&small, 4000);
+    assert_eq!(whole.depth(), Depth::Eight);
+    assert_eq!(
+        (whole.width(), whole.height()),
+        (small.width(), small.height())
     );
 }

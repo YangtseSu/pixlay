@@ -246,9 +246,15 @@ pixels by 0.0015/255 (§8, "S6").
 
 **Depth.** The decoded buffer keeps the file's own depth (8 or 16 bits per
 channel); everything after it is 16-bit — the resampler's output, the flattened
-buffer — and the only quantization is the final 8-bit write.
+buffer, and the preview-grade reduction as well (S15f, PIX-013) — and the only
+quantization is the final 8-bit write.
 An 8-bit source is *widened* with `sample * 257`, which is exact, so 8-bit files
-do not pay for a 16-bit buffer they cannot fill.
+do not pay for a 16-bit buffer they cannot fill. The one buffer that *gains* a
+depth is the reduction: it is neither the decode nor the final write but an
+intermediate between two resampling stages, so a reduced 8-bit photo is stored at
+16 bits and the source cache budgets `pixels × 8` bytes for it (`× 4` only for the
+copy that is the decoded photo itself, a photo at or below the target, which is no
+reduction at all).
 
 **The buffer ladder.** What exists at once, largest first:
 
@@ -409,7 +415,7 @@ three on both commands, and the difference between them is scope:
 
 | Item | Rule |
 |---|---|
-| `--gap <rel>` / `--radius <rel>` | fractions of the sheet height, `0..=1` (exit 1 outside). On `render` they override the document **for that render only** — the file is not touched — and on `edit` they are written into the document through `Command::SetFrame` (S15), so the CLI's edit is one undo step of the same command the window's `Frame…` dialog sends, and a gap that empties a cell is refused where it is asked for rather than when the file is validated |
+| `--gap <rel>` / `--radius <rel>` | fractions of the sheet height, `0..=1` (exit 1 outside). On `render` they override the document **for that render only** — the file is not touched — and on `edit` they are written into the document through `Command::SetFrame` (S15), so the CLI's edit is one undo step of the same command the window's `Frame…` dialog sends, and a gap that empties a cell is refused where it is asked for rather than when the file is validated. **On `edit` the frame is applied before the framing flags** (S15f, PIX-009): a crop is stored as its *fit*, and the fit reads the frame's `covering` (the cell's outline clipped to its inset rectangle), so `--gap 0.04 --zoom 1.4 --rotate 20` in one command is fitted against the frame the file will carry. Fitting first and applying the frame afterwards wrote a crop the renderer then refits — the file did not hold the fit it claimed, and the same edit run twice moved the bytes |
 | `--border-color <r,g,b>` | three channels `0..=255`, stored opaque (the frame's alpha rule is §2). The report prints it back the same way |
 | what `render` reports | `gap`, `radius` and `border` always, so "which frame did that render use" is answerable without counting pixels — the document's own values, unless a flag overrode one |
 | `edit --slot <i>` | the cell the framing flags apply to; `--rotate`/`--zoom`/`--offset`/`--clear` without it are exit 1 **naming the flag**, because taking them as "the frame, then" would drop them silently. `--slot` past the last cell is exit 1 naming the count |
@@ -436,7 +442,7 @@ the problem splits:
 | `--slot <i>` | the cell the gesture frames; default the first occupied one. A slot with no photo is exit 1 naming the occupied ones (`--slot` past the cell count is exit 1 as well, as on `edit`) |
 | `--steps <n>` | 2..=3600, default 60. **Step 1 is the cold one** (the gesture grid built from scratch) and `warm_ms` is the **median** of the rest: a mean over 60 steps on a busy machine is a number about the machine |
 | the four phases | `open` — the document as a window opens on it, at the resting grid (every occupied cell decoded and built); `cold` — the first step of a live gesture, at the gesture grid (the sources for *that* grid's copy are built here, S12b, and the grid's bitmaps are cold); `warm` — every step after it (one cell rebuilt, no decode); `refine` — the release, the resting grid again. Their decode counts are reported separately for exactly that reason |
-| `src_w`, `src_h` | the size of the source the **warm** step resampled — since S12b a *preview-grade reduction* (`pixlay_imaging::PreviewSource`), not the file. Before it the field was the photo's own size; against a 6000-px photo the difference (6000 → the copy's own long edge) is what says "the big decode left the step" |
+| `src_w`, `src_h` | the size of the source the **warm** step resampled — since S12b a *preview-grade reduction* (`pixlay_imaging::PreviewSource`), not the file. Before it the field was the photo's own size; against a 6000-px photo the difference (6000 → the copy's own long edge) is what says "the big decode left the step". **The largest of the cells that step rebuilt** (S15f, PIX-027C): a cell carried over from the bitmap cache was not resampled, and with sources of different aspects the pair is one copy's own two edges (compared by area), never a width from one copy beside a height from another |
 | the step | a *straightening* one, 1 degree further per step: a rotation grows the region the cell shows and since S11 the clamp pays for the angle with zoom, so it is the most per-step work the editor can be asked for |
 | `verdict` | `pipeline_holds` when the warm median is ≤ `budget_ms` = **16.666667** (one frame at 60 Hz), `gpu_preview` otherwise. **The exit code is 0 either way**: the measurement is the result, and an exit code that moved with the host's speed would make the same input's answer depend on the machine |
 | stability | the *counts* are stable and locale-independent; the *times* are measurements and only appear with `--stats` (`ms`, `open_ms`, `cold_ms`, `warm_ms`, `warm_max_ms`, `refine_ms`, `peak_rss_mb`, `icc = none`), which is the same exception §5 already makes for `--stats` |
@@ -880,7 +886,10 @@ at these sizes is up to 50% between runs, which is why every cell carries both);
   each, and nine of them do not fit in `MAX_SOURCE_BYTES`). On documents whose photos are *small* the peak
   grows slightly instead (verify: 42.6 → 51.5 MB at grid 780, 72.6 → 92.5 MB at 1600; the one-file 24 MP
   document: 175.2 → 185.0 / 206.4 MB), because a photo below its target is stored as-is and each of the two
-  targets keeps its own entry. Both are far inside the 2.5 GB budget of `AGENTS.md`.
+  targets keeps its own entry. Both are far inside the 2.5 GB budget of `AGENTS.md`. **S15f re-measured the
+  same shape after the reductions became 16-bit (PIX-013): 241.3 MB at grid 780 and 419.8 MB at 1600, with
+  the copies' own byte counts in §8, "S15f"** — the copies doubled and the peak rose by a fraction of that,
+  still six times inside the budget.
 
 **Decisions this step made** (recorded here because each one is a shape later steps build on):
 
@@ -907,8 +916,10 @@ at these sizes is up to 50% between runs, which is why every cell carries both);
   already.
 - **No new dependency, no `Cargo.lock` change** (`cargo update --workspace` locked 0 packages). The
   reduction is arithmetic over a buffer that was already there, and the only new code outside it is a
-  16-bit inverse-transfer table (`linear_to_srgb16`, 128 KB, built once) so a 16-bit source is reduced at
-  its own depth.
+  16-bit inverse-transfer table (`linear_to_srgb16`, 128 KB, built once). S12b reduced *at the source's own
+  depth*; **S15f made every reduction 16-bit** (PIX-013: a reduction is an intermediate between two
+  resampling stages, and the only quantization belongs at the final write), which is what the copy sizes in
+  §8, "S15f" are about.
 
 ### What S12's number says about the preview's future
 Read on the plan's own subject — the verification project, at the editor's own grid — the pipeline **holds**:
@@ -978,6 +989,26 @@ timed.
 | `render --long-edge 14043` on `strip-2-2x1g` with one cell at 45 degrees | `slot 0: bitmap needs 212722225 pixels (3890140370 bytes at the conversion peak); the limit is 200000000 pixels`, exit 2, **0.20 s** — and the same document at 2000 px renders |
 | the aspect boundary | `NaN`, `0`, `-0`, `-1`, `±inf` and anything outside `0.1..=10.0` are refused as `template aspect ratio is NaN but must be in 0.1..=10.0`, before any multiplication; `0.1` and `10.0` themselves are legal |
 | the verification render (`verify.pixlay`, `--long-edge 14043`) | 14043x10532, **ms 6999.5** + **encode_ms 2110.6**, **`peak_rss_mb` 1632.3**, 9,157,639 bytes — inside the S10 spread of 7232/1638 for the same document; `probe` on it reports `passed = true` with 8/8 slot colours exact and 0 foreign pixels on all 12 seams |
+
+### S15f (2026-09-24, `--release`, this machine)
+
+The preview-identity numbers: what a cached bitmap is keyed on now, what a 16-bit reduction costs the source
+cache, what the picker does when a listed file is another file, and the defect the step's own test found on
+the way. The identity rows are the committed tests' own assertions; the memory rows are
+`pixlay-render gesture --project nine.pixlay --grid 780|1600 --steps 6 --stats` on nine **6000x4000** photos
+(`strip-9-9x1`, the same shape S12b's criterion names), and the picker's rows are the GUI test's
+`eprintln`s.
+
+| what | number |
+|---|---|
+| a frame **gap** change (0 → 0.04, `strip-2-2x1g`, grid 800) | every cell is **rebuilt** — `source_px` non-zero and the pixels differ — and **0 files are decoded**: the copies are the file's, not the frame's. A **colour**-only change and a **radius**-only change are carried over (`source_px` 0x0, pixels bit-identical): the gap is the geometry the fit reads, the radius is the renderer's clip and the colour is painted after the slots |
+| one grid asked at two **source edges** (grid 800, edges 400 and 1200) | each edge costs **1 decode** (two cells, one file) and reports its own copy (400x300 / 1200x900); asking the first edge again is answered from its own set with **0 decodes**, and the fine build's pixels equal a cold fine build's |
+| a preview-grade copy at **16 bits** | the S12b dimensions doubled in bytes: **5.07 MB** for a 24 MP photo at the editor's grid (975x650) and **21.3 MB** at 1600 (2000x1333), against 2.5 / 10.7 MB as 8-bit. Nine of them are 45.6 MB and 192 MB — both inside `MAX_SOURCE_BYTES` (512 MB), so the two targets stay cached together |
+| the source cache's peak, nine 24 MP photos, two grids | **`peak_rss_mb` 241.3** at grid 780 and **419.8** at 1600 — the same quantity S12b measured on its own probe (217.2 / 316.5). It is not a controlled before/after: this document is the step's own nine 6000x4000 JPEGs on `strip-9-9x1`, and what moved is the copies' second byte |
+| the warm step on that document | **1.92 ms** median at grid 780 and **7.35 ms** at 1600 (`--release`, 6 steps, `warm_max_ms` 2.33 / 9.41), both inside the 16.667 ms budget; `refine_decodes` 0 |
+| a file **replaced in place**, in the picker (square.png → landscape.jpg, same name) | the pane re-decodes at the new photo's fitted size — **512x512 → 512x288** — and matches `pixlay-render thumb` of the new file at **RMSE 0.0000**; the cell's tile snapshot moves by **RMSE 111.43**; a second `refresh_pane` with the file untouched costs **0 further requests** |
+| the **stale unbind** the step's test found (before the fix) | after a folder change: `bind_tile(0)` then the *previous* binding's `unbind_tile(0)` left **1 request, 0 built, 0 in flight, no failure and no bound cell**, and **2831 frames** of pumping changed nothing. The guard — only the row that is the position's current binding may take its entry away — is 3 lines |
+| the verification render (`verify.pixlay`, `--long-edge 14043`) | 14043x10532, **ms 8150.6** + **encode_ms 2343.9**, **`peak_rss_mb` 1629.6**, 9,157,639 bytes; `probe` on the same document reports `passed = true` with 8/8 slot colours exact and 0 foreign pixels on all 12 seams |
 
 ## 9. The window (S7), and the stages added after it
 
@@ -1180,7 +1211,14 @@ without looking at a widget:
   spinner while that decodes; S13 painted the cell tile and could stay on it, because a repeated
   `(index, preview)` request was dropped as already seen. The request identity is
   `(folder generation, kind, index, device pixels)`, so a resize asks for the size the pane now is, a
-  re-focus is served from a bounded per-photo cache, and a folder change invalidates all of it. The stack
+  re-focus is served from a bounded per-photo cache, and a folder change invalidates all of it. **A file
+  replaced in place is a different photo** (S15f, PIX-012): the tile and the pane's caches are keyed by
+  the position and the size, and a position is not an identity, so the file's own stamp — the
+  modification time and the byte count the filesystem reports — is re-read (one `stat`, ~1 µs) wherever a
+  cached picture would be answered, and a file whose stamp moved drops everything cached about that
+  position: its tiles at every size, its previews, the photo's own pixel size (the status bar's pixels and
+  zoom are ratios against it) and the decoder's refusal. Two contents the filesystem describes identically
+  are one identity to any cache that cannot hash the bytes, and that is the boundary this rule has. The stack
   that holds the pane's three states swaps them **without a transition**: measured 2026-09-23, a
   `Crossfade` in flight paints both children at a partial opacity, and a window snapshot showed the strip
   and the list drawn while the pane — holding the right texture — was empty.
@@ -1266,9 +1304,15 @@ without looking at a widget:
 - **The preview keeps what it can reuse** (S12), **and resamples a preview-grade copy** (S12b).
   `pixlay_imaging::Preview` — the same type the CLI's `gesture` probe drives — holds preview-grade
   sources keyed by path, modification time **and target size** (budgeted by `MAX_SOURCE_BYTES`, least
-  recently used evicted) and **one bitmap set per grid** (at most two: the resting one and the coarse
-  one), carrying over every cell whose cell, source, source identity and template are
-  unchanged. A step of a gesture therefore rebuilds one cell and touches no disk at all; the window
+  recently used evicted, every reduced sample 16 bits: §4.1) and **one bitmap set per grid and source
+  edge** (the resting grid and the coarse one, each at its own edge — S15f, PIX-004), carrying over
+  every cell whose cell, source, source identity, template **and frame gap** are unchanged. The gap is
+  in that list and the frame's radius and colour are not: the gap moves the region the fit covers, while
+  the radius is the renderer's clip and the colour is painted after the slots, so both leave every
+  bitmap bit for bit identical (S15f, PIX-004). A set built at one source edge is never an answer for
+  another: a coarse set handed to a finer request would answer it with lower-quality pixels and store
+  them as the new edge's own. A step of a gesture therefore rebuilds one cell and touches no disk at
+  all; the window
   counts the decodes the worker reports (`EditorWindow::decoded_sources`) and the GUI test holds a whole
   drag to zero of them once both grids' copies exist. The copy is a **box average in linear light** to
   `PREVIEW_SOURCE_SCALE` (1.25) times the grid's long edge — the largest value that keeps the measured

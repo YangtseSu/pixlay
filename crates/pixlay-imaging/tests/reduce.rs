@@ -218,6 +218,55 @@ fn a_sixteen_bit_photo_stays_sixteen_bit() {
 }
 
 #[test]
+fn a_reduction_of_an_eight_bit_photo_keeps_more_than_eight_bits() {
+    // S15f, PIX-013. A reduction is an intermediate buffer — the resampler reads it
+    // and the only quantization the pipeline allows is the final 8-bit write — so an
+    // 8-bit file's reduction is stored at 16 bits, whatever the file carried.
+    //
+    // The pattern says it exactly: 2-pixel columns alternating between the codes 100
+    // and 101, reduced 16 -> 4, so every output texel is the 50/50 mean of two
+    // *adjacent* codes. In linear light that is a value strictly between them, and
+    // its sRGB code is therefore between `100 * 257` and `101 * 257` — an interval
+    // no multiple of 257 lies in, which is the whole of an 8-bit store's vocabulary
+    // (`Source::pixel` widens an 8-bit sample by exactly 257: `0xab * 257 = 0xabab`).
+    let dir = scratch("depth");
+    let mut rgb = Vec::with_capacity(16 * 16);
+    for _y in 0..16 {
+        for x in 0..16 {
+            let code = if (x / 2) % 2 == 0 { 100 } else { 101 };
+            rgb.push([code, code, code]);
+        }
+    }
+    let path = dir.join("depth.png");
+    write_rgb(&path, 16, 16, &rgb);
+    let source = Source::decode(&path).expect("decode");
+    assert_eq!(source.depth(), Depth::Eight);
+
+    let reduced = PreviewSource::new(&source, 4);
+    assert_eq!((reduced.width(), reduced.height()), (4, 4));
+    assert_eq!(reduced.depth(), Depth::Sixteen);
+    for y in 0..4 {
+        for x in 0..4 {
+            let texel = reduced.pixel(x, y);
+            assert!(
+                texel[0] > 100 * 257 && texel[0] < 101 * 257,
+                "texel ({x}, {y}) is {}, not a mean between the two codes",
+                texel[0]
+            );
+            // The channel is the same value three times: nothing here is coloured.
+            assert_eq!([texel[0], texel[0]], [texel[1], texel[2]]);
+            assert_eq!(texel[3], 65535, "an opaque block stays opaque");
+        }
+    }
+    assert_eq!(
+        reduced.bytes(),
+        4 * 4 * 4 * 2,
+        "the copy the cache holds is the 16-bit one"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn alpha_is_averaged_without_bleeding_color_into_it() {
     // 100x100: the left 51 columns opaque white, the rest fully transparent black.
     // Reducing to a long edge of 50 makes every footprint fall on whole pixels, and
