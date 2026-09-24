@@ -127,7 +127,10 @@ SCAN OPTIONS:
                         rotation), the EXIF date when there is one, and mtime in
                         seconds, plus `count` and `failed`. The order is lexical
                         by path. Extensions: .jpg .jpeg .png .heic .heif .avif
-                        .jxl .webp .tif .tiff.
+                        .jxl .webp .tif .tiff. A value that carries a control
+                        byte or is not UTF-8 is escaped (`\\\\`, `\\n`, `\\r`,
+                        `\\t`, `\\xNN`), so a filename's newline cannot add a
+                        field line.
     --recursive         Descend into subdirectories. Off by default: a picker
                         opens one folder, and a whole home directory is not a
                         listing anybody reads.

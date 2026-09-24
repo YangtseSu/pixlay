@@ -408,6 +408,74 @@ fn the_compose_stage_edits_the_selected_cell_and_the_document() {
     window.undo();
     assert_eq!(window.document().frame, pixlay_core::Frame::default());
 
+    // ---- a frame the document refuses is reported (S15h, PIX-020) ---------
+    // The rows offer 0–100 %, and a gap of 100 % leaves every cell of this template with
+    // nothing visible: `CollageDoc::validate` refuses it and names the slot. Before S15h
+    // the row kept the refused number while the document kept the previous one, and the
+    // delayed commit then wrote a frame the row no longer showed.
+    assert!(
+        gtk4::prelude::WidgetExt::activate_action(&window, "win.frame", None).is_ok(),
+        "the win.frame action is installed"
+    );
+    frame_dialog.seed(&window);
+    assert_eq!(
+        frame_dialog.notice(),
+        None,
+        "a freshly presented dialog has nothing to report"
+    );
+    let before_refusal = window.document();
+    frame_dialog.gap_row().set_value(100.0);
+    let notice = frame_dialog.notice();
+    assert!(
+        notice.is_some(),
+        "a refused value is reported in the dialog's own banner (row {}, document gap {}, \
+         display gap {}, toast {:?}, dialog visible {})",
+        frame_dialog.gap_row().value(),
+        window.document().frame.gap_rel,
+        window.display_document().frame.gap_rel,
+        window.last_toast(),
+        frame_dialog.widget().is_visible()
+    );
+    let notice = notice.expect("checked above");
+    assert!(
+        notice.contains("slot 0"),
+        "the reason names the cell the gap emptied, got {notice:?}"
+    );
+    assert_eq!(
+        frame_dialog.gap_row().value(),
+        0.0,
+        "the row goes back to what the document holds"
+    );
+    assert_eq!(
+        window.document().frame.gap_rel,
+        0.0,
+        "and the document never took the value"
+    );
+    assert_eq!(
+        window.display_document().frame.gap_rel,
+        0.0,
+        "neither did the canvas, which draws the pending command"
+    );
+    // Nothing was scheduled: past the quiet interval the delayed commit the finding was
+    // about would have written the refused frame.
+    window.pump(pixlay::window::COMMIT_QUIET + Duration::from_millis(80));
+    assert_eq!(
+        window.document().frame.gap_rel,
+        before_refusal.frame.gap_rel,
+        "a refused value is not a commit waiting to happen"
+    );
+    // The next accepted value clears the report: the row's number is the document's.
+    frame_dialog.radius_row().set_value(1.0);
+    assert_eq!(
+        frame_dialog.notice(),
+        None,
+        "an accepted value clears the report"
+    );
+    window.commit();
+    assert_eq!(window.document().frame.radius_rel, 0.01);
+    frame_dialog.close_button().emit_clicked();
+    support::close_dialog(&frame_dialog.widget(), &window);
+
     // ---- the Export… dialog ----------------------------------------------
     let export_dialog = window
         .export_dialog()

@@ -48,9 +48,6 @@ const FORMATS: [Format; 2] = [Format::Jpeg, Format::Png];
 /// "Language conventions"): a user reads "PNG" and a file carries `.png`.
 const FORMAT_NAMES: [&str; 2] = ["JPEG", "PNG"];
 
-/// The formats' extensions, for the name a format change rewrites.
-const FORMAT_EXTENSIONS: [&str; 2] = ["jpg", "png"];
-
 /// The step the size row moves in, in pixels: 100 is a round number a person can
 /// type over, and the bounds are the form's own (`MIN_EXPORT_PX` / `MAX_EXPORT_PX`).
 const SIZE_STEP: u32 = 100;
@@ -62,6 +59,14 @@ const SIZE_STEP: u32 = 100;
 /// where "0.02" reads as a mystery. The conversion lives here and nowhere else.
 const PERCENT: f64 = 100.0;
 
+/// How close a row's value has to be to the document's for the two to be the same
+/// frame (S15h, PIX-020).
+///
+/// A row is a whole percentage with one digit, so a fraction seeded into it and read
+/// back differs by at most 5e-5 — and the smallest move a user can make is 0.5 %, a
+/// hundred times that. A comparison without one would call a seed's own echo a change.
+const ROW_EPSILON: f64 = 1e-6;
+
 /// The `Frame…` dialog: the document's frame as three rows, in the document's own
 /// order — gap, radius, colour (ruling 30, 2026-09-23).
 pub struct FrameDialog {
@@ -70,6 +75,14 @@ pub struct FrameDialog {
     gap: adw::SpinRow,
     radius: adw::SpinRow,
     color: gtk::ColorDialogButton,
+    /// The dialog's own report of a value the document refused (S15h, PIX-020).
+    ///
+    /// A banner rather than a toast, because a toast would be shown by the *window*,
+    /// which is behind this modal dialog and covered by its dim: the row that could
+    /// not be applied is where the reason belongs. The rows' own numbers do not carry
+    /// it — "100 %" is a legal-looking figure — and a screen reader reaches the
+    /// banner as a label, so the refusal is not a colour.
+    banner: adw::Banner,
     /// Set while this module writes the rows, so that seeding the dialog from the
     /// document is not read back as a user editing it (the retired pane's own idiom).
     updating: Rc<Cell<bool>>,
@@ -111,8 +124,13 @@ impl FrameDialog {
 
         let page = adw::PreferencesPage::new();
         page.add(&group);
+        // The refused value is reported here, above the rows that hold it (S15h,
+        // PIX-020): the group's own numbers cannot say why they did not apply.
+        let banner = adw::Banner::new("");
+        banner.set_revealed(false);
         let view = adw::ToolbarView::new();
         view.add_top_bar(&header);
+        view.add_top_bar(&banner);
         view.set_content(Some(&page));
         let dialog = adw::Dialog::builder()
             .title(gettext("Frame"))
@@ -126,6 +144,7 @@ impl FrameDialog {
             gap,
             radius,
             color,
+            banner,
             updating: Rc::new(Cell::new(false)),
         });
         // The handlers live on the dialog's own children, so they hold *weak*
@@ -167,7 +186,7 @@ impl FrameDialog {
                     if dialog.updating.get() {
                         return;
                     }
-                    window.set_frame(dialog.frame());
+                    dialog.apply(&window);
                 }
             ));
         }
@@ -184,16 +203,70 @@ impl FrameDialog {
                 if dialog.updating.get() {
                     return;
                 }
-                window.set_frame(dialog.frame());
+                dialog.apply(&window);
             }
         ));
         frame_dialog
     }
 
+    /// Hands the rows' frame to the document, and answers a refusal where the value
+    /// came from (S15h, PIX-020).
+    ///
+    /// On acceptance the banner goes away: the row's number *is* the document's. On a
+    /// refusal the rows go back to the document's own frame — what the canvas is
+    /// showing — so the dialog cannot display a value the document never took, and the
+    /// banner says why with the message the core wrote (which names the offending
+    /// slot).
+    fn apply(&self, window: &EditorWindow) {
+        // **The rows already say what the document says**: this is the echo of a seed
+        // rather than an edit, and reporting it would clear the banner the refusal just
+        // raised. Measured 2026-09-25: GTK defers the value notification a restore
+        // causes to after the handler that restored it, so the echo arrives *after* the
+        // refusal was reported and used to put the banner away again — the row snapped
+        // back and the user was told nothing.
+        if self.echoes_document(window) {
+            return;
+        }
+        match window.set_frame(self.frame()) {
+            Ok(()) => self.banner.set_revealed(false),
+            Err(error) => {
+                self.banner.set_title(&error.to_string());
+                self.banner.set_revealed(true);
+                self.seed(window);
+            }
+        }
+    }
+
+    /// Whether the rows carry the document's own frame, within what a row can express.
+    ///
+    /// The comparison needs a tolerance because a row is a whole percentage with one
+    /// digit: seeding the rows from the document and reading them back can differ from
+    /// the document's fraction by at most 5e-5, while the smallest move a user can make
+    /// is 100 times that — so nothing a user did is swallowed.
+    fn echoes_document(&self, window: &EditorWindow) -> bool {
+        let frame = self.frame();
+        let document = window.document().frame;
+        (frame.gap_rel - document.gap_rel).abs() < ROW_EPSILON
+            && (frame.radius_rel - document.radius_rel).abs() < ROW_EPSILON
+            && frame.color == document.color
+    }
+
     /// Shows the dialog over `window`, with the document's own frame in its rows.
     pub fn present(&self, window: &EditorWindow) {
+        self.banner.set_revealed(false);
         self.seed(window);
         self.dialog.present(Some(window));
+    }
+
+    /// The reason the last value was refused, while it is being shown (S15h,
+    /// PIX-020); `None` when the dialog has nothing to report.
+    ///
+    /// The tests' handle on "the row says so": the banner's text is the core's own
+    /// message, which names the offending slot.
+    pub fn notice(&self) -> Option<String> {
+        self.banner
+            .is_revealed()
+            .then(|| self.banner.title().to_string())
     }
 
     /// The dialog itself, for the tests and the HIG checks.
@@ -324,6 +397,11 @@ impl ExportDialog {
             .content_width(480)
             .child(&view)
             .build();
+        // HIG `patterns/feedback/dialogs` and `reference/keyboard`: a dialog that has
+        // an affirmative action binds Return to it. Without this the documented
+        // default does nothing (`docs/HIG-REVIEW.md` §1) — measured by S15h's test,
+        // which activates the dialog's default widget rather than the button by hand.
+        dialog.set_default_widget(Some(&export));
 
         let export_dialog = Rc::new(Self {
             dialog,
@@ -360,8 +438,10 @@ impl ExportDialog {
                 }
             }
         ));
-        // The format row owns the file's extension: a name that still carries the
-        // other format's is rewritten, and one the user typed is left alone.
+        // The format row owns the file's extension: a name that carries one of the
+        // extensions this build writes has it replaced (case-insensitively, and
+        // `.jpeg` as well as `.jpg`), and one the user typed with any other extension
+        // is left alone — `resolved_name` is where it is refused.
         let weak = Rc::downgrade(&export_dialog);
         export_dialog.format.connect_selected_notify(glib::clone!(
             #[strong]
@@ -373,16 +453,14 @@ impl ExportDialog {
                 if dialog.updating.get() {
                     return;
                 }
-                let previous = dialog.last_format.replace(row.selected());
-                let (Some(old), Some(new)) = (
-                    FORMAT_EXTENSIONS.get(previous as usize),
-                    FORMAT_EXTENSIONS.get(row.selected() as usize),
-                ) else {
+                dialog.last_format.replace(row.selected());
+                let Some(format) = FORMATS.get(row.selected() as usize) else {
                     return;
                 };
                 let current = dialog.name.text().to_string();
-                if let Some(stem) = current.strip_suffix(&format!(".{old}")) {
-                    dialog.name.set_text(&format!("{stem}.{new}"));
+                let next = re_extension(&current, *format);
+                if next != current {
+                    dialog.name.set_text(&next);
                 }
             }
         ));
@@ -448,14 +526,30 @@ impl ExportDialog {
     /// and starts the same background export the menu's action does, so the progress
     /// bar, the toast and the worker thread are unchanged by the dialog that asked.
     ///
-    /// Three answers, and the dialog stays open for the first two (S15c):
+    /// Four answers, and the dialog stays open for the first three (S15c, S15h):
     ///
+    /// * the name is not one this build can write — empty, or with an extension other
+    ///   than the formats it writes — refused with the same rule the CLI's `--out`
+    ///   meets, and the rows are left to fix;
     /// * the path names one of the document's own photos — refused with the same
     ///   message `render` and `thumb` give, and nothing is written;
     /// * a file is already there — asked about, because replacing a file the user
     ///   already has is their decision (ruling 2026-09-24);
     /// * otherwise, the export starts.
     pub fn export(&self, window: &EditorWindow) {
+        // The format row has the last word on the extension (S15h, PIX-010): a name
+        // carrying the other format's extension is corrected in the row the user is
+        // looking at, so what the dialog shows is what the file will be called.
+        let name = match resolved_name(&self.name.text(), FORMATS[self.format_index()]) {
+            Ok(name) => name,
+            Err(reason) => {
+                window.toast(&reason);
+                return;
+            }
+        };
+        if name != self.name.text() {
+            self.name.set_text(&name);
+        }
         let settings = self.settings();
         match window.export_destination(&settings.path) {
             Err(reason) => {
@@ -619,6 +713,64 @@ fn patterns(format: Format) -> [&'static str; 2] {
         Format::Jpeg => ["*.jpg", "*.jpeg"],
         Format::Png => ["*.png", "*.PNG"],
     }
+}
+
+/// The extension a format's files carry when the name does not say otherwise.
+fn extension(format: Format) -> &'static str {
+    match format {
+        Format::Jpeg => "jpg",
+        Format::Png => "png",
+    }
+}
+
+/// The same name carrying `format`'s extension, when it already carries one of the
+/// extensions this build writes; unchanged otherwise.
+///
+/// The extension is compared case-insensitively and both JPEG spellings are the JPEG
+/// format (`Format::from_path`, the CLI's own rule), so `photo.JPEG` is *not* rewritten
+/// to `.jpg` — the user's spelling stands where it already means the right format — and
+/// a name with an extension this build does not write (`photo.2024`) is left to be
+/// refused rather than silently renamed.
+fn re_extension(name: &str, format: Format) -> String {
+    let Some(existing) = Path::new(name).extension().and_then(|e| e.to_str()) else {
+        return name.to_string();
+    };
+    match Format::from_path(Path::new(name)) {
+        Some(current) if current != format => {
+            let stem = &name[..name.len() - existing.len()];
+            format!("{stem}{}", extension(format))
+        }
+        // Nothing to change: the name already means this format, or it means an
+        // extension this build does not write and is left alone to be refused.
+        _ => name.to_string(),
+    }
+}
+
+/// The name the export writes, with the format row's own answer for its extension.
+///
+/// `Err` is the reason to show and the export must not start (S15h, PIX-010): an empty
+/// name, a name with no extension, and one whose extension this build does not write are
+/// all refused, which is the same rule the CLI's `--out` meets — a `.png` holding JPEG
+/// bytes is worse than a refusal. A name that carries a *known* extension is not refused
+/// but corrected to the format, so the two halves of the form always agree.
+fn resolved_name(name: &str, format: Format) -> Result<String, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(gettext("Type a name for the exported file"));
+    }
+    if Path::new(name).extension().is_none() {
+        return Err(fill(
+            gettext("{}: the file name needs an extension ({})"),
+            &[name, Format::EXTENSIONS],
+        ));
+    }
+    if Format::from_path(Path::new(name)).is_none() {
+        return Err(fill(
+            gettext("{}: this build writes {}"),
+            &[name, Format::EXTENSIONS],
+        ));
+    }
+    Ok(re_extension(name, format))
 }
 
 /// A path's file name as text, or the whole path when it has none.

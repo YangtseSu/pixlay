@@ -6,6 +6,7 @@
 
 use std::ffi::OsString;
 use std::io::Write;
+use std::os::unix::ffi::OsStrExt;
 
 use std::path::{Path, PathBuf};
 
@@ -661,8 +662,12 @@ fn render(args: RenderArgs) -> Result<u8, Failure> {
     report.text("status", "ok");
     report.text("command", "render");
     report.text("format", format.name());
-    // The request, an integer: the long edge the output was rendered at.
-    report.int("long_edge", i64::from(long_edge));
+    // The long edge the output was *actually* rendered at — `max(out_w, out_h)` of
+    // the image just written, which is the number a consumer comparing two renders
+    // needs. A preview render is a different size from the export base its grid is
+    // scaled from, so the request is reported separately as `preview_px` below
+    // (S15h, PIX-019).
+    report.int("long_edge", i64::from(image.width.max(image.height)));
     report.int("cells", doc.cells.len() as i64);
     report.int("occupied", images.len() as i64);
     // The frame the render used, always: with `--gap`/`--radius`/`--border-color`
@@ -796,12 +801,15 @@ fn scan(args: ScanArgs) -> Result<u8, Failure> {
     let mut report = Report::new();
     report.text("status", "ok");
     report.text("command", "scan");
-    report.text("dir", args.dir.display().to_string());
+    // Both the folder and every file are byte fields: they come off the
+    // filesystem, so they are bytes and not text, and the report has to carry the
+    // name it was given (S15h, PIX-018).
+    report.bytes("dir", args.dir.as_os_str().as_bytes());
     report.bool("recursive", args.recursive);
     let mut failed = 0;
     for (index, path) in paths.iter().enumerate() {
         let prefix = report.row("file", index);
-        report.text(&format!("{prefix}.path"), path.display().to_string());
+        report.bytes(&format!("{prefix}.path"), path.as_os_str().as_bytes());
         match facts(path) {
             Ok(facts) => {
                 report.text(&format!("{prefix}.status"), "ok");

@@ -13,3 +13,4 @@ crates/pixlay/src/picture.rs
 crates/pixlay/src/state.rs
 crates/pixlay/src/thumbs.rs
 crates/pixlay/src/window.rs
+crates/pixlay/src/workers.rs

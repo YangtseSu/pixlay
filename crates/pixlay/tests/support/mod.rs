@@ -212,13 +212,33 @@ pub fn window(app: &adw::Application) -> EditorWindow {
     app.activate();
     let window = pixlay::app::active_window(app).expect("activating built a window");
     watch(&window);
+    present(&window);
+    window
+}
+
+/// The window a test builds when it wants one of the background workers down (S15h,
+/// PIX-014): the same window the application presents, built with the plans `workers`
+/// names (`EditorWindow::with_workers`), presented the same way.
+pub fn window_with_workers(
+    app: &adw::Application,
+    workers: pixlay::workers::Workers,
+) -> EditorWindow {
+    let window = EditorWindow::with_workers(app, workers);
+    watch(&window);
+    present(&window);
+    window
+}
+
+/// Presents `window` and waits for the compositor to map it.
+///
+/// **What a test here can say about the display, and the whole of it**: the compositor
+/// mapped the window. It is a condition with a budget and then an assert, because every
+/// check below reads an allocation, a placement or a snapshot, and a window that was
+/// never mapped has none of those. The frame count cannot make this claim — the clock
+/// ticks on its own timer while `watch`'s callback is installed, hidden or not (the
+/// module doc) — so a check on it would be a check that can never fail.
+fn present(window: &EditorWindow) {
     window.present();
-    // **What a test here can say about the display, and the whole of it**: the compositor
-    // mapped the window. It is a condition with a budget and then an assert, because every
-    // check below reads an allocation, a placement or a snapshot, and a window that was
-    // never mapped has none of those. The frame count cannot make this claim — the clock
-    // ticks on its own timer while `watch`'s callback is installed, hidden or not (the
-    // module doc) — so a check on it would be a check that can never fail.
     let deadline = Instant::now() + FRAME_PROBE;
     while !window.is_mapped() && Instant::now() < deadline {
         window.pump(Duration::from_millis(50));
@@ -227,12 +247,11 @@ pub fn window(app: &adw::Application) -> EditorWindow {
         window.is_mapped(),
         "the window was presented and the compositor did not map it in {FRAME_PROBE:?}, so \
          every check would read a window that was never laid out: {}",
-        frame_state(&window)
+        frame_state(window)
     );
-    // And one more round for the frame that draws it: a mapped window is allocated on the
-    // frame *after* the one that mapped it.
+    // And one more round for the frame that draws it: a mapped window is allocated on
+    // the frame *after* the one that mapped it.
     window.pump(Duration::from_millis(400));
-    window
 }
 
 /// The CLI's fixtures, which is where the photos the GUI opens live.
@@ -643,6 +662,56 @@ pub fn descendants(root: &gtk::Widget) -> Vec<gtk::Widget> {
         }
     }
     found
+}
+
+/// Sends one key press to the canvas, through the controller the widget itself has.
+///
+/// GTK has no way to press a key without a seat, and the canvas's keyboard is an
+/// `EventControllerKey` on the widget (`canvas::add_keys`): emitting that controller's
+/// own `key-pressed` signal runs the handler the product installed and nothing else —
+/// no window, no seat, no focus chain to arrange. What it does not prove is GTK's own
+/// delivery of a key to a focused widget; what it does prove is the binding the product
+/// wrote, which is what the keyboard criteria are about.
+///
+/// Returns whether the handler claimed the key, which is how a test tells a binding
+/// that acted from one that let the press through.
+pub fn press(window: &EditorWindow, key: gtk4::gdk::Key, state: gtk4::gdk::ModifierType) -> bool {
+    press_on(&window.canvas_widget(), key, state)
+}
+
+/// [`press`] on any widget that carries its own key controller — the canvas, or a
+/// control libadwaita bound Enter to (`EditorWindow`'s dialogs).
+pub fn press_on(
+    widget: &impl IsA<gtk::Widget>,
+    key: gtk4::gdk::Key,
+    state: gtk4::gdk::ModifierType,
+) -> bool {
+    use gtk4::glib::translate::IntoGlib;
+    let keyval = key.into_glib();
+    let controllers = widget.clone().upcast::<gtk::Widget>().observe_controllers();
+    let mut key_controllers = 0;
+    for index in 0..controllers.n_items() {
+        let Some(controller) = controllers
+            .item(index)
+            .and_downcast::<gtk::EventControllerKey>()
+        else {
+            continue;
+        };
+        key_controllers += 1;
+        // A widget can carry more than one key controller (measured 2026-09-25: the
+        // Export dialog's affirmative has two, and only the second one is the Enter
+        // binding), so the press goes to each until one claims it.
+        if controller.emit_by_name("key-pressed", &[&keyval, &0u32, &state]) {
+            return true;
+        }
+    }
+    if key_controllers == 0 {
+        panic!(
+            "the {} has no key controller",
+            widget.clone().upcast::<gtk::Widget>().type_().name()
+        );
+    }
+    false
 }
 
 /// The alert dialog the window is showing, if it is showing one.

@@ -5,6 +5,8 @@
 //! observe the things the contract is about: stdout purity, exit codes, the
 //! absence of a TTY, and locale independence.
 
+use std::ffi::OsString;
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
@@ -271,9 +273,14 @@ fn preview_px_sets_the_long_edge() {
     ]);
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     assert_eq!(field(&output, "preview_px"), "800");
+    // `preview_px` is the request; `long_edge` is the edge the file was written
+    // at, which is what a caller reading one number has to compare against
+    // (S15h, PIX-019). This grid is exact, so the two agree here.
+    assert_eq!(field(&output, "long_edge"), "800");
     let width: i32 = field(&output, "out_w").parse().unwrap();
     let height: i32 = field(&output, "out_h").parse().unwrap();
     assert_eq!(width.max(height), 800, "{width}x{height}");
+    assert_eq!(field(&output, "long_edge"), width.max(height).to_string());
     // 4:3 canvas.
     assert_eq!((width, height), (800, 600));
     let _ = std::fs::remove_dir_all(&dir);
@@ -998,10 +1005,20 @@ fn exit_codes_are_fixed() {
     ]);
     assert_eq!(code(&output), 2, "{}", stderr(&output));
     assert!(stdout(&output).is_empty());
+    // The exact file, serde's own detail, and nothing invented in between
+    // (S15h, PIX-021): the message has to say which project was wrong.
+    let message = stderr(&output);
     assert!(
-        stderr(&output).contains("project JSON"),
-        "{}",
-        stderr(&output)
+        message.contains(broken.to_str().unwrap()),
+        "the failing project must be named exactly: {message}"
+    );
+    assert!(
+        message.contains("project JSON"),
+        "serde's detail is kept: {message}"
+    );
+    assert!(
+        message.contains("at line 1"),
+        "serde's position is kept: {message}"
     );
 
     let missing_source = dir.join("dangling.pixlay");
@@ -1925,6 +1942,13 @@ fn save_reports_a_missing_project_and_a_newer_version() {
     assert!(
         stderr(&newer).contains("newer than the supported version"),
         "{}",
+        stderr(&newer)
+    );
+    // A version refusal is read from the file too, so it names the file (S15h,
+    // PIX-021) — not only serde's failures do.
+    assert!(
+        stderr(&newer).contains(project.to_str().expect("utf-8 path")),
+        "the refusal must name the project: {}",
         stderr(&newer)
     );
     assert!(!dir.join("other.pixlay").exists());
@@ -3550,6 +3574,146 @@ fn row<'a>(
     rows.iter()
         .find(|row| row["path"].ends_with(name))
         .unwrap_or_else(|| panic!("no scan row for {name}"))
+}
+
+/// Decodes the report's escape rule back into the bytes a field was made from:
+/// `\\`, `\n`, `\r`, `\t` and `\xNN`.
+///
+/// It is the inverse of `report.rs`'s writer, and running it here is the
+/// statement that the rule *is* invertible — which is what makes a name that is
+/// not UTF-8 a name a consumer can still use.
+fn unescape(value: &str) -> Vec<u8> {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at] != b'\\' {
+            // A UTF-8 sequence passes through unchanged, so its bytes are copied
+            // one at a time.
+            out.push(bytes[at]);
+            at += 1;
+            continue;
+        }
+        match bytes[at + 1] {
+            b'\\' => out.push(b'\\'),
+            b'n' => out.push(b'\n'),
+            b'r' => out.push(b'\r'),
+            b't' => out.push(b'\t'),
+            b'x' => {
+                let hex = std::str::from_utf8(&bytes[at + 2..at + 4]).expect("two hex digits");
+                out.push(u8::from_str_radix(hex, 16).expect("hex"));
+                at += 4;
+                continue;
+            }
+            other => panic!("unknown escape \\{} in {value:?}", other as char),
+        }
+        at += 2;
+    }
+    out
+}
+
+/// S15h (PIX-018): a filename is bytes, and the report carries the bytes it is.
+///
+/// The names this uses are the ones a Linux filesystem allows and a machine
+/// surface has to survive: a newline (which used to end a field line early and
+/// start another one), a second control byte, the escape's own backslash, and one
+/// that is not UTF-8 at all. Each row's `path` has to decode back to the exact
+/// bytes the file was created with.
+#[test]
+fn scan_preserves_a_newline_a_control_byte_and_a_non_utf8_name() {
+    let dir = out_dir("scan-bytes");
+    let library = dir.join("library");
+    std::fs::create_dir_all(&library).expect("create the library");
+    let photo = include_bytes!("fixtures/photos/square.png");
+    let names: [OsString; 5] = [
+        OsString::from("plain.png"),
+        OsString::from("line\nbreak.png"),
+        OsString::from("bell\x01.png"),
+        OsString::from("back\\slash.png"),
+        // Not UTF-8 at all: `Path::display` would print a replacement character
+        // here, and two different byte names could then print the same line.
+        OsString::from_vec(b"\xff\xfe.png".to_vec()),
+    ];
+    for name in &names {
+        std::fs::write(library.join(name), photo).expect("write a photo");
+    }
+
+    let path = library.to_str().expect("a UTF-8 path");
+    let output = run(&["scan", "--dir", path]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let text = stdout(&output);
+
+    // One line per field: every line is a `key = value`, and no key is printed
+    // twice. A raw newline inside a value would surface here as a line without
+    // ` = `, or as a second line for a key that already had one.
+    let mut keys = std::collections::BTreeSet::new();
+    for line in text.lines() {
+        let (key, _) = line
+            .split_once(" = ")
+            .unwrap_or_else(|| panic!("a value injected a line: {line:?}"));
+        assert!(keys.insert(key.to_string()), "{key} was printed twice");
+    }
+
+    // The escapes are visible in the output itself, so the assertion is about the
+    // bytes on stdout and not only about the decoder above.
+    for escaped in [
+        r"line\nbreak.png",
+        r"bell\x01.png",
+        r"back\\slash.png",
+        r"\xff\xfe.png",
+    ] {
+        assert!(text.contains(escaped), "no {escaped} in:\n{text}");
+    }
+    assert!(
+        !text.contains("line\nbreak.png"),
+        "a filename's newline reached a line of its own"
+    );
+
+    // An ordinary path is unchanged: the escaping only touches what it must.
+    assert_eq!(field(&output, "dir"), path);
+
+    // `--json` carries the same escaped string as the value of the field, so a
+    // consumer reads a path out of either shape by one rule — and the object still
+    // parses, which the raw escaped form would not (`\xNN` is not a JSON escape).
+    let json = run(&["scan", "--dir", path, "--json"]);
+    assert_eq!(code(&json), 0, "{}", stderr(&json));
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout(&json)).expect("--json is one JSON object");
+    let object = parsed.as_object().expect("one object");
+    assert_eq!(object.len(), keys.len(), "a value injected a JSON key");
+    let values: Vec<&str> = object
+        .iter()
+        .filter(|(key, _)| key.as_str() == "dir" || key.ends_with(".path"))
+        .filter_map(|(_, value)| value.as_str())
+        .collect();
+    for name in &names {
+        let mut expected = library.as_os_str().as_bytes().to_vec();
+        expected.push(b'/');
+        expected.extend_from_slice(name.as_bytes());
+        assert!(
+            values.iter().any(|value| unescape(value) == expected),
+            "no JSON value decodes back to {name:?}: {values:?}"
+        );
+    }
+
+    let rows = scan_rows(&output);
+    assert_eq!(rows.len(), names.len(), "{rows:?}");
+    for name in &names {
+        // The row's path is the path `--dir` was given joined with the name, so
+        // the expectation is that whole path as bytes.
+        let mut expected = library.as_os_str().as_bytes().to_vec();
+        expected.push(b'/');
+        expected.extend_from_slice(name.as_bytes());
+        let found = rows
+            .iter()
+            .find(|row| unescape(&row["path"]) == expected)
+            .unwrap_or_else(|| panic!("no row decodes back to {name:?}: {rows:?}"));
+        assert_eq!(
+            found["status"], "ok",
+            "{name:?} was listed but not read: {found:?}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

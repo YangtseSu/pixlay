@@ -163,6 +163,13 @@ fn the_preview_grade_source_stays_the_exports_own_renderer() {
     // the only way the two are comparable pixel for pixel.
     assert_eq!(field(&reference, "out_w"), width.to_string());
     assert_eq!(field(&reference, "out_h"), height.to_string());
+    // `long_edge` is the edge the file was actually written at — not the export
+    // base the grid was scaled from — so it is the size read back from the PNG
+    // (S15h, PIX-019).
+    assert_eq!(
+        field(&reference, "long_edge"),
+        width.max(height).to_string()
+    );
 
     // ---- the preview's path: the reduction, then the same `draw` ----------
     // The CLI's own arithmetic, repeated so that the *only* difference between the

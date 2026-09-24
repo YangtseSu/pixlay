@@ -357,11 +357,13 @@ pixlay-render save      --project <file.pixlay> --out <file.pixlay> [--json]
 | Item | Contract |
 |---|---|
 | stdout | **only** machine-readable results (sorted `key = value`, or a single object with `--json`). Diagnostics all go to stderr |
+| escaping (S15h, PIX-018) | every value a line carries is escaped, so a value can never add a field line: `\` → `\\`, newline / CR / TAB → `\n` / `\r` / `\t`, any other byte below 0x20 or the byte 0x7F → `\xNN` (lowercase hex), and any byte that is not part of valid UTF-8 → `\xNN` byte by byte. Bytes of valid UTF-8 pass through unchanged, so an ordinary value's line is byte-identical to what it was. `--json` carries the same escaped string (JSON-escaped on top of it, since `\xNN` is not a JSON escape), so a control byte reaches neither shape. stderr is diagnostics rather than a machine surface and keeps plain text |
 | stability | same input, same output; the results carry no timestamps and no absolute paths. `--stats`'s `ms`/`encode_ms`/`peak_rss_mb` are the **only** exception (they are the measurement), and `scan` is the other one **by subject**: a directory listing *is* a set of paths and modification times (S9), so reporting them is the result rather than contamination — two runs over an unchanged directory are still byte-identical, which is what the rule protects |
 | locale | under any value of `LANG` / `LC_ALL` / `LANGUAGE`, stdout and stderr are **byte-identical** (including the error branches) |
 | interaction | does not read stdin, does not wait for a prompt, works with no TTY; `--help` covers every flag and every exit code |
 | exit codes | 0 success / 1 usage error / 2 project, decode, render or write failure / 2 probe verdict not passed. An `--out` that names one of the document's own photos is a **usage error** (1): the command as written is one this build never runs, and refusing it is cheaper than deciding it after a decode |
 | usage error and "failed to produce a result" | stdout stays empty; stderr names the failing path (or the missing flag) |
+| a project that does not parse or validate (S15h, PIX-021) | the message names the file it was read from and keeps the reason: `<path>: project JSON: <serde's message>`, `<path>: document version <n> …`, `<path>: <validation reason>`. Only parse and validation failures are wrapped — they are the ones that do not know the file; an I/O failure already carries its path and is not wrapped, so nothing prints `path: path:` |
 | probe verdict not passed | **not "failed to produce a result"**: the numbers are the result, so stdout emits all the numbers as usual, with `status = failed` and `passed = false`, stderr emits a one-line summary, and the exit code is 2 |
 | probe lower bound | when `occupied = 0` (all empty slots) the verdict is **failed**: every question the probe asks is about some slot, and with no slot there is no conclusion. Previously it "passed vacuously" (status=ok, exit 0) |
 | output format | determined by the `--out` extension: `.png` / `.jpg` / `.jpeg`, anything else is a usage error (exit 1, stdout empty, the message names the formats this build writes). **Two formats since S12c** — TIFF left with the purity ruling, so `.tif` is refused like any other unknown extension rather than falling back to PNG |
@@ -370,8 +372,8 @@ pixlay-render save      --project <file.pixlay> --out <file.pixlay> [--json]
 | per-format metadata (S6, resolutions removed by S12d) | PNG: **no `pHYs`**, `iCCP` with the profile (the `sRGB` chunk is **not** written next to it — the specification says the two should not both appear, and the profile is the one carrying the colorimetry). JPEG: JFIF `APP0` with the density unit **0** (square pixels, no resolution — the encoder's default), `APP2` `ICC_PROFILE` segments, and the frame's own sampling factors, which are **4:4:4** since S12c removed the request. There is no third format |
 | JPEG quality | **90, fixed** (not a flag): it is the S0–S6 baseline, so every measurement in §8 stays
 comparable, and `--quality` was deliberately not added — a knob nobody tests breaks quietly |
-| `--preview-px n` | n pixels on the long edge; the same `draw`, only `scale` changes. The **bitmaps are sized for the preview too** (S4): decoding and resampling a full A0 and letting Cairo shrink it would cost the export's time and memory for a thumbnail, and would do the shrinking with Cairo's filter instead of the pipeline's. The scaled grid is checked against the canvas pixel budget before the first decode (S15e, PIX-003) |
-| `render`'s report | carries `long_edge` (the integer the output was rendered at), `cells` and `occupied` next to the written file's facts |
+| `--preview-px n` | n pixels on the long edge; the same `draw`, only `scale` changes. The **bitmaps are sized for the preview too** (S4): decoding and resampling a full A0 and letting Cairo shrink it would cost the export's time and memory for a thumbnail, and would do the shrinking with Cairo's filter instead of the pipeline's. The scaled grid is checked against the canvas pixel budget before the first decode (S15e, PIX-003). The report's `long_edge` is the edge the file was written at, not the export base the preview's grid was scaled from (S15h, PIX-019) |
+| `render`'s report | carries `long_edge` — the integer the output was **actually rendered at**, `max(out_w, out_h)` of the written file (S15h, PIX-019), so a preview render reports the preview's edge while `preview_px` stays the request — `cells` and `occupied`, next to the written file's facts |
 | `probe`'s report | carries `long_edge` (the integer grid it sampled) instead of a resolution for the same reason |
 | `--stats` | appends `{ms, encode_ms, peak_rss_mb, icc}`; `render` emits all four, `probe` emits no `encode_ms` (it does not encode). `icc` is the description of the profile the written file carries (`sRGB IEC61966-2.1`); a command that writes no file reports `none`. The measurement rules are below |
 | `probe` | samples and outputs numbers (in-slot photo color, out-of-slot backdrop, shared-edge blended pixels, three-color convex combination residual), exit code 2 when the verdict is not passed. The background field is `bg_off_backdrop` — "off the document's backdrop colour", which is `frame.color` and white unless the document says otherwise (S11; it was `bg_non_white` while the backdrop was hard-coded) |
@@ -406,7 +408,7 @@ comparable, and `--quality` was deliberately not added — a knob nobody tests b
 
 | Item | `scan` | `thumb` |
 |---|---|---|
-| shape | `dir`, `recursive`, `count`, `failed`, and one `file.<i>` row per photo: `path`, `status`, and either `mime` / `width` / `height` / `date` / `mtime`, or `reason` | `format`, `mime`, `src_w`, `src_h`, `px`, `out_w`, `out_h`, `bytes` |
+| shape | `dir`, `recursive`, `count`, `failed`, and one `file.<i>` row per photo: `path`, `status`, and either `mime` / `width` / `height` / `date` / `mtime`, or `reason`. `dir` and every `file.<i>.path` are **byte paths** — the path's own OS bytes, escaped by the rule above — so a filename with a newline cannot forge a line and a name that is not UTF-8 survives instead of becoming U+FFFD (S15h, PIX-018) | `format`, `mime`, `src_w`, `src_h`, `px`, `out_w`, `out_h`, `bytes` |
 | what it is for | what a picker needs from a folder, and the key S12's decode cache invalidates on: `mtime`, whole seconds since the Unix epoch | the picker's expensive half — decode plus resample to a tile's size — as a CLI number; `--stats` is the budget number S12's decisions are measured against |
 | size | `height`/`width` are the size **after EXIF rotation** (`ImageDetails`' early dimensions are a hint and are *not* post-rotation, which is why a full decode happens), so `image` and `scan` cannot disagree about a file | `--px n` is the exact long edge, 1..=**8192**; the other edge keeps the photo's ratio (`round`, at least 1 px). The bound is the product's largest preview with room: a full-window 4K photo preview is 3840 px and a HiDPI one 7680, so past 8192 the caller wants `render --preview-px` |
 | candidates | files whose extension is in `PHOTO_EXTENSIONS` (`.jpg .jpeg .png .heic .heif .avif .jxl .webp .tif .tiff` — TIFF is still read even though it is no longer written), case-insensitively; **no recursion unless `--recursive`**, and only real directories are descended into (a symlink to a parent would never terminate). A non-photo extension is neither a row nor an error — the alternative is a folder's README becoming an error row | `--out`'s extension, the same four formats `render` writes |
@@ -1129,6 +1131,15 @@ may rely on:
   canvas does and what `edit --clear` writes (one command, `Command::ClearCell`, since S15: one press is
   one undo step). Every one of those edits has a keyboard path on the same cell (`+`/`-`, `Ctrl`+scroll,
   `Delete`, `Return`), and each is its own undo step.
+- **The arrow keys choose a cell, and the selection follows** (S15h, PIX-017's ruling of 2026-09-24). The
+  focus *is* the selection — the one cell every other control acts on — and it is visible (the canvas
+  outlines it) and announced: the canvas's accessible name is `Collage canvas, cell <n> of <cells>`, and a
+  screen reader hears it move. `EditorWindow::focus_step` is the model: the arrow keys step geometrically
+  (`Template::neighbour`, the function `Ctrl+Shift+Arrow` and `edit --swap` already name a neighbour with),
+  and the edge of the sheet does nothing rather than wrapping. With nothing focused the first arrow picks
+  the first cell — which is what makes the main path walkable with the keyboard alone, since before it a
+  cell could only be chosen with a pointer. The framing nudges the arrows used to be kept their jobs under
+  a modifier: `Shift`+arrow pans, `Ctrl`+arrow pans coarsely, `Ctrl+Shift`+arrow swaps two cells.
 - **`Frame…` is three rows in the document's own order** (ruling 30, 2026-09-23): gap, radius, colour, over
   `frame{gapRel, radiusRel, color}`, with both lengths typed as per cent of the collage's height (the
   document keeps fractions; `edit --gap` takes them). The rows write **live** — the canvas redraws behind the
@@ -1136,11 +1147,29 @@ may rely on:
   uses: the command is kept pending while the value moves and committed once it is quiet
   (`COMMIT_QUIET`, 250 ms), so one settled frame is one undo step. Its only button is *Close*: there is
   nothing left to confirm, and a Cancel would be a second undo stack.
+- **A value the document refuses is reported, and the rows go back** (S15h, PIX-020). The rows offer
+  0–100 %, and a gap of 100 % leaves every cell of the library's layouts with nothing visible:
+  `EditorWindow::set_frame` returns the `CoreError` (which names the slot) instead of swallowing it, the
+  dialog shows it in its own `AdwBanner` — a toast would be behind the modal — and re-seeds the three rows
+  from the document, so a row can never display a number the document does not hold. Nothing is left
+  pending and no commit is scheduled, so the delayed commit that used to write a frame the row no longer
+  showed cannot happen.
 - **`Export…` is the export's three questions as rows** — the format (JPEG/PNG), the long edge in pixels
   (`MIN_EXPORT_PX`..`=MAX_EXPORT_PX`), and the file name with the platform's own `GtkFileDialog` as its
   chooser — and its affirmative button starts the same background export the menu's action does
   (`EditorWindow::start_export`), with the same progress bar in the bottom bar and the same toast. The
   format row owns the file's extension, and the chooser's filter follows it.
+- **Where the first export goes, and what the name may be** (S15h, PIX-010, ruling of 2026-09-24). No
+  chooser step stands between `Export…` and the file: the first export of a window lands in the **pictures
+  directory** — the folder the picker opens on, `XDG_PICTURES_DIR` or `~/Pictures`; an account with
+  neither keeps the bare name — and a later export in the directory the last one used, because the stored
+  form keeps the whole path. The name's extension is the format row's: a name carrying the other format's
+  extension is rewritten case-insensitively (`.jpeg` and `.JPG` are the JPEG format, `Format::from_path`'s
+  own rule), a name that already means the selected format keeps the user's spelling, and a name with no
+  extension, with an extension this build does not write, or with nothing at all is refused with a toast —
+  the same rule the CLI's `--out` meets. `export::run` asks that rule again next to the alias rule, so a
+  direct caller cannot write JPEG bytes under a `.png` name. The dialog installs its affirmative as
+  libadwaita's `default-widget`, which is the property that binds Return to it.
 - **Two questions are answered before an export starts (S15c), and the dialog stays open for both.** A
   path that names one of the document's own photos is refused on the spot — the same rule and the same
   message `render` and `thumb` use (`pixlay_imaging::destination`, asked through
@@ -1338,6 +1367,16 @@ without looking at a widget:
   costs one build at a time, and the re-use of what a gesture does not change is
   `pixlay_imaging::Preview`'s (S12, above). An export reports progress, which
   the window shows in a progress bar rather than a modal.
+- **A worker that cannot start, or that is gone, is a report and not a wait** (S15h, PIX-014). Starting a
+  worker answers `Result` (`pixlay::workers::WorkerPlan`, whose product value is `Run`), every request
+  answers whether it was queued, and the failing request clears the state it would have marked pending
+  before it says anything: the canvas's grid, the gallery's build, a tile's in-flight entry and the export
+  progress bar all go back to resting, because a request nobody will answer must not be waited on. The
+  canvas reports once per window (`decode_reported`) — an edit asks again and is not a second failure — the
+  picker shows the refusal in the cell that asked, and an export that could not be started says so as a
+  toast. A thread that has started and died takes the same branch: its request channel answers `Err`.
+  `EditorWindow::with_workers` is the tests' way in (`Workers { decode, thumbs, export }`), and
+  `EditorWindow::new` is the product's.
 - **The accelerator table is data** (`crates/pixlay/src/app.rs::ACCELERATORS`): the bindings, the
   shortcuts dialog and the HIG test all read it, so they cannot drift. No binding uses
   `Alt+*`, `Super+*` or `Ctrl+Alt+*`, and `F9` left the table with the utility pane (S13);

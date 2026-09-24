@@ -26,6 +26,8 @@ use pixlay_imaging::encode::{Export, Format, write};
 use pixlay_imaging::{Rgb8View, Source, slot_bitmap};
 use pixlay_render::{Bitmap, Images, render_rgb8};
 
+use crate::workers::{Down, Kind, WorkerPlan};
+
 /// Smallest long edge the export form offers, in pixels.
 ///
 /// A floor for the form, not a limit of the format: any positive grid is valid,
@@ -117,6 +119,17 @@ pub fn run(
     // of the document's photos is lost, and this is the function that reaches the file
     // (S15c, PIX-001).
     refuse_source_alias(&settings.path, sources).map_err(|alias| alias.to_string())?;
+    // The extension is the whole interface between a file and its pixels, and the form
+    // resolves the name through this same rule before it calls here (S15h, PIX-010):
+    // refusing again is what makes it true for a direct caller too. `expected` names
+    // the format the form asked for, in the wording the CLI's `--out` uses.
+    let expected = match settings.format {
+        Format::Png => ".png",
+        Format::Jpeg => ".jpg or .jpeg",
+    };
+    if Format::from_path(&settings.path) != Some(settings.format) {
+        return Err(format!("{}: expected {expected}", settings.path.display()));
+    }
     let started = Instant::now();
     let canvas_px = grid(doc, settings)?;
 
@@ -194,22 +207,24 @@ pub fn grid(doc: &CollageDoc, settings: &Settings) -> Result<PixelSize, String> 
 /// it is invoked from the worker's thread and must not touch a widget itself —
 /// the window's own closure wraps each call in `MainContext::invoke` with a
 /// `SendWeakRef`, which is the only way a GTK object may be reached from here.
+///
+/// `Err` is a thread that could not be started (S15h, PIX-014): the window then
+/// clears the progress state it had just set and says so, instead of showing a
+/// progress bar that nothing will ever move.
 pub fn spawn(
     doc: CollageDoc,
     sources: Vec<Option<PathBuf>>,
     settings: Settings,
     report: impl Fn(Event) + Send + Sync + 'static,
-) {
+    plan: WorkerPlan,
+) -> Result<(), Down> {
     let report = std::sync::Arc::new(report);
-    std::thread::Builder::new()
-        .name("pixlay-export".to_string())
-        .spawn(move || {
-            let progress_report = std::sync::Arc::clone(&report);
-            let progress = move |progress: Progress| progress_report(Event::Progress(progress));
-            let outcome = run(&doc, &sources, &settings, &progress);
-            report(Event::Finished(outcome));
-        })
-        .expect("the export thread can be started");
+    plan.start(Kind::Export, move || {
+        let progress_report = std::sync::Arc::clone(&report);
+        let progress = move |progress: Progress| progress_report(Event::Progress(progress));
+        let outcome = run(&doc, &sources, &settings, &progress);
+        report(Event::Finished(outcome));
+    })
 }
 
 /// What an export reports back.

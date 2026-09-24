@@ -53,6 +53,7 @@ use pixlay_imaging::{Preview, SlotBitmap};
 use pixlay_render::{Bitmap, Images, render_rgb8};
 
 use crate::layout::Candidate;
+use crate::workers::{Down, Kind, WorkerPlan};
 
 /// One canvas job: everything the worker needs, and nothing that owns a window.
 struct CanvasJob {
@@ -120,27 +121,40 @@ enum Job {
 impl Decoder {
     /// Starts the worker. `reply` runs on the main context, in request order of
     /// completion (not of sending — a superseded job may still be running).
-    pub fn spawn(reply: impl Fn(Event) + Send + Sync + 'static) -> Self {
+    ///
+    /// `Err` is the thread that could not be started (S15h, PIX-014): the window
+    /// opens without a decoder and reports it where a decode would have been asked
+    /// for, rather than panicking on the way into `EditorWindow::new`.
+    pub fn spawn(reply: impl Fn(Event) + Send + Sync + 'static) -> Result<Self, Down> {
+        Self::spawn_with(reply, WorkerPlan::Run)
+    }
+
+    /// [`spawn`](Self::spawn) with the plan `window::Workers` names.
+    pub fn spawn_with(
+        reply: impl Fn(Event) + Send + Sync + 'static,
+        plan: WorkerPlan,
+    ) -> Result<Self, Down> {
         let (jobs, queue) = mpsc::channel::<Job>();
         let reply = std::sync::Arc::new(reply);
-        std::thread::Builder::new()
-            .name("pixlay-decode".to_string())
-            .spawn(move || work(queue, reply))
-            .expect("the decoding thread can be started");
-        Self {
+        plan.start(Kind::Decode, move || work(queue, reply))?;
+        Ok(Self {
             jobs,
             canvas_generation: 0,
             gallery_generation: 0,
-        }
+        })
     }
 
     /// Queues a canvas job and returns the generation that will identify its reply.
+    ///
+    /// `Err` is a worker that is not receiving (S15h): the window clears the pending
+    /// grid it would otherwise mark and reports the reason, because a request nobody
+    /// will answer is a canvas that waits for ever.
     pub fn request(
         &mut self,
         doc: &CollageDoc,
         sources: Vec<Option<PathBuf>>,
         grid: PixelSize,
-    ) -> u64 {
+    ) -> Result<u64, Down> {
         self.canvas_generation += 1;
         let job = Job::Canvas(CanvasJob {
             generation: self.canvas_generation,
@@ -148,10 +162,11 @@ impl Decoder {
             sources,
             grid,
         });
-        // A send failure means the worker died; the window keeps the bitmaps it
-        // has, which is the same state a decode error leaves it in.
-        let _ = self.jobs.send(job);
-        self.canvas_generation
+        self.jobs.send(job).map_err(|_| {
+            glib::g_warning!("pixlay", "{}", Kind::reason(Kind::Decode, Down::Gone));
+            Down::Gone
+        })?;
+        Ok(self.canvas_generation)
     }
 
     /// Queues a gallery job and returns the generation that will identify its
@@ -162,7 +177,7 @@ impl Decoder {
         sources: Vec<Option<PathBuf>>,
         candidates: Vec<(Template, PixelSize)>,
         source_edge: u32,
-    ) -> u64 {
+    ) -> Result<u64, Down> {
         self.gallery_generation += 1;
         let job = Job::Gallery(GalleryJob {
             generation: self.gallery_generation,
@@ -171,8 +186,11 @@ impl Decoder {
             candidates,
             source_edge,
         });
-        let _ = self.jobs.send(job);
-        self.gallery_generation
+        self.jobs.send(job).map_err(|_| {
+            glib::g_warning!("pixlay", "{}", Kind::reason(Kind::Decode, Down::Gone));
+            Down::Gone
+        })?;
+        Ok(self.gallery_generation)
     }
 }
 

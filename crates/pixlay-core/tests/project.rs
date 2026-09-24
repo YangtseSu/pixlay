@@ -12,8 +12,8 @@
 use std::path::{Path, PathBuf};
 
 use pixlay_core::{
-    Cell, CollageDoc, CropTransform, DOC_VERSION, Point, Polygon, Project, Slot, Template,
-    templates,
+    Cell, CollageDoc, CoreError, CropTransform, DOC_VERSION, Point, Polygon, Project, Slot,
+    Template, templates,
 };
 
 fn temp_dir(name: &str) -> PathBuf {
@@ -184,6 +184,66 @@ fn a_missing_project_and_a_newer_version_report_clearly() {
             .to_string()
             .contains("newer than the supported version"),
         "{error}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// S15h (PIX-021): a file-backed failure says which file it was.
+///
+/// The message inside — serde's, or a validation refusal — does not name the
+/// project; the loader is what knows the path, and this asserts that it passes it
+/// on. An I/O failure is the other side of the same rule: it already names its
+/// path, so it must not be wrapped a second time.
+#[test]
+fn a_file_backed_failure_names_the_project_it_read() {
+    let dir = temp_dir("load-error-path");
+
+    // A parse failure keeps serde's detail and gains the path.
+    let broken = dir.join("broken.pixlay");
+    std::fs::write(&broken, "{ not json").expect("write");
+    let error = CollageDoc::load(&broken).expect_err("a parse failure must fail");
+    assert!(
+        matches!(error, CoreError::AtPath { .. }),
+        "a parse failure has to carry the path: {error:?}"
+    );
+    let message = error.to_string();
+    assert!(message.contains("broken.pixlay"), "{message}");
+    assert!(
+        message.contains("project JSON"),
+        "serde's detail is kept: {message}"
+    );
+
+    // A validation failure too: the file was read and parsed, and it is still the
+    // file that has to be named.
+    let mut invalid = document();
+    invalid.cells[1].crop.zoom = 0.0;
+    let path = dir.join("invalid.pixlay");
+    std::fs::write(&path, invalid.to_json().expect("serializes")).expect("write");
+    let error = CollageDoc::load(&path).expect_err("an invalid document must fail");
+    assert!(
+        matches!(error, CoreError::AtPath { .. }),
+        "a validation failure has to carry the path: {error:?}"
+    );
+    let message = error.to_string();
+    assert!(message.contains("invalid.pixlay"), "{message}");
+    assert!(
+        message.contains("crop zoom"),
+        "the reason is kept: {message}"
+    );
+
+    // A missing file already names its path: wrapping it would print the path
+    // twice, which is what `AtPath` exists to avoid.
+    let missing = dir.join("absent.pixlay");
+    let error = Project::load(&missing).expect_err("a missing file must fail");
+    assert!(
+        matches!(error, CoreError::Io { .. }),
+        "an I/O failure is not wrapped: {error:?}"
+    );
+    let message = error.to_string();
+    assert_eq!(
+        message.matches("absent.pixlay").count(),
+        1,
+        "the missing path is named once: {message}"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

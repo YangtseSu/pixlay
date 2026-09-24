@@ -136,6 +136,7 @@ use crate::i18n::{fill, gettext};
 use crate::picture::Picture;
 use crate::thumbs::Kind;
 use crate::window::EditorWindow;
+use crate::workers::{Down, Kind as WorkerKind};
 
 /// Size of one grid cell, in logical pixels.
 ///
@@ -1421,6 +1422,10 @@ impl Picker {
         // take, so it is where a photo edited in another program is noticed.
         self.restamp(window, position);
         let Some(worker) = window.thumbs() else {
+            // The worker's thread never started (S15h, PIX-014): the cell says so,
+            // rather than spinning for a reply that cannot come. Nothing was marked
+            // in flight, so there is nothing to clear.
+            self.show_failure(position, &WorkerKind::Thumbs.message(Down::Start));
             return;
         };
         let px = self.tile_px();
@@ -1435,7 +1440,12 @@ impl Picker {
             return;
         };
         self.requested.set(self.requested.get() + 1);
-        worker.request_tile(position, &path, px);
+        if let Err(down) = worker.request_tile(position, &path, px) {
+            // The job was never queued: the in-flight entry goes with it, and the
+            // cell reports the worker instead of loading (S15h, PIX-014).
+            self.inflight.borrow_mut().remove(&(epoch, position, px));
+            self.show_failure(position, &WorkerKind::Thumbs.message(down));
+        }
     }
 
     /// Drops a position's tile request, because its cell is gone from the screen.
@@ -1615,6 +1625,14 @@ impl Picker {
         // preview in hand was decoded, and the pane shows what it has.
         self.restamp(window, index);
         let Some(worker) = window.thumbs() else {
+            // The cell-sized path's own report (S15h, PIX-014), for the pane: the
+            // photo it is waiting for is one this process cannot decode.
+            self.on_preview(
+                window,
+                index,
+                self.preview_px(),
+                Err(WorkerKind::Thumbs.message(Down::Start)),
+            );
             return;
         };
         let px = self.preview_px();
@@ -1649,7 +1667,14 @@ impl Picker {
                 .remove(&(epoch, index, px));
             return;
         };
-        worker.request_preview(index, &path, px);
+        if let Err(down) = worker.request_preview(index, &path, px) {
+            // The job was never queued, so the entry goes (S15h, PIX-014) and the
+            // pane reports the worker rather than showing its spinner for ever.
+            self.preview_inflight
+                .borrow_mut()
+                .remove(&(epoch, index, px));
+            self.on_preview(window, index, px, Err(WorkerKind::Thumbs.message(down)));
+        }
     }
 
     /// One preview arrived (a decode at the size the pane draws, not a resampled

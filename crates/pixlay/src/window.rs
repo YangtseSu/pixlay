@@ -58,6 +58,7 @@ use crate::layout::Gallery;
 use crate::picker::Picker;
 use crate::state::Editor;
 use crate::thumbs;
+use crate::workers::{Down, Kind as WorkerKind, Workers};
 
 /// What happens once a boundary's question has been answered, or a save has a path:
 /// the two continuations the window's boundaries hand each other (S15d).
@@ -159,8 +160,24 @@ mod imp {
         pub frame_dialog: OnceCell<Rc<dialogs::FrameDialog>>,
         pub export_dialog: OnceCell<Rc<dialogs::ExportDialog>>,
         pub picker: OnceCell<Rc<Picker>>,
-        /// The picker's tile worker: one thread, many small pictures.
-        pub thumbs: OnceCell<Rc<thumbs::Thumbs>>,
+        /// The picker's tile worker: one thread, many small pictures. `None` is a
+        /// thread that could not be started (S15h, PIX-014), and the picker then
+        /// reports it in the cell that asked instead of waiting for a reply.
+        pub thumbs: OnceCell<Option<Rc<thumbs::Thumbs>>>,
+        /// How this window's three workers start (S15h, PIX-014): the product's own
+        /// plan unless a test named another one.
+        pub workers: Cell<Workers>,
+        /// Whether the decoding worker's failure has already been reported: the
+        /// toast is news once, and the edit that asks again is not a second failure.
+        pub decode_reported: Cell<bool>,
+        /// The canvas's current accessible name.
+        ///
+        /// A copy for the tests, because GTK4 has no getter for an accessible
+        /// property's *value* (`gtk::test_accessible_has_property` answers only
+        /// whether one is set): "the name says which cell the focus is on" (S15h,
+        /// PIX-017) is a claim about a string, so the string is kept where a test can
+        /// read it, exactly as `last_toast` is.
+        pub canvas_label: RefCell<String>,
         /// The layout gallery: the band under the canvas, and the count control
         /// that decides what the candidates are (S14).
         pub gallery: OnceCell<Rc<Gallery>>,
@@ -233,6 +250,9 @@ mod imp {
                 export_dialog: OnceCell::new(),
                 picker: OnceCell::new(),
                 thumbs: OnceCell::new(),
+                workers: Cell::new(Workers::default()),
+                decode_reported: Cell::new(false),
+                canvas_label: RefCell::new(String::new()),
                 gallery: OnceCell::new(),
                 gallery_generation: Cell::new(0),
                 gallery_pending: Cell::new(false),
@@ -294,7 +314,66 @@ pub fn default_document() -> CollageDoc {
 
 impl EditorWindow {
     pub fn new(app: &adw::Application) -> Self {
-        glib::Object::builder().property("application", app).build()
+        let window: Self = glib::Object::builder().property("application", app).build();
+        window.start_workers(Workers::default());
+        window
+    }
+
+    /// The window a test builds when it wants one of the workers to be down
+    /// (S15h, PIX-014): the same window, with the three plans `workers` names.
+    ///
+    /// The product's own construction is [`new`](Self::new), which is this call with
+    /// every plan `WorkerPlan::Run`. The workers are not started in `build()`, so a
+    /// caller can choose the plan after the widgets exist and before the window is
+    /// presented — which is the moment the first request would be made.
+    pub fn with_workers(app: &adw::Application, workers: Workers) -> Self {
+        let window: Self = glib::Object::builder().property("application", app).build();
+        window.start_workers(workers);
+        window
+    }
+
+    /// Starts the two workers the window holds for its lifetime, under `workers`, and
+    /// remembers the plan the third one (an export's own thread) starts under.
+    ///
+    /// A start that fails is not a panic (S15h, PIX-014): the handle stays `None`,
+    /// and the request path that needed it reports the reason where the user can see
+    /// it. The picker's tile worker is a second thread with a different question —
+    /// many independent "what does this file look like" requests rather than one
+    /// document's bitmaps for one grid.
+    fn start_workers(&self, workers: Workers) {
+        let imp = self.imp();
+        imp.workers.set(workers);
+
+        // ---- decoding ------------------------------------------------------
+        let sender = glib::SendWeakRef::from(self.downgrade());
+        let decoder = Decoder::spawn_with(
+            move |event| {
+                let sender = sender.clone();
+                // The reply is plain data; the window is reached on its own thread.
+                glib::MainContext::default().invoke(move || {
+                    if let Some(window) = sender.upgrade() {
+                        window.on_decoder_event(event);
+                    }
+                });
+            },
+            workers.decode,
+        );
+        *imp.decoder.borrow_mut() = decoder.ok();
+
+        // ---- the picker's tiles ---------------------------------------------
+        let sender = glib::SendWeakRef::from(self.downgrade());
+        let thumbs = thumbs::Thumbs::spawn_with(
+            move |reply| {
+                let sender = sender.clone();
+                glib::MainContext::default().invoke(move || {
+                    if let Some(window) = sender.upgrade() {
+                        window.on_thumb(reply);
+                    }
+                });
+            },
+            workers.thumbs,
+        );
+        imp.thumbs.set(thumbs.ok().map(Rc::new)).ok();
     }
 
     fn build(&self) {
@@ -492,35 +571,6 @@ impl EditorWindow {
 
         self.install_actions();
 
-        // ---- decoding ------------------------------------------------------
-        let window = self.downgrade();
-        let sender = glib::SendWeakRef::from(window);
-        let decoder = Decoder::spawn(move |event| {
-            let sender = sender.clone();
-            // The reply is plain data; the window is reached on its own thread.
-            glib::MainContext::default().invoke(move || {
-                if let Some(window) = sender.upgrade() {
-                    window.on_decoder_event(event);
-                }
-            });
-        });
-        *imp.decoder.borrow_mut() = Some(decoder);
-
-        // ---- the picker's tiles ---------------------------------------------
-        // A second worker, for a different question: the decoder above builds one
-        // document's bitmaps for one grid, while this one answers many independent
-        // "what does this file look like" requests for the picker's grid.
-        let sender = glib::SendWeakRef::from(self.downgrade());
-        let thumbs = thumbs::Thumbs::spawn(move |reply| {
-            let sender = sender.clone();
-            glib::MainContext::default().invoke(move || {
-                if let Some(window) = sender.upgrade() {
-                    window.on_thumb(reply);
-                }
-            });
-        });
-        imp.thumbs.set(Rc::new(thumbs)).ok();
-
         // ---- unsaved work ---------------------------------------------------
         // **One question, every boundary** (PIX-002, 2026-09-24): closing the
         // window, `New` and `Open` all replace or end the document, so all three
@@ -689,9 +739,11 @@ impl EditorWindow {
         self.imp().picker.get().cloned()
     }
 
-    /// The picker's tile worker, if the window has one.
+    /// The picker's tile worker, if the window has one — `None` when the thread
+    /// could not be started (S15h, PIX-014), which is what the picker reports in the
+    /// cell that asked.
     pub fn thumbs(&self) -> Option<Rc<thumbs::Thumbs>> {
-        self.imp().thumbs.get().cloned()
+        self.imp().thumbs.get().cloned().flatten()
     }
 
     /// One tile or preview arrived from the picker's worker.
@@ -783,6 +835,14 @@ impl EditorWindow {
         *self.imp().last_draw_error.borrow_mut() = error;
     }
 
+    /// Whether an export is in flight.
+    ///
+    /// The tests' handle on the state the progress bar shows and the flag every wait
+    /// reads — a start that could not happen has to leave it false (S15h, PIX-014).
+    pub fn exporting(&self) -> bool {
+        self.imp().exporting.get()
+    }
+
     /// Files the decoding thread has decoded since the window opened.
     ///
     /// The tests' handle on S12's central claim — a live gesture never touches the
@@ -868,7 +928,12 @@ impl EditorWindow {
                     .fitted_crop(slot)
                     .is_some_and(|current| current.rotation_deg != fitted.rotation_deg);
                 self.imp().guides.set(rotation_changed);
-                self.live(Command::SetCrop { slot, crop: fitted });
+                // A refused step is not a gesture in flight: `guides` goes back with
+                // it, and no commit is scheduled for a command nobody took.
+                if self.live(Command::SetCrop { slot, crop: fitted }).is_err() {
+                    self.imp().guides.set(false);
+                    return;
+                }
                 // A slider cannot say "the drag ended"; the commit happens once
                 // the value stops moving. A wheel or a drag ends the same way,
                 // which is why they do not need a signal of their own either.
@@ -913,15 +978,20 @@ impl EditorWindow {
             .unwrap_or(crop)
     }
 
-    fn live(&self, command: Command) {
-        if self.imp().editor.borrow_mut().begin(command).is_ok() {
-            self.canvas_widget().queue_draw();
-            // The gesture is live, so this is the grid a gesture draws at: the
-            // document is moving, and a frame that keeps up is worth more than a
-            // sharp one. The release refines it (S12).
-            let grid = self.gesture_aware_grid(self.resting_grid());
-            self.request_decode(grid);
-        }
+    /// One step of a live gesture, or a refusal to report (S15h, PIX-020).
+    ///
+    /// `Err` is the document refusing the command — a frame that empties a cell, a
+    /// crop no fitting can cover — and it is the caller's to report: the pending
+    /// command is untouched, so nothing is drawn and nothing is scheduled.
+    fn live(&self, command: Command) -> Result<(), CoreError> {
+        self.imp().editor.borrow_mut().begin(command)?;
+        self.canvas_widget().queue_draw();
+        // The gesture is live, so this is the grid a gesture draws at: the
+        // document is moving, and a frame that keeps up is worth more than a
+        // sharp one. The release refines it (S12).
+        let grid = self.gesture_aware_grid(self.resting_grid());
+        self.request_decode(grid);
+        Ok(())
     }
 
     /// Commits the gesture in flight as one undo step.
@@ -978,6 +1048,64 @@ impl EditorWindow {
         let slot = slot.filter(|slot| *slot < self.document().template.slots.len());
         self.imp().selection.set(slot);
         self.refresh();
+    }
+
+    /// Moves the keyboard's focus through the grid, the selection following it (S15h,
+    /// PIX-017's ruling of 2026-09-24).
+    ///
+    /// The focus **is** the selection — the one cell every other control acts on — and
+    /// it is visible: the canvas draws the selected cell's outline, so a keyboard-only
+    /// user can see where the arrows have taken them, and [`sync_canvas_label`] tells a
+    /// screen reader which cell it is.
+    ///
+    /// The step is geometric and does not wrap: which cell is "to the right" is
+    /// `Template::neighbour`'s answer — the same function `Ctrl+Shift+Arrow` and the
+    /// CLI's `edit --swap` name a neighbour with — and the edge of the sheet answers
+    /// `None`, so a focus that ran off the right edge stays where it is instead of
+    /// reappearing on the left as if the key had been a different one. With nothing
+    /// focused yet the first arrow picks the first cell, which is where a keyboard user
+    /// starts reading the sheet.
+    ///
+    /// [`sync_canvas_label`]: Self::sync_canvas_label
+    pub fn focus_step(&self, dx: i32, dy: i32) {
+        let template = &self.document().template;
+        let next = match self.selection() {
+            Some(slot) => template.neighbour(slot, (dx, dy)),
+            None if !template.slots.is_empty() => Some(0),
+            None => None,
+        };
+        if let Some(slot) = next {
+            self.select(Some(slot));
+        }
+    }
+
+    /// Writes the canvas's accessible name: the cell the keyboard's focus is on
+    /// (S15h, PIX-017).
+    ///
+    /// One name for the canvas rather than a proxy widget per cell (the same ruling):
+    /// a screen reader announces "Cell 3 of 8" as the focus moves, and the cell's own
+    /// state is the `+` button or the photo it shows, both of which are controls of
+    /// their own with names of their own.
+    fn sync_canvas_label(&self) {
+        let area = self.canvas_widget();
+        let label = match self.selection() {
+            Some(slot) => fill(
+                gettext("Collage canvas, cell {} of {}"),
+                &[slot + 1, self.document().template.slots.len()],
+            ),
+            None => gettext("Collage canvas"),
+        };
+        a11y::label(&area, &label);
+        *self.imp().canvas_label.borrow_mut() = label;
+    }
+
+    /// The canvas's current accessible name: which cell the keyboard's focus is on
+    /// (S15h, PIX-017), or the bare "Collage canvas" before one is.
+    ///
+    /// The tests' handle on it — GTK4 exposes no getter for an accessible property's
+    /// value — and nothing else reads it.
+    pub fn canvas_label(&self) -> String {
+        self.imp().canvas_label.borrow().clone()
     }
 
     /// Sets the framing zoom (the sidebar's spin row), keeping the fit.
@@ -1054,7 +1182,10 @@ impl EditorWindow {
                 ..crop
             },
         );
-        self.live(Command::SetCrop { slot, crop: next });
+        if self.live(Command::SetCrop { slot, crop: next }).is_err() {
+            self.imp().guides.set(false);
+            return;
+        }
         self.schedule_commit();
     }
 
@@ -1686,9 +1817,16 @@ impl EditorWindow {
     /// number is not what the user made. A frame change also moves the clamp every
     /// cell is fitted against, so the commit re-decodes at the resting grid — the
     /// bitmaps a framed cell needs are not the ones an unframed one had.
-    pub fn set_frame(&self, frame: Frame) {
-        self.live(Command::SetFrame { frame });
+    ///
+    /// **`Err` is the document refusing the value, and it is reported where the value
+    /// came from** (S15h, PIX-020): a gap large enough to leave a cell with nothing
+    /// visible is refused by `Frame::validate`/`covering`, and a caller that ignored
+    /// it would leave its own control showing a number the document does not have.
+    /// Nothing is pending and nothing is scheduled when it refuses.
+    pub fn set_frame(&self, frame: Frame) -> Result<(), CoreError> {
+        self.live(Command::SetFrame { frame })?;
         self.schedule_commit();
+        Ok(())
     }
 
     /// What the export form asks for, with the path this window holds.
@@ -1705,7 +1843,7 @@ impl EditorWindow {
     pub fn export_settings(&self) -> Settings {
         let mut settings = self.imp().export.borrow().clone();
         if settings.path.as_os_str().is_empty() {
-            settings.path = PathBuf::from(suggested_export_name(self, settings.format));
+            settings.path = default_export_path(self, settings.format);
         }
         settings
     }
@@ -1769,7 +1907,20 @@ impl EditorWindow {
             });
         };
         *self.imp().export.borrow_mut() = settings.clone();
-        export::spawn(doc, sources.paths, settings, report);
+        // A thread that could not be started is not a progress bar to sit behind
+        // (S15h, PIX-014): the pending flag and the bar go back to their resting
+        // state and the reason is the toast.
+        if let Err(down) = export::spawn(
+            doc,
+            sources.paths,
+            settings,
+            report,
+            self.imp().workers.get().export,
+        ) {
+            self.imp().exporting.set(false);
+            self.show_progress(false);
+            self.toast(&WorkerKind::Export.message(down));
+        }
     }
 
     /// Exports synchronously; the same function the worker calls.
@@ -1918,13 +2069,29 @@ impl EditorWindow {
         let source_edge = preview_source_long_edge(self.resting_grid());
         let sources = self.imp().editor.borrow().sources();
         let doc = self.display_document();
-        let mut decoder = self.imp().decoder.borrow_mut();
-        let Some(decoder) = decoder.as_mut() else {
-            return;
+        // The request's own borrow of the decoder ends before anything is reported:
+        // the failure path calls back into the window, which reads the same field.
+        let outcome = {
+            let mut decoder = self.imp().decoder.borrow_mut();
+            match decoder.as_mut() {
+                Some(decoder) => {
+                    decoder.request_gallery(&doc, sources.paths, candidates, source_edge)
+                }
+                None => Err(Down::Start),
+            }
         };
-        let generation = decoder.request_gallery(&doc, sources.paths, candidates, source_edge);
-        self.imp().gallery_generation.set(generation);
-        self.imp().gallery_pending.set(true);
+        match outcome {
+            Ok(generation) => {
+                self.imp().gallery_generation.set(generation);
+                self.imp().gallery_pending.set(true);
+            }
+            // Nothing was queued, so nothing is pending (S15h, PIX-014): a band that
+            // stayed marked in flight would keep every wait on it waiting for ever.
+            Err(down) => {
+                self.imp().gallery_pending.set(false);
+                self.report_decode_down(down);
+            }
+        }
     }
 
     /// One gallery build arrived.
@@ -1954,15 +2121,44 @@ impl EditorWindow {
     fn request_decode(&self, grid: PixelSize) {
         let sources = self.imp().editor.borrow().sources();
         let doc = self.display_document();
-        let mut decoder = self.imp().decoder.borrow_mut();
-        let Some(decoder) = decoder.as_mut() else {
-            return;
-        };
-        let generation = decoder.request(&doc, sources.paths, grid);
-        self.imp().generation.set(generation);
-        self.imp().requested.set(Some(grid));
+        // The missing photos are a fact about the document, not about the worker: the
+        // banner says so whether or not a decode could be asked for.
         self.imp().missing.replace(sources.missing);
         self.update_banner();
+        let outcome = {
+            let mut decoder = self.imp().decoder.borrow_mut();
+            match decoder.as_mut() {
+                Some(decoder) => decoder.request(&doc, sources.paths, grid),
+                None => Err(Down::Start),
+            }
+        };
+        match outcome {
+            Ok(generation) => {
+                self.imp().generation.set(generation);
+                self.imp().requested.set(Some(grid));
+            }
+            // No job was queued, so no grid is in flight (S15h, PIX-014): the canvas
+            // keeps the bitmaps it has and the window says why it is not redrawing.
+            Err(down) => {
+                self.imp().requested.set(None);
+                self.report_decode_down(down);
+            }
+        }
+    }
+
+    /// Reports the decoding worker's own failure, once per window (S15h, PIX-014).
+    ///
+    /// Once, because a canvas asks on every resize and every edit: the first toast is
+    /// news, the fortieth is noise, and the state the user is in has not changed. The
+    /// log line is not deduplicated — a run that is being debugged wants every
+    /// refusal — which is why the reason is logged where the request failed and only
+    /// the sentence is held back here.
+    fn report_decode_down(&self, down: Down) {
+        if self.imp().decode_reported.replace(true) {
+            return;
+        }
+        glib::g_warning!("pixlay", "{}", WorkerKind::reason(WorkerKind::Decode, down));
+        self.toast(&WorkerKind::Decode.message(down));
     }
 
     /// One answer from the decoding thread, routed by what was asked for.
@@ -2138,6 +2334,7 @@ impl EditorWindow {
         self.update_title();
         self.update_banner();
         self.update_gallery_control();
+        self.sync_canvas_label();
         // The cells' own controls follow the document and the selection, so they are
         // written here rather than from a draw: showing a widget inside GTK's own
         // traversal leaves it snapshotted before it is allocated
@@ -2393,6 +2590,24 @@ fn suggested_project_name(window: &EditorWindow) -> String {
     match window.project_path() {
         Some(path) => file_name(&path),
         None => format!("{}.pixlay", gettext("collage")),
+    }
+}
+
+/// Where an export goes when the form has never been told (S15h, PIX-010).
+///
+/// Ruling 2026-09-24: **the first export lands in the pictures directory** — the same
+/// folder the picker opens on, `XDG_PICTURES_DIR` or `~/Pictures` — and a later one in
+/// the directory the last export used, which is what the stored path carries from then
+/// on. No chooser step is added to the main path, and nothing is written until the
+/// export itself runs, so a project that is never exported leaves no trace anywhere.
+///
+/// An account with no pictures directory at all falls back to the bare name in the
+/// process's own directory, which is where the form used to put every first export.
+fn default_export_path(window: &EditorWindow, format: pixlay_imaging::encode::Format) -> PathBuf {
+    let name = suggested_export_name(window, format);
+    match crate::picker::default_folder() {
+        Some(dir) => dir.join(name),
+        None => PathBuf::from(name),
     }
 }
 

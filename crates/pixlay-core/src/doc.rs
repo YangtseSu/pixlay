@@ -243,7 +243,14 @@ impl CollageDoc {
             path: path.to_path_buf(),
             source,
         })?;
-        Self::from_json(&json)
+        // A parse or validation failure names the file it came from (S15h,
+        // PIX-021): serde's message says what is wrong, not which project it is,
+        // and the caller is the one that knows the path. The read failure above
+        // already carries it, so only the in-memory failures are wrapped.
+        Self::from_json(&json).map_err(|source| CoreError::AtPath {
+            path: path.to_path_buf(),
+            source: Box::new(source),
+        })
     }
 
     /// Writes the document to `path`, atomically (S6.5).

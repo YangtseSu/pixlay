@@ -37,6 +37,7 @@ use std::sync::{Arc, Mutex};
 
 use gtk4::glib;
 
+use crate::workers::{Down, Kind as WorkerKind, WorkerPlan};
 use pixlay_imaging::{Source, Thumbnail, thumbnail};
 
 /// What a request is for.
@@ -107,20 +108,31 @@ pub struct Thumbs {
 impl Thumbs {
     /// Starts the worker. `reply` is called on the main context, in the order the
     /// jobs finish, which is the order they were queued (one thread).
-    pub fn spawn(reply: impl Fn(Reply) + Send + Sync + 'static) -> Self {
+    ///
+    /// `Err` is a thread that could not be started (S15h, PIX-014): the picker then
+    /// reports it in the cell that asked, rather than panicking on the way into the
+    /// window.
+    pub fn spawn(reply: impl Fn(Reply) + Send + Sync + 'static) -> Result<Self, Down> {
+        Self::spawn_with(reply, WorkerPlan::Run)
+    }
+
+    /// [`spawn`](Self::spawn) with the plan `window::Workers` names.
+    pub fn spawn_with(
+        reply: impl Fn(Reply) + Send + Sync + 'static,
+        plan: WorkerPlan,
+    ) -> Result<Self, Down> {
         let (jobs, queue) = mpsc::channel::<Job>();
         let wanted = Arc::new(Mutex::new(HashSet::new()));
         let reply = Arc::new(reply);
         let worker_wanted = Arc::clone(&wanted);
-        std::thread::Builder::new()
-            .name("pixlay-thumbs".to_string())
-            .spawn(move || work(queue, worker_wanted, reply))
-            .expect("the preview thread can be started");
-        Self {
+        plan.start(WorkerKind::Thumbs, move || {
+            work(queue, worker_wanted, reply)
+        })?;
+        Ok(Self {
             jobs,
             wanted,
             epoch: Cell::new(0),
-        }
+        })
     }
 
     /// The folder generation a request sent now would carry.
@@ -144,13 +156,17 @@ impl Thumbs {
     }
 
     /// Queues a grid tile.
-    pub fn request_tile(&self, index: usize, path: &Path, px: u32) {
-        self.request(Kind::Tile, index, path, px);
+    ///
+    /// `Err` is a worker that is not receiving (S15h, PIX-014): the picker drops the
+    /// request it had marked in flight and shows the reason in the cell, because a
+    /// cell that waits for a reply that cannot come spins for ever.
+    pub fn request_tile(&self, index: usize, path: &Path, px: u32) -> Result<(), Down> {
+        self.request(Kind::Tile, index, path, px)
     }
 
     /// Queues the preview pane's picture.
-    pub fn request_preview(&self, index: usize, path: &Path, px: u32) {
-        self.request(Kind::Preview, index, path, px);
+    pub fn request_preview(&self, index: usize, path: &Path, px: u32) -> Result<(), Down> {
+        self.request(Kind::Preview, index, path, px)
     }
 
     /// Drops a tile request: its cell has been unbound, scrolled away or covered
@@ -167,21 +183,35 @@ impl Thumbs {
         self.cancel(Kind::Preview, index, px);
     }
 
-    fn request(&self, kind: Kind, index: usize, path: &Path, px: u32) {
+    fn request(&self, kind: Kind, index: usize, path: &Path, px: u32) -> Result<(), Down> {
+        let key = key(self.epoch.get(), kind, index, px);
         self.wanted
             .lock()
             .expect("the request set is not poisoned")
-            .insert(key(self.epoch.get(), kind, index, px));
-        // A send failure means the worker died; the grid keeps the files it has
-        // and shows its loading state, which is the same state a decode error
-        // leaves a cell in.
-        let _ = self.jobs.send(Job {
+            .insert(key);
+        let job = Job {
             epoch: self.epoch.get(),
             kind,
             index,
             path: path.to_path_buf(),
             px,
-        });
+        };
+        if self.jobs.send(job).is_err() {
+            // The key goes with the request nobody will answer: leaving it would
+            // make the canceller's `remove` a no-op and the caller's own in-flight
+            // entry the only trace of a job that never existed.
+            self.wanted
+                .lock()
+                .expect("the request set is not poisoned")
+                .remove(&key);
+            glib::g_warning!(
+                "pixlay",
+                "{}",
+                crate::workers::Kind::reason(crate::workers::Kind::Thumbs, Down::Gone)
+            );
+            return Err(Down::Gone);
+        }
+        Ok(())
     }
 
     fn cancel(&self, kind: Kind, index: usize, px: u32) {

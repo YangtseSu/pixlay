@@ -326,8 +326,8 @@ pub fn build(window: &EditorWindow) -> gtk::DrawingArea {
     area.set_vexpand(true);
     a11y::label(&area, &gettext("Collage canvas"));
     area.set_tooltip_text(Some(&gettext(
-        "Drag to move the photo, scroll to zoom, Ctrl+scroll to straighten, \
-         Ctrl+Shift+Left/Right to swap two photos",
+        "Arrow keys choose a cell; Shift+arrow moves the photo and Ctrl+arrow moves it \
+         further; scroll zooms; Ctrl+scroll rotates; Ctrl+Shift+arrow swaps two cells",
     )));
 
     area.set_draw_func(glib::clone!(
@@ -523,6 +523,19 @@ fn add_scroll(area: &gtk::DrawingArea, window: &EditorWindow) {
 
 /// The keyboard path for the whole canvas: the main path must be walkable without
 /// a pointer (`AGENTS.md`, "GNOME HIG").
+///
+/// **The arrow keys are the focus, not the framing** (S15h, PIX-017's ruling of
+/// 2026-09-24): they move the selection through the grid — which cell is "to the
+/// right" is geometric, `Template::neighbour` — and the cell they land on is outlined
+/// by the canvas and announced by [`EditorWindow::focus_step`]'s own accessible name.
+/// Until that ruling the arrows panned the photo, which left a keyboard-only user a
+/// window they could focus but not choose a cell in: framing, `Delete`, `Return` and
+/// the swap all act on the selection, and it could only be set with a pointer.
+///
+/// The framing nudges kept their jobs under a modifier, so nothing the canvas could do
+/// is lost: `Shift`+arrow pans by a fine step, `Ctrl`+arrow by a coarse one, and
+/// `Ctrl+Shift`+arrow swaps the selected cell with its neighbour in that direction —
+/// the three the tooltip lists.
 fn add_keys(area: &gtk::DrawingArea, window: &EditorWindow) {
     let keys = gtk::EventControllerKey::new();
     keys.connect_key_pressed(glib::clone!(
@@ -535,35 +548,40 @@ fn add_keys(area: &gtk::DrawingArea, window: &EditorWindow) {
               _code: u32,
               state: gdk::ModifierType|
               -> glib::Propagation {
+            let shift = state.contains(gdk::ModifierType::SHIFT_MASK);
+            let control = state.contains(gdk::ModifierType::CONTROL_MASK);
+            let direction = match key {
+                gdk::Key::Left => (-1, 0),
+                gdk::Key::Right => (1, 0),
+                gdk::Key::Up => (0, -1),
+                gdk::Key::Down => (0, 1),
+                _ => (0, 0),
+            };
+            if direction != (0, 0) {
+                if control && shift {
+                    // Swapping two cells is about the layout rather than about one
+                    // photo's framing, so it answers before a selection is needed: an
+                    // *empty* cell has no crop and is still a legal half of a swap
+                    // (the whole point of `+` is that the new cell starts empty).
+                    if let Some(slot) = window.selection() {
+                        window.swap_towards(slot, direction);
+                    }
+                    return glib::Propagation::Stop;
+                }
+                if !control && !shift {
+                    window.focus_step(direction.0, direction.1);
+                    return glib::Propagation::Stop;
+                }
+            }
             let Some(slot) = window.selection() else {
                 // With nothing selected the canvas has nothing to edit; Tab still
                 // reaches every control in the pane.
                 return glib::Propagation::Proceed;
             };
-            // Swapping two cells is about the layout rather than about one photo's
-            // framing, so it is answered before the crop is read: an *empty* cell
-            // has no crop and is still a legal half of a swap (the whole point of
-            // `+` is that the new cell starts empty).
-            let shift = state.contains(gdk::ModifierType::SHIFT_MASK);
-            let control = state.contains(gdk::ModifierType::CONTROL_MASK);
-            if control && shift {
-                let direction = match key {
-                    gdk::Key::Left => (-1, 0),
-                    gdk::Key::Right => (1, 0),
-                    gdk::Key::Up => (0, -1),
-                    gdk::Key::Down => (0, 1),
-                    _ => (0, 0),
-                };
-                if direction != (0, 0) {
-                    window.swap_towards(slot, direction);
-                    return glib::Propagation::Stop;
-                }
-            }
             let Some(crop) = window.fitted_crop(slot) else {
                 return glib::Propagation::Proceed;
             };
-            let coarse = control;
-            let step = if coarse { 0.1 } else { 0.02 };
+            let step = if control { 0.1 } else { 0.02 };
             let next = match key {
                 gdk::Key::Left => Some(CropTransform {
                     offset: (crop.offset.0 - step, crop.offset.1),

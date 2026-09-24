@@ -20,6 +20,20 @@ pub enum CoreError {
     #[error("project JSON: {0}")]
     Json(#[from] serde_json::Error),
 
+    /// A project file this build read but could not accept (S15h, PIX-021).
+    ///
+    /// A parse or validation message on its own does not say *which* file was
+    /// wrong, and one run can name several project paths; the file-backed loaders
+    /// wrap their failure with the path they read and keep the inner message as it
+    /// is. [`Io`](Self::Io) is deliberately not wrapped: it already carries a path,
+    /// and wrapping it would print that path twice.
+    #[error("{path}: {source}")]
+    AtPath {
+        path: PathBuf,
+        #[source]
+        source: Box<CoreError>,
+    },
+
     /// A document written by a newer version is never guessed at or downgraded:
     /// the user is told which version is needed.
     #[error("document version {found} is newer than the supported version {supported}")]

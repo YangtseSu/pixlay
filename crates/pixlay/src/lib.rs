@@ -13,7 +13,8 @@
 //! the main path has somewhere to start and the document appears only once the
 //! user has chosen its photos. What is specific to a window — the gestures, the
 //! background threads and their progress, the current stage — is in `canvas.rs`,
-//! `decode.rs`, `thumbs.rs` and `window.rs`.
+//! `decode.rs`, `thumbs.rs` and `window.rs`, and how those threads start (and what a
+//! window does when one cannot) is `workers.rs`.
 //!
 //! `a11y.rs` is the one place an accessible name is set.
 //!
@@ -35,6 +36,7 @@ pub mod picture;
 pub mod state;
 pub mod thumbs;
 pub mod window;
+pub mod workers;
 
 pub use app::run;
 pub use window::EditorWindow;
