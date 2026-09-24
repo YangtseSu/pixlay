@@ -44,7 +44,6 @@ fn the_compose_stage_edits_the_selected_cell_and_the_document() {
     window
         .open_path(&support::verify_project())
         .expect("the verification project opens");
-    settle(&window);
     assert_eq!(
         window.stage(),
         Stage::Editor,
@@ -59,17 +58,31 @@ fn the_compose_stage_edits_the_selected_cell_and_the_document() {
     // ---- the strip is the selected cell's own controls ---------------------
     // Cell 0 is the verification template's largest cell (3/8 x 3/8), so the strip
     // has room for all five controls inside it.
+    //
+    // **Selected before the first frame is pumped, on purpose.** The bitmaps are not in
+    // hand until the decoder answers, so this is the order in which the window has only
+    // its `1x1` placeholder sheet to place a control against. What the checks below ask
+    // is that the *arrival* places them (`EditorWindow::on_decoded`) — the test never
+    // calls `CellControls::sync_in` for this block (measured 2026-09-24: without the
+    // re-sync the strip was placed from the placeholder and stayed there, which is the
+    // `0x0` a full-suite run reported).
     window.select(Some(0));
-    settle(&window);
-    let (width, height) = support::canvas_size(&window);
-    controls.sync_in(&window, width, height);
     let strip = controls.strip();
+    // The window has only its `1x1` placeholder to place against at this point, and a
+    // control placed from it is one GTK answers with a `0x0` allocation: nothing is shown
+    // until the bitmaps' own grid is in hand.
+    assert!(
+        !strip.is_visible(),
+        "no control is placed before its bitmaps are in hand"
+    );
+    support::canvas_bitmaps(&window);
     assert!(strip.is_visible(), "the selected cell's controls are shown");
     assert!(
         laid_out(&window, &strip, true),
-        "the strip was never laid out as a row ({}x{})",
+        "the strip was never laid out as a row ({}x{}): {}",
         strip.width(),
-        strip.height()
+        strip.height(),
+        support::frame_state(&window),
     );
     for (index, button) in controls.strip_buttons().into_iter().enumerate() {
         let widget = button.clone().upcast::<gtk4::Widget>();
@@ -142,9 +155,10 @@ fn the_compose_stage_edits_the_selected_cell_and_the_document() {
     );
     assert!(
         laid_out(&window, &strip, false),
-        "the strip was never laid out as a column ({}x{})",
+        "the strip was never laid out as a column ({}x{}): {}",
         strip.width(),
-        strip.height()
+        strip.height(),
+        support::frame_state(&window)
     );
     let (grid, _) = window.images();
     let placement = canvas::placement(grid, width, height);
@@ -302,7 +316,9 @@ fn the_compose_stage_edits_the_selected_cell_and_the_document() {
     // selected, the junction read `[255, 144, 144]`, the outline's own antialiased edge
     // over the red backdrop).
     window.select(None);
-    window.pump(Duration::from_millis(50));
+    // A snapshot reads the widgets' cached render nodes, so the probe waits for the
+    // frame that carries the change rather than for a fixed span of time.
+    support::after_frames(&window, 2, support::WAIT);
     let plain = support::snapshot(&window.canvas_widget());
     let plain_pixel = support::pixel(&plain, probe_x, probe_y);
     assert!(
@@ -361,8 +377,15 @@ fn the_compose_stage_edits_the_selected_cell_and_the_document() {
     frame_dialog.close_button().emit_clicked();
     support::close_dialog(&frame_dialog.widget(), &window);
     settle(&window);
-    let framed = support::snapshot(&window.canvas_widget());
-    let framed_pixel = support::pixel(&framed, probe_x, probe_y);
+    // The probe waits for *its* observation, not for a span of time: the canvas's own
+    // redraw is what carries the frame's colour, and on a background window the frame
+    // that redraws it can be seconds away (measured 2026-09-24: a probe that read the
+    // junction's pre-frame pixels because two window frames had passed).
+    let framed_pixel = support::settle_by(&window, support::PROBE_WAIT, || {
+        let image = support::snapshot(&window.canvas_widget());
+        let pixel = support::pixel(&image, probe_x, probe_y);
+        (pixel, pixel == [255, 0, 0])
+    });
     assert_ne!(
         plain_pixel,
         [255, 0, 0],
@@ -508,10 +531,12 @@ fn laid_out(window: &pixlay::EditorWindow, strip: &gtk4::Box, horizontal: bool) 
 fn settle(window: &pixlay::EditorWindow) {
     assert!(
         window.wait_for_idle(support::WAIT),
-        "the background pipeline finished"
+        "the background pipeline never finished: {}",
+        support::frame_state(window),
     );
     assert!(
         window.wait_for_gallery(support::WAIT),
-        "the layout band was built"
+        "the layout band was never built: {}",
+        support::frame_state(window),
     );
 }

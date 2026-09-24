@@ -78,12 +78,31 @@ pub const DEFAULT_TEMPLATE: &str = "mosaic-5-hero";
 /// `12000² = 144 MP < 200 MP`, so every template aspect stays inside the budget.
 pub const DEFAULT_EXPORT_PX: u32 = 4000;
 
+/// The grid the window holds before its first bitmaps are in hand.
+///
+/// One texel, and never a grid a render could use: `placement` stretches it over the
+/// whole widget, so `CellControls::sync_in` places nothing against it and waits for the
+/// reply that installs the real grid (`EditorWindow::on_decoded`).
+pub const PLACEHOLDER_GRID: PixelSize = PixelSize {
+    width: 1,
+    height: 1,
+};
+
 /// How long a test-facing wait pumps for work to *start* before concluding there is
 /// none (`EditorWindow::pump_until`).
 ///
 /// Long enough to cover a page push and the frame that lays it out, short enough that a
 /// wait about a document no edit is pending on costs a fraction of a second.
 const WORK_GRACE: Duration = Duration::from_millis(1000);
+
+/// How long [`EditorWindow::pump`] lets a window go without a frame before it asks for
+/// the window again.
+///
+/// A live session's compositor stops driving a window it is not compositing, and GTK
+/// only lays out on a frame, so a test waiting on an allocation has to get the window
+/// back in front. Two seconds is several frames' worth at any refresh rate and far
+/// below the waits' own 180 s ceiling.
+const FRAME_STALL: Duration = Duration::from_secs(2);
 
 /// How long a live gesture waits for quiet before it becomes an undo step.
 ///
@@ -180,6 +199,18 @@ mod imp {
         /// message cannot tell one report from two (`S13c`).
         pub toasts: Cell<u64>,
         pub actions: RefCell<Vec<gio::SimpleAction>>,
+        /// Frames this window's own frame clock has ticked since it was built.
+        ///
+        /// For the tests' waits, and nothing else: a wait that timed out has to say
+        /// whether frames were arriving at all, because "the canvas never produced a
+        /// render node" and "the compositor never ticked this window" are different
+        /// failures (measured 2026-09-24: the GUI tests' 180 s waits fired on a machine
+        /// whose session display was not driving the test window, and the message named
+        /// neither).
+        pub frames: Rc<Cell<u64>>,
+        /// What the canvas's draw function last refused, if anything: the other
+        /// failure mode, where frames do arrive and the canvas paints nothing.
+        pub last_draw_error: RefCell<Option<String>>,
     }
 
     impl Default for EditorWindow {
@@ -231,6 +262,8 @@ mod imp {
                 last_toast: RefCell::new(None),
                 toasts: Cell::new(0),
                 actions: RefCell::new(Vec::new()),
+                frames: Rc::new(Cell::new(0)),
+                last_draw_error: RefCell::new(None),
             }
         }
     }
@@ -248,6 +281,13 @@ mod imp {
             // SAFETY of the cast: the object this imp belongs to is the window.
             let window = self.obj();
             window.build();
+            // One counter for the window's own frame clock, so a test's wait can say
+            // whether frames were arriving while it waited.
+            let frames = self.frames.clone();
+            window.add_tick_callback(move |_, _| {
+                frames.set(frames.get() + 1);
+                gtk4::glib::ControlFlow::Continue
+            });
         }
     }
 
@@ -775,6 +815,30 @@ impl EditorWindow {
     /// grid it was requested at, so this is the grid the next bitmaps will be.
     pub fn requested_grid(&self) -> Option<PixelSize> {
         self.imp().requested.get()
+    }
+
+    /// Frames this window's frame clock has ticked since it was built.
+    ///
+    /// The tests' handle on "was this window being drawn at all while my wait ran":
+    /// two counts, a second apart, distinguish a frame that never arrived from a frame
+    /// that arrived and painted nothing.
+    pub fn frames(&self) -> u64 {
+        self.imp().frames.get()
+    }
+
+    /// What the canvas's draw function last refused, if it refused anything.
+    ///
+    /// Set by the canvas and read by the tests: a canvas that is mapped, visible and
+    /// allocated but snapshots to nothing is usually a `render` that failed, and this
+    /// is the reason.
+    pub fn last_draw_error(&self) -> Option<String> {
+        self.imp().last_draw_error.borrow().clone()
+    }
+
+    /// Records (or clears) the canvas's last draw refusal. The canvas's draw function
+    /// is the only writer; everything else reads [`last_draw_error`](Self::last_draw_error).
+    pub fn set_last_draw_error(&self, error: Option<String>) {
+        *self.imp().last_draw_error.borrow_mut() = error;
     }
 
     /// Files the decoding thread has decoded since the window opened.
@@ -1735,13 +1799,7 @@ impl EditorWindow {
 
     fn requested_grid_reset(&self) {
         self.imp().requested.set(None);
-        self.imp().images.replace((
-            PixelSize {
-                width: 1,
-                height: 1,
-            },
-            Images::new(),
-        ));
+        self.imp().images.replace((PLACEHOLDER_GRID, Images::new()));
     }
 
     /// Queues the gallery's build: every layout with the document's photo count,
@@ -1842,10 +1900,7 @@ impl EditorWindow {
             // A stale reply: the document moved on while this was decoding.
             return;
         }
-        let grid = self.imp().requested.get().unwrap_or(PixelSize {
-            width: 1,
-            height: 1,
-        });
+        let grid = self.imp().requested.get().unwrap_or(PLACEHOLDER_GRID);
         let mut images = Images::new();
         for bitmap in reply.bitmaps {
             let slot = bitmap.slot;
@@ -1864,6 +1919,21 @@ impl EditorWindow {
         }
         self.imp().images.replace((grid, images));
         self.imp().requested.set(None);
+        // The controls are placed from the grid their bitmaps are *for*, so the arrival
+        // is what puts them where the sheet actually is: a `sync` that ran while the
+        // bitmaps were still the placeholder placed nothing (`CellControls::sync_in`),
+        // and the window's other sync sites — a layout, an edit, a selection — are not
+        // guaranteed to follow this reply (measured 2026-09-24: a window that had just
+        // opened could leave its strip at the `1x1` placement until something else
+        // asked for a sync). **The editor's stage only**: while the picker is on screen the
+        // editor's own controls are work nobody can see — the same boundary and the same
+        // reason `request_gallery` has — and a page that is not showing has no placement to
+        // keep: `refresh` syncs it again when the editor is pushed.
+        if self.stage() == Stage::Editor
+            && let Some(controls) = self.cell_controls()
+        {
+            controls.sync(self);
+        }
         if !reply.failed.is_empty() {
             self.toast(&fill(
                 ngettext(
@@ -1915,9 +1985,28 @@ impl EditorWindow {
     pub fn pump(&self, duration: Duration) {
         let context = glib::MainContext::default();
         let deadline = Instant::now() + duration;
+        let mut last_frames = self.imp().frames.get();
+        let mut raised_at = Instant::now();
         while Instant::now() < deadline {
             while context.pending() {
                 context.iteration(false);
+            }
+            // A window the compositor has stopped compositing — a test window behind
+            // the rest of a live session — is sent almost no frame callbacks, and GTK's
+            // layout only advances on a frame, so a wait that pumps such a window
+            // measures a stale one (measured 2026-09-24: 91 frames in a 180 s wait with
+            // `active false`, where the same window ticked at 60 fps a moment earlier).
+            // Two seconds without a frame asks for the window again, which is what puts
+            // it back in front of the session.
+            let frames = self.imp().frames.get();
+            if frames != last_frames {
+                last_frames = frames;
+                raised_at = Instant::now();
+            } else if raised_at.elapsed() > FRAME_STALL {
+                // GTK4 has no "keep above" (that was GTK3), so asking for the
+                // window again is the only way to put it back in front of the session.
+                self.present();
+                raised_at = Instant::now();
             }
             std::thread::sleep(Duration::from_millis(2));
         }

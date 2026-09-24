@@ -49,7 +49,7 @@ use pixlay_render::{Images, RenderError, Target, draw};
 
 use crate::a11y;
 use crate::i18n::gettext;
-use crate::window::EditorWindow;
+use crate::window::{EditorWindow, PLACEHOLDER_GRID};
 
 /// Space between the sheet and the edge of the widget, in device pixels.
 ///
@@ -350,8 +350,15 @@ pub fn build(window: &EditorWindow) -> gtk::DrawingArea {
                 guides: window.guides(),
                 foreground,
             };
-            if let Err(error) = render(ctx, &view, width, height) {
-                glib::g_warning!("pixlay", "the canvas could not be drawn: {error}");
+            match render(ctx, &view, width, height) {
+                Ok(()) => window.set_last_draw_error(None),
+                Err(error) => {
+                    // Kept for the tests' waits: a mapped, allocated canvas that
+                    // snapshots to nothing is usually a `render` that refused, and this
+                    // is the reason it refused.
+                    window.set_last_draw_error(Some(error.to_string()));
+                    glib::g_warning!("pixlay", "the canvas could not be drawn: {error}");
+                }
             }
             window.request_grid_for(width, height);
         }
@@ -811,6 +818,17 @@ impl CellControls {
     pub fn sync_in(&self, window: &EditorWindow, width: i32, height: i32) {
         let doc = window.document();
         let (grid, _) = window.images();
+        // Nothing is placed against a canvas that has no size yet, or against a grid that
+        // is still the window's placeholder: `placement` stretches that single texel over
+        // the whole widget, and the margins it produces are ones GTK answers with a `0x0`
+        // allocation that no later frame repairs on its own (measured 2026-09-24: a strip
+        // placed from the placeholder stayed `0x0` for a test's whole 180 s wait). The
+        // controls are simply not shown until the bitmaps' own grid is known; the reply
+        // that installs them syncs again (`EditorWindow::on_decoded`).
+        if width <= 0 || height <= 0 || grid == PLACEHOLDER_GRID {
+            self.hide();
+            return;
+        }
         let placement = placement(grid, width, height);
         for (slot, button) in self.buttons.iter().enumerate() {
             let empty = doc
@@ -892,6 +910,14 @@ impl CellControls {
                 .set_margin_top((top + CONTROL_INSET).round() as i32);
         }
         self.strip.set_visible(true);
+    }
+
+    /// Hides every control: what a sync with nothing to place against leaves behind.
+    fn hide(&self) {
+        for button in &self.buttons {
+            button.set_visible(false);
+        }
+        self.strip.set_visible(false);
     }
 }
 

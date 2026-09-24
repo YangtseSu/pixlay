@@ -24,7 +24,7 @@ use gtk4::prelude::*;
 use libadwaita as adw;
 use libadwaita::prelude::*;
 
-use pixlay::{EditorWindow, i18n};
+use pixlay::{EditorWindow, canvas, i18n};
 
 /// An image in memory: width, height, and straight RGB, three bytes per pixel.
 pub type Image = (i32, i32, Vec<u8>);
@@ -202,20 +202,123 @@ pub fn canvas_size(window: &EditorWindow) -> (i32, i32) {
     }
     assert!(
         area.width() > 0 && area.height() > 0,
-        "the canvas was never allocated"
+        "the canvas was never allocated: {}x{}, {}",
+        area.width(),
+        area.height(),
+        frame_state(window),
     );
     let (width, height) = (area.width(), area.height());
     assert!(
         window.wait_for_idle(WAIT),
         "the canvas's own decode never finished: canvas {width}x{height}, images grid \
-         {:?}, requested {:?}, band pending {}, {} source decodes so far",
+         {:?}, requested {:?}, band pending {}, {} source decodes so far, {}",
         window.images().0,
         window.requested_grid(),
         window.gallery_decodes(),
         window.decoded_sources(),
+        frame_state(window),
     );
     (width, height)
 }
+
+/// Waits until the canvas's own bitmaps are in hand **for the grid it rests at**.
+///
+/// [`canvas_size`] answers "the canvas has a size and nothing is in flight", which is
+/// not the same claim: the bitmaps in hand can still be the window's `1x1` placeholder
+/// — the state `open_document` starts from — and a control placed against a placeholder
+/// sheet is one GTK answers with a `0x0` allocation (`CellControls::sync_in`). A test
+/// that measures the canvas's controls asks for this, and the wait is the *condition*
+/// rather than a longer settling loop (measured 2026-09-24: a full-suite run failed
+/// here with a strip that had stayed `0x0` for the whole 180 s wait).
+pub fn canvas_bitmaps(window: &EditorWindow) -> (i32, i32) {
+    let area = window.canvas_widget();
+    let resting = || {
+        let doc = window.document();
+        canvas::preferred_grid(doc.template.aspect, area.width(), area.height())
+    };
+    let deadline = Instant::now() + WAIT;
+    while Instant::now() < deadline {
+        if area.width() > 0
+            && area.height() > 0
+            && window.images().0 == resting()
+            && window.requested_grid().is_none()
+        {
+            break;
+        }
+        window.pump(Duration::from_millis(20));
+    }
+    let (width, height) = (area.width(), area.height());
+    assert!(
+        width > 0 && height > 0 && window.images().0 == resting(),
+        "the canvas never got its own bitmaps: canvas {width}x{height}, bitmaps for \
+         {:?}, resting {:?}, requested {:?}, {}",
+        window.images().0,
+        resting(),
+        window.requested_grid(),
+        frame_state(window),
+    );
+    assert!(
+        window.wait_for_idle(WAIT),
+        "the background pipeline never finished: {}",
+        frame_state(window),
+    );
+    (width, height)
+}
+
+/// Pumps until the window's own frame clock has ticked at least `count` more times.
+///
+/// A pixel probe reads what is on screen, and what is on screen is what the last frame
+/// drew: GTK hands a snapshot the widgets' **cached** render nodes, so a probe taken
+/// before the frame that carries the change sees the previous one. Measured 2026-09-24:
+/// the picker's pick-then-clear probe compared two identical images (RMSE 0.000) because
+/// neither had been drawn after its change, and a fixed 200 ms of pumping is a guess,
+/// not a condition. Returns the frames that arrived, so a caller that cares can say so.
+pub fn after_frames(window: &EditorWindow, count: u64, timeout: Duration) -> u64 {
+    let start = window.frames();
+    let deadline = Instant::now() + timeout;
+    while window.frames() < start + count {
+        if Instant::now() >= deadline {
+            return window.frames() - start;
+        }
+        // `pump` is what asks for the window again when the compositor has stopped
+        // driving it, so a stall here is recovered rather than waited out.
+        window.pump(Duration::from_millis(20));
+    }
+    window.frames() - start
+}
+
+/// Pumps until `observe` reports it has seen what it is waiting for, and hands back
+/// what it last saw.
+///
+/// A pixel probe reads the widgets' **cached** render nodes, and the frame that carries
+/// a change can arrive long after the change on a live session whose compositor is not
+/// driving a background window (measured 2026-09-24: 91 frames in a 180 s wait with
+/// `active false`, and a probe that returned the junction's pre-frame pixels because two
+/// window frames had passed without the canvas being redrawn). Waiting for the
+/// *observation* is what makes such a probe a condition rather than a guess — and the
+/// caller still asserts on what came back, so an observation that never arrives fails
+/// exactly as it did before.
+pub fn settle_by<T>(
+    window: &EditorWindow,
+    timeout: Duration,
+    mut observe: impl FnMut() -> (T, bool),
+) -> T {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let (value, settled) = observe();
+        if settled || Instant::now() >= deadline {
+            return value;
+        }
+        window.pump(Duration::from_millis(50));
+    }
+}
+
+/// How long a pixel probe waits for the observation it wants.
+///
+/// Generous against a compositor that trickles frames at a background window, and far
+/// below the harness's own 180 s ceiling: a probe that has not seen its observation in
+/// a minute is not going to, and the assert that follows says so.
+pub const PROBE_WAIT: Duration = Duration::from_secs(60);
 
 /// Dismisses a dialog the harness has finished with, and pumps a frame.
 ///
@@ -234,7 +337,46 @@ pub fn canvas_size(window: &EditorWindow) -> (i32, i32) {
 ///   this product's contract, so no test asserts it.
 pub fn close_dialog(dialog: &adw::Dialog, window: &EditorWindow) {
     dialog.force_close();
-    window.pump(Duration::from_millis(200));
+    // The wait is a **condition**, not a delay: a dialog that is still presented owns
+    // the frame it is over, and a widget behind it snapshots to nothing, so a pixel
+    // probe taken too early reads an empty surface rather than a wrong one. Bounded,
+    // because libadwaita's own close transition is not this product's contract and a
+    // headless X server has been measured to leave a closed dialog visible for as long
+    // as anyone waited (2026-09-23) — the loop still pumps frames, which is what lets the
+    // transition finish where it can.
+    let deadline = Instant::now() + DIALOG_WAIT;
+    while dialog.is_visible() && Instant::now() < deadline {
+        window.pump(Duration::from_millis(20));
+    }
+    window.pump(Duration::from_millis(50));
+}
+
+/// How long a dialog dismissal is waited for before the test carries on regardless.
+const DIALOG_WAIT: Duration = Duration::from_secs(5);
+
+/// Whether this window was being drawn while a wait ran, in one line.
+///
+/// The waits in this harness fail on a timeout, and a timeout that cannot say *why* is
+/// the flake they exist to end: the frame count separates "the compositor never drove
+/// this window" from "frames arrived and the widget still painted nothing", and the
+/// canvas's own last `render` refusal is the second of those (measured 2026-09-24: a
+/// full-suite run failed on a canvas that had produced no render node for its whole
+/// 180 s wait, and the message named neither).
+pub fn frame_state(window: &EditorWindow) -> String {
+    format!(
+        "{} frames, active {}, mapped {}, last canvas draw refusal: {:?}",
+        window.frames(),
+        window.is_active(),
+        window.is_mapped(),
+        window.last_draw_error()
+    )
+}
+
+/// The window a widget belongs to, when it is one of the editor's.
+fn owner_window(widget: &impl IsA<gtk::Widget>) -> Option<EditorWindow> {
+    widget
+        .root()
+        .and_then(|root| root.downcast::<EditorWindow>().ok())
 }
 
 /// The pixels a widget draws, as straight RGB, through a real render node.
@@ -251,8 +393,14 @@ pub fn snapshot(widget: &impl IsA<gtk::Widget>) -> Image {
         height
     );
     // A widget that has not been drawn yet snapshots to an empty node, so this
-    // waits for the frame that contains it rather than assuming one has happened.
-    let deadline = Instant::now() + WAIT;
+    // waits for the frame that contains it rather than assuming one has happened. The
+    // nudge after the first second is what turns "nothing was invalidated, so no frame
+    // was going to come" into a frame: the test has just changed something, and a
+    // `queue_resize` is the same request the change itself would have made.
+    let owner = owner_window(widget);
+    let frames_at_start = owner.as_ref().map(|window| window.frames());
+    let start = Instant::now();
+    let deadline = start + WAIT;
     let node = loop {
         let paintable = gtk::WidgetPaintable::new(Some(widget));
         let snapshot = gtk::Snapshot::new();
@@ -261,18 +409,35 @@ pub fn snapshot(widget: &impl IsA<gtk::Widget>) -> Image {
             Some(node) => break node,
             None if Instant::now() < deadline => {
                 widget.queue_draw();
+                if start.elapsed() > Duration::from_secs(1) {
+                    widget.queue_resize();
+                    if let Some(window) = owner.as_ref() {
+                        window.queue_draw();
+                    }
+                }
                 pump(Duration::from_millis(20));
             }
-            None => panic!(
-                "the widget never produced a render node: a {} of {}x{}, visible {}, \
-                 mapped {}, {} child(ren)",
-                widget.type_().name(),
-                widget.width(),
-                widget.height(),
-                widget.is_visible(),
-                widget.is_mapped(),
-                widget.first_child().is_some() as u8,
-            ),
+            None => {
+                let arrived = match (owner.as_ref(), frames_at_start) {
+                    (Some(window), Some(before)) => window.frames() - before,
+                    _ => 0,
+                };
+                panic!(
+                    "the widget never produced a render node: a {} of {}x{}, visible {}, \
+                     mapped {}, {} child(ren); waited {:.1}s, {arrived} frames arrived{}",
+                    widget.type_().name(),
+                    widget.width(),
+                    widget.height(),
+                    widget.is_visible(),
+                    widget.is_mapped(),
+                    widget.first_child().is_some() as u8,
+                    start.elapsed().as_secs_f64(),
+                    owner
+                        .as_ref()
+                        .map(|window| format!(", {}", frame_state(window)))
+                        .unwrap_or_default(),
+                )
+            }
         }
     };
     let surface = widget

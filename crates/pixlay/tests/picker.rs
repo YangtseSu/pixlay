@@ -347,17 +347,44 @@ fn the_picker_stage_meets_its_own_criteria() {
         !other.has_css_class("picked"),
         "an unpicked cell must not carry the highlight class"
     );
-    window.pump(Duration::from_millis(200));
+    // Two frames, not a 200 ms guess: a snapshot reads the widgets' cached render
+    // nodes, so a probe taken before the frame that carries the change compares the
+    // same pixels twice (measured 2026-09-24: RMSE 0.000 on both sides).
+    let painted = support::after_frames(&window, 2, support::WAIT);
+    assert!(
+        painted >= 2,
+        "the picked grid was not drawn ({painted} frames)"
+    );
     let before = support::snapshot(&picker.grid());
     picker.clear_selection(&window);
-    window.pump(Duration::from_millis(200));
-    let after = support::snapshot(&picker.grid());
-    let difference = support::rmse(&before, &after);
+    let painted = support::after_frames(&window, 2, support::WAIT);
+    assert!(
+        painted >= 2,
+        "the cleared grid was not drawn ({painted} frames)"
+    );
+    // The probe waits for *its* observation — the grid drawn without the highlight —
+    // rather than for a span of time: a snapshot reads the widgets' cached render
+    // nodes, so a probe taken before the frame that carries the change compares the
+    // same pixels twice (measured 2026-09-24: RMSE 0.000 on both sides).
+    let difference = support::settle_by(&window, support::PROBE_WAIT, || {
+        let after = support::snapshot(&picker.grid());
+        let difference = support::rmse(&before, &after);
+        (difference, difference > 1.0)
+    });
     eprintln!("the highlight is worth RMSE {difference:.3} of the grid's pixels");
     assert!(
         difference > 1.0,
         "picking and unpicking a cell did not change the grid's pixels ({difference:.3}): \
-         the highlight is not drawing"
+         the highlight is not drawing (the class is {} after clearing, the cell widget is {})",
+        if picker
+            .cell_widget(0)
+            .is_some_and(|cell| cell.has_css_class("picked"))
+        {
+            "still there"
+        } else {
+            "gone"
+        },
+        picker.cell_widget(0).is_some(),
     );
     assert!(
         !picker
