@@ -91,7 +91,9 @@ the canvas is **content** and the interface is **styling**, and the two must not
      thumbnails one full-width row under it, the picked list beside the media area at its height, the status
      bar's four fields readable — are the 128 px cells the right size, does the selection highlight read
      at a glance, does a drag in the picked list land where the hand expects it to, and does the preview stay
-     sharp when the window is resized (it is decoded at the pane's own pixels since S13b);
+     sharp when the window is resized (it is decoded at the pane's own pixels since S13b) **and when it is
+     toggled to 1:1** (S15j, ruled 2026-09-24: the fit ↔ 1:1 toggle and panning at 1:1, with no free zoom and
+     no view rotation);
    - the layout gallery (S14): does a candidate thumbnail read as "my photos in *that* layout", is a
     128x96 thumbnail legible against the 139 px of canvas height the band takes, does the caption — the
     template's own name, which is what `edit --template` takes — read, and does the highlight make the
