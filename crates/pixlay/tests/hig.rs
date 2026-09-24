@@ -454,6 +454,34 @@ fn check_picker(window: &EditorWindow, failures: &mut Vec<String>) {
     {
         failures.push("clearing the pick left a cell highlighted".to_string());
     }
+
+    // The pane's zoom is one control with two states, and it says which one it is in
+    // (S15j): HIG `guidelines/accessibility` asks every control be named — the walk above
+    // covers that — and this name carries the *state* for the reason the canvas's does
+    // (`docs/HIG-REVIEW.md` §2, "Screen reader"), while the tooltip says what the double
+    // click does (`patterns/feedback/tooltips`; the sentence case is the deviation that
+    // chapter records for every tooltip in this window).
+    //
+    // The tooltip is what can be read back: GTK 4.24 exposes no getter for an accessible
+    // name (only `gtk_test_accessible_has_property`, which is "it has one"), so the name
+    // and the tooltip are written by one function (`Picker::update_zoom_labels`) and the
+    // tooltip is the half a test can hold to. Both are read around a toggle rather than
+    // compared with a sentence, because the claim is "the pane says which state it is
+    // in", not "the pane says these words".
+    let pane = picker.preview_widget();
+    let fitted = pane.tooltip_text();
+    let _ = gtk4::prelude::WidgetExt::activate_action(window, "win.zoom-preview", None);
+    let actual = pane.tooltip_text();
+    let _ = gtk4::prelude::WidgetExt::activate_action(window, "win.zoom-preview", None);
+    if picker.zoom() != pixlay::picker::Zoom::Fit {
+        failures.push("two toggles left the pane away from the fit".to_string());
+    }
+    if fitted.as_deref().unwrap_or("").is_empty() {
+        failures.push("the pane's zoom has no tooltip".to_string());
+    }
+    if fitted == actual {
+        failures.push("the pane's tooltip does not follow its zoom state".to_string());
+    }
 }
 
 /// The picker's input paths, and the three defects S13c fixed while it rewrote the

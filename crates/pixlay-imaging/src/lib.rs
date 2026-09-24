@@ -79,4 +79,4 @@ pub use preview::{
 pub use probe::{ProbeReport, Rgb8View, probe};
 pub use reduce::PreviewSource;
 pub use resample::{MAX_BITMAP_PIXELS, Region, check_bitmap, resample};
-pub use thumb::{Thumbnail, thumbnail};
+pub use thumb::{Rect, Thumbnail, thumbnail, thumbnail_region};

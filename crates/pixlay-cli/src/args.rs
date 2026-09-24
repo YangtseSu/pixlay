@@ -14,6 +14,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use pixlay_core::{Frame, MAX_LONG_EDGE_PX, Point, Rgba8};
+use pixlay_imaging::Rect;
 
 use crate::cli::Failure;
 
@@ -66,7 +67,7 @@ USAGE:
     pixlay-render probe  --project <file.pixlay> [OPTIONS]
     pixlay-render image  --photo <file> [--json]
     pixlay-render scan   --dir <path> [--recursive] [--json]
-    pixlay-render thumb  --photo <file> --px <n> --out <file> [--json]
+    pixlay-render thumb  --photo <file> --px <n> --out <file> [--region <x>,<y>,<w>,<h>] [--json]
     pixlay-render templates [--aspect <ratio>] [--slots <n>] [--json]
     pixlay-render init --template <name> --out <file.pixlay> [--photo <p>...] [--json]
     pixlay-render gesture --project <file.pixlay> --grid <px> [--slot <i>] [--steps <n>] [--json]
@@ -138,7 +139,18 @@ SCAN OPTIONS:
 THUMB OPTIONS:
     --photo <file>      Photo to preview. Required.
     --px <n>            Long edge of the preview, 1..=8192. Required. The other
-                        edge keeps the photo's ratio, at least 1 pixel.
+                        edge keeps the source's ratio — the photo's, or the
+                        --region rectangle's when one is given — at least 1
+                        pixel.
+    --region <x>,<y>,<w>,<h>
+                        Resample one rectangle of the photo instead of all of
+                        it: the rectangle's origin in the photo's own pixels,
+                        then its width and height, at least 1 each. --px is
+                        still the output's long edge, so --px equal to the
+                        larger of w and h is that rectangle at its own size
+                        (what the window's 1:1 preview asks for), and a
+                        smaller one is a fit of the rectangle. A rectangle
+                        the photo does not contain is refused (exit 2).
     --out <file>        Preview file, .png / .jpg / .jpeg.
                         Required (a screen-sized image). An existing file is
                         replaced; --photo itself is refused (exit 1).
@@ -390,11 +402,15 @@ pub struct ScanArgs {
     pub json: bool,
 }
 
-/// `thumb`: one photo, resampled to a preview. The picker's costly half (S9).
+/// `thumb`: one photo (or one rectangle of it), resampled to a preview. The picker's
+/// costly half (S9), and since S15j the same call the pane's 1:1 view makes.
 pub struct ThumbArgs {
     pub photo: PathBuf,
     /// Long edge of the preview, 1..=`MAX_THUMB_PX`.
     pub px: u32,
+    /// `--region x,y,w,h`: the rectangle of the photo to resample. `None` is the whole
+    /// photo, which is what every `thumb` before S15j asked for.
+    pub region: Option<Rect>,
     pub out: PathBuf,
     pub stats: bool,
     pub json: bool,
@@ -479,6 +495,7 @@ struct Flags {
     dir: Option<PathBuf>,
     recursive: bool,
     px: Option<u32>,
+    region: Option<Rect>,
     grid: Option<u32>,
     steps: Option<u32>,
     gap: Option<f64>,
@@ -520,7 +537,7 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
         "probe" => &["project", "long-edge", "stats"],
         "image" => &["photo"],
         "scan" => &["dir", "recursive", "stats"],
-        "thumb" => &["photo", "px", "out", "stats"],
+        "thumb" => &["photo", "px", "out", "region", "stats"],
         "templates" => &["aspect", "slots"],
         "init" => &["template", "out", "photo"],
         "edit" => &[
@@ -546,7 +563,7 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
         "gesture" => &["project", "grid", "slot", "steps", "stats"],
         _ => &[],
     };
-    let present: [(&'static str, bool); 27] = [
+    let present: [(&'static str, bool); 28] = [
         ("project", flags.project.is_some()),
         ("template", flags.template.is_some()),
         ("out", flags.out.is_some()),
@@ -563,6 +580,7 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
         ("dir", flags.dir.is_some()),
         ("recursive", flags.recursive),
         ("px", flags.px.is_some()),
+        ("region", flags.region.is_some()),
         ("grid", flags.grid.is_some()),
         ("steps", flags.steps.is_some()),
         ("gap", flags.gap.is_some()),
@@ -613,6 +631,7 @@ fn reason(name: &str, flag: &str) -> &'static str {
         (_, "dir") => "only `scan` lists a directory",
         (_, "recursive") => "only `scan` descends into subdirectories",
         (_, "px") => "only `thumb` sizes a preview",
+        (_, "region") => "only `thumb` resamples one rectangle of a photo",
         (_, "grid") => "only `gesture` measures at a grid",
         (_, "steps") => "only `gesture` runs a sequence of steps",
         (
@@ -766,6 +785,11 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                 }
                 set_once(&mut flags.px, pixels, "px")?;
             }
+            "region" => {
+                let raw = value("region")?;
+                let region = parse_region(&raw)?;
+                set_once(&mut flags.region, region, "region")?;
+            }
             "grid" => {
                 let raw = number(&value("grid")?, "grid")?;
                 let pixels = u32::try_from(raw).map_err(|_| {
@@ -902,6 +926,7 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
             Ok(Command::Thumb(ThumbArgs {
                 photo,
                 px,
+                region: flags.region,
                 out,
                 stats: flags.stats,
                 json: flags.json,
@@ -1177,6 +1202,45 @@ fn parse_offset(value: &OsString) -> Result<(f64, f64), Failure> {
         Ok(value)
     };
     Ok((component("x", parsed.0)?, component("y", parsed.1)?))
+}
+
+/// Parses `--region <x>,<y>,<w>,<h>`: one rectangle of a photo, in its own pixels.
+///
+/// The comma convention is the surface's own for a pair (`--at`), extended to the four
+/// numbers a rectangle needs. The origin is not range-checked here — whether a rectangle
+/// is inside the photo is a fact about the *file*, which is only known once the file is
+/// decoded — so that half is the command's own `RegionOutside` (exit 2, with the photo's
+/// size in the message). A rectangle with no area is a usage error (exit 1), the same
+/// kind of mistake as `--px 0`.
+fn parse_region(value: &OsString) -> Result<Rect, Failure> {
+    let text = value
+        .to_str()
+        .ok_or_else(|| Failure::Usage("--region must be valid UTF-8".to_string()))?;
+    let parts: Vec<&str> = text.split(',').collect();
+    let [x, y, width, height] = parts.as_slice() else {
+        return Err(Failure::Usage(format!(
+            "--region must be x,y,w,h, got {text}"
+        )));
+    };
+    let component = |what: &str, raw: &str| -> Result<u32, Failure> {
+        raw.trim().parse::<u32>().map_err(|_| {
+            Failure::Usage(format!(
+                "--region {what} must be a whole number of pixels, got {raw}"
+            ))
+        })
+    };
+    let region = Rect {
+        x: component("x", x)?,
+        y: component("y", y)?,
+        width: component("w", width)?,
+        height: component("h", height)?,
+    };
+    if region.width == 0 || region.height == 0 {
+        return Err(Failure::Usage(format!(
+            "--region {text} has no area: w and h are at least 1"
+        )));
+    }
+    Ok(region)
 }
 
 /// Parses `--swap <i>,<j>`: two cell indexes, the same comma convention as

@@ -149,6 +149,7 @@ fn help_and_version_succeed_on_stdout() {
         "--dir",
         "--recursive",
         "--px",
+        "--region",
         "--slot",
         "--rotate",
         "--zoom",
@@ -4125,6 +4126,106 @@ fn init_refuses_a_photo_count_outside_the_range_or_a_wrong_slot_count() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `thumb --region` is the window's 1:1 view (S15j): the rectangle's own pixels.
+///
+/// The comparison is the CLI against itself, which is what makes it a statement about
+/// *identity* rather than about a resampler: a whole photo at its own long edge is the
+/// photo unchanged (1:1 is the identity kernel), so a rectangle of it at its own size has
+/// to be exactly the crop — pixel for pixel, which a re-scaled or half-texel-shifted crop
+/// could not be.
+#[test]
+fn thumb_resamples_one_rectangle_of_a_photo() {
+    let dir = out_dir("thumb-region");
+    // A checkerboard: the content is at the pixel level, so it is also what a smoothed
+    // 1:1 copy would fail on (the resampler's own tests measure the kernel; this one
+    // measures the *surface*).
+    let photo = dir.join("checker.png");
+    image::RgbImage::from_fn(200, 150, |x, y| {
+        if (x + y) % 2 == 0 {
+            image::Rgb([250, 250, 250])
+        } else {
+            image::Rgb([5, 5, 5])
+        }
+    })
+    .save(&photo)
+    .expect("write the checkerboard");
+
+    let whole = dir.join("whole.png");
+    let output = run(&[
+        "thumb",
+        "--photo",
+        photo.to_str().unwrap(),
+        "--px",
+        "200",
+        "--out",
+        whole.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "region"), "0,0,200,150");
+
+    let region = dir.join("region.png");
+    let output = run(&[
+        "thumb",
+        "--photo",
+        photo.to_str().unwrap(),
+        "--px",
+        "64",
+        "--region",
+        "40,30,64,48",
+        "--out",
+        region.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "region"), "40,30,64,48");
+    assert_eq!(field(&output, "src_w"), "200");
+    assert_eq!(field(&output, "src_h"), "150");
+    // The long edge is the output's and still exact; the other keeps the *rectangle's*
+    // ratio, not the photo's.
+    assert_eq!(field(&output, "out_w"), "64");
+    assert_eq!(field(&output, "out_h"), "48");
+
+    let whole = image::open(&whole)
+        .expect("open the photo at 1:1")
+        .to_rgb8();
+    let region = image::open(&region).expect("open the rectangle").to_rgb8();
+    assert_eq!(region.dimensions(), (64, 48));
+    for y in 0..48u32 {
+        for x in 0..64u32 {
+            assert_eq!(
+                region.get_pixel(x, y),
+                whole.get_pixel(x + 40, y + 30),
+                "the rectangle differs from the photo at {x},{y}"
+            );
+        }
+    }
+
+    // A rectangle the photo does not contain is a failure (exit 2), not a usage error:
+    // its shape is fine, and the file's own size is what refuses it. The message names
+    // both.
+    let refused = run(&[
+        "thumb",
+        "--photo",
+        photo.to_str().unwrap(),
+        "--px",
+        "64",
+        "--region",
+        "160,120,64,48",
+        "--out",
+        dir.join("outside.png").to_str().unwrap(),
+    ]);
+    assert_eq!(code(&refused), 2, "{}", stderr(&refused));
+    assert!(stdout(&refused).is_empty(), "{}", stdout(&refused));
+    let message = stderr(&refused);
+    assert!(
+        message.contains("the region 160,120 64x48 is not inside the 200x150 photo"),
+        "{message}"
+    );
+    assert!(
+        !dir.join("outside.png").exists(),
+        "a refusal writes nothing"
+    );
+}
+
 #[test]
 fn scan_and_thumb_keep_the_usage_and_locale_rules() {
     let dir = out_dir("scan-thumb-usage");
@@ -4154,6 +4255,50 @@ fn scan_and_thumb_keep_the_usage_and_locale_rules() {
         ],
         vec![
             "thumb", "--photo", "x.jpg", "--photo", "y.jpg", "--px", "10", "--out", "x.png",
+        ],
+        // `--region` is S15j's flag, and it has its own shape: four whole numbers with
+        // an area.
+        vec![
+            "thumb", "--photo", "x.jpg", "--px", "10", "--out", "x.png", "--region", "1,2,3",
+        ],
+        vec![
+            "thumb",
+            "--photo",
+            "x.jpg",
+            "--px",
+            "10",
+            "--out",
+            "x.png",
+            "--region",
+            "1,2,3,4,5",
+        ],
+        vec![
+            "thumb", "--photo", "x.jpg", "--px", "10", "--out", "x.png", "--region", "-1,2,3,4",
+        ],
+        vec![
+            "thumb", "--photo", "x.jpg", "--px", "10", "--out", "x.png", "--region", "0,0,0,4",
+        ],
+        vec![
+            "thumb",
+            "--photo",
+            "x.jpg",
+            "--px",
+            "10",
+            "--out",
+            "x.png",
+            "--region",
+            "1,2,3.5,4",
+        ],
+        // And a flag from another subcommand is still refused on the ones that do not
+        // take it.
+        vec![
+            "render",
+            "--template",
+            "mosaic-8-s14",
+            "--px",
+            "10",
+            "--region",
+            "1,2,3,4",
         ],
         vec![
             "render",

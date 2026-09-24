@@ -12,7 +12,7 @@
 
 use std::path::{Path, PathBuf};
 
-use pixlay_imaging::{Sampler, Source, thumbnail};
+use pixlay_imaging::{Rect, Sampler, Source, thumbnail, thumbnail_region};
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -115,8 +115,8 @@ fn the_long_edge_is_exact_and_the_ratio_is_kept() {
         // A pillarbox: the short edge must not round to zero.
         ((10000, 1), 100, (100, 1)),
         // An upscale asks for more pixels than the source has — the picker's
-        // preview, a `Contain` fit with no zoom, does that — and the ratio still
-        // holds.
+        // preview does that whenever a small photo is focused, because its `Contain`
+        // fit is the pane — and the ratio still holds.
         ((100, 75), 400, (400, 300)),
         // Half away from zero, and at least one pixel.
         ((400, 200), 3, (3, 2)),
@@ -244,4 +244,155 @@ fn a_preview_past_the_bitmap_budget_is_refused() {
     // And the same photo at a size a picker uses still comes back.
     let thumb = thumbnail(&source, 256).expect("a 256 px preview");
     assert_eq!((thumb.width, thumb.height), (256, 192));
+}
+
+/// A rectangle of a photo at its own size is the photo's own pixels (S15j).
+///
+/// This is the picker's 1:1 view, and the claim is exactness rather than closeness: the
+/// taps of a 1:1 resample are the identity (`lanczos(0)` is 1 and every other tap is 0),
+/// so the rectangle is a *crop* of the photo, pixel for pixel. A single kernel tap out of
+/// place, a half-texel origin, or a destination that rounded differently would all show
+/// up as a difference against the same photo decoded whole at its own size.
+#[test]
+fn a_rectangle_at_its_own_size_is_the_photos_own_pixels() {
+    let source = Source::decode(&fixture("resample-source.png")).expect("decodes");
+    let whole = thumbnail(&source, source.width().max(source.height())).expect("the photo at 1:1");
+    assert_eq!((whole.width, whole.height), (1600, 1200));
+
+    for region in [
+        // The whole photo, a middle rectangle, the far corner, and one pixel.
+        Rect {
+            x: 0,
+            y: 0,
+            width: 1600,
+            height: 1200,
+        },
+        Rect {
+            x: 200,
+            y: 100,
+            width: 800,
+            height: 600,
+        },
+        Rect {
+            x: 1101,
+            y: 901,
+            width: 499,
+            height: 299,
+        },
+        Rect {
+            x: 3,
+            y: 7,
+            width: 1,
+            height: 1,
+        },
+    ] {
+        let crop = thumbnail_region(&source, region, region.width.max(region.height))
+            .expect("a 1:1 rectangle");
+        assert_eq!(
+            (crop.width, crop.height),
+            (region.width as i32, region.height as i32),
+            "{region:?}: the destination is the rectangle's own size"
+        );
+        assert_eq!(
+            (crop.source_width, crop.source_height),
+            (source.width(), source.height()),
+            "{region:?}: the reply still reports the photo's own size"
+        );
+        let wide = region.width as usize * 3;
+        for row in 0..region.height as usize {
+            let theirs = ((region.y as usize + row) * whole.width as usize + region.x as usize) * 3;
+            let ours = row * crop.width as usize * 3;
+            assert_eq!(
+                &crop.pixels[ours..ours + wide],
+                &whole.pixels[theirs..theirs + wide],
+                "{region:?}: row {row} is not the photo's own row"
+            );
+        }
+    }
+}
+
+/// A rectangle can be fitted too — the same resample at a smaller grid — and the
+/// destination's aspect is the rectangle's own.
+#[test]
+fn a_fitted_rectangle_keeps_its_own_ratio_and_colour() {
+    let source = Flat {
+        width: 400,
+        height: 300,
+        color: [30000, 15000, 6000, u16::MAX],
+    };
+    let region = Rect {
+        x: 40,
+        y: 30,
+        width: 100,
+        height: 50,
+    };
+    let fit = thumbnail_region(&source, region, 40).expect("a fitted rectangle");
+    assert_eq!(
+        (fit.width, fit.height),
+        (40, 20),
+        "the rectangle's ratio, not the photo's"
+    );
+    // Flat in, flat out: a rectangle's resample is the same kernel and the same colour
+    // path as a whole-photo preview, so nothing here is a second implementation.
+    for pixel in fit.pixels.as_chunks::<3>().0 {
+        assert!(pixel[0].abs_diff(117) <= 1, "{pixel:?}");
+        assert!(pixel[1].abs_diff(59) <= 1, "{pixel:?}");
+        assert!(pixel[2].abs_diff(23) <= 1, "{pixel:?}");
+    }
+
+    // A rectangle with no area is not a picture, and a zero long edge is the same
+    // refusal the whole-photo path makes.
+    let empty = Rect {
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 10,
+    };
+    assert!(thumbnail_region(&source, empty, 10).is_err());
+    assert!(thumbnail_region(&source, region, 0).is_err());
+}
+
+/// A rectangle the photo does not contain is refused, not clamped (S15j).
+///
+/// The resampler clamps its *taps* into the source, so a rectangle hanging off the edge
+/// would quietly smear the last row instead of failing: the refusal is what turns "the
+/// caller computed the rectangle from another grid" into a message with the photo's own
+/// size in it.
+#[test]
+fn a_rectangle_the_photo_does_not_contain_is_refused() {
+    let source = Flat {
+        width: 400,
+        height: 300,
+        color: [0, 0, 0, u16::MAX],
+    };
+    for region in [
+        Rect {
+            x: 350,
+            y: 0,
+            width: 100,
+            height: 10,
+        }, // past the right edge
+        Rect {
+            x: 0,
+            y: 295,
+            width: 10,
+            height: 10,
+        }, // past the bottom
+        Rect {
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 10,
+        }, // no area
+        Rect {
+            x: u32::MAX,
+            y: 0,
+            width: 2,
+            height: 2,
+        }, // the addition would wrap
+    ] {
+        let error = thumbnail_region(&source, region, 10).expect_err("outside the photo");
+        let message = error.to_string();
+        assert!(message.contains("400x300 photo"), "{region:?}: {message}");
+    }
 }

@@ -878,10 +878,13 @@ fn mtime_seconds(path: &Path) -> i64 {
 
 /// `thumb`: one photo's preview pixels as a file (S9).
 ///
-/// The picker's expensive half is the decode plus the resample to the size a tile
+/// The picker's expensive half is the decode plus the resample to the size the pane
 /// shows, and this is that half with a number attached: S13 holds the widget's
-/// texture to these pixels, and `--stats` reports what one preview costs, which is
-/// the budget S12's cache and coarse-grid decisions are made against.
+/// texture to these pixels, and `--stats` reports what one preview costs, which is the
+/// budget S12's cache and coarse-grid decisions are made against. **`--region` is the
+/// window's 1:1 view** (S15j): the pane's own picture is a rectangle of the photo
+/// resampled so that its long edge is the rectangle's (`thumbnail_region`, the same
+/// call), and with `--px` equal to that edge this command writes exactly those pixels.
 fn thumb(args: ThumbArgs) -> Result<u8, Failure> {
     let format = Format::from_path(&args.out).ok_or_else(|| {
         Failure::Usage(format!(
@@ -898,8 +901,14 @@ fn thumb(args: ThumbArgs) -> Result<u8, Failure> {
     let stopwatch = stats::Stopwatch::start();
     let source = pixlay_imaging::Source::decode(&args.photo)
         .map_err(|error| Failure::Failed(error.to_string()))?;
-    let preview = pixlay_imaging::thumbnail(&source, args.px)
-        .map_err(|error| Failure::Failed(error.to_string()))?;
+    let preview = match args.region {
+        // A region the photo does not contain is a failure rather than a usage error:
+        // the rectangle is well-formed, and the file's own size is what refuses it
+        // (`docs/CONTRACT.md` §5).
+        Some(region) => pixlay_imaging::thumbnail_region(&source, region, args.px),
+        None => pixlay_imaging::thumbnail(&source, args.px),
+    }
+    .map_err(|error| Failure::Failed(error.to_string()))?;
     let compose = stopwatch.elapsed();
 
     let encode_watch = stats::Stopwatch::start();
@@ -924,6 +933,19 @@ fn thumb(args: ThumbArgs) -> Result<u8, Failure> {
     report.text("mime", source.mime().to_string());
     report.int("src_w", i64::from(source.width()));
     report.int("src_h", i64::from(source.height()));
+    // The rectangle that was resampled, printed back the way it was asked for: the whole
+    // photo when `--region` was not given, so "which pixels are these" has one answer
+    // whichever spelling the caller used.
+    let region = args
+        .region
+        .unwrap_or_else(|| pixlay_imaging::Rect::whole(source.width(), source.height()));
+    report.text(
+        "region",
+        format!(
+            "{},{},{},{}",
+            region.x, region.y, region.width, region.height
+        ),
+    );
     report.int("px", i64::from(args.px));
     report.int("out_w", i64::from(preview.width));
     report.int("out_h", i64::from(preview.height));

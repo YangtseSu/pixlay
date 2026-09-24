@@ -654,6 +654,18 @@ impl EditorWindow {
                 }
             }),
         );
+        // The picker's zoom toggle (S15j): the keyboard's way to the pane's two states,
+        // which is the path HIG `guidelines/pointer-touch` asks every pointer action to
+        // have. The anchor is the pane's centre — there is no pointer to be "at".
+        add(
+            "zoom-preview",
+            true,
+            Box::new(|window| {
+                if let Some(picker) = window.picker() {
+                    picker.toggle_zoom(window, None);
+                }
+            }),
+        );
         add(
             "close",
             true,
@@ -2416,7 +2428,8 @@ impl EditorWindow {
                 // shows one, like Save (S15).
                 "save" | "save-as" | "frame" => editing,
                 "export" => editing && has_any_photo,
-                "choose-folder" => !editing,
+                // The pane's zoom is the picker's, like the folder it lists.
+                "choose-folder" | "zoom-preview" => !editing,
                 "add-photo" | "clear-cell" | "reset-framing" => editing && selected,
                 _ => action.is_enabled(),
             };

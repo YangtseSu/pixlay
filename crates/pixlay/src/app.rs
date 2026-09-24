@@ -42,6 +42,7 @@ pub const ACCELERATORS: &[(&str, &str)] = &[
     ("win.close", "<Control>w"),
     ("win.export", "<Control>e"),
     ("win.choose-folder", "<Control><Shift>o"),
+    ("win.zoom-preview", "z"),
     ("win.add-photo", "<Control>i"),
     ("win.undo", "<Control>z"),
     ("win.redo", "<Control><Shift>z"),
@@ -62,7 +63,7 @@ pub const SHORTCUT_SECTIONS: &[(&str, &[&str])] = &[
             "win.add-photo",
         ],
     ),
-    ("Photos", &["win.choose-folder"]),
+    ("Photos", &["win.choose-folder", "win.zoom-preview"]),
     ("Editing", &["win.undo", "win.redo", "win.reset-framing"]),
 ];
 
@@ -99,6 +100,7 @@ pub fn shortcut_title(action: &str) -> String {
         "win.close" => gettext("Close the window"),
         "win.export" => gettext("Export the collage"),
         "win.choose-folder" => gettext("Choose a folder of photos"),
+        "win.zoom-preview" => gettext("Zoom the preview"),
         "win.add-photo" => gettext("Insert a photo"),
         "win.undo" => gettext("Undo"),
         "win.redo" => gettext("Redo"),

@@ -52,7 +52,7 @@ use gtk4::prelude::*;
 use libadwaita::prelude::*;
 
 use pixlay::picker::{
-    PREVIEW_MAX_PX, PREVIEW_PX_STEP, Picker, STATUS_FIELDS, TILE_REQUEST_MAX, TILE_SIZE,
+    PREVIEW_MAX_PX, PREVIEW_PX_STEP, Picker, STATUS_FIELDS, TILE_REQUEST_MAX, TILE_SIZE, Zoom,
 };
 use pixlay::window::Stage;
 use pixlay_imaging::{Sampler, Source};
@@ -929,9 +929,401 @@ fn the_picker_stage_meets_its_own_criteria() {
         "and the status line has to follow it"
     );
 
+    // ---- the pane's zoom: fit ↔ 1:1 (S15j, ruled 2026-09-24) ---------------
+    // The stage's newest criterion, and the only one about the pane's *pixels at two
+    // scales*: both states are reachable (the keyboard's own action, and the toggle back),
+    // the decode at 1:1 is the rectangle's own size rather than an enlarged fit, panning
+    // stops at the photo's edges, and the status bar's readout follows the view.
+    let zoom_folder = support::out_dir().join("zoom");
+    let _ = std::fs::remove_dir_all(&zoom_folder);
+    std::fs::create_dir_all(&zoom_folder).expect("the zoom folder can be created");
+    let (pane_width, pane_height) = pane_device(&picker);
+    // A photo larger than the pane on both axes, so 1:1 has a rectangle to pan, and a
+    // checkerboard, so "these are the photo's own pixels" is measurable: a fit of it
+    // averages the pattern away, which is exactly what a 1:1 view must not be.
+    let big = (pane_width + 400, pane_height + 300);
+    let checker = zoom_folder.join("checker.png");
+    let mut pixels = Vec::with_capacity((big.0 * big.1 * 3) as usize);
+    for y in 0..big.1 {
+        for x in 0..big.0 {
+            let value = if (x + y) % 2 == 0 { 250 } else { 5 };
+            pixels.extend_from_slice(&[value, value, value]);
+        }
+    }
+    support::save_png(&checker, &(big.0 as i32, big.1 as i32, pixels));
+    // A photo smaller than the pane on both axes: at 1:1 it is shown at its own size in
+    // the middle of the pane, and there is nothing to pan. Its border is one flat colour,
+    // which is what makes "where it was drawn" a measurement.
+    let (small_width, small_height) = (320i32, 240i32);
+    let small = zoom_folder.join("small.png");
+    let mut pixels = Vec::with_capacity((small_width * small_height * 3) as usize);
+    for y in 0..small_height {
+        for x in 0..small_width {
+            let border = x < 4 || y < 4 || x >= small_width - 4 || y >= small_height - 4;
+            pixels.extend_from_slice(if border { &[255, 0, 0] } else { &[10, 40, 200] });
+        }
+    }
+    support::save_png(&small, &(small_width, small_height, pixels));
+
+    picker.open_folder(&window, &zoom_folder);
+    window.pump(Duration::from_millis(100));
+    let big_position = picker
+        .files()
+        .iter()
+        .position(|file| file.ends_with("checker.png"))
+        .expect("the checkerboard is in the zoom folder");
+    let small_position = picker
+        .files()
+        .iter()
+        .position(|file| file.ends_with("small.png"))
+        .expect("the small photo is in the zoom folder");
+
+    assert_eq!(
+        picker.zoom(),
+        Zoom::Fit,
+        "the pane opens on the fit (the state is a preference, and this is a new window's)"
+    );
+    picker.focus(&window, big_position);
+    assert!(
+        window.wait_for_preview(support::WAIT),
+        "the pane never decoded the checkerboard's fit"
+    );
+    let fit_px = picker.preview_px();
+    let (_, fit_width, fit_height, fit_pixels) =
+        picker.preview_pixels().expect("the fit has pixels");
+    let fit_energy = pixel_energy(&fit_pixels, fit_width, fit_height);
+    let fit_artifact = support::artifact("picker-zoom-fit.png");
+    support::save_png(&fit_artifact, &support::snapshot(&picker.preview_widget()));
+
+    // The keyboard's own path to 1:1: the window action the `Z` accelerator activates
+    // (`app::ACCELERATORS`; `tests/hig.rs` checks the binding and the dialog row).
+    assert!(
+        gtk4::prelude::WidgetExt::activate_action(&window, "win.zoom-preview", None).is_ok(),
+        "the zoom action must be enabled while the picker is the stage"
+    );
+    assert_eq!(picker.zoom(), Zoom::Actual, "the toggle has to reach 1:1");
+    assert!(
+        window.wait_for_preview(support::WAIT),
+        "the pane never decoded the 1:1 view"
+    );
+
+    let rect = picker.view_rect().expect("a 1:1 view names its rectangle");
+    assert_eq!(
+        (rect.width, rect.height),
+        (pane_width.min(big.0), pane_height.min(big.1)),
+        "the rectangle is the pane's device size, clamped to the photo"
+    );
+    assert_eq!(
+        (rect.x, rect.y),
+        (
+            ((big.0 - rect.width) as f64 / 2.0).round() as u32,
+            ((big.1 - rect.height) as f64 / 2.0).round() as u32,
+        ),
+        "a photo larger than the pane opens at 1:1 centred"
+    );
+    assert_eq!(
+        picker.preview_px(),
+        rect.width.max(rect.height),
+        "1:1 is decoded at the rectangle's own long edge"
+    );
+    assert_eq!(
+        picker.zoom_percent(),
+        Some(100),
+        "the status bar's readout follows the view, not the fit"
+    );
+    assert_eq!(picker.status_line()[STATUS_FIELDS - 1], "100%");
+
+    let (path, width, height, actual) = picker.preview_pixels().expect("the 1:1 view has pixels");
+    assert_eq!(path, picker.file(big_position).expect("the photo"));
+    assert_eq!(
+        (width, height),
+        (rect.width as i32, rect.height as i32),
+        "the picture is the rectangle's own size"
+    );
+    let texture = picker
+        .preview_picture()
+        .paintable()
+        .and_then(|paintable| paintable.downcast::<gtk4::gdk::Texture>().ok())
+        .expect("the pane paints a texture");
+    assert_eq!(
+        (texture.width(), texture.height()),
+        (width, height),
+        "and the pane paints that picture, not a tile and not the fit"
+    );
+
+    // The picture is not an enlarged fit: a checkerboard's adjacent pixels differ by
+    // nearly a full range at 1:1, and a fit of the same photo averages the pattern into
+    // a grey field. This is the criterion's own probe — a detail that only survives a
+    // real 1:1 decode — as two numbers.
+    let actual_energy = pixel_energy(&actual, width, height);
+    eprintln!(
+        "the pane at {fit_px} px (fit) carries {fit_energy:.1} per pixel and at {} px (1:1) {actual_energy:.1}",
+        picker.preview_px()
+    );
+    assert!(
+        actual_energy > 150.0,
+        "the 1:1 view carries {actual_energy:.1} per pixel: the checkerboard is not there"
+    );
+    assert!(
+        actual_energy > 5.0 * fit_energy,
+        "the 1:1 view ({actual_energy:.1}) is not distinguishable from the fit ({fit_energy:.1}):          it is an upscaled fit rather than a decode of its own"
+    );
+    // And the pane's *drawn* pixels are that picture: the whole pane is the rectangle
+    // here (the photo is larger than it), so the frame the widget paints is the photo's.
+    let drawn = support::snapshot(&picker.preview_widget());
+    let actual_artifact = support::artifact("picker-zoom-actual.png");
+    support::save_png(&actual_artifact, &drawn);
+    assert_eq!(
+        (drawn.0, drawn.1),
+        (
+            picker.preview_widget().width(),
+            picker.preview_widget().height()
+        ),
+        "the drawn frame is the pane's own size"
+    );
+
+    // The pane's pixels are the CLI's own picture of the same rectangle (one
+    // implementation, not two): `thumb --region` is the 1:1 view's call.
+    let thumb = support::artifact("picker-zoom-thumb.png");
+    let argv: Vec<std::ffi::OsString> = [
+        "thumb",
+        "--photo",
+        path.to_str().expect("a UTF-8 path"),
+        "--px",
+        &picker.preview_px().to_string(),
+        "--region",
+        &format!("{},{},{},{}", rect.x, rect.y, rect.width, rect.height),
+        "--out",
+        thumb.to_str().expect("a UTF-8 path"),
+    ]
+    .iter()
+    .map(std::ffi::OsString::from)
+    .collect();
+    let status = pixlay_cli::cli::run(&argv).expect("the CLI writes the rectangle");
+    assert_eq!(status, 0, "pixlay-render thumb --region succeeds");
+    let from_cli = Source::decode(&thumb).expect("the CLI's rectangle decodes");
+    assert_eq!(
+        (from_cli.width() as i32, from_cli.height() as i32),
+        (width, height),
+        "the pane and the CLI decoded the same rectangle at the same size"
+    );
+    let difference = rmse_against(&actual, width, height, &from_cli);
+    eprintln!("the 1:1 view against pixlay-render thumb --region: RMSE {difference:.4}");
+    assert!(
+        difference <= RMSE_THRESHOLD,
+        "the 1:1 view and the CLI's rectangle diverged: RMSE {difference:.4}"
+    );
+
+    // Panning: the drag moves the view, the clamp is the photo's own edges, and a drag
+    // past the edge is refused rather than accumulated.
+    picker.begin_pan();
+    picker.drag_pan(&window, -10_000.0, -10_000.0);
+    let at_far_edge = picker.view_rect().expect("a 1:1 view");
+    assert_eq!(
+        (at_far_edge.x, at_far_edge.y),
+        (big.0 - rect.width, big.1 - rect.height),
+        "dragging towards the far corner stops at the photo's own edge"
+    );
+    picker.begin_pan();
+    picker.drag_pan(&window, -10.0, -10.0);
+    assert_eq!(
+        picker.view_rect().expect("a 1:1 view"),
+        at_far_edge,
+        "and a further drag at the edge changes nothing"
+    );
+    picker.begin_pan();
+    picker.drag_pan(&window, 10_000.0, 10_000.0);
+    let at_near_edge = picker.view_rect().expect("a 1:1 view");
+    assert_eq!(
+        (at_near_edge.x, at_near_edge.y),
+        (0, 0),
+        "dragging towards the near corner stops at the photo's origin"
+    );
+    // The decode follows the view: the pane ends up holding the rectangle it is at.
+    picker.begin_pan();
+    picker.drag_pan(&window, -200.0, -150.0);
+    let panned = picker.view_rect().expect("a 1:1 view");
+    assert!(
+        window.wait_for_preview(support::WAIT),
+        "the pane never decoded the panned rectangle"
+    );
+    let (_, width, height, panned_pixels) = picker.preview_pixels().expect("the pan's pixels");
+    assert_eq!(
+        picker.view_rect().expect("a 1:1 view"),
+        panned,
+        "the pane settled on the rectangle the drag asked for"
+    );
+    let thumb = support::artifact("picker-zoom-panned.png");
+    let argv: Vec<std::ffi::OsString> = [
+        "thumb",
+        "--photo",
+        path.to_str().expect("a UTF-8 path"),
+        "--px",
+        &panned.width.max(panned.height).to_string(),
+        "--region",
+        &format!(
+            "{},{},{},{}",
+            panned.x, panned.y, panned.width, panned.height
+        ),
+        "--out",
+        thumb.to_str().expect("a UTF-8 path"),
+    ]
+    .iter()
+    .map(std::ffi::OsString::from)
+    .collect();
+    let status = pixlay_cli::cli::run(&argv).expect("the CLI writes the panned rectangle");
+    assert_eq!(status, 0, "pixlay-render thumb --region succeeds");
+    let from_cli = Source::decode(&thumb).expect("the CLI's rectangle decodes");
+    let difference = rmse_against(&panned_pixels, width, height, &from_cli);
+    eprintln!("the panned view against pixlay-render thumb --region: RMSE {difference:.4}");
+    assert!(
+        difference <= RMSE_THRESHOLD,
+        "the panned view and the CLI's rectangle diverged: RMSE {difference:.4}"
+    );
+
+    // The same action toggles back, and the fit is what the pane holds again.
+    assert!(
+        gtk4::prelude::WidgetExt::activate_action(&window, "win.zoom-preview", None).is_ok(),
+        "the toggle has to be reachable both ways"
+    );
+    assert_eq!(picker.zoom(), Zoom::Fit, "and it reverts to the fit");
+    assert!(
+        window.wait_for_preview(support::WAIT),
+        "the pane never went back to the fit"
+    );
+    assert_eq!(
+        picker.preview_px(),
+        fit_px,
+        "the fit is decoded at the size it was before the toggle"
+    );
+    assert_ne!(
+        picker.zoom_percent(),
+        Some(100),
+        "a fit of a photo larger than the pane is not 100 %"
+    );
+
+    // A photo *smaller* than the pane, at 1:1: it is drawn at its own size in the
+    // middle of the pane — the margins are what make the picture's box its own — and
+    // there is nothing to pan. The zoom state survives the focus change: comparing two
+    // photos at 1:1 is one toggle and then a click.
+    gtk4::prelude::WidgetExt::activate_action(&window, "win.zoom-preview", None)
+        .expect("back to 1:1 for the small photo");
+    picker.focus(&window, small_position);
+    assert_eq!(
+        picker.zoom(),
+        Zoom::Actual,
+        "the pane keeps its zoom state across a focus change"
+    );
+    assert!(
+        window.wait_for_preview(support::WAIT),
+        "the pane never decoded the small photo at 1:1"
+    );
+    let rect = picker.view_rect().expect("a 1:1 view");
+    assert_eq!(
+        (rect.x, rect.y, rect.width, rect.height),
+        (0, 0, small_width as u32, small_height as u32),
+        "a photo smaller than the pane is its own rectangle"
+    );
+    picker.begin_pan();
+    picker.drag_pan(&window, -500.0, -500.0);
+    assert_eq!(
+        picker.view_rect().expect("a 1:1 view"),
+        rect,
+        "and there is nothing to pan: the whole photo is already visible"
+    );
+    // Where it is drawn, measured: the border is one flat colour, so its bounding box is
+    // the drawn photo — its size as a fraction of the pane (which is scale-independent)
+    // and its centre (which is where "centred in the pane" becomes a number).
+    let drawn = support::snapshot(&picker.preview_widget());
+    let border = support::settle_by(&window, support::PROBE_WAIT, || {
+        let image = support::snapshot(&picker.preview_widget());
+        (
+            bounding_box(&image, |pixel| {
+                pixel[0] > 200 && pixel[1] < 60 && pixel[2] < 60
+            }),
+            true,
+        )
+    });
+    let (box_left, box_top, box_width, box_height) =
+        border.expect("the small photo's border must be drawn");
+    let expected_fraction = (
+        f64::from(small_width) / f64::from(pane_width),
+        f64::from(small_height) / f64::from(pane_height),
+    );
+    let drawn_fraction = (
+        f64::from(box_width) / f64::from(drawn.0),
+        f64::from(box_height) / f64::from(drawn.1),
+    );
+    eprintln!(
+        "the small photo is drawn {box_width}x{box_height} at {box_left},{box_top} in a {}x{} pane: {:.3} of it, against {:.3} expected",
+        drawn.0, drawn.1, drawn_fraction.0, expected_fraction.0
+    );
+    assert!(
+        (drawn_fraction.0 - expected_fraction.0).abs() < 0.02
+            && (drawn_fraction.1 - expected_fraction.1).abs() < 0.02,
+        "the small photo is drawn at {drawn_fraction:?} of the pane, not at its own size {expected_fraction:?}"
+    );
+    let centre = (
+        f64::from(box_left) + f64::from(box_width) / 2.0,
+        f64::from(box_top) + f64::from(box_height) / 2.0,
+    );
+    assert!(
+        (centre.0 - f64::from(drawn.0) / 2.0).abs() <= 2.0
+            && (centre.1 - f64::from(drawn.1) / 2.0).abs() <= 2.0,
+        "the small photo is centred at {centre:?} in a {}x{} pane",
+        drawn.0,
+        drawn.1
+    );
+
     let picture = support::artifact("picker.png");
     support::save_png(&picture, &support::snapshot(&window));
     eprintln!("the picker stage is {picture:?}");
+}
+
+/// The mean absolute difference between horizontally adjacent pixels, per channel:
+/// how much detail a picture carries at the pixel level.
+///
+/// A 1:1 decode of a checkerboard sits at the top of this scale and a fit of the same
+/// photo near the bottom, which is the difference between the pane's two states as one
+/// number (S15j).
+fn pixel_energy(pixels: &[u8], width: i32, height: i32) -> f64 {
+    let width = width.max(2) as usize;
+    let height = height.max(1) as usize;
+    let mut total = 0.0f64;
+    let mut count = 0.0f64;
+    for y in 0..height {
+        for x in 1..width {
+            for channel in 0..3 {
+                let left = pixels[(y * width + x - 1) * 3 + channel];
+                let right = pixels[(y * width + x) * 3 + channel];
+                total += f64::from(left.abs_diff(right));
+                count += 1.0;
+            }
+        }
+    }
+    total / count.max(1.0)
+}
+
+/// The bounding box of the pixels a predicate accepts, as `(left, top, width, height)`,
+/// or `None` when it accepts none.
+fn bounding_box(
+    image: &support::Image,
+    accept: impl Fn(&[u8; 3]) -> bool,
+) -> Option<(i32, i32, i32, i32)> {
+    let (width, height, _) = image;
+    let (mut left, mut top, mut right, mut bottom) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
+    for y in 0..*height {
+        for x in 0..*width {
+            if !accept(&support::pixel(image, x, y)) {
+                continue;
+            }
+            left = left.min(x);
+            top = top.min(y);
+            right = right.max(x);
+            bottom = bottom.max(y);
+        }
+    }
+    (left <= right && top <= bottom).then(|| (left, top, right - left + 1, bottom - top + 1))
 }
 
 /// The index of the square fixture, which is the photo the status line is checked

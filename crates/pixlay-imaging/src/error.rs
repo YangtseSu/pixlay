@@ -49,6 +49,22 @@ pub enum ImagingError {
     #[error("a thumbnail needs a long edge of at least 1 pixel")]
     EmptyThumbnail,
 
+    /// A rectangle of a photo that the photo does not contain (`thumb --region`,
+    /// and the picker's 1:1 view). The resampler clamps its taps into the source,
+    /// so a rectangle that hung off the edge would not fail — it would smear the
+    /// last row into a picture of the wrong size.
+    #[error(
+        "the region {x},{y} {width}x{height} is not inside the {source_width}x{source_height} photo"
+    )]
+    RegionOutside {
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+        source_width: u32,
+        source_height: u32,
+    },
+
     /// A document that does not fit the slot count of its own template cannot be
     /// laid out. `CollageDoc::validate` catches this on load; an in-memory
     /// document reaches here.

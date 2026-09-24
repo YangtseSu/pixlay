@@ -37,12 +37,17 @@
 //!   Past the cap the grid *reports* the refusal instead of truncating silently,
 //!   which the guidelines do not cover and ruling 3 requires.
 //! * **Not a second renderer, and not a second product.** A tile and the preview
-//!   are `pixlay_imaging::thumbnail` pixels — the same function the CLI's `thumb`
-//!   writes to a file — so "what the window shows" and "what the CLI writes" are
-//!   one implementation, and S13's pixel criterion is a comparison of two calls
-//!   rather than of two resamplers. There is no zoom in this stage: ruling 2's
-//!   preview fills the pane (`ContentFit::Contain`), and magnification is the
-//!   editor's business (its own gestures and `Ctrl+0`).
+//!   are `pixlay_imaging::thumbnail` (a whole photo at a long edge) or
+//!   `thumbnail_region` (a rectangle of one, which is the pane's 1:1 view) pixels —
+//!   the same two calls the CLI's `thumb` writes to a file — so "what the window
+//!   shows" and "what the CLI writes" are one implementation, and S13's and S15j's
+//!   pixel criteria compare two calls rather than two resamplers.
+//! * **A preview that zooms, in the bounded form the 2026-09-24 ruling fixed**
+//!   (S15j, PIX-028): fit ↔ 1:1 — a double click or `Z`, the toggle anchored at the
+//!   pointer — and panning at 1:1 by drag, bounded by the photo's own edges. No free
+//!   or continuous zoom and no view rotation; a cell's framing is the editor's, where
+//!   the slot exists. What 1:1 costs is the same rule as the fit's: the decode is the
+//!   rectangle shown at the size it draws ([`Picker::wanted_view`]).
 //! * **Not where the document is made.** [`Picker::document`] builds it through
 //!   `pixlay_core::Selection`, the same policy type the CLI's `init --photo`
 //!   uses, so "the third photo the user picked is the third cell" is one
@@ -96,9 +101,11 @@
 //! was decoded at **1152 px** and drawn at **760 px**, 2.25× its own pixels
 //! (`S13c`'s measurements). Both are gone: the pane's photo is decoded at the long
 //! edge it is *drawn* at — the `Contain` fit of the pane's device size against the
-//! photo's own pixels ([`Picker::preview_px`]) — rounded up to
-//! [`PREVIEW_PX_STEP`] and capped at [`PREVIEW_MAX_PX`], and it never paints a
-//! tile: while it waits it shows a spinner.
+//! photo's own pixels ([`Picker::preview_px`]) at the fit, the 1:1 rectangle's own long
+//! edge at 1:1 — rounded up to [`PREVIEW_PX_STEP`] and capped at [`PREVIEW_MAX_PX`]
+//! **in the fit's case only** (a rounded or capped 1:1 rectangle would be a scaled one,
+//! which is the thing 1:1 rules out), and it never paints a tile: while it waits it
+//! shows a spinner.
 //!
 //! That fit needs the photo's own size before the decode, and the answer is free:
 //! every reply from the picture worker carries the decoded source's width and
@@ -113,6 +120,24 @@
 //! (`GdkSurface::layout` for a window resize, `GtkPaned::position` for a divider
 //! drag, `GtkWidget::scale-factor` for a screen change: GTK4 has no `size-allocate`
 //! signal and no `width` property).
+//!
+//! # The 1:1 view's own size, and its own box
+//!
+//! At 1:1 the pane's picture is a rectangle of the photo at one image pixel per device
+//! pixel, and that size is not a fit of anything: `GtkPicture` centres its content in
+//! the box it is given (`gtk_picture_snapshot`) but does not shrink the box to the
+//! content, and a content smaller than the box is **scaled up** by `Contain`. So the
+//! picture's *margins* are the box ([`Picker::place_picture`]), and a photo smaller than
+//! the pane at 1:1 sits at its own size in the middle of it rather than being enlarged —
+//! which is the one thing 1:1 must not do.
+//!
+//! A drag asks the worker for the new rectangle on every pointer event; the requests
+//! that are no longer the view are cancelled, so the queue holds at most the one in
+//! flight and the last asked for (the same policy a tile has). What the pane *shows*
+//! between two arrivals is the previous rectangle — the same picture, held still for one
+//! decode — rather than a translated texture, because a translated one would have to be
+//! drawn outside its box to fill the pane; whether that is the right trade is a *look*
+//! question and belongs to S15's walk, not to a guess here.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -129,12 +154,12 @@ use gtk4::prelude::*;
 use libadwaita as adw;
 
 use pixlay_core::{CollageDoc, MAX_PHOTOS, MIN_PHOTOS, Selection, SelectionError};
-use pixlay_imaging::Thumbnail;
+use pixlay_imaging::{Rect, Thumbnail};
 
 use crate::a11y;
 use crate::i18n::{fill, gettext};
 use crate::picture::Picture;
-use crate::thumbs::Kind;
+use crate::thumbs::{View, Want};
 use crate::window::EditorWindow;
 use crate::workers::{Down, Kind as WorkerKind};
 
@@ -150,13 +175,15 @@ use crate::workers::{Down, Kind as WorkerKind};
 /// `guidelines/pointer-touch` asks of a click target.
 pub const TILE_SIZE: i32 = 128;
 
-/// Step the preview pane's decode is rounded up to, in pixels.
+/// Step the pane's *fitted* decode is rounded up to, in pixels.
 ///
 /// The pane's fitted size in device pixels *is* the request, rounded up so that
-/// dragging a divider re-decodes once per step rather than once per pixel.
+/// dragging a divider re-decodes once per step rather than once per pixel. At 1:1
+/// there is nothing to round (S15j): the rectangle's own long edge is the size, and a
+/// step up from it would enlarge the photo, which is the one thing 1:1 must not do.
 pub const PREVIEW_PX_STEP: u32 = 128;
 
-/// The pane's decode is never larger than this, in pixels.
+/// The largest the pane's *fitted* decode is, in pixels.
 ///
 /// Measured (`--release`, this machine, 2026-09-22, `pixlay-render thumb` of a
 /// 1 MP photo including the ~25 ms process start): 1024 px costs 229 ms,
@@ -164,6 +191,13 @@ pub const PREVIEW_PX_STEP: u32 = 128;
 /// display's own long edge (3840x2160, `/sys/class/drm/*/modes`), so a maximized
 /// window upscales by at most 1.9x and one focus costs at most 0.59 s
 /// (`docs/2026-09-22-STEPS.md`, `S13 · Ruling`).
+///
+/// **The cap is the fit's, and the 1:1 view is not subject to it** (S15j): 1:1 *is*
+/// one image pixel per device pixel, so a rectangle decoded at anything smaller would
+/// be the blur the view exists to rule out. What it costs is the pane's own size — on
+/// a 4K display the same 1112 ms per pan step `thumb --px 3840` measures — and that is
+/// the trade the bounded zoom accepts; the fit, which is what a photo is *browsed* at,
+/// keeps the cap.
 pub const PREVIEW_MAX_PX: u32 = 2048;
 
 /// How many fields the status bar has, in gthumb's order (`S13c`): the pick's
@@ -236,6 +270,21 @@ thread_local! {
     static SPLITS: Cell<Option<i32>> = const { Cell::new(None) };
 }
 
+/// Which of the preview pane's two zoom states it is in.
+///
+/// Two and only two, ruled 2026-09-24 (PIX-028): ruling 2's "a large preview that can
+/// zoom and pan" became this bounded form — no free or continuous zoom, and no view
+/// rotation (EXIF orientation is applied at decode, and a cell's own rotation is the
+/// editor's, where the slot exists). The case for the toggle is judging a photo's own
+/// sharpness and telling near-duplicates apart, which is what picking photos needs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Zoom {
+    /// The `Contain` fit: the whole photo, scaled to the pane.
+    Fit,
+    /// 1:1 — actual size: one image pixel per device pixel, panned inside the photo.
+    Actual,
+}
+
 /// The picker's widgets and its state.
 ///
 /// `Rc`-owned rather than a `GObject`: nothing here needs a property or a
@@ -270,12 +319,13 @@ pub struct Picker {
     /// Files the decoder refused, with its reason: a cell that cannot show a
     /// photo is reported rather than silently blank (`scan`'s S9 rule).
     failures: RefCell<HashMap<usize, String>>,
-    /// The pane's own decodes, keyed by photo and the size the pane was at: this is
-    /// what a re-focus is answered from, and what the stage's pixel criterion
-    /// compares against `pixlay-render thumb` at the same size.
-    previews: RefCell<Cache<(usize, u32)>>,
+    /// The pane's own decodes, keyed by photo and the [`View`] asked for: this is
+    /// what a re-focus is answered from, what a pan back to a place that is still in
+    /// hand costs nothing, and what the stage's pixel criterion compares against
+    /// `pixlay-render thumb` at the same size.
+    previews: RefCell<Cache<(usize, View)>>,
     /// Preview requests in flight, keyed the same way.
-    preview_inflight: RefCell<HashSet<(u64, usize, u32)>>,
+    preview_inflight: RefCell<HashSet<(u64, usize, View)>>,
     /// The photos' own pixel sizes, as every reply reports them (the decode has the
     /// source in hand, so this costs nothing): the pane's fitted decode and the
     /// status bar's zoom are both ratios against these. A photo whose size is not
@@ -288,9 +338,23 @@ pub struct Picker {
     /// the index alone would go on showing the file that used to be there.
     /// [`Picker::restamp`] is the comparison, and it is the only writer.
     stamps: RefCell<HashMap<usize, Stamp>>,
-    /// The preview on screen, and the photo it belongs to. `None` while the pane is
-    /// waiting for one.
-    shown: RefCell<Option<(PathBuf, Rc<Picture>, u32)>>,
+    /// The preview on screen, and the view of it: `None` while the pane is waiting
+    /// for one.
+    shown: RefCell<Option<(PathBuf, Rc<Picture>, View)>>,
+    /// Which of the pane's two zoom states it is in (S15j, ruled 2026-09-24).
+    zoom: Cell<Zoom>,
+    /// The 1:1 view's origin as an offset from where the photo would sit centred, in
+    /// the photo's own pixels, clamped by [`Picker::pan_by`] to what the photo allows.
+    ///
+    /// Relative rather than absolute so that focusing another photo, or a pane that is
+    /// resized, keeps the *centre* of the view: the rectangle re-centres around the
+    /// same part of the photo, and only the photo's own edge moves it. It is zero
+    /// while the fit is what the pane draws.
+    pan: Cell<(f64, f64)>,
+    /// The pan a drag started from: `GtkGestureDrag` reports offsets from the drag's
+    /// own start, so the pan is `start - offset` rather than an accumulation of
+    /// per-event deltas (which would round once per event).
+    drag_origin: Cell<(f64, f64)>,
     /// The photo the pane is focused on, if any.
     focused: Cell<Option<usize>>,
     /// How many tiles have been asked for since the folder was listed. The number
@@ -646,6 +710,56 @@ impl Picker {
         preview_stack.set_visible_child_name("empty");
         a11y::label(&preview_stack, &gettext("Photo preview"));
 
+        // The pane's own two gestures (S15j, ruled 2026-09-24): a **double click**
+        // toggles the zoom, and the toggle is *at the pointer* — the photo pixel under
+        // it stays under it — and a **drag** pans at 1:1 with the content following the
+        // hand, which is this chapter's own table for a view that pans rather than
+        // scrolls (HIG `guidelines/pointer-touch`, "Scrolling, Panning & Zooming":
+        // "Pan: click+drag"). No state of its own: GTK arbitrates the two gestures, so
+        // a press that moves beyond the drag threshold is a pan and a press that does
+        // not is a click, and a drag at the fit simply has nothing to pan.
+        let toggle = gtk::GestureClick::new();
+        toggle.set_button(gdk::BUTTON_PRIMARY);
+        toggle.connect_pressed(glib::clone!(
+            #[weak]
+            window,
+            move |gesture: &gtk::GestureClick, presses, x, y| {
+                // `n_press` counts consecutive presses: the second one is the double
+                // click. A third is ignored rather than toggling twice.
+                if presses != 2 {
+                    return;
+                }
+                let Some(picker) = window.picker() else {
+                    return;
+                };
+                gesture.set_state(gtk::EventSequenceState::Claimed);
+                picker.toggle_zoom(&window, Some((x, y)));
+            }
+        ));
+        preview_stack.add_controller(toggle);
+
+        let pan = gtk::GestureDrag::new();
+        pan.set_button(gdk::BUTTON_PRIMARY);
+        pan.connect_drag_begin(glib::clone!(
+            #[weak]
+            window,
+            move |_, _, _| {
+                if let Some(picker) = window.picker() {
+                    picker.begin_pan();
+                }
+            }
+        ));
+        pan.connect_drag_update(glib::clone!(
+            #[weak]
+            window,
+            move |_, dx, dy| {
+                if let Some(picker) = window.picker() {
+                    picker.drag_pan(&window, dx, dy);
+                }
+            }
+        ));
+        preview_stack.add_controller(pan);
+
         // ---- the picked list ------------------------------------------------
         // A single-selection list, not a plain one: its rows have to be focusable
         // for `Ctrl+Up`/`Ctrl+Down` to mean anything (HIG `guidelines/pointer-touch`
@@ -820,6 +934,9 @@ impl Picker {
             sizes: RefCell::new(HashMap::new()),
             stamps: RefCell::new(HashMap::new()),
             shown: RefCell::new(None),
+            zoom: Cell::new(Zoom::Fit),
+            pan: Cell::new((0.0, 0.0)),
+            drag_origin: Cell::new((0.0, 0.0)),
             focused: Cell::new(None),
             requested: Cell::new(0),
             epoch: Cell::new(0),
@@ -859,6 +976,7 @@ impl Picker {
 
         picker.follow_the_pane(window);
         picker.connect_picked_list(window);
+        picker.update_zoom_labels();
         picker.update_next();
         picker.update_status_line();
 
@@ -1015,6 +1133,9 @@ impl Picker {
         self.stamps.borrow_mut().clear();
         *self.shown.borrow_mut() = None;
         self.focused.set(None);
+        // The pan belongs to the photo it was made on, and there is no photo now; the
+        // zoom state is a preference about the *pane* and survives the folder (S15j).
+        self.pan.set((0.0, 0.0));
         self.requested.set(0);
 
         *self.folder.borrow_mut() = Some(folder.to_path_buf());
@@ -1109,16 +1230,33 @@ impl Picker {
 
     /// The long edge the preview pane's photo is decoded at, in device pixels.
     ///
-    /// **The size it is drawn at** (ruling 22): the `Contain` fit of the pane's
-    /// device size against the focused photo's own pixels, rounded up to
-    /// [`PREVIEW_PX_STEP`] and capped at [`PREVIEW_MAX_PX`]. S13b asked for the
-    /// pane's long edge whatever the photo's aspect, which decoded a portrait
-    /// **1152 px** for a **760 px** draw; the number here never exceeds the pane's
-    /// own long edge by more than the rounding step. A photo whose size is not known
-    /// yet gets the pane's long edge — the largest size the pane could need — and is
-    /// re-asked for at its fitted size when the answer arrives
+    /// **The size it is drawn at**, which is S13b's rule and is not a second one at
+    /// 1:1 (S15j): the `Contain` fit of the pane's device size against the focused
+    /// photo's own pixels at the fit — rounded up to [`PREVIEW_PX_STEP`] and capped at
+    /// [`PREVIEW_MAX_PX`], so a divider drag re-decodes once per step rather than once
+    /// per pixel — and the 1:1 rectangle's own long edge at 1:1, unrounded (one step of
+    /// rounding would enlarge the photo, which is the one thing 1:1 must not do) and
+    /// uncapped (`PREVIEW_MAX_PX` is about a fit; a 1:1 rectangle is the pane's own
+    /// size by construction). S13b asked for the pane's long edge whatever the photo's
+    /// aspect, which decoded a portrait **1152 px** for a **760 px** draw.
+    ///
+    /// A photo whose size is not known yet answers with the pane's long edge — the
+    /// largest size either state could need, and the size the fit's first request uses
+    /// — and is re-asked for at its own size when the answer arrives
     /// ([`Picker::on_preview`]).
     pub fn preview_px(&self) -> u32 {
+        match self.wanted_view() {
+            Some(view) => view.px(),
+            None => {
+                let (width, height) = self.pane_device_size();
+                width.max(height)
+            }
+        }
+    }
+
+    /// The long edge the *fit* decodes at: the photo scaled into the pane, rounded up
+    /// and capped (see [`Picker::preview_px`]).
+    fn fit_px(&self) -> u32 {
         let edge = match self.focused_size() {
             Some(size) => fitted_long_edge(self.pane_device_size(), size),
             None => {
@@ -1128,6 +1266,61 @@ impl Picker {
         };
         let rounded = (edge.ceil().max(0.0) as u32).div_ceil(PREVIEW_PX_STEP) * PREVIEW_PX_STEP;
         rounded.clamp(PREVIEW_PX_STEP, PREVIEW_MAX_PX)
+    }
+
+    /// Which of the pane's two zoom states it is in.
+    pub fn zoom(&self) -> Zoom {
+        self.zoom.get()
+    }
+
+    /// The rectangle of the photo the pane shows at 1:1, in the photo's own pixels.
+    ///
+    /// `None` at the fit, and `None` at 1:1 while nothing has reported the photo's own
+    /// size: the rectangle is *named* by that size (its own size is the pane's device
+    /// size clamped to the photo, and its origin is the pan), so until a decode has
+    /// answered there is no rectangle to ask for. Its size is `min(pane, photo)` on each
+    /// axis — a photo smaller than the pane is shown whole, centred — and its origin is
+    /// clamped inside the photo, which is what "panning stops at the image's own edges"
+    /// means as a number.
+    pub fn view_rect(&self) -> Option<Rect> {
+        let source = self.focused_size()?;
+        self.rect_in(source)
+    }
+
+    /// [`Picker::view_rect`] against a size already in hand.
+    fn rect_in(&self, source: (u32, u32)) -> Option<Rect> {
+        let (pane_width, pane_height) = self.pane_device_size();
+        if pane_width == 0 || pane_height == 0 {
+            return None;
+        }
+        let width = pane_width.min(source.0).max(1);
+        let height = pane_height.min(source.1).max(1);
+        let (offset_x, offset_y) = self.pan.get();
+        let centre = (
+            (f64::from(source.0) - f64::from(width)) / 2.0,
+            (f64::from(source.1) - f64::from(height)) / 2.0,
+        );
+        let x = (centre.0 + offset_x).round().clamp(0.0, centre.0 * 2.0);
+        let y = (centre.1 + offset_y).round().clamp(0.0, centre.1 * 2.0);
+        Some(Rect {
+            x: x as u32,
+            y: y as u32,
+            width,
+            height,
+        })
+    }
+
+    /// What the pane is asking the focused photo for right now.
+    ///
+    /// `None` when there is nothing to ask for: no photo, no pane to draw it in, or a
+    /// 1:1 view whose photo's own size no decode has reported yet — in that last case
+    /// the request that *is* out (the fit's, at the pane's long edge) reports the size
+    /// when it lands, and [`Picker::on_preview`] asks again.
+    fn wanted_view(&self) -> Option<View> {
+        match self.zoom.get() {
+            Zoom::Fit => Some(View::Fit { px: self.fit_px() }),
+            Zoom::Actual => Some(View::Actual(self.view_rect()?)),
+        }
     }
 
     /// The focused photo's own pixel size, once a reply has reported it.
@@ -1146,11 +1339,16 @@ impl Picker {
 
     /// The zoom the status bar shows, in whole percent.
     ///
-    /// `round(100 × drawn / photo long edge)`, where the drawn edge is the `Contain`
-    /// fit the pane paints (never the rounded-up *decode* size): 100 % is one image
-    /// pixel per device pixel, which is what both references mean by it (gthumb
-    /// `ImageViewer.vala:665`, loupe `apply_zoom`).
+    /// `round(100 × drawn / photo long edge)`, where the drawn edge is what the pane
+    /// draws (never the rounded-up *decode* size): the `Contain` fit at the fit, and
+    /// the photo's own edge at 1:1. 100 % is one image pixel per device pixel, which is
+    /// what both references mean by it (gthumb `ImageViewer.vala:665`, loupe
+    /// `apply_zoom`) — and it is what 1:1 *is*, so the readout follows the view (S15j)
+    /// rather than reporting the fit's ratio while the pane shows the photo's pixels.
     pub fn zoom_percent(&self) -> Option<u32> {
+        if self.zoom.get() == Zoom::Actual {
+            return self.focused_size().map(|_| 100);
+        }
         let (source_width, source_height) = self.focused_size()?;
         let drawn = fitted_long_edge(self.pane_device_size(), (source_width, source_height));
         let longest = f64::from(source_width.max(source_height));
@@ -1190,16 +1388,19 @@ impl Picker {
         ))
     }
 
-    /// Whether the pane is showing the focused photo at the pane's current size.
+    /// Whether the pane is showing the focused photo in the view it is asking for.
     pub fn preview_current(&self) -> bool {
         let Some(index) = self.focused.get() else {
             return false;
         };
-        let shown = self.shown.borrow();
-        let Some((path, _, px)) = shown.as_ref() else {
+        let Some(wanted) = self.wanted_view() else {
             return false;
         };
-        *px == self.preview_px() && self.file(index).as_ref() == Some(path)
+        let shown = self.shown.borrow();
+        let Some((path, _, view)) = shown.as_ref() else {
+            return false;
+        };
+        *view == wanted && self.file(index).as_ref() == Some(path)
     }
 
     /// The widget GTK has bound to a position, if it is on screen.
@@ -1351,12 +1552,12 @@ impl Picker {
             .filter(|(_, held, _)| *held == index)
             .map(|(_, _, px)| *px)
             .collect();
-        let stale_previews: Vec<u32> = self
+        let stale_previews: Vec<View> = self
             .preview_inflight
             .borrow()
             .iter()
             .filter(|(_, held, _)| *held == index)
-            .map(|(_, _, px)| *px)
+            .map(|(_, _, view)| *view)
             .collect();
         for px in stale_tiles {
             self.inflight
@@ -1366,12 +1567,12 @@ impl Picker {
                 worker.cancel_tile(index, px);
             }
         }
-        for px in stale_previews {
+        for view in stale_previews {
             self.preview_inflight
                 .borrow_mut()
-                .remove(&(self.epoch.get(), index, px));
+                .remove(&(self.epoch.get(), index, view));
             if let Some(worker) = window.thumbs() {
-                worker.cancel_preview(index, px);
+                worker.cancel_preview(index, view);
             }
         }
         match current {
@@ -1561,6 +1762,11 @@ impl Picker {
     // ---- the preview -------------------------------------------------------
 
     /// Shows `index` in the preview pane, decoding it at the size it is drawn at.
+    ///
+    /// The pane's zoom state survives a focus change — a user comparing two photos at
+    /// 1:1 has asked for 1:1 once, and clicking through the strip is how the comparison
+    /// is made — while the *pan* starts centred on each photo (it is relative to the
+    /// centre, so this is where it already is).
     pub fn focus(&self, window: &EditorWindow, index: usize) {
         if index >= self.len() {
             return;
@@ -1588,12 +1794,115 @@ impl Picker {
         }
     }
 
+    /// Toggles the pane between the `Contain` fit and 1:1 (S15j, ruled 2026-09-24).
+    ///
+    /// `anchor` is a point in the pane's own coordinates — the double click's — and the
+    /// toggle is *at* it: the photo pixel under the pointer stays under it when the view
+    /// zooms to 1:1. A `None` anchor, which is the keyboard's path (`win.zoom-preview`,
+    /// `Z`), keeps the centre. Zooming back to the fit has no anchor to keep: the fit is
+    /// the whole photo in the pane, by definition.
+    pub fn toggle_zoom(&self, window: &EditorWindow, anchor: Option<(f64, f64)>) {
+        match self.zoom.get() {
+            Zoom::Fit => {
+                self.pan.set((0.0, 0.0));
+                // Only a photo whose size is known has a rectangle to anchor: before
+                // that, 1:1 is centred like the keyboard's path (the reply that reports
+                // the size re-asks either way).
+                if let (Some(anchor), Some(source)) = (anchor, self.focused_size())
+                    && let Some(rect) = self.rect_in(source)
+                {
+                    let scale = f64::from(self.scale_factor());
+                    let (fit_origin, fit_scale) = fit_placement(self.pane_device_size(), source);
+                    let anchor = (anchor.0 * scale, anchor.1 * scale);
+                    // Where the pointer is on the photo now...
+                    let photo_px = (
+                        (anchor.0 - fit_origin.0) / fit_scale,
+                        (anchor.1 - fit_origin.1) / fit_scale,
+                    );
+                    // ...and where it lands at 1:1, with the rectangle's box centred.
+                    let (origin_x, origin_y) = actual_placement(self.pane_device_size(), rect);
+                    let centre = (
+                        (f64::from(source.0) - f64::from(rect.width)) / 2.0,
+                        (f64::from(source.1) - f64::from(rect.height)) / 2.0,
+                    );
+                    let wanted = (
+                        photo_px.0 - (anchor.0 - origin_x) - centre.0,
+                        photo_px.1 - (anchor.1 - origin_y) - centre.1,
+                    );
+                    let limit = (
+                        (f64::from(source.0) - f64::from(rect.width)) / 2.0,
+                        (f64::from(source.1) - f64::from(rect.height)) / 2.0,
+                    );
+                    self.pan.set((
+                        wanted.0.clamp(-limit.0, limit.0),
+                        wanted.1.clamp(-limit.1, limit.1),
+                    ));
+                }
+                self.zoom.set(Zoom::Actual);
+            }
+            Zoom::Actual => {
+                self.zoom.set(Zoom::Fit);
+                self.pan.set((0.0, 0.0));
+            }
+        }
+        // The pane's own name and tooltip say which of the two states it is in, and the
+        // picture, its box and the request all follow the new view.
+        self.update_zoom_labels();
+        self.refresh_pane(window);
+    }
+
+    /// A pan drag started: remember what it starts from.
+    ///
+    /// `GtkGestureDrag` reports offsets from the drag's own start, so the pan is computed
+    /// from that start rather than accumulated per event — an accumulation would round
+    /// once per pointer event and drift.
+    pub fn begin_pan(&self) {
+        self.drag_origin.set(self.pan.get());
+    }
+
+    /// A pan drag moved by `(dx, dy)` logical pixels since the drag started.
+    ///
+    /// The content follows the hand (HIG `guidelines/pointer-touch`'s "Pan: click+drag"
+    /// for a view that pans): dragging towards the photo's right shows what is to its
+    /// left, so the rectangle moves the other way, in the photo's own pixels — one image
+    /// pixel per device pixel, which is what 1:1 means. The pan stops at the photo's own
+    /// edges (the clamp), and the offset is clamped rather than the rectangle's origin,
+    /// so the view starts moving again the moment the hand reverses.
+    ///
+    /// Nothing happens at the fit: there is no pan in a `Contain` fit.
+    pub fn drag_pan(&self, window: &EditorWindow, dx: f64, dy: f64) {
+        if self.zoom.get() != Zoom::Actual {
+            return;
+        }
+        let Some(source) = self.focused_size() else {
+            return;
+        };
+        let scale = f64::from(self.scale_factor());
+        let (width, height) = self.pane_device_size();
+        let (width, height) = (width.min(source.0), height.min(source.1));
+        let limit = (
+            (f64::from(source.0) - f64::from(width)) / 2.0,
+            (f64::from(source.1) - f64::from(height)) / 2.0,
+        );
+        let origin = self.drag_origin.get();
+        self.pan.set((
+            (origin.0 - dx * scale).clamp(-limit.0, limit.0),
+            (origin.1 - dy * scale).clamp(-limit.1, limit.1),
+        ));
+        // The picture's box does not move — the rectangle is the same size, and the pan
+        // happens *inside* it — so only the decode follows, and one request per pointer
+        // event is coalesced to one at a time ([`Picker::ask_for_preview`] cancels the
+        // views nobody will look at).
+        self.ask_for_preview(window);
+    }
+
     /// Follows the pane's own allocation, because that is the size its photo is
     /// decoded at.
     ///
     /// Called from the three places GTK4 can report it (see the module docs), and
     /// cheap when nothing changed: the decode is asked for by
-    /// `(photo, device pixels)`, so an unchanged size asks for nothing.
+    /// `(photo, view)`, so an unchanged view asks for nothing. A resize also re-clamps
+    /// the 1:1 view, whose rectangle is the pane's own size clamped to the photo.
     pub fn refresh_pane(&self, window: &EditorWindow) {
         self.show_focused(window);
         self.ask_for_preview(window);
@@ -1615,7 +1924,7 @@ impl Picker {
         self.refresh_pane(window);
     }
 
-    /// Asks for the focused photo's preview at the pane's own size.
+    /// Asks for the focused photo's preview in the view the pane wants.
     fn ask_for_preview(&self, window: &EditorWindow) {
         let Some(index) = self.focused.get() else {
             return;
@@ -1627,129 +1936,217 @@ impl Picker {
         let Some(worker) = window.thumbs() else {
             // The cell-sized path's own report (S15h, PIX-014), for the pane: the
             // photo it is waiting for is one this process cannot decode.
-            self.on_preview(
-                window,
-                index,
-                self.preview_px(),
-                Err(WorkerKind::Thumbs.message(Down::Start)),
-            );
+            self.show_preview_failure(index, &WorkerKind::Thumbs.message(Down::Start));
             return;
         };
-        let px = self.preview_px();
-        // A request for the same photo at another size is not the picture this pane
-        // needs any more: dropping it is what keeps a divider drag from decoding a
-        // size nobody will see.
-        let stale: Vec<u32> = self
+        // Nothing to ask for yet: at 1:1 the photo's own size is what names the
+        // rectangle, and the reply that carries it re-asks (`on_preview`).
+        let Some(view) = self.wanted_view() else {
+            return;
+        };
+        // A request for another view of this photo is not the picture this pane needs
+        // any more: dropping it is what keeps a divider drag from decoding a size, and a
+        // pan from decoding a place, that nobody will see. A pan asks on every pointer
+        // event, so this is also what coalesces the drag's stream: the worker skips a
+        // job whose key was cancelled while it waited.
+        let stale: Vec<View> = self
             .preview_inflight
             .borrow()
             .iter()
-            .filter(|(_, other, size)| *other == index && *size != px)
-            .map(|(_, _, size)| *size)
+            .filter(|(_, other, held)| *other == index && *held != view)
+            .map(|(_, _, held)| *held)
             .collect();
-        for size in stale {
+        for held in stale {
             self.preview_inflight
                 .borrow_mut()
-                .remove(&(self.epoch.get(), index, size));
-            worker.cancel_preview(index, size);
+                .remove(&(self.epoch.get(), index, held));
+            worker.cancel_preview(index, held);
         }
         let epoch = self.epoch.get();
-        if self.previews.borrow().contains(&(index, px))
+        if self.previews.borrow().contains(&(index, view))
             || !self
                 .preview_inflight
                 .borrow_mut()
-                .insert((epoch, index, px))
+                .insert((epoch, index, view))
         {
             return;
         }
         let Some(path) = self.file(index) else {
             self.preview_inflight
                 .borrow_mut()
-                .remove(&(epoch, index, px));
+                .remove(&(epoch, index, view));
             return;
         };
-        if let Err(down) = worker.request_preview(index, &path, px) {
+        if let Err(down) = worker.request_preview(index, &path, view) {
             // The job was never queued, so the entry goes (S15h, PIX-014) and the
             // pane reports the worker rather than showing its spinner for ever.
             self.preview_inflight
                 .borrow_mut()
-                .remove(&(epoch, index, px));
-            self.on_preview(window, index, px, Err(WorkerKind::Thumbs.message(down)));
+                .remove(&(epoch, index, view));
+            self.show_preview_failure(index, &WorkerKind::Thumbs.message(down));
         }
     }
 
-    /// One preview arrived (a decode at the size the pane draws, not a resampled
-    /// tile).
+    /// One preview arrived: a rectangle of the photo at the size the pane draws it (a
+    /// decode of its own, never a resampled tile).
     pub fn on_preview(
         &self,
         window: &EditorWindow,
         index: usize,
-        px: u32,
+        view: View,
         thumbnail: Result<Thumbnail, String>,
     ) {
         match thumbnail {
             Ok(thumbnail) => {
                 // The reply reports the photo's own size, which is what the fitted
-                // decode and the status bar's zoom are ratios against. Learning it
-                // can *move* the size the pane wants — a photo focused before its
-                // tile was decoded was asked for at the pane's long edge — so the
-                // request is made again for the fitted size, once.
+                // decode, the 1:1 rectangle and the status bar's zoom are all measured
+                // against. Learning it can *move* what the pane wants — a photo focused
+                // before anything decoded it was asked for at the pane's long edge, and a
+                // 1:1 view has no rectangle at all until then — so a reply that is not
+                // the view the pane is asking for sends the request again.
                 let learned = (thumbnail.source_width, thumbnail.source_height);
-                let first_time = self.sizes.borrow_mut().insert(index, learned).is_none();
+                self.sizes.borrow_mut().insert(index, learned);
                 let picture = Rc::new(picture_from(thumbnail));
                 self.previews
                     .borrow_mut()
-                    .insert((index, px), Rc::clone(&picture));
+                    .insert((index, view), Rc::clone(&picture));
                 if self.focused.get() == Some(index) {
-                    if px == self.preview_px() {
+                    if Some(view) == self.wanted_view() {
                         let path = self.file(index).unwrap_or_default();
                         self.preview.set_paintable(Some(picture.texture()));
                         self.preview.set_tooltip_text(None);
                         self.preview_stack.set_visible_child_name("photo");
-                        *self.shown.borrow_mut() = Some((path, picture, px));
-                    } else if first_time {
+                        *self.shown.borrow_mut() = Some((path, picture, view));
+                    } else {
+                        // The view moved while this was decoding (a pan, a resize, the
+                        // toggle): the pane asks again, and a request already out for
+                        // that view makes this a no-op.
+                        self.show_focused(window);
                         self.ask_for_preview(window);
                     }
                     self.update_status_line();
                 }
             }
             Err(reason) => {
-                if self.focused.get() == Some(index) {
-                    self.preview_stack.set_visible_child_name("empty");
-                    self.preview.set_tooltip_text(Some(&reason));
-                }
+                self.show_preview_failure(index, &reason);
             }
         }
     }
 
-    /// Paints the pane from what it has: the focused photo's preview at the size the
-    /// pane draws it, or the state that says it is still coming.
+    /// The pane's own failure: `index`'s photo cannot be decoded, or the worker that
+    /// would decode it is gone (S15h, PIX-014).
+    ///
+    /// Only for the photo the pane is *on*: a reply that arrives for a position the user
+    /// has already left is not this pane's news. A failure is not remembered for the
+    /// pane the way it is for a cell ([`Picker::failures`]): the pane reports it and asks
+    /// again the next time something moves it, which is where a file that is readable
+    /// again shows up.
+    fn show_preview_failure(&self, index: usize, reason: &str) {
+        if self.focused.get() != Some(index) {
+            return;
+        }
+        self.preview_stack.set_visible_child_name("empty");
+        self.preview.set_tooltip_text(Some(reason));
+    }
+
+    /// Paints the pane from what it has: the focused photo in the view the pane wants,
+    /// or the state that says it is still coming.
     fn show_focused(&self, window: &EditorWindow) {
         let Some(index) = self.focused.get() else {
             self.preview_stack.set_visible_child_name("empty");
             *self.shown.borrow_mut() = None;
+            self.place_picture(None);
             return;
         };
         // The pane's own check (S15f, PIX-012), before the cache is consulted: what
         // it paints must be the file's, and a replaced file leaves the pane on the
         // loading state until the new preview arrives.
         self.restamp(window, index);
-        let px = self.preview_px();
-        let picture = self.previews.borrow_mut().get(&(index, px));
-        match picture {
-            Some(picture) => {
+        let wanted = self.wanted_view();
+        self.place_picture(wanted);
+        let picture = match wanted {
+            Some(view) => self.previews.borrow_mut().get(&(index, view)),
+            None => None,
+        };
+        match (picture, wanted) {
+            (Some(picture), Some(view)) => {
                 self.preview.set_paintable(Some(picture.texture()));
                 self.preview.set_tooltip_text(None);
                 self.preview_stack.set_visible_child_name("photo");
                 let path = self.file(index).unwrap_or_default();
-                *self.shown.borrow_mut() = Some((path, picture, px));
+                *self.shown.borrow_mut() = Some((path, picture, view));
             }
             // Never the tile: the pane waits behind a spinner instead of showing a
             // 128 px picture stretched over it (`S13 · Ruling`).
-            None => {
+            _ => {
                 self.preview_stack.set_visible_child_name("loading");
                 *self.shown.borrow_mut() = None;
             }
         }
+    }
+
+    /// Sizes the picture's own box to what it is drawing (S15j).
+    ///
+    /// `GtkPicture` centres its content inside the box it is given
+    /// (`gtk_picture_snapshot`: `x = (width - w) / 2`), but it does not *shrink* that box
+    /// to the content — and with `Contain` a content smaller than the box is scaled up to
+    /// it. So the box has to be the size the photo is drawn at, and the margins are what
+    /// set it: at the fit they are zero (the box is the pane, and `Contain` fits the photo
+    /// into it as it always has), and at 1:1 they are half the slack, so the picture is
+    /// drawn at exactly its own pixels and centred in the pane — which is why a photo
+    /// smaller than the pane at 1:1 sits in the middle of it rather than filling it.
+    fn place_picture(&self, view: Option<View>) {
+        let margins = match view {
+            Some(View::Actual(rect)) => {
+                let scale = f64::from(self.scale_factor());
+                let (pane_width, pane_height) = (
+                    self.preview_stack.width().max(0),
+                    self.preview_stack.height().max(0),
+                );
+                let want = (
+                    ((f64::from(rect.width) / scale).round() as i32).clamp(0, pane_width),
+                    ((f64::from(rect.height) / scale).round() as i32).clamp(0, pane_height),
+                );
+                // The same split `GtkPicture` uses for its own centring, so the box is
+                // where the content would have been put anyway.
+                let slack = ((pane_width - want.0).max(0), (pane_height - want.1).max(0));
+                (
+                    slack.0 / 2,
+                    slack.0 - slack.0 / 2,
+                    slack.1 / 2,
+                    slack.1 - slack.1 / 2,
+                )
+            }
+            _ => (0, 0, 0, 0),
+        };
+        self.preview.set_margin_start(margins.0);
+        self.preview.set_margin_end(margins.1);
+        self.preview.set_margin_top(margins.2);
+        self.preview.set_margin_bottom(margins.3);
+    }
+
+    /// The pane's own labels: its accessible name and its tooltip say which of the two
+    /// states it is in and what the toggle does (S15j, ruled 2026-09-24).
+    ///
+    /// The name carries the state for the reason the canvas's does since S15h
+    /// (`docs/HIG-REVIEW.md` §2, "Screen reader"): the pane is one control, and a screen
+    /// reader has to be able to say whether the photo is fitted or shown at its own size
+    /// before anything is pressed. HIG `guidelines/accessibility` asks every control be
+    /// named; the *wording* is this app's own sentence case, which is the deviation
+    /// `patterns/feedback/tooltips` records for every tooltip in this window.
+    fn update_zoom_labels(&self) {
+        let (name, hint) = match self.zoom.get() {
+            Zoom::Fit => (
+                gettext("Photo preview, fitted to the pane"),
+                gettext("Double-click to show the photo at its own size"),
+            ),
+            Zoom::Actual => (
+                gettext("Photo preview, at the photo's own size"),
+                gettext("Double-click to fit the photo in the pane"),
+            ),
+        };
+        a11y::label(&self.preview_stack, &name);
+        self.preview_stack.set_tooltip_text(Some(&hint));
     }
 
     /// The photo the preview shows, if any.
@@ -1763,16 +2160,16 @@ impl Picker {
         // was asked for under — so this happens before the answer is judged, and a
         // reply from the folder before this one cannot clear a live request's
         // entry or leave its own behind.
-        match reply.kind {
-            Kind::Tile => {
+        match reply.want {
+            Want::Tile { px } => {
                 self.inflight
                     .borrow_mut()
-                    .remove(&(reply.epoch, reply.index, reply.px));
+                    .remove(&(reply.epoch, reply.index, px));
             }
-            Kind::Preview => {
+            Want::Preview(view) => {
                 self.preview_inflight
                     .borrow_mut()
-                    .remove(&(reply.epoch, reply.index, reply.px));
+                    .remove(&(reply.epoch, reply.index, view));
             }
         }
         // An answer from the folder before this one answers a question that is not
@@ -1780,9 +2177,9 @@ impl Picker {
         if reply.epoch != self.epoch.get() {
             return;
         }
-        match reply.kind {
-            Kind::Tile => self.on_tile(reply.index, reply.px, reply.result),
-            Kind::Preview => self.on_preview(window, reply.index, reply.px, reply.result),
+        match reply.want {
+            Want::Tile { px } => self.on_tile(reply.index, px, reply.result),
+            Want::Preview(view) => self.on_preview(window, reply.index, view, reply.result),
         }
     }
 
@@ -2286,6 +2683,39 @@ fn picker_menu() -> gio::Menu {
     menu.append_section(None, &help);
 
     menu
+}
+
+/// Where the `Contain` fit draws the photo in the pane: its top-left corner and its
+/// scale, both in device pixels.
+///
+/// `GtkPicture`'s own fit (`gtk_picture_snapshot`): the scale that makes the photo fill
+/// one axis, and a content box centred in the widget. This is what the pane's own pixels
+/// come out at, and what the toggle's anchor is measured against.
+fn fit_placement(pane: (u32, u32), source: (u32, u32)) -> ((f64, f64), f64) {
+    let scale = f64::min(
+        f64::from(pane.0) / f64::from(source.0.max(1)),
+        f64::from(pane.1) / f64::from(source.1.max(1)),
+    );
+    let drawn = (f64::from(source.0) * scale, f64::from(source.1) * scale);
+    (
+        (
+            (f64::from(pane.0) - drawn.0) / 2.0,
+            (f64::from(pane.1) - drawn.1) / 2.0,
+        ),
+        scale,
+    )
+}
+
+/// Where the 1:1 rectangle is drawn in the pane: its top-left corner, in device pixels.
+///
+/// One image pixel per device pixel, so there is no scale to state — the box *is* the
+/// rectangle's size — and the box is centred in the pane when the pane is the larger of
+/// the two ([`Picker::place_picture`] puts the picture's own box there).
+fn actual_placement(pane: (u32, u32), rect: Rect) -> (f64, f64) {
+    (
+        (f64::from(pane.0) - f64::from(rect.width)) / 2.0,
+        (f64::from(pane.1) - f64::from(rect.height)) / 2.0,
+    )
 }
 
 /// The long edge a photo is drawn at when `Contain`-fitted into a pane, in device

@@ -12,22 +12,26 @@
 //! one worker thread and crosses back as **plain bytes**
 //! (`glib::MainContext::invoke`). A GTK object never leaves the main thread.
 //!
-//! And what makes the numbers the *pipeline's* numbers: a tile is
-//! [`pixlay_imaging::thumbnail`], the same function the CLI's `thumb` writes to a
-//! file, so "what the grid shows" and "what `pixlay-render thumb` writes" are one
-//! implementation — S13's pixel criterion is a comparison of two calls, not of
-//! two resamplers.
+//! And what makes the numbers the *pipeline's* numbers: a tile and the pane's picture
+//! are [`pixlay_imaging::thumbnail`] (a whole photo at a long edge) or
+//! [`pixlay_imaging::thumbnail_region`] (a rectangle of one at a long edge, which is the
+//! pane's 1:1 view), and the CLI's `thumb` writes through those same two calls — so
+//! "what the pane shows" and "what `pixlay-render thumb` writes" are one implementation,
+//! and S13's and S15j's pixel criteria are comparisons of two calls rather than of two
+//! resamplers.
 //!
 //! # What this file does not do (S13b)
 //!
 //! It does not remember what has been asked for, which S13's `seen` deque did: the
-//! picker owns that now, because a request's identity is
-//! `(kind, file index, device pixels)` and only the picker knows which of those
-//! answers it still has or still wants. What is left here is **cancellation**: a
-//! cell that scrolls away is dropped from [`Thumbs::wanted`], and a job that is
-//! still queued when its key is gone is discarded without a decode — gthumb's own
-//! policy (`src/Thumbnailer.vala`'s priority queue with `remove`/`cancel`), which
-//! is what keeps a folder scrolled quickly from queueing work nobody will look at.
+//! picker owns that now, because a request's identity is `(file index, what is
+//! wanted)` — the size for a tile, the [`View`] for the pane (`docs/CONTRACT.md` §9)
+//! — and only the picker knows which of those answers it still has or still wants.
+//! What is left here is **cancellation**: a cell that scrolls away is dropped from
+//! [`Thumbs::wanted`], and a job that is still queued when its key is gone is
+//! discarded without a decode — gthumb's own policy (`src/Thumbnailer.vala`'s
+//! priority queue with `remove`/`cancel`), which is what keeps a folder scrolled
+//! quickly from queueing work nobody will look at, and what keeps a pan at 1:1 from
+//! queueing a decode per pointer event.
 
 use std::cell::Cell;
 use std::collections::HashSet;
@@ -38,24 +42,56 @@ use std::sync::{Arc, Mutex};
 use gtk4::glib;
 
 use crate::workers::{Down, Kind as WorkerKind, WorkerPlan};
-use pixlay_imaging::{Source, Thumbnail, thumbnail};
+use pixlay_imaging::{Source, Thumbnail, thumbnail, thumbnail_region};
 
-/// What a request is for.
+/// What the preview pane is asking a photo for.
 ///
-/// Two kinds, because an answer has to reach the right widget, and because the
-/// two are asked for at different sizes and re-asked for different reasons: a tile
-/// follows the cell it is bound to, a preview follows the focused photo and the
-/// pane's own pixels.
+/// Two states and no more (ruled 2026-09-24, PIX-028: "fit ↔ 1:1, panning at 1:1, no
+/// free zoom and no view rotation"), and the request *is* the identity: the picker's
+/// cache and this worker's dedup and cancellation are keyed by it, because the same
+/// photo at another size, or at another place, is another picture.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Kind {
-    /// One grid cell's square tile.
-    Tile,
-    /// The preview pane's picture.
-    Preview,
+pub enum View {
+    /// The `Contain` fit: the whole photo, resampled so its long edge is `px` pixels.
+    ///
+    /// The size is carried rather than derived, because the first request for a photo
+    /// cannot know it: nothing has decoded the file yet, so the pane asks at its own
+    /// long edge (the largest size it could need) and re-asks at the fitted size when
+    /// the reply reports the photo's own pixels.
+    Fit { px: u32 },
+    /// 1:1 — one image pixel per device pixel — showing `rect` of the photo.
+    ///
+    /// The decode is the rectangle's own size (`max(width, height)` on its long edge,
+    /// which `thumb_size` maps back to exactly `width x height`), so the pane's picture
+    /// at 1:1 is the photo's own pixels rather than an enlarged fit.
+    Actual(pixlay_imaging::Rect),
 }
 
-/// A request's identity: the folder it belongs to, what is wanted, for which file,
-/// at which size.
+impl View {
+    /// The long edge this view is decoded at, in pixels.
+    pub fn px(&self) -> u32 {
+        match self {
+            View::Fit { px } => *px,
+            View::Actual(rect) => rect.width.max(rect.height),
+        }
+    }
+}
+
+/// What is wanted of one photo.
+///
+/// Two kinds, because an answer has to reach the right widget and because the two are
+/// asked for at different sizes and re-asked for different reasons: a tile follows the
+/// cell it is bound to, the pane's picture follows the focused photo and the pane's own
+/// size. The whole request is the key — see [`View`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Want {
+    /// One grid cell's square tile, `px` device pixels on its long edge.
+    Tile { px: u32 },
+    /// The preview pane's picture, in one of its two states.
+    Preview(View),
+}
+
+/// A request's identity: the folder it belongs to, what is wanted, and for which file.
 ///
 /// **The generation is part of it**, and that is not decoration: `forget` clears
 /// the wanted set when the folder changes, and without the generation a request
@@ -64,30 +100,28 @@ pub enum Kind {
 /// picker then rejects as stale while its own request is skipped for looking
 /// already answered. Measured 2026-09-22: that left six tiles "in flight" for
 /// three minutes on a folder of fourteen photos.
-type Key = (u64, Kind, usize, u32);
+type Key = (u64, usize, Want);
 
 /// The key for one request, as the worker and the canceller both spell it.
-fn key(epoch: u64, kind: Kind, index: usize, px: u32) -> Key {
-    (epoch, kind, index, px)
+fn key(epoch: u64, index: usize, want: Want) -> Key {
+    (epoch, index, want)
 }
 
-/// One request: the file, the size, and what to call the answer.
+/// One request: the file, what is wanted of it, and what to call the answer.
 struct Job {
     /// The folder generation this job belongs to (`Thumbs::epoch`): a reply that
     /// arrives after the folder changed is not an answer to anything any more.
     epoch: u64,
-    kind: Kind,
     index: usize,
     path: PathBuf,
-    px: u32,
+    want: Want,
 }
 
 /// What one finished job carries back.
 pub struct Reply {
     pub epoch: u64,
-    pub kind: Kind,
     pub index: usize,
-    pub px: u32,
+    pub want: Want,
     pub result: Result<Thumbnail, String>,
 }
 
@@ -161,12 +195,12 @@ impl Thumbs {
     /// request it had marked in flight and shows the reason in the cell, because a
     /// cell that waits for a reply that cannot come spins for ever.
     pub fn request_tile(&self, index: usize, path: &Path, px: u32) -> Result<(), Down> {
-        self.request(Kind::Tile, index, path, px)
+        self.request(index, path, Want::Tile { px })
     }
 
-    /// Queues the preview pane's picture.
-    pub fn request_preview(&self, index: usize, path: &Path, px: u32) -> Result<(), Down> {
-        self.request(Kind::Preview, index, path, px)
+    /// Queues the preview pane's picture, at one of its two states.
+    pub fn request_preview(&self, index: usize, path: &Path, view: View) -> Result<(), Down> {
+        self.request(index, path, Want::Preview(view))
     }
 
     /// Drops a tile request: its cell has been unbound, scrolled away or covered
@@ -175,26 +209,26 @@ impl Thumbs {
     /// A cancel is always about the folder being listed now — what an earlier
     /// folder left behind was dropped by [`forget`](Self::forget).
     pub fn cancel_tile(&self, index: usize, px: u32) {
-        self.cancel(Kind::Tile, index, px);
+        self.cancel(index, Want::Tile { px });
     }
 
-    /// Drops the preview request for a photo at a size.
-    pub fn cancel_preview(&self, index: usize, px: u32) {
-        self.cancel(Kind::Preview, index, px);
+    /// Drops the preview request for a photo in one view — the pane has moved on to
+    /// another one, and a decode nobody will see is the cost of not dropping it.
+    pub fn cancel_preview(&self, index: usize, view: View) {
+        self.cancel(index, Want::Preview(view));
     }
 
-    fn request(&self, kind: Kind, index: usize, path: &Path, px: u32) -> Result<(), Down> {
-        let key = key(self.epoch.get(), kind, index, px);
+    fn request(&self, index: usize, path: &Path, want: Want) -> Result<(), Down> {
+        let key = key(self.epoch.get(), index, want);
         self.wanted
             .lock()
             .expect("the request set is not poisoned")
             .insert(key);
         let job = Job {
             epoch: self.epoch.get(),
-            kind,
             index,
             path: path.to_path_buf(),
-            px,
+            want,
         };
         if self.jobs.send(job).is_err() {
             // The key goes with the request nobody will answer: leaving it would
@@ -214,11 +248,11 @@ impl Thumbs {
         Ok(())
     }
 
-    fn cancel(&self, kind: Kind, index: usize, px: u32) {
+    fn cancel(&self, index: usize, want: Want) {
         self.wanted
             .lock()
             .expect("the request set is not poisoned")
-            .remove(&key(self.epoch.get(), kind, index, px));
+            .remove(&key(self.epoch.get(), index, want));
     }
 }
 
@@ -228,7 +262,7 @@ fn work(
     reply: Arc<dyn Fn(Reply) + Send + Sync>,
 ) {
     while let Ok(job) = queue.recv() {
-        let job_key = key(job.epoch, job.kind, job.index, job.px);
+        let job_key = key(job.epoch, job.index, job.want);
         let wanted_still = wanted
             .lock()
             .expect("the request set is not poisoned")
@@ -239,7 +273,16 @@ fn work(
         // A file the decoder refuses is a value, not a panic: the cell reports it
         // and the folder keeps listing (`scan`'s S9 rule, applied to the grid).
         let result = Source::decode(&job.path)
-            .and_then(|source| thumbnail(&source, job.px))
+            .and_then(|source| match job.want {
+                Want::Tile { px } => thumbnail(&source, px),
+                // At 1:1 the decode is the rectangle's own size, so the pane's
+                // picture is the photo's own pixels; the fit is the whole photo at a
+                // long edge. One preview pipeline, two requests.
+                Want::Preview(View::Fit { px }) => thumbnail(&source, px),
+                Want::Preview(View::Actual(rect)) => {
+                    thumbnail_region(&source, rect, rect.width.max(rect.height))
+                }
+            })
             .map_err(|error| error.to_string());
         wanted
             .lock()
@@ -248,9 +291,8 @@ fn work(
         let reply = Arc::clone(&reply);
         let done = Reply {
             epoch: job.epoch,
-            kind: job.kind,
             index: job.index,
-            px: job.px,
+            want: job.want,
             result,
         };
         glib::MainContext::default().invoke(move || reply(done));

@@ -1,11 +1,13 @@
-//! Photo previews: one whole photo, resampled to a size a picker can hold.
+//! Photo previews: a photo (or a rectangle of one) resampled to a size a picker can
+//! hold.
 //!
-//! The picker's grid (S13) and its preview both show *the photo* — the preview is
-//! a `Contain` fit, with no zoom (ruling 2, `docs/CONTRACT.md` §9) — and
-//! `AGENTS.md`'s rule for a visual claim applies to them too: the pixels the
-//! GUI puts on screen have to be a machine-checkable number somewhere, so this is
-//! the CLI's `thumb` as well as the widget's texture (`pixlay-render thumb`, and
-//! S13 asserts the two are the same picture).
+//! The picker's grid (S13) and its preview pane both show *the photo*: the pane is a
+//! `Contain` fit at rest and the photo's own pixels at 1:1 (`S15j`, ruling 2's "a large
+//! preview that can zoom and pan" in the bounded form the 2026-09-24 ruling fixed), and
+//! `AGENTS.md`'s rule for a visual claim applies to both: the pixels the GUI puts on
+//! screen have to be a machine-checkable number somewhere, so this is the CLI's `thumb`
+//! as well as the widget's texture (`pixlay-render thumb`, whose `--region` is the same
+//! call the pane's 1:1 view makes, and S13 asserts the two are the same picture).
 //!
 //! Two decisions worth stating, because they are what make the result *the
 //! pipeline's* picture rather than a second one:
@@ -28,6 +30,51 @@ use crate::decode::Sampler;
 use crate::error::ImagingError;
 use crate::resample::{Region, check_bitmap, resample};
 
+/// A rectangle of a photo, in the photo's own pixels.
+///
+/// The part of a photo a viewer shows, before any scaling: [`thumbnail_region`]
+/// resamples one, the CLI's `--region` is one, and the picker's 1:1 view is one. It is
+/// also a request's identity where one is made (the picker's worker dedups and cancels
+/// by it), so it is `Eq + Hash` and `Copy`.
+///
+/// The grid is the one a decode reports — the photo's own pixels with EXIF orientation
+/// already applied ([`Thumbnail::source_width`]) — and a rectangle the photo does not
+/// contain is refused rather than clamped: a rectangle is a request, and one that hangs
+/// off the edge is a caller that computed it from the wrong grid.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Rect {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl Rect {
+    /// The whole of a `width x height` photo.
+    pub fn whole(width: u32, height: u32) -> Self {
+        Self {
+            x: 0,
+            y: 0,
+            width,
+            height,
+        }
+    }
+
+    /// Whether this rectangle has an area and is inside a `width x height` photo.
+    pub fn inside(&self, width: u32, height: u32) -> bool {
+        self.width > 0
+            && self.height > 0
+            && self
+                .x
+                .checked_add(self.width)
+                .is_some_and(|right| right <= width)
+            && self
+                .y
+                .checked_add(self.height)
+                .is_some_and(|bottom| bottom <= height)
+    }
+}
+
 /// A preview-sized copy of a photo: straight sRGB, 8 bits, opaque.
 #[derive(Clone, Debug)]
 pub struct Thumbnail {
@@ -48,16 +95,68 @@ pub struct Thumbnail {
 
 /// Resamples a whole photo so that its long edge is exactly `long_edge` pixels.
 pub fn thumbnail(source: &impl Sampler, long_edge: u32) -> Result<Thumbnail, ImagingError> {
+    thumbnail_region(
+        source,
+        Rect::whole(source.width(), source.height()),
+        long_edge,
+    )
+}
+
+/// Resamples one rectangle of a photo to the size it is drawn at.
+///
+/// `long_edge` is the destination's long edge and the destination's *aspect* is the
+/// rectangle's, so a `long_edge` equal to the rectangle's own long edge is a **1:1**
+/// resample: the Lanczos taps degenerate to the identity at exactly 1:1 (`lanczos(0)`
+/// is 1 and every other tap is 0), which is what makes the picker's 1:1 view the
+/// photo's own pixels rather than a scaled copy of them. A smaller `long_edge` is a fit
+/// of that rectangle, through the same `resample` and the same colour path as a
+/// whole-photo preview — there is one preview pipeline, not two.
+///
+/// The rectangle is in the photo's own pixel grid, and one the photo does not contain
+/// is [`ImagingError::RegionOutside`]: `resample` clamps its taps into the source, so a
+/// region that hung off the edge would not fail but would smear the last row into a
+/// picture of the wrong size.
+pub fn thumbnail_region(
+    source: &impl Sampler,
+    region: Rect,
+    long_edge: u32,
+) -> Result<Thumbnail, ImagingError> {
     if long_edge == 0 {
         return Err(ImagingError::EmptyThumbnail);
     }
-    let (width, height) = thumb_size(source.width(), source.height(), long_edge);
-    // The display grid *is* the destination: a preview shows all of the photo, so
-    // the source samples per display pixel is the whole downscale ratio and the
-    // resampler scales its kernel by it.
-    let region = Region {
-        display: (f64::from(width), f64::from(height)),
-        texels: (0, 0, width, height),
+    let (source_width, source_height) = (source.width(), source.height());
+    if !region.inside(source_width, source_height) {
+        return Err(ImagingError::RegionOutside {
+            x: region.x,
+            y: region.y,
+            width: region.width,
+            height: region.height,
+            source_width,
+            source_height,
+        });
+    }
+    let (width, height) = thumb_size(region.width, region.height, long_edge);
+    // The display grid the resampler works in: the size the *whole* photo would have if
+    // the rectangle were drawn at `long_edge`. The destination is the rectangle's own
+    // size, so the display step per output texel is the source step — the rectangle's
+    // first output texel covers `step` source pixels starting at the rectangle's own x
+    // (exactly, at 1:1, where `step` is 1).
+    let step = (
+        f64::from(region.width) / f64::from(width),
+        f64::from(region.height) / f64::from(height),
+    );
+    let display = (
+        f64::from(source_width) / step.0,
+        f64::from(source_height) / step.1,
+    );
+    let view = Region {
+        display,
+        texels: (
+            (f64::from(region.x) / step.0).round() as i32,
+            (f64::from(region.y) / step.1).round() as i32,
+            width,
+            height,
+        ),
     };
     // A preview is a bitmap like a slot's, so it answers to the same budget — the
     // request is a caller's, and this is a public entry point (S15e, PIX-003). The
@@ -66,16 +165,16 @@ pub fn thumbnail(source: &impl Sampler, long_edge: u32) -> Result<Thumbnail, Ima
     // for a message about memory.
     check_bitmap(
         "a photo preview",
-        &region,
-        region.conversion_bytes(source.height()),
+        &view,
+        view.conversion_bytes(source_height),
     )?;
-    let linear = resample(source, region);
+    let linear = resample(source, view);
     let rgb = linear.over_white();
     Ok(Thumbnail {
         width,
         height,
-        source_width: source.width(),
-        source_height: source.height(),
+        source_width,
+        source_height,
         pixels: rgb.to_srgb8(),
     })
 }

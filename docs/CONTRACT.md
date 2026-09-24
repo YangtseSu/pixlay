@@ -356,7 +356,7 @@ pixlay-render render    --template <name> --long-edge <px> --out <file>   # no p
 pixlay-render probe     --project <file.pixlay> --long-edge <px>
 pixlay-render image     --photo <file>
 pixlay-render scan      --dir <path> [--recursive] [--json]
-pixlay-render thumb     --photo <file> --px <n> --out <file>
+pixlay-render thumb     --photo <file> --px <n> --out <file> [--region <x>,<y>,<w>,<h>]
 pixlay-render templates [--aspect <ratio>] [--slots <n>] [--json]
 pixlay-render init      --template <name> --out <file.pixlay> [--photo <p>...]
 pixlay-render edit      --project <file.pixlay> --out <file.pixlay> --slot <i> --rotate <deg> --zoom <z> --offset <x>,<y> --clear
@@ -422,12 +422,12 @@ comparable, and `--quality` was deliberately not added — a knob nobody tests b
 
 | Item | `scan` | `thumb` |
 |---|---|---|
-| shape | `dir`, `recursive`, `count`, `failed`, and one `file.<i>` row per photo: `path`, `status`, and either `mime` / `width` / `height` / `date` / `mtime`, or `reason`. `dir` and every `file.<i>.path` are **byte paths** — the path's own OS bytes, escaped by the rule above — so a filename with a newline cannot forge a line and a name that is not UTF-8 survives instead of becoming U+FFFD (S15h, PIX-018) | `format`, `mime`, `src_w`, `src_h`, `px`, `out_w`, `out_h`, `bytes` |
+| shape | `dir`, `recursive`, `count`, `failed`, and one `file.<i>` row per photo: `path`, `status`, and either `mime` / `width` / `height` / `date` / `mtime`, or `reason`. `dir` and every `file.<i>.path` are **byte paths** — the path's own OS bytes, escaped by the rule above — so a filename with a newline cannot forge a line and a name that is not UTF-8 survives instead of becoming U+FFFD (S15h, PIX-018) | `format`, `mime`, `src_w`, `src_h`, `region`, `px`, `out_w`, `out_h`, `bytes` |
 | what it is for | what a picker needs from a folder, and the key S12's decode cache invalidates on: `mtime`, whole seconds since the Unix epoch | the picker's expensive half — decode plus resample to a tile's size — as a CLI number; `--stats` is the budget number S12's decisions are measured against |
-| size | `height`/`width` are the size **after EXIF rotation** (`ImageDetails`' early dimensions are a hint and are *not* post-rotation, which is why a full decode happens), so `image` and `scan` cannot disagree about a file | `--px n` is the exact long edge, 1..=**8192**; the other edge keeps the photo's ratio (`round`, at least 1 px). The bound is the product's largest preview with room: a full-window 4K photo preview is 3840 px and a HiDPI one 7680, so past 8192 the caller wants `render --preview-px` |
+| size | `height`/`width` are the size **after EXIF rotation** (`ImageDetails`' early dimensions are a hint and are *not* post-rotation, which is why a full decode happens), so `image` and `scan` cannot disagree about a file | `--px n` is the exact long edge, 1..=**8192**; the other edge keeps the source's ratio (`round`, at least 1 px) — the photo's, or the `--region` rectangle's when one is given. The bound is the product's largest preview with room: a full-window 4K photo preview is 3840 px and a HiDPI one 7680, so past 8192 the caller wants `render --preview-px` |
 | candidates | files whose extension is in `PHOTO_EXTENSIONS` (`.jpg .jpeg .png .heic .heif .avif .jxl .webp .tif .tiff` — TIFF is still read even though it is no longer written), case-insensitively; **no recursion unless `--recursive`**, and only real directories are descended into (a symlink to a parent would never terminate). A non-photo extension is neither a row nor an error — the alternative is a folder's README becoming an error row | `--out`'s extension, the same two formats `render` writes (`.png` / `.jpg` / `.jpeg` — S12c removed TIFF) |
-| refusal | a file with a photo extension that does not decode **is** a row (`status = failed`) with the decoder's own reason, and the command still exits **0**: the listing is the result. A `--dir` that is not a directory is exit **2** with the path named | a photo that does not decode, or an `--out` this build cannot write, is exit **2**; `--px` outside the range is exit **1**, and an `--out` that *is* `--photo` is exit **1** (the destination row above, asked before the decode) |
-| pixels | — | the whole photo, resampled once at the preview's own grid — the same `resample` (Lanczos3, linear light, kernel widened by the downscale ratio) and the same `over_white` + quantize as a slot, so a preview is not a second picture of the same file |
+| refusal | a file with a photo extension that does not decode **is** a row (`status = failed`) with the decoder's own reason, and the command still exits **0**: the listing is the result. A `--dir` that is not a directory is exit **2** with the path named | a photo that does not decode, or an `--out` this build cannot write, is exit **2**; `--px` outside the range is exit **1**, and an `--out` that *is* `--photo` is exit **1** (the destination row above, asked before the decode). A `--region` is refused in two halves, and which one is which is the point: a malformed one (fewer or more than four numbers, a negative, a fractional, a width or height of 0) is a **usage** error (exit **1**) because the command as written is one this build never runs, while a well-formed rectangle the **photo does not contain** is exit **2** and names the file's own size (`the region 900,700 800x600 is not inside the 1600x1200 photo`) — only the decode knows that, so it cannot be a usage error |
+| pixels | — | the whole photo — or, with `--region x,y,w,h`, that rectangle of it, in the photo's own pixels (`pixlay_imaging::Rect`) — resampled once at the preview's own grid: the same `resample` (Lanczos3, linear light, kernel widened by the downscale ratio) and the same `over_white` + quantize as a slot, so a preview is not a second picture of the same file. **A region whose long edge is `--px` is a 1:1 resample** (S15j): the taps degenerate to the identity (`lanczos(0)` is 1, every other tap 0), so the output is that rectangle of the photo pixel for pixel — measured: `thumb --px 1600 --region 200,100,800,600` of the 1600x1200 fixture is byte-identical to the same crop of `thumb --px 1600`. The window's preview pane at 1:1 is this call, which is what makes the pane's pixels a number the CLI can reproduce |
 
 **`init --photo` is where a selection becomes a document** (S9), and it goes through `pixlay_core::Selection` — the same policy the picker uses (S13), so "the third photo the user picked is the third cell" has one implementation:
 
@@ -1249,13 +1249,15 @@ without looking at a widget:
   the remove at its right end. A rebuild removes the rows one at a time and never calls `remove_all`: the
   list's placeholder is a child of the box, and `remove_all` takes it and forgets it (`gtklistbox.c`), so
   the empty hint would never come back.
-- **A tile and the preview are `pixlay_imaging::thumbnail` pixels** — the same function the CLI's `thumb`
-  writes to a file. Both are built at the size the widget *is*: a tile at `TILE_SIZE` times the screen's
-  scale factor (256 device px on this 2× machine, so a HiDPI screen is sharp without a hard-coded 2x), and
-  the pane's photo at **the size it draws** — the `Contain` fit of the pane's device size against the
-  photo's own pixels, rounded up to 128 px and capped at `PREVIEW_MAX_PX` = 2048 (2048 because a
+- **A tile and the preview are `pixlay_imaging::thumbnail` (or, at 1:1, `thumbnail_region`) pixels** — the
+  same two calls the CLI's `thumb` writes to a file. Both are built at the size the widget *is*: a tile at
+  `TILE_SIZE` times the screen's scale factor (256 device px on this 2× machine, so a HiDPI screen is sharp
+  without a hard-coded 2x), and the pane's photo at **the size it draws** — the `Contain` fit of the pane's
+  device size against the photo's own pixels, rounded up to 128 px and capped at `PREVIEW_MAX_PX` = 2048 (2048 because a
   pane-sized decode costs 229 ms at 1024, 593 ms at 2048 and 1112 ms at 3840 on the 3840x2160 display this
-  machine has, measured 2026-09-22, `S13 · Ruling`). The photo's own size comes from the reply itself:
+  machine has, measured 2026-09-22, `S13 · Ruling`); a **1:1** rectangle is instead its own long edge,
+  unrounded and uncapped (S15j), because a step up from it would enlarge the photo — the one thing 1:1 must
+  not do — and the rectangle is the pane's own size by construction. The photo's own size comes from the reply itself:
   `Thumbnail` carries the decoded `Source`'s width and height, so a photo whose tile is on screen — which
   is every photo the strip can show — is decoded at its fitted size on the first request, and a photo whose
   size is not known yet is decoded at the pane's long edge and re-asked for once the answer arrives (one
@@ -1267,8 +1269,10 @@ without looking at a widget:
 - **The pane never paints a tile.** It shows the focused photo's preview at the size it draws, or a
   spinner while that decodes; S13 painted the cell tile and could stay on it, because a repeated
   `(index, preview)` request was dropped as already seen. The request identity is
-  `(folder generation, kind, index, device pixels)`, so a resize asks for the size the pane now is, a
-  re-focus is served from a bounded per-photo cache, and a folder change invalidates all of it. **A file
+  `(folder generation, index, view)` — the view being the fit's long edge or the 1:1 rectangle (S15j) — so a
+  resize asks for the size the pane now is, a pan asks for the place it moved to and cancels the views
+  nobody will look at, a re-focus is served from a bounded per-photo cache, and a folder change invalidates
+  all of it. **A file
   replaced in place is a different photo** (S15f, PIX-012): the tile and the pane's caches are keyed by
   the position and the size, and a position is not an identity, so the file's own stamp — the
   modification time and the byte count the filesystem reports — is re-read (one `stat`, ~1 µs) wherever a
@@ -1290,11 +1294,22 @@ without looking at a widget:
   **17** more; the bound the test holds this to is `TILE_REQUEST_MAX` = 64. Decoded tiles and previews are
   cached in memory (64 MB each, LRU, keyed by size as well as by file), which is what makes a
   scrolled-back row instant.
-- **The stage has no zoom of its own**: the preview is `Contain`-fitted (ruling 2's "fit and zoom" is the
-  photo filling the pane), and magnification is the editor's business. The status bar's zoom percentage is
-  a readout of that fit, not a control. *Ruled 2026-09-24 (PIX-028): this paragraph becomes a **fit ↔ 1:1**
-  toggle with panning at 1:1, no free zoom and no view rotation — **S15j** lands it and replaces this text,
-  so what is written here is what the build does until then.*
+- **The pane has two zoom states and no others** (S15j, ruled 2026-09-24, PIX-028): the `Contain` **fit**
+  — the whole photo scaled into the pane, which is what it opens on — and **1:1**, one image pixel per
+  device pixel. A double click toggles them, anchored **at the pointer** (the photo pixel under it stays
+  under it), and `Z` (`win.zoom-preview`) toggles them from the keyboard with the pane's centre as the
+  anchor; the state is the pane's and survives a focus change, so comparing two photos at 1:1 is one toggle
+  and then a click. At 1:1 the pane shows a **rectangle of the photo**: its size is the pane's own device
+  size clamped to the photo (a photo smaller than the pane is shown whole, at its own size, centred — the
+  picture's margins are its box, because `GtkPicture` would otherwise scale a smaller content *up* into the
+  pane), and it pans by drag with the content following the hand, bounded by the photo's own edges. The
+  decode follows the view, which is S13b's rule rather than a second one: at the fit it is the whole photo
+  at the fitted long edge, at 1:1 it is that rectangle at its own size (`pixlay_imaging::thumbnail_region`,
+  the call `thumb --region` makes), and a pan asks for the new rectangle with the requests that are no
+  longer the view cancelled, so the worker holds at most one in flight. The status bar's zoom percentage
+  follows the view — 100 % at 1:1 — and is still a readout rather than a control. **Not doing**, all ruled:
+  no free or continuous zoom, no view rotation (EXIF orientation is applied at decode; a cell's rotation is
+  the editor's, where the slot exists), no fullscreen.
 - **The app is dark by default** (ruling 23): `app.rs` sets `Adw.ColorScheme.FORCE_DARK` at startup, as HIG
   `guidelines/ui-styling` recommends for an app that displays rich visual content and as both reference apps
   do. There is no per-app switch (ruling 8 forbids the settings file it would need), and the canvas and the
