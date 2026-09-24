@@ -110,7 +110,9 @@ the canvas is **content** and the interface is **styling**, and the two must not
 ### The re-routed main path's scripted step list (the three-minute walk)
 
 Written for `open → pick 2–9 photos → pick a layout → adjust → export`, and walked once, at the plan's
-S15. Run the app (`cargo run --release -p pixlay`, or the installed `pixlay` after S16) and time the whole list:
+S15 — **after the S15 series**, the review's remediation (ruling 2026-09-24,
+`docs/2026-09-22-STEPS.md`). Run the app (`cargo run --release -p pixlay`, or the installed `pixlay` after
+S16) and time the whole list:
 
 1. *Pick photos*: the window opens on the library; select two to five photos in the thumbnail row (the picked list down the right edge shows them in order, and clicking one of its rows previews that photo; the status bar reads picked/total · pixels · size · zoom).
 2. *Next*: the header bar's Next button carries the count; press it.
