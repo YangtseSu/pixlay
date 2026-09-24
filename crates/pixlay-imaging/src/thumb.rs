@@ -25,7 +25,7 @@
 
 use crate::decode::Sampler;
 use crate::error::ImagingError;
-use crate::resample::{Region, resample};
+use crate::resample::{Region, check_bitmap, resample};
 
 /// A preview-sized copy of a photo: straight sRGB, 8 bits, opaque.
 #[derive(Clone, Debug)]
@@ -54,13 +54,21 @@ pub fn thumbnail(source: &impl Sampler, long_edge: u32) -> Result<Thumbnail, Ima
     // The display grid *is* the destination: a preview shows all of the photo, so
     // the source samples per display pixel is the whole downscale ratio and the
     // resampler scales its kernel by it.
-    let linear = resample(
-        source,
-        Region {
-            display: (f64::from(width), f64::from(height)),
-            texels: (0, 0, width, height),
-        },
-    );
+    let region = Region {
+        display: (f64::from(width), f64::from(height)),
+        texels: (0, 0, width, height),
+    };
+    // A preview is a bitmap like a slot's, so it answers to the same budget — the
+    // request is a caller's, and this is a public entry point (S15e, PIX-003). The
+    // estimate is the slot-shaped one, whose last buffer is four bytes per texel
+    // where a thumbnail's is three: an over-estimate, which is the safe direction
+    // for a message about memory.
+    check_bitmap(
+        "a photo preview",
+        &region,
+        region.conversion_bytes(source.height()),
+    )?;
+    let linear = resample(source, region);
     let rgb = linear.over_white();
     Ok(Thumbnail {
         width,

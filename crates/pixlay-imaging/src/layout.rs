@@ -34,6 +34,13 @@
 //! Peak = one source + Σ bitmaps + the output surface, and the decoder thread
 //! holds one source at a time, so `N` concurrent slots need
 //! `N * source + Σ bitmaps + output ≤ budget`.
+//!
+//! Each bitmap is checked against [`crate::MAX_BITMAP_PIXELS`] before it is
+//! allocated (S15e, PIX-003): the destination is the slot's own extent, so the
+//! canvas's own pixel budget is the bound for it, and a request past that bound is
+//! refused with the slot and the memory it would have held rather than attempted.
+//! The budget covers one bitmap, not the sum — the ladder's `Σ dst_px` is the
+//! memory budget's question and is measured, not enforced.
 
 use std::path::PathBuf;
 
@@ -41,7 +48,7 @@ use pixlay_core::CollageDoc;
 
 use crate::decode::{Sampler, Source};
 use crate::error::ImagingError;
-use crate::resample::{Region, resample};
+use crate::resample::{Region, check_bitmap, resample};
 
 /// Pixels of margin around the exact displayed region, on every side.
 ///
@@ -126,10 +133,15 @@ pub(crate) fn flat_bitmap(
     let photo_aspect =
         slot_bbox.width() * canvas_px.aspect() / slot_bbox.height().max(f64::MIN_POSITIVE);
     let fit = doc.fitted_crop(slot_index, canvas_px.aspect(), photo_aspect)?;
-    let region = fit
+    let display = fit
         .transform
         .display_region(slot, canvas_px, photo_aspect, REGION_GUARD_PX);
-    let texels = region.texels();
+    let region = Region::from(display);
+    // The probe's content is flat color: the only buffer this path allocates is
+    // the ARgb32 bitmap itself. The budget is the slot's own (S15e, PIX-003) — a
+    // probe is not a second kind of bitmap.
+    check_bitmap(&format!("slot {slot_index}"), &region, 4 * region.pixels())?;
+    let texels = region.texels;
     if texels.2 <= 0 || texels.3 <= 0 {
         return Err(ImagingError::DegenerateSlot { slot: slot_index });
     }
@@ -175,21 +187,24 @@ pub fn slot_bitmap(
 
     let photo_aspect = Sampler::aspect(source);
     let fit = doc.fitted_crop(slot_index, canvas_px.aspect(), photo_aspect)?;
-    let region = fit
+    let display = fit
         .transform
         .display_region(slot, canvas_px, photo_aspect, REGION_GUARD_PX);
-    let texels = region.texels();
+    let region = Region::from(display);
+    // Before a byte is allocated: a slot's bitmap answers to the canvas's own
+    // pixel budget, and the message names the slot and what the conversion would
+    // have held (S15e, PIX-003).
+    check_bitmap(
+        &format!("slot {slot_index}"),
+        &region,
+        region.conversion_bytes(source.height()),
+    )?;
+    let texels = region.texels;
     if texels.2 <= 0 || texels.3 <= 0 {
         return Err(ImagingError::DegenerateSlot { slot: slot_index });
     }
 
-    let linear = resample(
-        source,
-        Region {
-            display: region.display,
-            texels,
-        },
-    );
+    let linear = resample(source, region);
     // Flatten onto white — and stop there: since S12c there is no colour stage
     // after the resample, so what the slot shows is what the photo was.
     let rgb = linear.over_white();

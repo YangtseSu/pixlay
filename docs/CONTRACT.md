@@ -118,8 +118,9 @@ Conventions:
 | `docVersion` | exactly `DOC_VERSION` (currently **3**); higher refused, lower refused too | see "Version policy" |
 | slot count | 2..=9 | `AGENTS.md`; nine since S12c removed the ten-slot recipe |
 | long edge | 1..=30000 px (`MAX_LONG_EDGE_PX`) | a pixel count, the one size parameter: what a render renders and what an export writes |
-| canvas pixels | ≤ 200 MP | the largest grid the product has rendered measured 139.5 MP (§8, "S0"); 43% of headroom left |
-| template aspect ratio | 0.1..=10.0 | a template outside this range is not a collage layout |
+| canvas pixels | ≤ 200 MP | the largest grid the product has rendered measured 139.5 MP (§8, "S0"); 43% of headroom left. Checked wherever a grid is **asked for** (S15e): the grid a long edge derives, and the scaled grid `render --preview-px` and `gesture --grid` derive from it |
+| one slot's bitmap | ≤ 200 MP texels (`MAX_BITMAP_PIXELS`, the same budget at the bitmap boundary — S15e) | a bitmap is the part of the photo the slot can show: the slot's own extent in output pixels plus the axis-aligned box a rotation needs, so it is bounded by the canvas rather than by the zoom. Refused per slot with the slot named and the conversion's peak bytes reported (§8, "S15e") |
+| template aspect ratio | 0.1..=10.0 (`MIN_TEMPLATE_ASPECT` / `MAX_TEMPLATE_ASPECT`) | a template outside this range is not a collage layout. Checked where a template is validated **and** where a pixel grid is derived from one (S15e, PIX-027A): a `NaN`, zero, negative or infinite aspect used to reach the rounding and come back as a one-pixel-by-N grid |
 | the render grid | long edge exact, the other edge `round` (half away from zero, at least 1 px) — asserted as 4:3 at 4000 → 4000x3000 | the whole grid request, frozen so an export's size does not drift between builds |
 | slot outline | ≥ 3 vertices, finite, every vertex inside `[0,1]`, area > 0 | a polygon with no interior is not a slot |
 | framing rotation | ~~±45°~~ **any finite angle, normalized to `(-180, 180]`** (the cap was removed on 2026-09-22; S11 widens the validation). Clockwise is positive, sheet y points down | the 2026-09-22 ruling, `AGENTS.md` |
@@ -128,9 +129,10 @@ Conventions:
 | template aspect query | `templates::of_aspect` matches within ≤ 1e-6 (`ASPECT_TOLERANCE`) | the picker's grouping: layouts whose declared ratio agrees with the named one |
 | frame gap / radius | both finite, `0 ≤ value ≤ 1.0` (`MAX_FRAME_REL`, fraction of canvas height) | the bound is a typo bound, not a design one: a length past the whole canvas height is not a frame around anything. A gap *inside* the range can still empty a small cell, and that is refused per slot by `CollageDoc::validate`, naming the slot |
 | frame colour alpha | exactly `255` | the backdrop is painted, not blended: a translucent one would make the exported pixel depend on the surface behind it, which is exactly what "preview and export are the same picture" and "an export is never transparent" forbid |
-| `--preview-px` | 1..=20000 (long edge, in pixels) | a preview larger than this cannot be reviewed by eye anyway |
+| `--preview-px` | 1..=20000 (long edge, in pixels) | a preview larger than this cannot be reviewed by eye anyway. The flag bounds the *request*; the grid it scales the base canvas to still has to fit the canvas pixel budget, so `--preview-px 20000` on a square template is 400 MP and is refused with `CanvasTooLarge` (exit 2) before a byte is decoded (S15e, PIX-003) |
 | `--at` (`hit`) | both components inside 0..=1 | the canvas *is* `[0,1]`: normalized coordinates are what the document stores and what `probe` prints, so a point outside the canvas is a caller that mis-scaled something, not a hit test with an unusual answer |
 | `--long-edge` (export size) | 1..=30000 (long edge, in pixels; `MAX_LONG_EDGE_PX` in `pixlay-core`) | the whole size request: the edge is exact, the other edge follows the template's aspect rounded half away from zero (at least 1 px). The **canvas pixel budget still applies to the grid it derives** (a square canvas at 20000 px is 400 MP and is refused, exit 2), so the flag's range and the budget are two different limits and both are checked |
+| `--grid` (`gesture`) | 1..=20000 (long edge, in pixels) | the resting canvas grid a gesture is measured at, derived by the same `PixelSize::for_long_edge` the window's and `render`'s grids are (S15e) — so the rounding and the canvas pixel budget are one rule rather than three, and a 4:3 canvas at 20000 (300 MP) is refused, exit 2 |
 | decoded source | ≤ 120 MP and ≤ 20000 px per edge, 20 s | `MAX_DECODE_PIXELS` / `MAX_DECODE_EDGE` / `DECODE_TIMEOUT` in `pixlay-imaging`. A source is RGBA at its own depth, so 120 MP is 480 MB as 8-bit and 960 MB as 16-bit; the area cap is checked between the loader's header and its pixels, so a decompression bomb costs nothing |
 | clamp degradation threshold | ~~when the zoom the **requested rotation** needs exceeds `CLAMP_ZOOM_LIMIT` = **1.5 times the upright covering zoom**, the angle is reduced to the widest one that fits~~ — **removed by S11 (2026-09-22): the angle is free and is never reduced, so the rule and the constant are gone; the zoom pays for the angle, and its worst case over the whole library is 21.7x against a cap of 1000x (§8)** | the S3 row as it was decided (`docs/completed/2026-09-20-STEPS-done.md`): its reference was the upright floor, not an absolute zoom, and a ten-column strip needs 6x upright for a 4:3 photo, so a narrow slot was never degraded. Measured kept angles, matching photo and 45° asked (2026-09-21): 45° (unlimited) at 1:1, 34.0° at 6:5, 27.3° at 4:3, 22.6° at 3:2, 18.0° at 16:9, 11.2° at 8:3, mirrored for portrait slots. Kept as the record of what the cap did |
 
@@ -265,6 +267,17 @@ measures 1182 MB peak for the whole render (§8). `decoding is one source at a
 time` follows from the same table: `N` concurrent slots need
 `N × source + Σ bitmaps + output ≤ budget`.
 
+**One bitmap is budgeted; the sum is measured.** Since S15e each bitmap is checked
+against the canvas pixel budget (`MAX_BITMAP_PIXELS`) *before* it is allocated, and
+the refusal names the slot and what the conversion would have held: the three
+destination buffers are 18 bytes per texel (the 16-bit RGBA the resampler writes,
+the 16-bit RGB it flattens into, and the ARgb32 the canvas takes), and the row
+strip is the one buffer that does not follow the texel count — `16 × dst_w × rows`
+with `rows` one block's kernel reach, under 84 MB for any source inside the
+decoder's caps. The **sum** over slots is not enforced: it is the memory budget's
+question (`Σ dst_px` above), measured per document in §8 rather than checked, and
+the 200 MP bound is per bitmap.
+
 **One exception, and why it stays: the framing rotation.** `AGENTS.md`'s sentence
 also names "rotation interpolation", and the framing rotation (any angle since
 2026-09-22, from `CropTransform`) is still applied by `draw` itself, as S3 built it. The reason is
@@ -338,7 +351,7 @@ pixlay-render save      --project <file.pixlay> --out <file.pixlay> [--json]
 | per-format metadata (S6, resolutions removed by S12d) | PNG: **no `pHYs`**, `iCCP` with the profile (the `sRGB` chunk is **not** written next to it — the specification says the two should not both appear, and the profile is the one carrying the colorimetry). JPEG: JFIF `APP0` with the density unit **0** (square pixels, no resolution — the encoder's default), `APP2` `ICC_PROFILE` segments, and the frame's own sampling factors, which are **4:4:4** since S12c removed the request. There is no third format |
 | JPEG quality | **90, fixed** (not a flag): it is the S0–S6 baseline, so every measurement in §8 stays
 comparable, and `--quality` was deliberately not added — a knob nobody tests breaks quietly |
-| `--preview-px n` | n pixels on the long edge; the same `draw`, only `scale` changes. The **bitmaps are sized for the preview too** (S4): decoding and resampling a full A0 and letting Cairo shrink it would cost the export's time and memory for a thumbnail, and would do the shrinking with Cairo's filter instead of the pipeline's |
+| `--preview-px n` | n pixels on the long edge; the same `draw`, only `scale` changes. The **bitmaps are sized for the preview too** (S4): decoding and resampling a full A0 and letting Cairo shrink it would cost the export's time and memory for a thumbnail, and would do the shrinking with Cairo's filter instead of the pipeline's. The scaled grid is checked against the canvas pixel budget before the first decode (S15e, PIX-003) |
 | `render`'s report | carries `long_edge` (the integer the output was rendered at), `cells` and `occupied` next to the written file's facts |
 | `probe`'s report | carries `long_edge` (the integer grid it sampled) instead of a resolution for the same reason |
 | `--stats` | appends `{ms, encode_ms, peak_rss_mb, icc}`; `render` emits all four, `probe` emits no `encode_ms` (it does not encode). `icc` is the description of the profile the written file carries (`sRGB IEC61966-2.1`); a command that writes no file reports `none`. The measurement rules are below |
@@ -419,7 +432,7 @@ the problem splits:
 |---|---|
 | shape | `command`, `template`, `version`, `slots`, `occupied`, `slot`, `steps`, `step_deg`, `grid_w`, `grid_h`, `gesture_w`, `gesture_h`, `open_decodes`, `cold_decodes`, `warm_decodes`, `refine_decodes`, `src_w`, `src_h`, `budget_ms`, `verdict` |
 | `--project` | required, and **every occupied cell must decode**: a step that cannot be timed is exit 2 naming the cells, because a sequence with a hole in it describes nothing |
-| `--grid <px>` | required: the long edge of the **resting** canvas grid, 1..=20000. The report's `grid_*` is that grid and `gesture_*` is the one a live gesture draws at (`gesture_grid`, half of it), so the two the editor uses are both visible |
+| `--grid <px>` | required: the long edge of the **resting** canvas grid, 1..=20000. The report's `grid_*` is that grid and `gesture_*` is the one a live gesture draws at (`gesture_grid`, half of it), so the two the editor uses are both visible. Derived by `PixelSize::for_long_edge`, so the canvas pixel budget applies to the grid it makes: a 4:3 canvas at 20000 is 300 MP and is refused, exit 2, before a decode (S15e) |
 | `--slot <i>` | the cell the gesture frames; default the first occupied one. A slot with no photo is exit 1 naming the occupied ones (`--slot` past the cell count is exit 1 as well, as on `edit`) |
 | `--steps <n>` | 2..=3600, default 60. **Step 1 is the cold one** (the gesture grid built from scratch) and `warm_ms` is the **median** of the rest: a mean over 60 steps on a busy machine is a number about the machine |
 | the four phases | `open` — the document as a window opens on it, at the resting grid (every occupied cell decoded and built); `cold` — the first step of a live gesture, at the gesture grid (the sources for *that* grid's copy are built here, S12b, and the grid's bitmaps are cold); `warm` — every step after it (one cell rebuilt, no decode); `refine` — the release, the resting grid again. Their decode counts are reported separately for exactly that reason |
@@ -946,6 +959,25 @@ cost rather than its floor).
 - **The band's geometry is a design constant, not a measurement of the reference** — there is no reference
   for it — and it is chosen so the canvas keeps the majority of the page: 139 of 760 leaves the sheet 575 px
   tall, and the thumbnail box (128x96) is the largest that does.
+
+### S15e (2026-09-24, `--release`, this machine)
+
+The bitmap boundary's numbers: what the shipped library can ask for, and what the check refuses. The sweep
+is `display_region`'s own arithmetic over every template at its largest legal grid, every whole degree and
+six photo aspects (0.5, 0.8, 1, 4:3, 1.5, 2.4) — geometry, not pixels; the refusals are the CLI's own runs,
+timed.
+
+| what | number |
+|---|---|
+| the worst single slot bitmap at A0 (14043 px) | **212.8 MP** — `strip-2-2x1g` slot 0 at 45 degrees (a half-canvas slot), whose conversion alone would hold **3.89 GB**; the bound refuses it. The CLI's own run of the same template and angle measures 212,722,225 texels / 3,890,140,370 bytes: the stored zoom differs from the sweep's request and the region is clamped into the displayed photo, so the two numbers are the same case measured twice |
+| the worst single slot bitmap at the largest legal grid | **215.8 MP** — the same template at 45 degrees on a 14142x14142 (199 MP) canvas |
+| the sum over slots at 45 degrees | **403 MP** of bitmaps for `strip-9-9x1` at A0 — 1.6 GB held at once, about 2.9 GB at the peak with the output surface and one slot's conversion. **Not refused**: the per-bitmap bound is the pixel budget's, the sum is the memory budget's (measured here rather than enforced) |
+| the row strip's own bound | `16 * dst_w * min(src_h, 262 * step)` bytes; under **84 MB** for any source inside `MAX_DECODE_EDGE`, so it needs no budget of its own |
+| `render --preview-px 20000`, square template | `canvas would be 400000000 pixels; the limit is 200000000`, exit 2, nothing written, **0.17 s** — no decode, no allocation |
+| `gesture --grid 20000`, 4:3 project | `canvas would be 300000000 pixels; the limit is 200000000`, exit 2, **0.16 s** |
+| `render --long-edge 14043` on `strip-2-2x1g` with one cell at 45 degrees | `slot 0: bitmap needs 212722225 pixels (3890140370 bytes at the conversion peak); the limit is 200000000 pixels`, exit 2, **0.20 s** — and the same document at 2000 px renders |
+| the aspect boundary | `NaN`, `0`, `-0`, `-1`, `±inf` and anything outside `0.1..=10.0` are refused as `template aspect ratio is NaN but must be in 0.1..=10.0`, before any multiplication; `0.1` and `10.0` themselves are legal |
+| the verification render (`verify.pixlay`, `--long-edge 14043`) | 14043x10532, **ms 6999.5** + **encode_ms 2110.6**, **`peak_rss_mb` 1632.3**, 9,157,639 bytes — inside the S10 spread of 7232/1638 for the same document; `probe` on it reports `passed = true` with 8/8 slot colours exact and 0 foreign pixels on all 12 seams |
 
 ## 9. The window (S7), and the stages added after it
 

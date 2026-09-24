@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::CoreError;
-use crate::{MAX_CANVAS_PIXELS, MAX_LONG_EDGE_PX};
+use crate::{MAX_CANVAS_PIXELS, MAX_LONG_EDGE_PX, MAX_TEMPLATE_ASPECT, MIN_TEMPLATE_ASPECT};
 
 /// A render's size in pixels.
 ///
@@ -30,6 +30,20 @@ impl PixelSize {
     /// (`Template::aspect`), which is also why a grid-vs-template aspect check
     /// cannot exist: the grid's shape *is* the template's.
     pub fn for_long_edge(aspect: f64, long_edge_px: u32) -> Result<Self, CoreError> {
+        // The aspect first: it is what every branch below multiplies with, and a
+        // value the arithmetic cannot use — `NaN`, zero, a negative, an infinity —
+        // must be refused before a grid is derived from it, not turned into a
+        // one-pixel-by-N shape by the rounding (S15e, PIX-027A). The domain is the
+        // template's own (`MIN_TEMPLATE_ASPECT..=MAX_TEMPLATE_ASPECT`), because a
+        // grid's shape *is* its template's.
+        if !aspect.is_finite() || !(MIN_TEMPLATE_ASPECT..=MAX_TEMPLATE_ASPECT).contains(&aspect) {
+            return Err(CoreError::OutOfRange {
+                what: "template aspect ratio",
+                value: aspect,
+                min: MIN_TEMPLATE_ASPECT,
+                max: MAX_TEMPLATE_ASPECT,
+            });
+        }
         if long_edge_px == 0 || long_edge_px > MAX_LONG_EDGE_PX {
             return Err(CoreError::OutOfRange {
                 what: "long edge (px)",
@@ -55,14 +69,26 @@ impl PixelSize {
                 height: long_edge_px as i32,
             }
         };
-        let pixels = pixel.pixels();
+        pixel.validate()?;
+        Ok(pixel)
+    }
+
+    /// Refuses a grid past the canvas pixel budget.
+    ///
+    /// The budget is checked wherever a grid is **asked for**, not only where one
+    /// is derived from a long edge (S15e, PIX-003): `render --preview-px` scales
+    /// the base grid, and the scaled grid is what gets allocated, so a square
+    /// template at `--preview-px 20000` is 400 MP and is refused here rather than
+    /// decoded and drawn into a surface the machine cannot serve.
+    pub fn validate(&self) -> Result<(), CoreError> {
+        let pixels = self.pixels();
         if pixels > MAX_CANVAS_PIXELS {
             return Err(CoreError::CanvasTooLarge {
                 pixels,
                 max: MAX_CANVAS_PIXELS,
             });
         }
-        Ok(pixel)
+        Ok(())
     }
 
     pub fn pixels(&self) -> u64 {

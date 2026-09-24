@@ -288,6 +288,56 @@ fn grid_for_long_edge() {
     assert!(err.to_string().contains("900000000 pixels"), "{err}");
 }
 
+/// The aspect is checked before anything is derived from it (S15e, PIX-027A):
+/// `NaN`, zero, a negative and an infinity used to reach the rounding and come
+/// back as a grid unrelated to the template — a one-pixel-by-N shape is what
+/// `NaN.max(1.0)` and a negative's `round` produce.
+#[test]
+fn grid_aspect_boundaries() {
+    use pixlay_core::{MAX_TEMPLATE_ASPECT, MIN_TEMPLATE_ASPECT};
+
+    for aspect in [f64::NAN, 0.0, -1.0, -0.0, f64::INFINITY, f64::NEG_INFINITY] {
+        let err = PixelSize::for_long_edge(aspect, 4000)
+            .expect_err("an aspect no arithmetic can use must be refused");
+        assert!(
+            err.to_string().contains("template aspect ratio"),
+            "{aspect}: {err}"
+        );
+    }
+    // The domain is the template's own: the edges are inside it, and one step
+    // outside is refused with the same bound `Template::validate` names.
+    PixelSize::for_long_edge(MIN_TEMPLATE_ASPECT, 4000).expect("0.1 is a legal layout");
+    PixelSize::for_long_edge(MAX_TEMPLATE_ASPECT, 4000).expect("10.0 is a legal layout");
+    for aspect in [
+        MIN_TEMPLATE_ASPECT - 1e-9,
+        MAX_TEMPLATE_ASPECT + 1e-9,
+        0.001,
+        100.0,
+    ] {
+        let err = PixelSize::for_long_edge(aspect, 4000).expect_err("outside 0.1..=10.0");
+        assert!(
+            err.to_string().contains("must be in 0.1..=10"),
+            "{aspect}: {err}"
+        );
+    }
+
+    // A grid is refused by the budget wherever it is asked for, not only where it
+    // is derived: this is the check `render --preview-px` needs, and it is the
+    // same `CanvasTooLarge` the long-edge path raises.
+    let scaled = PixelSize {
+        width: 20000,
+        height: 20000,
+    };
+    let err = scaled.validate().expect_err("400 MP");
+    assert!(err.to_string().contains("400000000 pixels"), "{err}");
+    PixelSize {
+        width: 20000,
+        height: 10000,
+    }
+    .validate()
+    .expect("exactly the budget is inside it");
+}
+
 #[test]
 fn crop_transform_limits() {
     CropTransform::IDENTITY.validate().expect("identity");

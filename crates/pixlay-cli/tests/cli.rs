@@ -501,6 +501,156 @@ fn the_export_modes_are_mutually_exclusive() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The canvas pixel budget at the boundaries a size is actually *asked for*
+/// (S15e, PIX-003).
+///
+/// `--preview-px` and `--grid` are long edges, and the grid they derive is what
+/// gets allocated: the flag's own range (`1..=20000`) is a range of long edges,
+/// and 20000 on a square canvas is 400 MP. The refusal is the typed one — exit 2,
+/// the same `CanvasTooLarge` `--long-edge` raises — and it happens before the
+/// first decode, so a refused render costs nothing and writes nothing.
+#[test]
+fn a_grid_past_the_canvas_budget_is_refused_before_it_is_allocated() {
+    let dir = out_dir("budget");
+    // A square template: 20000x20000 = 400 MP, well past the 200 MP budget.
+    let out = dir.join("preview.png");
+    let output = run(&[
+        "render",
+        "--template",
+        "grid-4-2x2",
+        "--preview-px",
+        "20000",
+        "--out",
+        out.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&output), 2, "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("canvas would be 400000000 pixels"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(stdout(&output).is_empty(), "{}", stdout(&output));
+    assert!(!out.exists(), "a refused render writes nothing");
+
+    // The same limit on the export path, where it has always applied: the flag is
+    // inside `MAX_LONG_EDGE_PX` and the *grid* it derives is not.
+    let out = dir.join("long.png");
+    let output = run(&[
+        "render",
+        "--template",
+        "grid-4-2x2",
+        "--long-edge",
+        "30000",
+        "--out",
+        out.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&output), 2, "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("canvas would be 900000000 pixels"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(!out.exists(), "a refused render writes nothing");
+
+    // And on `gesture`, whose grid used to be derived by a second implementation
+    // with no budget at all: a 4:3 canvas at 20000 is 300 MP.
+    let project = write_full_project(&dir, "two.pixlay");
+    let output = run(&[
+        "gesture",
+        "--project",
+        project.to_str().unwrap(),
+        "--grid",
+        "20000",
+    ]);
+    assert_eq!(code(&output), 2, "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("canvas would be 300000000 pixels"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(stdout(&output).is_empty(), "{}", stdout(&output));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The other half of the same budget: the bitmap boundary (S15e, PIX-003).
+///
+/// A bitmap holds the part of the photo a slot can show, which is the slot's own
+/// extent plus the axis-aligned box a framing rotation needs — so a half-canvas
+/// slot at 45 degrees asks for more than the canvas it sits on, and the pipeline
+/// refuses it naming the slot and the memory the conversion would have held.
+/// Without the refusal this render would try to hold 3.9 GB of one cell's bitmap.
+#[test]
+fn a_bitmap_past_the_budget_is_refused_naming_the_slot() {
+    let dir = out_dir("bitmap-budget");
+    let photo = dir.join("photo.png");
+    std::fs::write(&photo, include_bytes!("fixtures/photos/ratio-4-3.png")).expect("write photo");
+    let project = dir.join("square.pixlay");
+    let created = run(&[
+        "init",
+        "--template",
+        "strip-2-2x1g",
+        "--photo",
+        photo.to_str().unwrap(),
+        "--photo",
+        photo.to_str().unwrap(),
+        "--out",
+        project.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&created), 0, "{}", stderr(&created));
+    let rotated = dir.join("rotated.pixlay");
+    let edited = run(&[
+        "edit",
+        "--project",
+        project.to_str().unwrap(),
+        "--slot",
+        "0",
+        "--rotate",
+        "45",
+        "--out",
+        rotated.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&edited), 0, "{}", stderr(&edited));
+
+    let out = dir.join("a0.png");
+    let output = run(&[
+        "render",
+        "--project",
+        rotated.to_str().unwrap(),
+        "--long-edge",
+        "14043",
+        "--out",
+        out.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&output), 2, "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("slot 0: bitmap needs"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(
+        stderr(&output).contains("the limit is 200000000 pixels"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(!out.exists(), "a refused render writes nothing");
+
+    // The same document at a grid where the box fits still renders, so the check
+    // is a bound rather than a refusal of the layout.
+    let small = dir.join("small.png");
+    let output = run(&[
+        "render",
+        "--project",
+        rotated.to_str().unwrap(),
+        "--long-edge",
+        "2000",
+        "--out",
+        small.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert!(small.exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn probe_reports_numbers_the_renderer_can_be_judged_by() {
     let dir = out_dir("probe");

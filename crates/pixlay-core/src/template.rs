@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::CoreError;
 use crate::geometry::{EPSILON, Point, Polygon};
-use crate::{MAX_SLOTS, MIN_SLOTS};
+use crate::{MAX_SLOTS, MAX_TEMPLATE_ASPECT, MIN_SLOTS, MIN_TEMPLATE_ASPECT};
 
 /// Tolerance between a slot's declared area and the area of its outline.
 /// 1e-6 of a sheet edge is 0.014 px on the 14043-px reference grid.
@@ -108,12 +108,14 @@ impl Template {
                 max: f64::from(u32::MAX),
             });
         }
-        if !self.aspect.is_finite() || !(0.1..=10.0).contains(&self.aspect) {
+        if !self.aspect.is_finite()
+            || !(MIN_TEMPLATE_ASPECT..=MAX_TEMPLATE_ASPECT).contains(&self.aspect)
+        {
             return Err(CoreError::OutOfRange {
                 what: "template aspect ratio",
                 value: self.aspect,
-                min: 0.1,
-                max: 10.0,
+                min: MIN_TEMPLATE_ASPECT,
+                max: MAX_TEMPLATE_ASPECT,
             });
         }
         if !(MIN_SLOTS..=MAX_SLOTS).contains(&self.slots.len()) {

@@ -357,3 +357,83 @@ fn a_narrow_slot_holds_only_the_part_of_the_photo_it_shows() {
         "the bitmaps total {total} px for a {canvas_area} px canvas"
     );
 }
+
+/// The bitmap boundary (S15e, PIX-003): a slot whose bitmap would be past the
+/// canvas's own pixel budget is refused with the typed error **before the
+/// conversion allocates anything**.
+///
+/// The case is a real one, not a synthetic extreme: a two-cell square canvas at A0
+/// with both cells rotated 45 degrees. The axis-aligned box of a half-canvas slot
+/// at that angle is 1.5 times its own area, so the bitmap alone is past the budget
+/// — and if the refusal were not there, this test would try to hold 3.8 GB.
+#[test]
+fn a_bitmap_past_the_budget_is_refused_before_it_is_allocated() {
+    use pixlay_imaging::{MAX_BITMAP_PIXELS, check_bitmap};
+
+    let mut doc = document("strip-2-2x1g");
+    for cell in &mut doc.cells {
+        cell.crop = CropTransform {
+            zoom: 1.0,
+            offset: (0.0, 0.0),
+            rotation_deg: 45.0,
+        };
+    }
+    // The flat sampler is 640x480 — a 4:3 photo, which is the aspect the bound was
+    // measured at.
+    let source = Flat {
+        color: [0, 0, 0, u16::MAX],
+    };
+    let canvas = PixelSize::for_long_edge(doc.template.aspect, 14043).expect("the A0 grid");
+    let err = slot_bitmap(&doc, &source, 0, canvas).expect_err("past the budget");
+    let message = err.to_string();
+    assert!(message.contains("slot 0"), "{message}");
+    assert!(
+        message.contains("bitmap needs 212824320 pixels"),
+        "{message}"
+    );
+    assert!(
+        message.contains("the limit is 200000000 pixels"),
+        "{message}"
+    );
+
+    // The same slot inside the budget still builds: the check is a bound, not a
+    // refusal of the geometry. The grid is a small one because this case *does*
+    // resample, and the debug profile has no optimization to hide behind.
+    let inside = PixelSize::for_long_edge(doc.template.aspect, 1000).expect("a grid inside it");
+    let bitmap = slot_bitmap(&doc, &source, 0, inside).expect("a bitmap inside the budget");
+    let pixels = u64::from(bitmap.width) * u64::from(bitmap.height);
+    assert!(pixels < MAX_BITMAP_PIXELS, "{pixels} px");
+
+    // And the accounting the message reports: the destination buffers at 18 bytes
+    // per texel plus the resampler's strip. A 100x100 destination reading a
+    // 4000-tall source has 40 source rows per destination row, so one block of 256
+    // output rows reaches the source's own height — the strip is then the whole
+    // source, 16 bytes per row per destination column.
+    let region = pixlay_imaging::Region {
+        display: (100.0, 100.0),
+        texels: (0, 0, 100, 100),
+    };
+    let tall = Ramp {
+        width: 4000,
+        height: 4000,
+    };
+    assert_eq!(
+        region.conversion_bytes(tall.height()),
+        18 * 10_000 + 16 * 100 * 4_000,
+        "18 bytes per texel and the strip"
+    );
+    // At a 1:1 scale the source's height is not what bounds the block: one source
+    // row per destination row means `BLOCK_ROWS` rows plus the filter's own
+    // support on both ends, 262 of them, which a 300-row source holds.
+    let square = pixlay_imaging::Region {
+        display: (300.0, 300.0),
+        texels: (0, 0, 300, 300),
+    };
+    assert_eq!(
+        square.conversion_bytes(300),
+        18 * 300 * 300 + 16 * 300 * 262,
+        "the kernel's own reach at a 1:1 scale"
+    );
+    check_bitmap("a test region", &square, square.conversion_bytes(300))
+        .expect("a 300x300 bitmap is nowhere near the budget");
+}

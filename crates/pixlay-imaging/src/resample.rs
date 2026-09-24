@@ -32,6 +32,7 @@
 //! render, against 1.6 s with the tables.
 
 use crate::decode::Sampler;
+use crate::error::ImagingError;
 use crate::linear::LinearRgba16;
 use crate::transfer::{WGHT, srgb_to_linear_f32, to_fixed};
 
@@ -47,6 +48,59 @@ const LANCZOS_A: f64 = 3.0;
 /// seam.
 const BLOCK_ROWS: usize = 256;
 
+/// Largest a single bitmap may be, in texels: the canvas pixel budget
+/// ([`pixlay_core::MAX_CANVAS_PIXELS`]), applied at the second boundary a size is
+/// asked for (S15e, PIX-003).
+///
+/// A bitmap holds the part of the photo the slot can show, so it is the slot's own
+/// extent in output pixels plus the axis-aligned box a framing rotation needs —
+/// bounded by the canvas rather than by the zoom, which is what makes the canvas's
+/// own budget the right bound for it. **The displayed size needs no bound of its
+/// own**: `Region::display` is the size the whole photo is displayed at, and it can
+/// legitimately be enormous (a 20000-px-wide source in a 1:20000 aspect is
+/// displayed 6e11 px tall), while the region stays the slot's own extent because
+/// `display_region` clamps it into that display rectangle. Memory follows the
+/// region, so the region is what is budgeted.
+///
+/// Measured 2026-09-24 over the shipped library at every whole degree and six photo
+/// aspects: the worst single slot is **212.8 MP** — `strip-2-2x1g` at A0 (a
+/// half-canvas slot at 45 degrees, whose conversion alone would hold 3.9 GB) — and
+/// this refuses it; at the largest legal grid the worst is 215.8 MP, the same
+/// template and angle. What this bound does **not** cover is the *sum* over slots:
+/// measured the same day, `strip-9-9x1` at A0 with every cell at 45 degrees holds
+/// 403 MP of bitmaps at once, which is the memory budget's question rather than
+/// this pixel budget's.
+pub const MAX_BITMAP_PIXELS: u64 = pixlay_core::MAX_CANVAS_PIXELS;
+
+/// Refuses a bitmap past the budget, before a byte is allocated for it.
+///
+/// `what` names the offender for the message (`slot 3`, `a photo preview`): the
+/// whole-photo preview has no cell, and one budget covers both. `bytes` is what
+/// the caller's own conversion will hold at its peak — [`Region::conversion_bytes`]
+/// for a resampled slot, four bytes per texel for the probe's flat bitmap — and is
+/// carried into the message because "how much memory was this asking for" is the
+/// question the refusal exists to answer.
+///
+/// The check is on the destination's texels, which is what the conversion's memory
+/// follows: the three destination buffers are 18 bytes per texel, so the texel bound
+/// *is* the byte bound. The row strip is the one buffer that does not follow it, and
+/// it needs no bound of its own — for a source inside the decoder's caps it is
+/// `16 * dst_w * min(src_h, 262 * step)` bytes, `step = src_h / display_h`, and
+/// `dst_w <= display_w` with `display_w / display_h <= photo_aspect = src_w / src_h`:
+/// at most 4192 bytes per source column, so under 84 MB at `MAX_DECODE_EDGE`.
+pub fn check_bitmap(what: &str, region: &Region, bytes: u64) -> Result<(), ImagingError> {
+    let pixels = region.pixels();
+    if pixels > MAX_BITMAP_PIXELS {
+        return Err(ImagingError::BitmapTooLarge {
+            what: what.to_string(),
+            pixels,
+            bytes,
+            max: MAX_BITMAP_PIXELS,
+        });
+    }
+    Ok(())
+}
+
 /// A source rectangle and its destination, both in the *displayed* photo's pixel
 /// grid, plus the source size that grid was derived from.
 ///
@@ -59,9 +113,53 @@ pub struct Region {
     pub texels: (i32, i32, i32, i32),
 }
 
+impl From<pixlay_core::DisplayRegion> for Region {
+    fn from(region: pixlay_core::DisplayRegion) -> Self {
+        Self {
+            display: region.display,
+            texels: region.texels(),
+        }
+    }
+}
+
 impl Region {
     fn destination(&self) -> (u32, u32) {
         (self.texels.2.max(1) as u32, self.texels.3.max(1) as u32)
+    }
+
+    /// The bitmap's own texel count: its width times its height, and zero for a
+    /// region with no area.
+    pub fn pixels(&self) -> u64 {
+        let (_, _, width, height) = self.texels;
+        u64::from(width.max(0) as u32) * u64::from(height.max(0) as u32)
+    }
+
+    /// What this region's conversion holds at its peak, in bytes.
+    ///
+    /// Everything [`resample`] allocates for one destination, plus the flattened
+    /// buffer and the bitmap that follow it — all alive at the last step:
+    ///
+    /// | Buffer | Bytes | Source |
+    /// |---|---|---|
+    /// | the resampler's output, `LinearRgba16` | `8 * texels` | two bytes per channel, four channels |
+    /// | the row strip, `f32` RGBA | `16 * dst_w * rows` | one block's kernel reach, `rows` source rows |
+    /// | the flattened `LinearRgb16` | `6 * texels` | two bytes, three channels |
+    /// | the ARgb32 bitmap the canvas takes | `4 * texels` | one byte per channel |
+    ///
+    /// The strip is the one that does not follow the texel count: a block reaches
+    /// `BLOCK_ROWS * step` source rows plus the filter's own support on both ends
+    /// (`2 * LANCZOS_A * step`), with `step = src_h / display_h` and clamped by the
+    /// source's height. It is reported as part of the peak rather than checked on
+    /// its own — the three destination buffers above it are what the budget is
+    /// about, and they grow 18 bytes per texel where the strip grows 16 bytes per
+    /// destination *column*.
+    pub fn conversion_bytes(&self, source_height: u32) -> u64 {
+        let pixels = self.pixels();
+        let width = self.texels.2.max(1) as u64;
+        let step = f64::from(source_height) / self.display.1.max(f64::MIN_POSITIVE);
+        let reach = (BLOCK_ROWS as f64 + 2.0 * LANCZOS_A) * step.max(1.0);
+        let rows = reach.min(f64::from(source_height)).max(1.0) as u64;
+        18 * pixels + 16 * width * rows
     }
 }
 

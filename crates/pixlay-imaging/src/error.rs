@@ -61,11 +61,20 @@ pub enum ImagingError {
     #[error("slot {slot} cannot be laid out: empty geometry")]
     DegenerateSlot { slot: usize },
 
-    /// The displayed size does not fit Cairo's 32-bit surface dimensions.
-    #[error("slot {slot}: displayed bitmap {width}x{height} is out of range")]
+    /// A bitmap past the pipeline's budget, refused before it is allocated
+    /// (S15e, PIX-003).
+    ///
+    /// `what` names the offender for the message — `slot 3`, `a photo preview` —
+    /// because the preview path has no cell; `pixels` is the bitmap's own texel
+    /// count and `bytes` what its conversion holds at its peak, which is the
+    /// number that says why the budget exists.
+    #[error(
+        "{what}: bitmap needs {pixels} pixels ({bytes} bytes at the conversion peak); the limit is {max} pixels"
+    )]
     BitmapTooLarge {
-        slot: usize,
-        width: f64,
-        height: f64,
+        what: String,
+        pixels: u64,
+        bytes: u64,
+        max: u64,
     },
 }

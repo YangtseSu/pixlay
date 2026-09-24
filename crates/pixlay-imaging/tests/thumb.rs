@@ -219,3 +219,28 @@ fn a_preview_shows_the_whole_photo_rather_than_a_crop() {
         );
     }
 }
+
+/// A preview answers to the bitmap budget like a slot does (S15e, PIX-003):
+/// `thumbnail` is a public entry point and its region is the whole photo, so the
+/// caller's own long edge is what decides the destination's size. The CLI bounds
+/// the flag at 8192 px; a caller of the API is bounded here, before the resample
+/// allocates a 40000x40000 (5.7 GB) destination.
+#[test]
+fn a_preview_past_the_bitmap_budget_is_refused() {
+    let source = Flat {
+        width: 4000,
+        height: 3000,
+        color: [u16::MAX, u16::MAX, u16::MAX, u16::MAX],
+    };
+    let err = thumbnail(&source, 40000).expect_err("40000 px on both edges");
+    let message = err.to_string();
+    assert!(message.contains("a photo preview"), "{message}");
+    assert!(
+        message.contains("the limit is 200000000 pixels"),
+        "{message}"
+    );
+
+    // And the same photo at a size a picker uses still comes back.
+    let thumb = thumbnail(&source, 256).expect("a 256 px preview");
+    assert_eq!((thumb.width, thumb.height), (256, 192));
+}

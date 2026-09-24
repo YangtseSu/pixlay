@@ -91,6 +91,18 @@ pub const MAX_CANVAS_PIXELS: u64 = 200_000_000;
 /// would miss a template whose aspect is computed from slot geometry.
 pub const ASPECT_TOLERANCE: f64 = 1e-6;
 
+/// Smallest and largest template aspect ratio a layout may declare.
+///
+/// A template outside this range is not a collage layout (`docs/CONTRACT.md`
+/// §2): the aspect is the sheet's shape, so 10:1 is a strip rather than a page.
+/// Checked twice on purpose — where a template is validated
+/// ([`Template::validate`]) and where a pixel grid is derived from one
+/// ([`PixelSize::for_long_edge`]), because a grid's shape *is* the template's and
+/// a request that reached the second boundary without the first is refused
+/// rather than turned into a grid unrelated to the layout (S15e, PIX-027A).
+pub const MIN_TEMPLATE_ASPECT: f64 = 0.1;
+pub const MAX_TEMPLATE_ASPECT: f64 = 10.0;
+
 /// Smallest and largest slot count a template may declare.
 ///
 /// The ceiling was 10 while `strip-10-10x1` shipped; S12c removed that recipe, so

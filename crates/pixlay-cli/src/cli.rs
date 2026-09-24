@@ -613,6 +613,14 @@ fn render(args: RenderArgs) -> Result<u8, Failure> {
         width: pixlay_render::output_px(canvas_px.width, scale),
         height: pixlay_render::output_px(canvas_px.height, scale),
     };
+    // `--preview-px` is a long edge, and the grid it derives is the one that gets
+    // allocated: a square template at the flag's own maximum is 400 MP, so the
+    // canvas pixel budget is checked on the *scaled* grid too (S15e, PIX-003).
+    // Asked here — before the first decode and before `draw` — so a refused render
+    // costs nothing and writes nothing.
+    bitmap_px
+        .validate()
+        .map_err(|error| Failure::Failed(error.to_string()))?;
 
     let stopwatch = stats::Stopwatch::start();
     // The photo-free path has no cells to decode: every slot stays white.
@@ -987,8 +995,13 @@ fn gesture(args: GestureArgs) -> Result<u8, Failure> {
     };
 
     // The grid the window rests at, and the grid it draws at while a gesture is
-    // live — the editor's own two (`pixlay_imaging::gesture_grid`).
-    let resting = preview_grid(args.grid, doc.template.aspect);
+    // live — the editor's own two (`pixlay_imaging::gesture_grid`). The resting
+    // grid is derived by the same function the window's and `render`'s are, so the
+    // rounding and the canvas pixel budget are one rule rather than three
+    // (S15e, PIX-003): a 20000-px grid on a 4:3 canvas is 300 MP and is refused
+    // before a single decode.
+    let resting = PixelSize::for_long_edge(doc.template.aspect, args.grid)
+        .map_err(|error| Failure::Failed(error.to_string()))?;
     let moving = gesture_grid(resting);
 
     let mut preview = Preview::new();
@@ -1095,26 +1108,6 @@ fn gesture(args: GestureArgs) -> Result<u8, Failure> {
     add_stats(&mut report, args.stats, total, None, "none");
     emit(&report, args.json);
     Ok(EXIT_SUCCESS)
-}
-
-/// The resting canvas grid `--grid` names: its long edge is exactly the pixels
-/// asked for, and the other edge follows the canvas's own ratio.
-fn preview_grid(long_edge: u32, aspect: f64) -> PixelSize {
-    let long = long_edge as i32;
-    let short = (f64::from(long_edge) / aspect.max(f64::MIN_POSITIVE))
-        .round()
-        .max(1.0) as i32;
-    if aspect >= 1.0 {
-        PixelSize {
-            width: long,
-            height: short,
-        }
-    } else {
-        PixelSize {
-            width: short,
-            height: long,
-        }
-    }
 }
 
 fn probe(args: ProbeArgs) -> Result<u8, Failure> {
