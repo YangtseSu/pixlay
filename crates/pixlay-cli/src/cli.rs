@@ -12,13 +12,14 @@ use std::path::{Path, PathBuf};
 
 use pixlay_core::{Command as Edit, CropTransform, History, PixelSize, Project, canvas_grid};
 use pixlay_imaging::destination::refuse_source_alias;
-use pixlay_imaging::preview::{GESTURE_STEP_DEG, preview_source_long_edge};
+use pixlay_imaging::preview::GESTURE_STEP_DEG;
 use pixlay_imaging::{Export, Format, Preview, Rgb8View, SlotBitmap, gesture_grid, icc};
 use pixlay_render::Images;
 
 use crate::args::{
     self, Command, DEFAULT_LONG_EDGE_PX, EditArgs, GestureArgs, HitArgs, ImageArgs, InitArgs,
-    ProbeArgs, RenderArgs, SaveArgs, ScanArgs, Source, SwitchArgs, TemplatesArgs, ThumbArgs, USAGE,
+    ProbeArgs, RenderArgs, SaveArgs, ScanArgs, SketchArgs, Source, SwitchArgs, TemplatesArgs,
+    ThumbArgs, USAGE,
 };
 use crate::report::Report;
 use crate::stats;
@@ -608,6 +609,9 @@ fn render(args: RenderArgs) -> Result<u8, Failure> {
             Format::EXTENSIONS
         ))
     })?;
+    if let Some(sketch) = &args.sketch {
+        return render_sketch(&args, sketch, format);
+    }
     // Load the document first: a broken project must fail before anything is
     // rendered, and its message must name the path that is wrong.
     let (mut doc, sources) = match &args.source {
@@ -721,6 +725,81 @@ fn render(args: RenderArgs) -> Result<u8, Failure> {
     if let Some(preview) = args.preview_px {
         report.int("preview_px", i64::from(preview));
     }
+    add_stats(
+        &mut report,
+        args.stats,
+        compose,
+        Some(encode_ms),
+        icc::DESCRIPTION,
+    );
+    emit(&report, args.json);
+    Ok(EXIT_SUCCESS)
+}
+
+/// `render --sketch`: a template's *geometry*, drawn — no decode, no document.
+///
+/// The same call the window's layout band makes for every candidate, with the
+/// same three parameters: the band passes its theme's colours, and a caller that
+/// passes the same values at the same grid gets the same pixels (the parity
+/// `crates/pixlay/tests/layout.rs` holds both sides to).
+fn render_sketch(args: &RenderArgs, sketch: &SketchArgs, format: Format) -> Result<u8, Failure> {
+    let Source::Template(name) = &args.source else {
+        // `parse` refuses a sketch without `--template`; this is the same rule
+        // from the other side, so no future caller reaches the renderer with a
+        // sketch of a project's photos.
+        return Err(Failure::Usage(
+            "--sketch draws a template's geometry: give --template <name>".to_string(),
+        ));
+    };
+    let template = pixlay_core::templates::get(name).ok_or_else(|| {
+        Failure::Usage(format!(
+            "unknown template {name}; this build knows: {}",
+            pixlay_core::templates::names().join(", ")
+        ))
+    })?;
+    let long_edge = args.long_edge.unwrap_or(DEFAULT_LONG_EDGE_PX);
+    let canvas_px = PixelSize::for_long_edge(template.aspect, long_edge)
+        .map_err(|error| Failure::Failed(error.to_string()))?;
+
+    let stopwatch = stats::Stopwatch::start();
+    let image = pixlay_render::sketch_rgb8(&template, canvas_px, &sketch.style())
+        .map_err(|error| Failure::Failed(error.to_string()))?;
+    let compose = stopwatch.elapsed();
+
+    // Pixels and metadata in one pass, exactly as a render encodes.
+    let encode_watch = stats::Stopwatch::start();
+    let bytes = pixlay_imaging::encode::write(
+        &args.out,
+        &Export {
+            format,
+            image: Rgb8View {
+                width: image.width,
+                height: image.height,
+                data: &image.data,
+            },
+        },
+    )
+    .map_err(|error| Failure::Failed(error.to_string()))?;
+    let encode_ms = encode_watch.elapsed();
+
+    let mut report = Report::new();
+    report.text("status", "ok");
+    report.text("command", "render");
+    report.text("format", format.name());
+    report.bool("sketch", true);
+    report.text(
+        "paper",
+        rgb([sketch.paper.r, sketch.paper.g, sketch.paper.b]),
+    );
+    report.text("ink", rgb([sketch.ink.r, sketch.ink.g, sketch.ink.b]));
+    report.float("stroke", sketch.stroke_px);
+    // One outline per slot, which is the whole drawing: a sketch has no cells
+    // with photos, no occupancy and no frame, so those fields do not exist here.
+    report.int("slots", template.slots.len() as i64);
+    report.int("long_edge", i64::from(image.width.max(image.height)));
+    report.int("out_w", i64::from(image.width));
+    report.int("out_h", i64::from(image.height));
+    report.int("bytes", bytes as i64);
     add_stats(
         &mut report,
         args.stats,
@@ -1029,7 +1108,8 @@ fn thumb(args: ThumbArgs) -> Result<u8, Failure> {
 /// the decoded photo, so against a 6000-px file the field went from 6000 to the
 /// copy's own long edge; "the big decode left the step" is therefore a number the
 /// report carries rather than an assumption, and `open`'s and `refine`'s copies
-/// (the resting grid's, one [`preview_source_long_edge`] wide) and `cold`'s (the
+/// (the resting grid's, one `pixlay_imaging::preview::preview_source_long_edge`
+/// wide) and `cold`'s (the
 /// gesture grid's, half of it) are that function of the grids the report already
 /// prints.
 ///
@@ -1285,25 +1365,18 @@ fn switch(args: SwitchArgs) -> Result<u8, Failure> {
     let mut band_candidates = 0;
     if args.band {
         let band_step = stats::Stopwatch::start();
-        // The canvas's own edge (S14): the band's copies *are* the canvas's, so its
-        // builds decode nothing the switch has not decoded already.
-        let edge = preview_source_long_edge(grid);
+        // What the window's band does on the same click (S21): every candidate of
+        // the new cell count is a **sketch** at the band's thumbnail grid — the
+        // template's own geometry, drawn — so there is no `Preview` here and no
+        // decode: the band no longer touches the document's photos at all. The
+        // colours are the renderer's defaults where the window passes its
+        // theme's; the values do not change the work, and this ruler measures
+        // time.
+        let style = pixlay_render::Sketch::default();
         let listed = pixlay_core::templates::with_slots(doc.cells.len());
         for listed_template in &listed {
-            let mut candidate = doc.clone();
-            candidate.template = listed_template.clone();
-            candidate
-                .cells
-                .resize(listed_template.slots.len(), Default::default());
-            let slice = &sources[..candidate.cells.len().min(sources.len())];
             let candidate_grid = pixlay_core::templates::candidate_grid(listed_template.aspect);
-            let candidate_built =
-                preview.build_at_source_edge(&candidate, slice, candidate_grid, edge);
-            let mut images = Images::new();
-            for bitmap in &candidate_built.bitmaps {
-                images.insert(bitmap.slot, render_bitmap(bitmap)?);
-            }
-            pixlay_render::render_rgb8(&candidate, &images, candidate_grid, 1.0, None)
+            pixlay_render::sketch_rgb8(listed_template, candidate_grid, &style)
                 .map_err(|error| Failure::Failed(error.to_string()))?;
         }
         band_candidates = listed.len();

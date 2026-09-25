@@ -45,7 +45,7 @@ use pixlay_core::{
     CollageDoc, Command, CoreError, CropTransform, Frame, MAX_PHOTOS, MIN_PHOTOS, PixelSize,
     Project, Template, templates,
 };
-use pixlay_imaging::{gesture_grid, preview_source_long_edge};
+use pixlay_imaging::gesture_grid;
 use pixlay_render::Images;
 
 use crate::a11y;
@@ -190,10 +190,6 @@ mod imp {
         pub gallery_generation: Cell<u64>,
         /// Whether a gallery build is outstanding, which is what the tests wait on.
         pub gallery_pending: Cell<bool>,
-        /// Files the *band's* own builds decoded: S14's criterion counts that
-        /// share ("the gallery costs no decode the canvas does not already pay
-        /// for"), not the thread's total.
-        pub gallery_decodes: Cell<u64>,
         /// Builds of the band that have landed and were accepted (S15).
         ///
         /// The tests' handle on "the band was built": the flag above says whether a
@@ -260,7 +256,6 @@ mod imp {
                 gallery: OnceCell::new(),
                 gallery_generation: Cell::new(0),
                 gallery_pending: Cell::new(false),
-                gallery_decodes: Cell::new(0),
                 gallery_builds: Cell::new(0),
                 banner: OnceCell::new(),
                 toast: OnceCell::new(),
@@ -867,17 +862,6 @@ impl EditorWindow {
     /// because the disk was touched all the same.
     pub fn decoded_sources(&self) -> u64 {
         self.imp().decoded.get()
-    }
-
-    /// Files the layout band's own builds decoded.
-    ///
-    /// The tests' handle on S14's central claim — the band shares the canvas's
-    /// preview-grade copies, so it costs **0** decodes of its own however many
-    /// candidates it lists ("N decodes, never N×C") — and nothing else reads it:
-    /// the count is a fact about the worker, and the window itself has no use for
-    /// it.
-    pub fn gallery_decodes(&self) -> u64 {
-        self.imp().gallery_decodes.get()
     }
 
     /// Layout-band builds that have landed since the window opened.
@@ -2105,11 +2089,16 @@ impl EditorWindow {
         self.imp().images.replace((PLACEHOLDER_GRID, Images::new()));
     }
 
-    /// Queues the gallery's build: every layout with the document's photo count,
-    /// drawn with the document's own photos.
+    /// Queues the gallery's build: every layout with the document's cell count,
+    /// drawn as a sketch.
     ///
-    /// On the canvas's own worker (`decode.rs`), and the step's criterion is that
-    /// `decoded_sources` does not move when the band is rebuilt.
+    /// On the canvas's own worker (`decode.rs`) because that is where the band's
+    /// builds have always run — one thread owns every background drawing — but
+    /// there is nothing to decode any more (S21): a candidate is its template's
+    /// geometry, so the job names no file and `decoded_sources` does not move.
+    ///
+    /// The two colours come from the band's own widgets ([`Gallery::sketch_style`]),
+    /// read here on the main thread and sent as plain data.
     fn request_gallery(&self) {
         // The band is the *editor* stage's surface: while the picker is on screen a
         // build would be work nobody can see — and it is not cheap in a debug build,
@@ -2121,6 +2110,9 @@ impl EditorWindow {
         if self.stage() != Stage::Editor {
             return;
         }
+        let Some(gallery) = self.imp().gallery.get() else {
+            return;
+        };
         let candidates: Vec<(Template, PixelSize)> = self
             .candidate_templates()
             .into_iter()
@@ -2129,22 +2121,13 @@ impl EditorWindow {
                 (template, grid)
             })
             .collect();
-        // The canvas's own edge: the band's copies *are* the canvas's copies, and
-        // the two jobs go out together only while the canvas is at rest — the two
-        // conditions under which this call happens (`refresh_document` after an
-        // edit, `request_grid_for` when the resting grid moved) are also the ones
-        // that send the canvas job for that same edge.
-        let source_edge = preview_source_long_edge(self.resting_grid());
-        let sources = self.imp().editor.borrow().sources();
-        let doc = self.display_document();
+        let style = gallery.sketch_style();
         // The request's own borrow of the decoder ends before anything is reported:
         // the failure path calls back into the window, which reads the same field.
         let outcome = {
             let mut decoder = self.imp().decoder.borrow_mut();
             match decoder.as_mut() {
-                Some(decoder) => {
-                    decoder.request_gallery(&doc, sources.paths, candidates, source_edge)
-                }
+                Some(decoder) => decoder.request_gallery(candidates, style),
                 None => Err(Down::Start),
             }
         };
@@ -2164,15 +2147,9 @@ impl EditorWindow {
 
     /// One gallery build arrived.
     fn on_gallery(&self, reply: GalleryReply) {
-        // Counted like the canvas's decodes (and for the same reason): the claim
-        // "the whole gallery costs one decode per photo" is a claim about this
-        // number, and a superseded build decoded the same files all the same.
-        self.imp()
-            .decoded
-            .set(self.imp().decoded.get() + reply.decodes);
-        self.imp()
-            .gallery_decodes
-            .set(self.imp().gallery_decodes.get() + reply.decodes);
+        // No decode is counted here, and none can be: since S21 the band's job is a
+        // list of templates, and a sketch names no file. `decoded_sources` is the
+        // one counter of decoded files, and the band's builds do not move it.
         if reply.generation != self.imp().gallery_generation.get() {
             return;
         }

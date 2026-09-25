@@ -76,6 +76,7 @@ pixlay-render - headless renderer and probe for Pixlay projects
 USAGE:
     pixlay-render render --project <file.pixlay> --out <file> [OPTIONS]
     pixlay-render render --template <name> --long-edge <n> --out <file> [OPTIONS]
+    pixlay-render render --template <name> --sketch --out <file> [SKETCH OPTIONS]
     pixlay-render probe  --project <file.pixlay> [OPTIONS]
     pixlay-render image  --photo <file> [--json]
     pixlay-render scan   --dir <path> [--recursive] [--json]
@@ -92,7 +93,8 @@ USAGE:
 
 RENDER OPTIONS:
     --project <file>    Project to render. Paths inside it are relative to it.
-    --template <name>   Render a template with no photos (see `templates`).
+    --template <name>   Render a template with no photos (see `templates`); with
+                        --sketch, draw the template's geometry instead.
     --out <file>        Output file. Format comes from the extension:
                         .png, .jpg, .jpeg. Required. An existing file is
                         replaced; a path that names one of the project's own
@@ -126,6 +128,24 @@ FRAME OPTIONS (render, edit):
                         empty cell. The alpha of a stored colour is always 255:
                         the backdrop is painted, not blended, so an export is
                         never transparent and a preview is the same picture.
+
+SKETCH OPTIONS (render --sketch):
+    Draws a template's *geometry*: every cell's outline stroked in ink over the
+    sheet's ground. This is what the window's layout band shows for each
+    candidate, so the same grid and the same three parameters reproduce a
+    candidate's pixels exactly. The sheet's aspect is the template's declared
+    one, so --long-edge sizes the image as it does for a render; a sketch has no
+    frame, no photos and no --preview-px.
+    --paper <r,g,b>     The sheet's ground, 0..=255 per channel. Default
+                        255,255,255: a document-like sheet, where the window
+                        passes its theme's own colours.
+    --ink <r,g,b>       The colour the cell outlines are stroked in, 0..=255 per
+                        channel. Default 0,0,0.
+    --stroke <px>       Stroke width, positive and finite. Default 1. The sheet's
+                        own edge is stroked inside the image, so the border is a
+                        full line and not a clipped one; a shared edge is one line
+                        of this width, because both neighbours stroke the same
+                        path.
 
 PROBE OPTIONS:
     --project <file>    Project to probe. Required.
@@ -217,9 +237,11 @@ SWITCH OPTIONS:
                         a 4:3 sheet and 980x551 for a 16:9 one, so the switch's
                         preview-grade copies are for another edge.
     --band              Measure the layout band's rebuild with the switch: every
-                        candidate of the new cell count, rendered at the grid the
-                        window renders a candidate at. Its share is `band_ms`, so
-                        `with and without the band` is two runs of this command.
+                        candidate of the new cell count, drawn as a *sketch* of
+                        its geometry at the grid the window draws a candidate at
+                        (S21; the window's own band does the same with its
+                        theme's colours). Its share is `band_ms`, so `with and
+                        without the band` is two runs of this command.
     `switch` measures the layout change the window's click produces, on a project
     already open on another layout: `template_ms` (the SetTemplate step and the new
     grid), `sources_ms` (the preview-grade copies — one decode per file whose copy
@@ -386,8 +408,31 @@ pub struct RenderArgs {
     /// Frame overrides for this render only: the document is not changed, and
     /// nothing is written back to it (`edit` is the command that stores a frame).
     pub frame: FrameArgs,
+    /// `--sketch`: draw the template's geometry instead of a document. `Some`
+    /// carries the three parameters, already at their defaults where the command
+    /// line named none.
+    pub sketch: Option<SketchArgs>,
     pub stats: bool,
     pub json: bool,
+}
+
+/// The sketch's three parameters as the command line carries them: the sheet's
+/// ground, the ink of its cell outlines, and the stroke's width in pixels.
+pub struct SketchArgs {
+    pub paper: Rgba8,
+    pub ink: Rgba8,
+    pub stroke_px: f64,
+}
+
+impl SketchArgs {
+    /// The renderer's own view of the three.
+    pub fn style(&self) -> pixlay_render::Sketch {
+        pixlay_render::Sketch {
+            paper: self.paper,
+            ink: self.ink,
+            stroke_px: self.stroke_px,
+        }
+    }
 }
 
 /// The frame flags, as a command line carries them: each is `Some` only when the
@@ -581,6 +626,12 @@ struct Flags {
     steps: Option<u32>,
     /// `--band`: measure the layout band's own rebuild as part of a switch.
     band: bool,
+    /// `--sketch`: draw a template's geometry instead of a document's photos.
+    sketch: bool,
+    /// `--paper` / `--ink` / `--stroke`: the sketch's own parameters.
+    paper: Option<Rgba8>,
+    ink: Option<Rgba8>,
+    stroke: Option<f64>,
     /// `--canvas <w>x<h>`: the canvas widget a switch's two grids are derived from.
     canvas: Option<(i32, i32)>,
     gap: Option<f64>,
@@ -617,6 +668,10 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
             "gap",
             "radius",
             "border-color",
+            "sketch",
+            "paper",
+            "ink",
+            "stroke",
             "stats",
         ],
         "probe" => &["project", "long-edge", "stats"],
@@ -723,6 +778,10 @@ fn reason(name: &str, flag: &str) -> &'static str {
         (_, "grid") => "only `gesture` measures at a canvas grid",
         (_, "steps") => "only `gesture` runs a sequence of steps",
         (_, "band") => "only `switch` measures the layout band's rebuild",
+        (_, "sketch") => "only `render` draws a template's geometry as a sketch",
+        (_, "paper" | "ink" | "stroke") => {
+            "only `render --sketch` has a paper, an ink and a stroke"
+        }
         (_, "canvas") => "only `switch` measures at a canvas widget's size",
         (
             "probe" | "image" | "scan" | "thumb" | "templates" | "init" | "hit" | "save",
@@ -905,6 +964,24 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                 set_once(&mut flags.steps, steps, "steps")?;
             }
             "band" => flags.band = true,
+            "sketch" => flags.sketch = true,
+            "paper" => {
+                let color = parse_color(&value("paper")?)?;
+                set_once(&mut flags.paper, color, "paper")?;
+            }
+            "ink" => {
+                let color = parse_color(&value("ink")?)?;
+                set_once(&mut flags.ink, color, "ink")?;
+            }
+            "stroke" => {
+                let width = float(&value("stroke")?, "stroke")?;
+                if width <= 0.0 {
+                    return Err(Failure::Usage(format!(
+                        "--stroke {width} is not a line: a stroke width is positive"
+                    )));
+                }
+                set_once(&mut flags.stroke, width, "stroke")?;
+            }
             "canvas" => {
                 let box_size = parse_size(&value("canvas")?, "canvas")?;
                 set_once(&mut flags.canvas, box_size, "canvas")?;
@@ -1200,15 +1277,52 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
         }
         _ => {
             let source = source_of("render", &flags)?;
-            let out = flags
-                .out
-                .ok_or_else(|| Failure::Usage("render needs --out <file>".to_string()))?;
             if flags.long_edge.is_some() && flags.preview_px.is_some() {
                 return Err(Failure::Usage(
                     "--preview-px renders a preview of the export; --long-edge sizes the export"
                         .to_string(),
                 ));
             }
+            // A sketch is a *template's* geometry: the document's own fields (its
+            // frame, its photos, a preview of a finished collage) have nothing to
+            // apply to, and taking one as if it did would be a silent drop.
+            let colors = flags.paper.is_some() || flags.ink.is_some() || flags.stroke.is_some();
+            if !flags.sketch && colors {
+                return Err(Failure::Usage(
+                    "--paper, --ink and --stroke are the sketch's parameters: give --sketch"
+                        .to_string(),
+                ));
+            }
+            let sketch = if flags.sketch {
+                if !matches!(source, Source::Template(_)) {
+                    return Err(Failure::Usage(
+                        "--sketch draws a template's geometry: give --template <name>".to_string(),
+                    ));
+                }
+                if flags.preview_px.is_some() {
+                    return Err(Failure::Usage(
+                        "--sketch draws at --long-edge; there is no document to preview"
+                            .to_string(),
+                    ));
+                }
+                if flags.frame_any() {
+                    return Err(Failure::Usage(
+                        "--sketch draws a template; the frame (--gap/--radius/--border-color) is a document's"
+                            .to_string(),
+                    ));
+                }
+                let defaults = pixlay_render::Sketch::default();
+                Some(SketchArgs {
+                    paper: flags.paper.unwrap_or(defaults.paper),
+                    ink: flags.ink.unwrap_or(defaults.ink),
+                    stroke_px: flags.stroke.unwrap_or(defaults.stroke_px),
+                })
+            } else {
+                None
+            };
+            let out = flags
+                .out
+                .ok_or_else(|| Failure::Usage("render needs --out <file>".to_string()))?;
             Ok(Command::Render(RenderArgs {
                 source,
                 out,
@@ -1219,6 +1333,7 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                     radius: flags.radius,
                     border: flags.border,
                 },
+                sketch,
                 stats: flags.stats,
                 json: flags.json,
             }))

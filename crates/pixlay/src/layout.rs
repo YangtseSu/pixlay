@@ -1,32 +1,29 @@
-//! The layout stage: every candidate layout of the current photo count, drawn with
-//! the user's own photos, plus the count control that decides what that count is.
+//! The layout stage: every candidate layout of the current photo count, drawn as a
+//! sketch of its geometry, plus the count control that decides what that count is.
 //!
 //! Stage 3 of the main path (`AGENTS.md`: `open → add photos → pick a layout →
 //! adjust → export`), and **a band on the document's page rather than a third
 //! page** (S14): a second `AdwNavigationPage` would have to own a second canvas, and
 //! S15's compose controls attach to the canvas this band sits under.
 //!
-//! # The candidates are real documents
+//! # The candidates are sketches
 //!
-//! The list is `Selection::layouts()` — every template with exactly the photo
-//! count, in library order (`S14 · Ruling`, 2026-09-23) — and each one is drawn as
-//! a **real `CollageDoc`**: the document in the editor with
-//! `Command::SetTemplate` applied, so the cells that survive keep their photo and
-//! framing. Its thumbnail is therefore `pixlay_render::render_rgb8` of that
-//! document, the same call `pixlay-render render` makes, which is what makes "the
-//! gallery is not a second renderer" a comparison of two calls rather than of two
-//! implementations.
+//! The list is [`crate::window::EditorWindow::candidate_templates`] — every template
+//! with exactly the document's cell count, in library order — and each candidate is
+//! drawn by `pixlay_render::sketch_rgb8`: its cells' outlines stroked over the
+//! sheet's ground (ruling 32 of the plan of 2026-09-25; S21). A template carries
+//! geometry and nothing else, so a sketch is a complete account of it — and the band
+//! therefore **decodes nothing**: no photo enters the strip, so the strip's cost is
+//! a few hundred microseconds however many candidates it lists (measured 2026-09-26:
+//! 0.12–0.14 ms per candidate at the band's grid, `--release`).
 //!
-//! # What it costs, and what it must not cost
+//! # The two colours come from the theme
 //!
-//! The gallery renders on the *canvas's* decode worker ([`crate::decode`]), one
-//! thread and one [`Preview`](pixlay_imaging::Preview), and it asks that worker for
-//! the copies **at the canvas's own preview-grade edge**
-//! (`Preview::build_at_source_edge`) — so the band's own builds decode nothing the
-//! canvas has not already decoded, however many candidates it lists. Measured
-//! 2026-09-23 (`docs/CONTRACT.md` §8, "S14"): **0** decodes for a three-candidate
-//! band, 74.6 ms to rebuild it (`--release`), and pixels within **0.083** RMSE of a
-//! full-resolution render of the same candidates.
+//! A candidate is interface, not content, so its paper and its ink are the theme's
+//! own: the two probe widgets below carry the classes `style.css` gives the colours
+//! to, and [`Gallery::sketch_style`] reads them back through
+//! `GtkWidget::color()` — public, non-deprecated API, and the colours themselves
+//! stay in CSS where the rest of the app's colours live.
 //!
 //! # The strip
 //!
@@ -47,15 +44,24 @@ use gtk4::glib;
 use gtk4::prelude::*;
 
 use pixlay_core::templates::CANDIDATE_BOX;
-use pixlay_core::{MAX_PHOTOS, MIN_PHOTOS};
-use pixlay_render::Rgb8Image;
+use pixlay_core::{MAX_PHOTOS, MIN_PHOTOS, Rgba8};
+use pixlay_render::{Rgb8Image, Sketch};
 
 use crate::a11y;
 use crate::i18n::{fill, gettext};
 use crate::picture::Picture;
 use crate::window::EditorWindow;
 
-/// One rendered candidate, as the worker hands it back.
+/// The sketch's stroke width, in the thumbnail's own pixels.
+///
+/// One pixel: the band's cells are [`CANDIDATE_BOX`] (128x96), and a hairline is
+/// what makes a cell's edges read as *lines* rather than as filled bars at that
+/// size (S21; the reference's own layout strip draws them the same way). The
+/// human's legibility gate is where this is judged; the CLI takes the width as a
+/// parameter and defaults to the same one.
+const SKETCH_STROKE_PX: f64 = 1.0;
+
+/// One drawn candidate, as the worker hands it back.
 ///
 /// Plain data on purpose: it crosses the thread boundary
 /// (`glib::MainContext::invoke`), and a GTK object never leaves the main thread.
@@ -90,6 +96,11 @@ pub struct Gallery {
     /// Set while this module writes the buttons' own state, so that a highlight
     /// does not read back as a user choosing a layout (the picker's own idiom).
     syncing: Rc<Cell<bool>>,
+    /// The two widgets that carry the sketch's colours, which `style.css` gives
+    /// them: `GtkWidget::color()` is the one public way to read a theme colour
+    /// back, so the band probes its own stylesheet instead of naming a value.
+    paper_probe: gtk::Label,
+    ink_probe: gtk::Label,
 }
 
 impl Gallery {
@@ -135,6 +146,16 @@ impl Gallery {
         root.append(&control);
         root.append(&strip);
 
+        // The two colour probes: invisible labels whose only job is to carry the
+        // classes `style.css` defines the sketch's colours with. They are never
+        // allocated (an invisible child takes no room) and they are the band's own,
+        // so the colours resolve through the same stylesheet the rest of the
+        // window is drawn from.
+        let paper_probe = colour_probe("sketch-paper");
+        let ink_probe = colour_probe("sketch-ink");
+        root.append(&paper_probe);
+        root.append(&ink_probe);
+
         let gallery = Rc::new(Self {
             root,
             minus,
@@ -147,6 +168,8 @@ impl Gallery {
             pictures: RefCell::new(HashMap::new()),
             order: RefCell::new(Vec::new()),
             syncing: Rc::new(Cell::new(false)),
+            paper_probe,
+            ink_probe,
         });
 
         gallery.minus.connect_clicked(glib::clone!(
@@ -207,8 +230,9 @@ impl Gallery {
             .map(|button| button.widget_name().to_string())
     }
 
-    /// One candidate's pixels, which is what the pixel criterion compares.
-    pub fn thumbnail(&self, template: &str) -> Option<(i32, i32, Vec<u8>)> {
+    /// One candidate's pixels — its sketch, which is what the pixel criterion
+    /// compares.
+    pub fn sketch(&self, template: &str) -> Option<(i32, i32, Vec<u8>)> {
         let pictures = self.pictures.borrow();
         let picture = pictures.get(template)?;
         Some((picture.width(), picture.height(), picture.bytes().to_vec()))
@@ -217,6 +241,20 @@ impl Gallery {
     /// The cell bound to a candidate, for the tests and the HIG checks.
     pub fn cell(&self, template: &str) -> Option<gtk::ToggleButton> {
         self.buttons.borrow().get(template).cloned()
+    }
+
+    /// The sketch's three parameters, with the two colours read from the theme
+    /// (see the module docs).
+    ///
+    /// Read on the main thread, at the moment a build is asked for, and handed to
+    /// the worker as plain data: a colour resolved here is a colour resolved
+    /// against the widgets the band is actually drawn with.
+    pub fn sketch_style(&self) -> Sketch {
+        Sketch {
+            paper: probe_color(&self.paper_probe),
+            ink: probe_color(&self.ink_probe),
+            stroke_px: SKETCH_STROKE_PX,
+        }
     }
 
     // ---- what the window writes -------------------------------------------
@@ -233,13 +271,23 @@ impl Gallery {
         if candidates.is_empty() {
             self.cells.append(&self.placeholder);
         }
-        for candidate in candidates {
+        let count = candidates.len();
+        for (index, candidate) in candidates.into_iter().enumerate() {
             let picture = Rc::new(Picture::rgb8(
                 candidate.image.width,
                 candidate.image.height,
                 candidate.image.data,
             ));
-            let button = candidate_cell(window, &candidate.template, &picture, &self.syncing);
+            // The cell's accessible name is **positional** (ruling 40): a
+            // candidate is its sketch, and the template's name is machine identity
+            // (`edit --template`), never text a user reads.
+            let button = candidate_cell(
+                window,
+                &candidate.template,
+                &picture,
+                &self.syncing,
+                (index + 1, count),
+            );
             self.cells.append(&button);
             order.push(candidate.template.clone());
             self.buttons
@@ -305,34 +353,25 @@ impl Gallery {
     }
 }
 
-/// The strip's empty state: a candidate cell with nothing in it.
+/// The strip's empty state: a candidate cell with nothing drawn in it.
 ///
-/// **The same widgets as a candidate** — a `GtkToggleButton` with the same class and
-/// the same content shape, only insensitive and with an empty thumbnail — because
-/// the band's height decides how much the canvas above it gets, and the candidates
-/// arrive from a **background build**: a placeholder of a different size means the
-/// canvas is laid out twice on every open, which is one more grid and one more
-/// decode of every photo (measured 2026-09-23: the canvas lost 105 px when the band
-/// filled, and the eight-photo verification document was decoded 21 times instead of
-/// 14). Same widgets, same height, whatever the theme and whatever the font size.
+/// **The same widgets as a candidate** — a `GtkToggleButton` holding a box of
+/// [`CANDIDATE_BOX`], only insensitive and with no picture — because the band's
+/// height decides how much the canvas above it gets, and the candidates arrive
+/// from a **background build**: a placeholder of a different size means the canvas
+/// is laid out twice on every open, which is one more grid and one more decode of
+/// every photo (measured 2026-09-23: the canvas lost 105 px when the band filled,
+/// and the eight-photo verification document was decoded 21 times instead of 14).
+/// Same widgets, same height, whatever the theme and whatever the font size.
 ///
-/// The caption is short because a cell is [`CANDIDATE_BOX`] wide; the whole sentence is
-/// the tooltip and the accessible name.
+/// Since S21 a candidate has no caption (ruling 40), so neither has this: the
+/// sentence is the tooltip and the accessible name, and the box is the height.
 fn placeholder_cell() -> gtk::ToggleButton {
     let spacer = gtk::Box::new(gtk::Orientation::Vertical, 0);
     spacer.set_width_request(CANDIDATE_BOX.0);
     spacer.set_height_request(CANDIDATE_BOX.1);
-    let caption = gtk::Label::builder()
-        .label(gettext("No layout"))
-        .ellipsize(gtk::pango::EllipsizeMode::Middle)
-        .build();
-    caption.add_css_class("caption");
-    caption.add_css_class("dim-label");
-    let content = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    content.append(&spacer);
-    content.append(&caption);
 
-    let cell = gtk::ToggleButton::builder().child(&content).build();
+    let cell = gtk::ToggleButton::builder().child(&spacer).build();
     cell.add_css_class("layout-cell");
     cell.set_sensitive(false);
     cell.set_tooltip_text(Some(&gettext("No layout has this many photos")));
@@ -340,17 +379,25 @@ fn placeholder_cell() -> gtk::ToggleButton {
     cell
 }
 
-/// One candidate: its thumbnail, its name, and the toggle that chooses it.
+/// One candidate: its sketch, the toggle that chooses it, and where it sits in the
+/// strip.
 ///
 /// A `GtkToggleButton`, not a custom-drawn cell: HIG `guidelines/accessibility`
 /// and `guidelines/pointer-touch` then cover it for free (it is focusable, it is
 /// named, and `Space` activates it), which is the same reasoning ruling 9 uses for
 /// S15's floating buttons.
+///
+/// `position` is `(the candidate's place, how many candidates there are)` and it is
+/// the cell's **whole** accessible name: a candidate is its sketch, so "Layout 3 of
+/// 5" is what a screen reader has to say about it, and no template name is text a
+/// user reads (ruling 40). The widget's own name stays the template's — that is how
+/// the window and the tests find the cell (`Gallery::cell`), not user-visible copy.
 fn candidate_cell(
     window: &EditorWindow,
     template: &str,
     picture: &Rc<Picture>,
     syncing: &Rc<Cell<bool>>,
+    position: (usize, usize),
 ) -> gtk::ToggleButton {
     let image = gtk::Picture::builder()
         .content_fit(gtk::ContentFit::Contain)
@@ -359,21 +406,14 @@ fn candidate_cell(
         .height_request(CANDIDATE_BOX.1)
         .paintable(picture.texture())
         .build();
-    let caption = gtk::Label::builder()
-        .label(template)
-        .ellipsize(gtk::pango::EllipsizeMode::Middle)
-        .build();
-    caption.add_css_class("caption");
-    caption.add_css_class("dim-label");
 
-    let content = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    content.append(&image);
-    content.append(&caption);
-
-    let button = gtk::ToggleButton::builder().child(&content).build();
+    let button = gtk::ToggleButton::builder().child(&image).build();
     button.set_widget_name(template);
     button.add_css_class("layout-cell");
-    a11y::label(&button, &fill(gettext("Layout {}"), &[template]));
+    a11y::label(
+        &button,
+        &fill(gettext("Layout {} of {}"), &[position.0, position.1]),
+    );
     // Owned, because the handler outlives this call.
     let template = template.to_string();
     button.connect_toggled(glib::clone!(
@@ -402,6 +442,35 @@ fn candidate_cell(
         }
     ));
     button
+}
+
+/// An invisible label whose only job is to resolve one CSS colour.
+///
+/// `style.css` gives the class a `color:` declaration, and [`probe_color`] reads
+/// it back. It costs nothing in layout (an invisible child is not allocated) and
+/// nothing in the tree (it holds no content), and it is how the band gets a
+/// *theme* colour without naming one.
+fn colour_probe(class: &str) -> gtk::Label {
+    let probe = gtk::Label::new(None);
+    probe.add_css_class(class);
+    probe.set_visible(false);
+    probe
+}
+
+/// One probe's colour, as the sketch's own opaque RGB.
+///
+/// `GtkWidget::color()` is the CSS `color` property as the widget resolved it: the
+/// theme's variable, the app's stylesheet and the widget's own state included. The
+/// alpha is forced opaque because that is what a sketch's two colours are (see
+/// `pixlay_render::Sketch`).
+fn probe_color(probe: &gtk::Label) -> Rgba8 {
+    let rgba = probe.color();
+    let channel = |value: f32| (value * 255.0).round().clamp(0.0, 255.0) as u8;
+    Rgba8::rgb(
+        channel(rgba.red()),
+        channel(rgba.green()),
+        channel(rgba.blue()),
+    )
 }
 
 /// An icon button with a tooltip and an accessible name — the shell's own idiom

@@ -65,6 +65,24 @@
   border-color: var(--accent-bg-color);
 }
 
+/* The sketch's two colours (S21), which the band reads back through
+ * `GtkWidget::color()` on the two invisible probes the band builds
+ * (`crates/pixlay/src/layout.rs`). A candidate is a small *sheet* with its cells'
+ * outlines on it, so the paper is the theme's foreground and the ink its view
+ * background: a light sheet with dark lines in the dark style — which is how the
+ * reference strips draw a layout (ruling 32) — and the inverse in a light one.
+ * The classes exist so that no colour is named in Rust and both follow the theme
+ * and its high-contrast variant; `GtkWidget::color()` is the one public way to
+ * read a stylesheet colour back (the style context's own `lookup_color` is
+ * deprecated since GTK 4.10). */
+.sketch-paper {
+  color: @view_fg_color;
+}
+
+.sketch-ink {
+  color: @view_bg_color;
+}
+
 /* gthumb's `.statusbar { padding: 4px }` (`data/css/style.css`), with the horizontal
  * margin a window's edge wants and the band's own height: 24 px of content plus the
  * padding is the reference's measured 32 px status band (S13c), and it keeps the bar

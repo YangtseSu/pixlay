@@ -362,7 +362,8 @@ the frozen order: it is *decode + colour normalization* handed fewer samples, an
 (`slot_bitmaps`) never sees it. The reason it exists is §8 "S12": one cell's cost follows the source's
 resolution, and 24 MP per step is 12x a 60 Hz frame. What it costs in fidelity is measured in §8 "S12b"
 — a fraction of a level on photo content — and **a picture whose fidelity is compared against the
-export** (the window's canvas test, a gallery candidate) must stay inside the RMSE it names.
+export** (the window's canvas test; a gallery candidate was the second until S21, when the candidate became
+a sketch and left the comparison) must stay inside the RMSE it names.
 
 **The bitmap's region.** A bitmap may hold a sub-rectangle of the displayed
 photo. It then carries where it sits (`Bitmap::origin`, in displayed-photo
@@ -384,6 +385,7 @@ pixels.
 pixlay-render render    --project <file.pixlay> --long-edge <px> --out <file>
 pixlay-render render    --project <file.pixlay> --gap <rel> --radius <rel> --border-color <r,g,b> --out <file>
 pixlay-render render    --template <name> --long-edge <px> --out <file>   # no project, no photos
+pixlay-render render    --template <name> --sketch --out <file> [--paper r,g,b] [--ink r,g,b] [--stroke <px>]
 pixlay-render probe     --project <file.pixlay> --long-edge <px>
 pixlay-render image     --photo <file>
 pixlay-render scan      --dir <path> [--recursive] [--json]
@@ -418,6 +420,7 @@ pixlay-render save      --project <file.pixlay> --out <file.pixlay> [--json]
 | JPEG quality | **90, fixed** (not a flag): it is the S0–S6 baseline, so every measurement in §8 stays
 comparable, and `--quality` was deliberately not added — a knob nobody tests breaks quietly |
 | `--preview-px n` | n pixels on the long edge; the same `draw`, only `scale` changes. The **bitmaps are sized for the preview too** (S4): decoding and resampling a full A0 and letting Cairo shrink it would cost the export's time and memory for a thumbnail, and would do the shrinking with Cairo's filter instead of the pipeline's. The scaled grid is checked against the canvas pixel budget before the first decode (S15e, PIX-003). The report's `long_edge` is the edge the file was written at, not the export base the preview's grid was scaled from (S15h, PIX-019) |
+| `--sketch` (S21) | draws the **template's geometry** instead of a document: every cell's outline stroked in ink over the sheet's ground (`pixlay_render::sketch_rgb8`, the same normalized→pixel path `draw` places photos with). This is what the window's layout band shows for every candidate, so `render --template <n> --sketch` at the band's grid and with the band's own three parameters reproduces a candidate's pixels exactly — `crates/pixlay/tests/layout.rs` holds the two to **RMSE 0**. `--template` is required (`--project`, `--preview-px`, `--gap`/`--radius`/`--border-color` are refused, exit 1: a sketch has no document, no preview and no frame), `--long-edge` sizes it as it sizes a render (the sheet's aspect is the template's, and a sketch's grid has its shape), and `--paper`/`--ink` are `r,g,b` 0..=255 with defaults 255,255,255 / 0,0,0 while `--stroke` is a positive finite width in pixels defaulting to 1. A JPEG export is legal and shows the same two colours: the paper fills the surface, so a sketch is opaque everywhere. Its report is a *sketch* shape: `sketch = true`, `paper`, `ink`, `stroke`, `slots`, `long_edge`, `out_w`, `out_h`, `bytes` — and no `cells` / `occupied` / `gap` / `radius` / `border`, which are a document's |
 | `render`'s report | carries `long_edge` — the integer the output was **actually rendered at**, `max(out_w, out_h)` of the written file (S15h, PIX-019), so a preview render reports the preview's edge while `preview_px` stays the request — `cells` and `occupied`, next to the written file's facts |
 | `probe`'s report | carries `long_edge` (the integer grid it sampled) instead of a resolution for the same reason |
 | `--stats` | appends `{ms, encode_ms, peak_rss_mb, icc}`; `render` emits all four, `probe` emits no `encode_ms` (it does not encode). `icc` is the description of the profile the written file carries (`sRGB IEC61966-2.1`); a command that writes no file reports `none`. The measurement rules are below |
@@ -1000,38 +1003,48 @@ document describes them, and the preview's pixels stay `draw`'s; the GPU preview
 photo content, 2.14 RMSE against S7's window-vs-CLI comparison on the fixtures' synthetic hard edges, both
 inside S7's threshold of 6.
 
-### S14 (2026-09-23, this machine)
+### S21 (2026-09-26, this machine)
 
-The layout stage's numbers. Two of the three were taken by the CLI's own pipeline (the source-choice probe
-below, `--release`); the rest are the committed test's (`crates/pixlay/tests/layout.rs`, a debug test build —
-the geometry and the decode counts are the same code a release build runs, so these are the *shape* of the
-cost rather than its floor).
+The layout band's sketch, and the switch re-measured against S18's ruler. The rows marked *test* are the
+committed tests' own (`crates/pixlay/tests/layout.rs`, a debug test build: the drawing and the decode counts
+are the same code a release build runs, so they are the *shape* of the cost); the rest are `--release` runs
+on a quiet machine, three consecutive each where a row says so. **S14's section stood here until this step**
+— candidate renders, the shared preview-grade copies and the source choice — and its seven live
+measurements moved to the archive with a note saying what replaced them
+(`docs/archive/2026-09-22-STEPS.md`, "S14 · Result").
 
 | what | number |
 |---|---|
-| the band, at 1100x760 | **139** logical px tall of the window's 760; a candidate cell **128x115**, its thumbnail the largest grid inside **128x96** (a 4:3 candidate 128x96, a 16:9 one 128x72, a 2:3 one 64x96) |
-| the canvas, before the candidates land and after | **575** px both times (`tests/layout.rs` asserts the two are equal) — the placeholder is a candidate cell, so the band cannot resize the canvas under it |
-| decodes for the eight-photo verification project, on open | **7** — one per distinct file. Before S14's two fixes it was **21**: a request at a 1x1 grid, made before the canvas was allocated at all, plus the canvas being laid out twice because the band grew when the candidates arrived. Both are gone (`EditorWindow::refresh_document`, `layout::placeholder_cell`) |
-| the band's **own** decodes | **0** through a layout change, a committed framing change and a resize (`EditorWindow::gallery_decodes`) |
-| what a layout change and a resize cost the canvas | **7** decodes across both events for the same eight photos: a layout change moves the sheet's aspect and a resize moves the grid, so the copy at the new edge is cut once — the canvas's own work, and neither event is doubled by the band, whose request goes out beside it at that same edge |
-| a candidate's pixels vs `pixlay-render render` of the same document at the same grid | **0.1094** / **0.2269** / **0.1432** across the three candidates of the eight-photo document (worst **0.2269**, threshold 6) |
-| the band's rebuild | **74.6 ms** for three candidates at a 128x96 grid (`--release`) |
-| **the source choice**, measured as a probe: the canvas's own preview-grade copy (975 px for a 780-px canvas) against the gallery's own thumbnail-sized one | **(a) shared: 0 gallery decodes, 74.6 ms, worst drift 0.083** · **(b) its own: 7 further decodes, 4.0 ms, worst drift 3.42** — **(a) is what shipped** |
+| a candidate vs `pixlay-render render --template <n> --sketch` at the same grid and the same three parameters (*test*) | **RMSE 0** across the eight-photo document's three candidates — not "below a threshold": both sides call `sketch_rgb8`, and the PNG the CLI writes round-trips through the decoder bit-exactly |
+| the band's own decodes (*test*) | **0**, measured where the canvas cannot contribute (`grid-4-2x2` → `grid-4-2x2g`, two 1:1 four-cell layouts, so the click keeps the canvas's grid and the whole delta is the band's) — and structural: `decode::GalleryJob` carries templates and a style, no path at all |
+| the band, at 1100x760 (*test*) | **120** logical px tall of the window's 760 (was 139); a candidate cell **128x96** (was 128x115 — the caption left with ruling 40), and the canvas is **594** px where it was 575 |
+| the two colours the band draws with (*test*) | paper **255,255,255** · ink **29,29,32** — the dark style's `@view_fg_color` / `@view_bg_color`, read back from `style.css` through `GtkWidget::color()` |
+| a sketch's own cost | **0.12–0.14 ms** per candidate at the band's grid (`render --sketch --stats`, a 128-px sheet) |
+| the band's rebuild, `--band` | **0.14–0.18 ms** for the three candidates, three runs (S18's same row: 169.6–172.5 ms) |
+| the click `mosaic-8-s14` → `strip-8-8x1`, CLI | **125.5 / 126.3 / 127.9 ms** — `template_ms` 0.014, `sources_ms` 82.9–85.7, `composite_ms` 42.2–42.6, **7 decodes** (S18: 123.5–124.8) |
+| the click `mosaic-8-s14` → `grid-8-4x2`, CLI | **176.7 / 177.5 / 181.9 ms** — `sources_ms` 96.3–102.4, `composite_ms` 79.4–80.6, **7 decodes** (S18: 176.9–179.0) |
+| the same two clicks in the window, release | **147.5 ms** and **201.4 ms** to the canvas's frame (S18: 149–151 and 204–207), each followed by **20.6 ms** to the band's frame — one display frame, because the build itself is 0.15 ms on the worker. One run each (the window ruler opens a window per row; the CLI rows above are three) |
+| the whole turn, fresh session | **168.1 ms** and **222.0 ms** (S18: 294–374 ms) |
+| the **same session's second click** | the canvas **29.9 ms with 0 decodes** (S18: 115.3–120.9): the band no longer goes through the canvas's `Preview`, so no candidate build evicts its bitmaps — S18's expectation, confirmed |
+| peak `VmHWM` | the CLI **64.7–65.8 MB** for the eight-photo document (S18: 63.8–65.6) |
 
-- **The source choice is (a), and it is the same question S12b's fidelity ladder names.** A copy *larger* than
-  the candidate is a downsampling source, which is what the resampler wants; a copy *at* the candidate's size
-  is read at 1:1, where the reduction's own sampling is what the picture shows — which is exactly the 3.42.
-  So the hazard "a gallery candidate must not come from a reduction at a large factor" (S12b, above) is
-  resolved by naming the canvas's *edge* rather than by reducing a second copy: the factor from that copy to
-  a candidate is 7.6, and the drift is **0.083** on the CLI's own pipeline, **0.11-0.23** through the
-  window's. `pixlay_imaging::Preview::build_at_source_edge` carries this measurement in its own docs.
-- **The window's own criterion is the decode count, and it is now exactly "one per photo".** `decoded_sources`
-  is a claim about the decoding *thread*, so the band's share is counted separately
-  (`gallery_decodes`): the band never decodes anything once the canvas has built at the same edge, and the
-  canvas itself is one decode per distinct file per grid it is asked for.
-- **The band's geometry is a design constant, not a measurement of the reference** — there is no reference
-  for it — and it is chosen so the canvas keeps the majority of the page: 139 of 760 leaves the sheet 575 px
-  tall, and the thumbnail box (128x96) is the largest that does.
+- **The canvas half is unchanged, and that is the point of re-measuring**: `switch_ms` 125.5–127.9 / 176.7–181.9
+  against S18's 123.5–124.8 / 176.9–179.0 is the same number within the run-to-run spread, so the sketch did
+  not touch the click's own work — it removed everything the band used to add to it (169.6–172.5 ms of
+  rebuild, and the eviction that made a repeat click rebuild every bitmap). A click's whole turn went from
+  294–374 ms to 168–222 ms, and the second click of a session from 115–121 ms to 30 ms.
+- **What is left of the band's row in the window ruler is one frame, not a build.** The build is 0.15 ms on
+  the worker, so the wait for its reply returns immediately and the number is the display frame that draws
+  it — the same 20.6 ms in all three rows, which is what "the band costs nothing" looks like when measured
+  with a frame clock. The CLI's `--band` (0.14–0.18 ms) is the build alone.
+- **The band's geometry is still a design constant, not a measurement of the reference** — there is no
+  reference for it — and it is chosen so the canvas keeps the majority of the page: 120 of 760 leaves the
+  sheet 594 px tall, and the thumbnail box (128x96) is the largest that does. The caption's 19 px went back
+  to the canvas.
+- **The band's own decodes are a structural claim now, not a counter.** S14 measured them with
+  `EditorWindow::gallery_decodes`; S21 deleted the counter with the machinery it counted — the band's job
+  cannot name a file — and what `tests/layout.rs` asserts is that `decoded_sources`, the one counter of
+  decoded files, does not move across a band rebuild.
 
 ### S15e (2026-09-24, `--release`, this machine)
 
@@ -1111,7 +1124,8 @@ session's; each row is three consecutive runs on a quiet machine.
   against it after S21's sketch band, which is expected to remove both the band's own rebuild and the eviction above
   — an expectation to re-measure, not a measurement. The two cheaper optimisations the ruling was offered and did not
   take (a second preview-grade edge held in the source cache; a `Preview` of the band's own) are recorded in
-  `docs/2026-09-25-STEPS.md`, `S18 · Result`.
+  `docs/2026-09-25-STEPS.md`, `S18 · Result`. **S21 re-measured it (2026-09-26): the numbers are the "S21"
+  section below**, and what it found about the eviction is the reason the second optimisation is moot.
 
 ### S20 (2026-09-26, `--release`, this machine)
 
@@ -1144,8 +1158,9 @@ second `AdwNavigationPage` would have to own a second canvas, and S15's compose 
 canvas the band sits under. The stage is a moment in the *flow*, not a place in the navigation stack; the
 sentences above that said it "will sit between them" meant the flow and are rewritten here. The invariants
 above are unchanged by the sequence: still one document, one renderer, one gesture per command. The
-library and the gallery are **not** renderers of the document — a candidate thumbnail is `render_rgb8` of
-the same drawn document at a smaller size, which S14's own criteria hold it to (§8, "S14").
+library and the gallery are **not** renderers of the document — **since S21 a candidate is a sketch of its
+template's geometry**, drawn by `pixlay_render::sketch_rgb8`, which the CLI's `render --sketch` is the
+machine surface of and which §8's "S21" measures.
 
 What the layout stage is, as of S14b (`crates/pixlay/src/layout.rs`, `canvas.rs`), and what a caller may
 rely on:
@@ -1153,20 +1168,31 @@ rely on:
 - **The candidates are the layouts with the document's cell count, and only those** (ruling 25, 2026-09-23;
   S14b moved the count from the *photo* count to the *cell* count): `templates::with_slots()`, the one
   function the CLI's `templates --slots` and `Selection::layouts()` are expressed in. Each candidate is a
-  **real document**: the editor's own document with `Command::SetTemplate` applied, so a candidate of
-  another aspect is drawn at its own shape and the sheet's shape changes with the click. The strip follows
-  the layout rather than the photo count because `+` can leave a cell empty: a three-cell document with two
-  photos in it is still a three-cell document, and a strip filtered to the photos would offer the layouts of
-  a *different* one. A count with no layout shows an empty cell-shaped placeholder instead of a strip.
+  **sketch of that template's geometry** (S21, ruling 32): every cell's outline stroked over the sheet's
+  ground, drawn by `pixlay_render::sketch_rgb8` at the largest grid inside the band's own `CANDIDATE_BOX`
+  — so a candidate of another aspect is drawn at its own shape and the sheet's shape changes with the
+  click, and a candidate is a complete account of a template, which carries geometry and no style. The
+  strip follows the layout rather than the photo count because `+` can leave a cell empty: a three-cell
+  document with two photos in it is still a three-cell document, and a strip filtered to the photos would
+  offer the layouts of a *different* one. A count with no layout shows an empty cell-shaped placeholder
+  instead of a strip.
+- **A candidate is drawn in the theme's own two colours, and says its position and nothing else** (S21):
+  the paper and the ink come from `style.css`'s `.sketch-paper` / `.sketch-ink` classes, read back through
+  `GtkWidget::color()` on two invisible probes — a candidate is interface, not content, so neither colour
+  is a constant and both follow the theme and its high-contrast variant. The cell carries **no caption**:
+  a template's name is machine identity (`edit --template`, `templates`, the document's own embedded copy)
+  and never text a user reads (ruling 40), so what a screen reader announces is the position
+  (`Layout 3 of 5`) and the widget's own name — the template's — is for callers, not for people.
 - **The band is a band on the document's page**: the editor's content is
   `banner · canvas · gallery`, so the canvas keeps the majority of the page and the band is one candidate
-  cell tall (measured: 139 logical px of a 760-px window, a 128x96 thumbnail in a 115-px cell). The
-  placeholder is **the same widgets as a candidate** — a `GtkToggleButton` with the cell's class and an
-  empty thumbnail — so the canvas does not resize when the candidates land from their background build:
+  cell tall (a 128x96 sketch in a cell of its own; the measured height is §8's "S21"). The
+  placeholder is **the same widgets as a candidate** — a `GtkToggleButton` with the cell's class and no
+  picture — so the canvas does not resize when the candidates land from their background build:
   measured 2026-09-23, a shorter placeholder cost the document's eight photos **21** decodes on open and
   the same document costs **7** with it (one per distinct file; the count that remains is the canvas's
   own, and the request made before the canvas was allocated at all — a 1x1 grid — is gone with it,
-  `EditorWindow::refresh_document`).
+  `EditorWindow::refresh_document`). Since S21 a candidate has no caption, so the placeholder has none
+  either: the two are the same height because both are the box.
 - **The count is a control of the layout, and it reads the number it edits** (ruled 2026-09-23): the label
   is the **cell count alone** — no noun beside it, because the control sits between two buttons and above a
   strip of the very layouts it counts, and what the number counts is the accessible name

@@ -117,15 +117,18 @@ pub fn with_slots(slots: usize) -> Vec<Template> {
 /// rebuild from the CLI, so the box lives here beside [`candidate_grid`] rather
 /// than in either caller: two copies of it would be two answers to "how big is a
 /// candidate". 128x96 is the largest box that leaves the canvas the majority of the
-/// page at the default window (S14).
+/// page at the default window (S14); since S21 a candidate is a sketch of its
+/// geometry and the box holds one at the layout's own aspect.
 pub const CANDIDATE_BOX: (i32, i32) = (128, 96);
 
-/// The grid one candidate is rendered at: the largest grid with `aspect`'s shape
+/// The grid one candidate is drawn at: the largest grid with `aspect`'s shape
 /// that fits inside [`CANDIDATE_BOX`].
 ///
-/// A candidate is a real render at a smaller size (`docs/CONTRACT.md` §5), so its
-/// pixels are comparable with `pixlay-render render` of the same document at this
-/// grid.
+/// A candidate is a **sketch** of the template's geometry since S21
+/// (`docs/CONTRACT.md` §5, `render --sketch`), so its pixels are comparable with
+/// `pixlay-render render --template <name> --sketch` at this grid: the sheet's
+/// shape is the template's, and a grid of another shape would stretch the
+/// geometry.
 pub fn candidate_grid(aspect: f64) -> PixelSize {
     PixelSize::fit_in_bounds(
         aspect,

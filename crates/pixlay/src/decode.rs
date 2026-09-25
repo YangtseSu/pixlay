@@ -1,23 +1,20 @@
-//! Background decoding: the one thing the window may not do on its own thread.
+//! Background work for the canvas and the layout band.
 //!
 //! `pixlay-imaging` is synchronous and pure, and a decode is tens of milliseconds
 //! per photo — long enough to drop frames if it ran in a draw callback. So one
 //! worker thread owns the decoding, and the window only ever receives finished
 //! bitmaps.
 //!
-//! Two kinds of work arrive here, and they share one thread because they share one
-//! [`Preview`] — and with it one set of preview-grade copies and one set of decodes
-//! per photo:
+//! Two kinds of work arrive here, and they share one thread:
 //!
-//! * **the canvas** wants the whole document at the grid it draws at;
-//! * **the layout gallery** (S14) wants every candidate layout at a thumbnail grid.
-//!   It names **the canvas's own preview-grade edge**
-//!   ([`Preview::build_at_source_edge`]), so the band's copies are the copies the
-//!   canvas already reduced: measured 2026-09-23, its own builds decode **0** files
-//!   however many candidates the band lists — C cheap per-cell resamples, never a
-//!   decode per thumbnail. The edge is taken while the canvas is at rest, so the
-//!   two jobs go out as one batch and the canvas job (which the worker runs first)
-//!   puts the copies in the cache before the band reads them.
+//! * **the canvas** wants the whole document at the grid it draws at, and it is
+//!   what the thread is for;
+//! * **the layout band** (S14) wants every candidate of the document's cell count
+//!   — and since S21 a candidate is a **sketch**: its template's cell outlines
+//!   stroked over the sheet's ground, drawn by `pixlay_render::sketch_rgb8`. The
+//!   job carries no document and no photo paths, so the band costs no decode at
+//!   all (it used to share the canvas's preview-grade copies, S14's design; the
+//!   sketch removed the need).
 //!
 //! Three decisions shape this file:
 //!
@@ -25,8 +22,8 @@
 //!   takes the newest request of each kind waiting and forgets the ones in
 //!   between. A drag that produces 60 requests per second therefore costs one
 //!   build at a time, never a growing queue, and the canvas converges on where the
-//!   pointer actually is — while a gallery job queued beside it still builds, on
-//!   the same [`Preview`], rather than being superseded by a kind it is not.
+//!   pointer actually is — while a gallery job queued beside it still builds
+//!   rather than being superseded by a kind it is not.
 //! * **The worker keeps what it can reuse, in `pixlay-imaging`.** Framing one slot
 //!   rebuilds exactly that slot: the decoded sources and the other cells' bitmaps
 //!   come from [`pixlay_imaging::Preview`], which is the same type the CLI's
@@ -41,7 +38,7 @@
 //! A photo that cannot be decoded does not fail the job: the slot stays white and
 //! its index comes back in [`Reply::failed`], because one unreadable file must
 //! not blank the collage the user is working on. The gallery reports the same way,
-//! one candidate at a time: a candidate whose render fails is simply not in the
+//! one candidate at a time: a candidate whose sketch fails is simply not in the
 //! reply.
 
 use std::path::PathBuf;
@@ -50,7 +47,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use gtk4::glib;
 use pixlay_core::{CollageDoc, PixelSize, Template};
 use pixlay_imaging::{Preview, SlotBitmap};
-use pixlay_render::{Bitmap, Images, render_rgb8};
+use pixlay_render::{Sketch, sketch_rgb8};
 
 use crate::layout::Candidate;
 use crate::workers::{Down, Kind, WorkerPlan};
@@ -63,17 +60,19 @@ struct CanvasJob {
     grid: PixelSize,
 }
 
-/// One gallery job: the same document, one request per candidate layout.
+/// One gallery job: every candidate of the document's cell count, as a sketch.
+///
+/// Since S21 this carries **no document and no photo paths**: a candidate is its
+/// template's geometry, so the job is a list of templates, the grid each is drawn
+/// at and the three parameters of the drawing. A sketch has no photo in it, which
+/// is why the band costs no decode and why `Preview` is not involved.
 struct GalleryJob {
     generation: u64,
-    doc: CollageDoc,
-    sources: Vec<Option<PathBuf>>,
     /// Each candidate's template and the thumbnail grid it is drawn at.
     candidates: Vec<(Template, PixelSize)>,
-    /// The long edge the preview-grade copies are taken at — **the canvas's own**,
-    /// so that the two jobs share one set of copies and the band costs no decode
-    /// the canvas does not already pay for.
-    source_edge: u32,
+    /// The paper, the ink and the stroke width, read from the band's theme on the
+    /// main thread.
+    style: Sketch,
 }
 
 /// What one canvas build sends back.
@@ -91,12 +90,8 @@ pub struct Reply {
 /// What one gallery build sends back.
 pub struct GalleryReply {
     pub generation: u64,
-    /// One entry per candidate that rendered, in the order it was asked for.
+    /// One entry per candidate that drew, in the order it was asked for.
     pub candidates: Vec<Candidate>,
-    /// Files this build decoded — one per photo on the band's first build, zero
-    /// whenever the sources were already reduced for the grids asked for, which is
-    /// what the gallery's decode criterion holds it to ("N decodes, never N×C").
-    pub decodes: u64,
 }
 
 /// Either answer, which is what the window's one callback receives.
@@ -171,20 +166,18 @@ impl Decoder {
 
     /// Queues a gallery job and returns the generation that will identify its
     /// reply.
+    ///
+    /// No document and no sources: a candidate is a template's geometry (S21).
     pub fn request_gallery(
         &mut self,
-        doc: &CollageDoc,
-        sources: Vec<Option<PathBuf>>,
         candidates: Vec<(Template, PixelSize)>,
-        source_edge: u32,
+        style: Sketch,
     ) -> Result<u64, Down> {
         self.gallery_generation += 1;
         let job = Job::Gallery(GalleryJob {
             generation: self.gallery_generation,
-            doc: doc.clone(),
-            sources,
             candidates,
-            source_edge,
+            style,
         });
         self.jobs.send(job).map_err(|_| {
             glib::g_warning!("pixlay", "{}", Kind::reason(Kind::Decode, Down::Gone));
@@ -240,21 +233,11 @@ fn work(queue: Receiver<Job>, reply: std::sync::Arc<dyn Fn(Event) + Send + Sync>
         }
         if let Some(job) = gallery {
             let mut candidates = Vec::with_capacity(job.candidates.len());
-            let mut decodes = 0;
             for (template, grid) in &job.candidates {
-                // The candidate is the editor's own document with `SetTemplate`
-                // applied, which is exactly what clicking the candidate does — so
-                // the thumbnail shows the document the click would produce, not an
-                // approximation of it.
-                let mut doc = job.doc.clone();
-                doc.template = template.clone();
-                doc.cells
-                    .resize(template.slots.len(), pixlay_core::Cell::default());
-                let sources = &job.sources[..doc.cells.len().min(job.sources.len())];
-                let built = preview.build_at_source_edge(&doc, sources, *grid, job.source_edge);
-                decodes += built.decodes;
-                if let Ok(image) = render_rgb8(&doc, &images_from(built.bitmaps), *grid, 1.0, None)
-                {
+                // A candidate is the template's own geometry, drawn — not a render
+                // of the document with that template applied — so this branch names
+                // no file and cannot decode anything (S21).
+                if let Ok(image) = sketch_rgb8(template, *grid, &job.style) {
                     candidates.push(Candidate {
                         template: template.name.clone(),
                         image,
@@ -266,7 +249,6 @@ fn work(queue: Receiver<Job>, reply: std::sync::Arc<dyn Fn(Event) + Send + Sync>
                 Event::Gallery(GalleryReply {
                     generation: job.generation,
                     candidates,
-                    decodes,
                 }),
             );
         }
@@ -280,26 +262,4 @@ fn send(reply: &std::sync::Arc<dyn Fn(Event) + Send + Sync>, event: Event) {
     // glib API that takes a `Send` closure, which is why nothing but the reply and
     // a `SendWeakRef` is captured here.
     glib::MainContext::default().invoke(move || reply(event));
-}
-
-/// Wraps a build's bitmaps for the renderer, dropping the ones it cannot take.
-///
-/// A bitmap that `draw` refuses is a slot that stays white; it must not fail the
-/// candidate, which is a whole layout.
-fn images_from(bitmaps: Vec<SlotBitmap>) -> Images {
-    let mut images = Images::new();
-    for bitmap in bitmaps {
-        let slot = bitmap.slot;
-        match Bitmap::from_argb32_region(
-            bitmap.width as i32,
-            bitmap.height as i32,
-            bitmap.origin,
-            bitmap.display,
-            bitmap.pixels,
-        ) {
-            Ok(bitmap) => images.insert(slot, bitmap),
-            Err(error) => glib::g_warning!("pixlay", "a decoded bitmap was refused: {error}"),
-        }
-    }
-    images
 }

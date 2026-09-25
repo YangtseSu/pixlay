@@ -158,6 +158,10 @@ fn help_and_version_succeed_on_stdout() {
         "--gap",
         "--radius",
         "--border-color",
+        "--sketch",
+        "--paper",
+        "--ink",
+        "--stroke",
         "--json",
         "--stats",
     ] {
@@ -224,6 +228,218 @@ fn the_template_smoke_path_renders_without_a_project() {
         std::fs::metadata(&out).expect("stat").len().to_string(),
         field(&output, "bytes")
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_sketch_draws_a_templates_geometry_in_the_callers_colours() {
+    let dir = out_dir("sketch");
+    let out = dir.join("sketch.png");
+    let output = run(&[
+        "render",
+        "--template",
+        "mosaic-8-s14",
+        "--sketch",
+        "--long-edge",
+        "128",
+        "--out",
+        out.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "status"), "ok");
+    assert_eq!(field(&output, "sketch"), "true");
+    assert_eq!(field(&output, "slots"), "8");
+    assert_eq!(field(&output, "out_w"), "128");
+    assert_eq!(field(&output, "out_h"), "96");
+    assert_eq!(field(&output, "long_edge"), "128");
+    // The defaults, which are the renderer's: white paper, black ink, one pixel.
+    assert_eq!(field(&output, "paper"), "255,255,255");
+    assert_eq!(field(&output, "ink"), "0,0,0");
+    assert_eq!(field(&output, "stroke"), "1.000000");
+    // A sketch is not a document: the render's own rows (its cell count, its
+    // occupancy, its frame) do not exist, and a caller comparing field sets sees
+    // which kind of render it got from `sketch` alone.
+    for absent in ["cells", "occupied", "gap", "radius", "border"] {
+        assert!(
+            !stdout(&output).contains(&format!("{absent} = ")),
+            "{absent} has no meaning in a sketch"
+        );
+    }
+    assert!(stderr(&output).is_empty(), "{}", stderr(&output));
+
+    // The pixels: the sheet's own edge is a solid line, every cell's outline is
+    // one, and the middle of a cell is the paper.
+    let image = image::open(&out).expect("readable").to_rgb8();
+    assert_eq!(image.get_pixel(0, 48).0, [0, 0, 0], "the sheet's left edge");
+    assert_eq!(
+        image.get_pixel(127, 48).0,
+        [0, 0, 0],
+        "the sheet's right edge"
+    );
+    assert_eq!(image.get_pixel(64, 0).0, [0, 0, 0], "the sheet's top edge");
+    assert_eq!(
+        image.get_pixel(64, 95).0,
+        [0, 0, 0],
+        "the sheet's bottom edge"
+    );
+    assert_eq!(image.get_pixel(20, 20).0, [255, 255, 255], "a cell's paper");
+
+    // The two colours and the width are the caller's, and a sketch is an opaque
+    // drawing: the same geometry written as a JPEG (which has no alpha at all)
+    // shows the same two colours.
+    let coloured = dir.join("coloured.jpg");
+    let output = run(&[
+        "render",
+        "--template",
+        "mosaic-8-s14",
+        "--sketch",
+        "--long-edge",
+        "128",
+        "--paper",
+        "20,24,28",
+        "--ink",
+        "240,240,240",
+        "--stroke",
+        "3",
+        "--out",
+        coloured.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "format"), "jpeg");
+    assert_eq!(field(&output, "paper"), "20,24,28");
+    assert_eq!(field(&output, "ink"), "240,240,240");
+    assert_eq!(field(&output, "stroke"), "3.000000");
+    let image = image::open(&coloured).expect("readable").to_rgb8();
+    // A JPEG is lossy, so this is "the caller's colours arrived", not exact bytes:
+    // [20,24,28] and [240,240,240] are far enough apart that eight levels of
+    // tolerance cannot confuse one with the other or with the default palette.
+    let near = |got: [u8; 3], want: [u8; 3]| {
+        got.iter()
+            .zip(want)
+            .all(|(got, want)| i32::from(*got).abs_diff(i32::from(want)) <= 8)
+    };
+    assert!(
+        near(image.get_pixel(0, 48).0, [240, 240, 240]),
+        "the caller's ink, at the sheet's edge: {:?}",
+        image.get_pixel(0, 48).0
+    );
+    assert!(
+        near(image.get_pixel(20, 20).0, [20, 24, 28]),
+        "the caller's paper: {:?}",
+        image.get_pixel(20, 20).0
+    );
+
+    // Same input, same pixels: the band's parity with this command is a
+    // comparison of two runs of one renderer.
+    let again = dir.join("sketch-again.png");
+    let repeat = run(&[
+        "render",
+        "--template",
+        "mosaic-8-s14",
+        "--sketch",
+        "--long-edge",
+        "128",
+        "--out",
+        again.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&repeat), 0, "{}", stderr(&repeat));
+    assert_eq!(
+        std::fs::read(&out).expect("read the first"),
+        std::fs::read(&again).expect("read the second"),
+        "two sketches of one template differ"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_sketch_refuses_what_it_cannot_draw() {
+    let dir = out_dir("sketch-refusals");
+    let project = write_project(&dir, "sketch.pixlay", true);
+    let out = dir.join("x.png");
+    let out = out.to_str().unwrap();
+    let project = project.to_str().unwrap();
+    for (args, what) in [
+        // A sketch is a template's geometry: a project's photos and its frame are
+        // not part of it, and a preview of a document neither.
+        (
+            vec!["render", "--project", project, "--sketch", "--out", out],
+            "a project",
+        ),
+        (
+            vec![
+                "render",
+                "--project",
+                project,
+                "--sketch",
+                "--template",
+                "mosaic-8-s14",
+                "--out",
+                out,
+            ],
+            "a project beside a template",
+        ),
+        (
+            vec![
+                "render",
+                "--template",
+                "mosaic-8-s14",
+                "--sketch",
+                "--preview-px",
+                "800",
+                "--out",
+                out,
+            ],
+            "a preview",
+        ),
+        (
+            vec![
+                "render",
+                "--template",
+                "mosaic-8-s14",
+                "--sketch",
+                "--gap",
+                "0.05",
+                "--out",
+                out,
+            ],
+            "a frame",
+        ),
+        // The three parameters are the sketch's, and a render has nothing to do
+        // with them: taken silently they would be a drop.
+        (
+            vec![
+                "render",
+                "--template",
+                "mosaic-8-s14",
+                "--paper",
+                "1,2,3",
+                "--out",
+                out,
+            ],
+            "a paper without a sketch",
+        ),
+        (
+            vec![
+                "render",
+                "--template",
+                "mosaic-8-s14",
+                "--sketch",
+                "--stroke",
+                "0",
+                "--out",
+                out,
+            ],
+            "a stroke of zero",
+        ),
+    ] {
+        let output = run(&args);
+        assert_eq!(code(&output), 1, "{what}: {}", stderr(&output));
+        assert!(stdout(&output).is_empty(), "{what}: wrote to stdout");
+        assert!(!stderr(&output).is_empty(), "{what}: said nothing");
+    }
+    // A sketch writes nothing when it is refused, so the refusal costs a caller
+    // nothing.
+    assert!(!std::path::Path::new(out).exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -5117,7 +5333,11 @@ fn switch_measures_a_layout_change_at_the_canvas_box() {
     assert_eq!(field(&kept, "open_decodes"), "2");
 
     // The band's own rebuild, when it is asked for: every candidate of the new cell
-    // count, at the grid the window draws a candidate at.
+    // count, at the grid the window draws a candidate at. Since S21 a candidate is
+    // a *sketch* — its cells' outlines over the sheet's ground — so the band's loop
+    // names no photo and decodes nothing; what the row above says about `decodes`
+    // is therefore the canvas's own, and this run's `decodes` is the same number
+    // with the band's rebuild included.
     let banded = run(&[
         "switch",
         "--project",

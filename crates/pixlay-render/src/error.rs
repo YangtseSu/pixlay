@@ -27,6 +27,9 @@ pub enum RenderError {
     #[error("render scale must be finite and positive, got {0}")]
     InvalidScale(f64),
 
+    #[error("stroke width must be finite and positive, got {0}")]
+    InvalidStroke(f64),
+
     #[error("band {index} of {count} does not exist")]
     InvalidBand { index: u32, count: u32 },
 

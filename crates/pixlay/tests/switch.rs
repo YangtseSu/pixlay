@@ -18,8 +18,10 @@
 //! session is a second window ([`support::second_window`]): the caches of a layout switch
 //! are the *session's* (`Preview` is one editing session, S12b). A third row measures the
 //! **same session's second click**, back to the layout it opened on: the CLI cannot model
-//! it (its process has one history), and it is where the shared bitmap cache shows —
-//! `MAX_GRIDS` is two, and the band's candidate builds go through the same `Preview`.
+//! it (its process has one history). Until S21 that row also showed the band's own cost —
+//! its candidate renders went through the canvas's `Preview` and evicted its bitmaps
+//! (`MAX_GRIDS` is two) — and since S21 the band draws sketches, names no photo and shares
+//! no cache with the canvas, so the row is the canvas's alone.
 //!
 //! **Nothing here asserts a millisecond.** The budget is S18's gate, and a threshold
 //! that a busy machine can trip is a false failure; what is asserted is that the switch
@@ -60,9 +62,6 @@ struct Switch {
     /// Files the worker decoded for this switch — the CLI's `decodes` (the sources
     /// phase) is the same number.
     decodes: u64,
-    /// Files the band's own builds decoded after the canvas's reply: S14's claim is
-    /// that this is 0.
-    band_decodes: u64,
 }
 
 #[test]
@@ -116,10 +115,9 @@ fn a_layout_switch_is_measured_from_the_click() {
         rows.push(("fresh session".to_string(), measure(&window, target)));
     }
     // And the same session's **second** click, back to the layout it opened on: the
-    // row the CLI cannot model (its process is one session with one history), and the
-    // one that shows what the shared bitmap cache costs a user who clicks back and
-    // forth — `MAX_GRIDS` is two, and the band's own candidate builds go through the
-    // same `Preview`.
+    // row the CLI cannot model (its process is one session with one history). Since S21
+    // the band shares nothing with the canvas — a candidate is a sketch, not a render —
+    // so what this row costs is the canvas's own work on a warm session.
     rows.push((
         "second click, same session".to_string(),
         measure(&first, "mosaic-8-s14"),
@@ -143,7 +141,7 @@ fn a_layout_switch_is_measured_from_the_click() {
     for (label, switch) in &rows {
         eprintln!(
             "switch, {label}: {} → {} · canvas {}x{} · grid {}x{} → {}x{} · \
-             canvas {:.1} ms ({} decodes) · band {:.1} ms ({} decodes) · total {:.1} ms · \
+             canvas {:.1} ms ({} decodes) · band {:.1} ms (0 decodes, a sketch) · total {:.1} ms · \
              budget {:.0} ms · {}",
             switch.from,
             switch.target,
@@ -156,7 +154,6 @@ fn a_layout_switch_is_measured_from_the_click() {
             switch.canvas_ms,
             switch.decodes,
             switch.band_ms,
-            switch.band_decodes,
             switch.switch_ms,
             pixlay_cli::cli::SWITCH_BUDGET_MS,
             if switch.canvas_ms <= pixlay_cli::cli::SWITCH_BUDGET_MS {
@@ -212,7 +209,6 @@ fn measure(window: &EditorWindow, target: &str) -> Switch {
     // read, so the conditions have to be counts taken here.
     let builds_before = window.gallery_builds();
     let decodes_before = window.decoded_sources();
-    let band_decodes_before = window.gallery_decodes();
     let started = Instant::now();
     cell.set_active(true);
     // The request is synchronous (`refresh_document` → `request_decode`), and a grid in
@@ -279,6 +275,5 @@ fn measure(window: &EditorWindow, target: &str) -> Switch {
         band_ms: switch_ms - canvas_ms,
         switch_ms,
         decodes: window.decoded_sources() - decodes_before,
-        band_decodes: window.gallery_decodes() - band_decodes_before,
     }
 }

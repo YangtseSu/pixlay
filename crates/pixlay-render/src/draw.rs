@@ -267,7 +267,12 @@ fn rounded_rect_path(ctx: &Context, x: f64, y: f64, width: f64, height: f64, rad
     ctx.close_path();
 }
 
-fn outline_path(ctx: &Context, outline: &Polygon, canvas: PixelSize) {
+/// Adds one slot's outline to the current path, in canvas pixels.
+///
+/// The one place normalized geometry becomes canvas pixels: [`draw_slot`] clips
+/// with it and [`crate::sketch_rgb8`] strokes it, so a sketch and a render agree
+/// about where a cell is by construction.
+pub(crate) fn outline_path(ctx: &Context, outline: &Polygon, canvas: PixelSize) {
     let (w, h) = (f64::from(canvas.width), f64::from(canvas.height));
     ctx.new_path();
     for (index, point) in outline.points.iter().enumerate() {

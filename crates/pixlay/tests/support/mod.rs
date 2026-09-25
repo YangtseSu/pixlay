@@ -351,10 +351,10 @@ pub fn canvas_size(window: &EditorWindow) -> (i32, i32) {
     assert!(
         window.wait_for_idle(WAIT),
         "the canvas's own decode never finished: canvas {width}x{height}, images grid \
-         {:?}, requested {:?}, band pending {}, {} source decodes so far, {}",
+         {:?}, requested {:?}, {} band builds, {} source decodes so far, {}",
         window.images().0,
         window.requested_grid(),
-        window.gallery_decodes(),
+        window.gallery_builds(),
         window.decoded_sources(),
         frame_state(window),
     );

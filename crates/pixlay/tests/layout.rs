@@ -1,15 +1,17 @@
-//! S14's exit criteria, as one test: the layout band and the count control.
+//! S14's exit criteria, as one test: the layout band and the count control — with
+//! S21's sketch in place of the candidate renders.
 //!
 //! One `#[test]` because GTK lives on one thread (see `support`). What is checked
 //! here, in the order S14's criteria are written:
 //!
-//! * the strip lists every layout with the photo count, and only those;
-//! * every candidate's thumbnail is `pixlay-render render` of the same document at
-//!   the same pixel size (the RMSE threshold) — the gallery is not a second
-//!   renderer;
+//! * the strip lists every layout with the cell count, and only those;
+//! * every candidate's drawing is `pixlay-render render --sketch` of the same
+//!   template at the same grid and with the same three parameters (RMSE 0) — the
+//!   band's sketch and the CLI's are two calls of one renderer;
 //! * a layout change and a LIFO removal keep every surviving cell's photo and
 //!   framing, and `+` adds one empty cell back — a layout edit, not a restore;
-//! * the whole band costs one decode per photo, never one per candidate;
+//! * the whole band decodes **nothing**: a candidate is a template's geometry, so
+//!   `decoded_sources` does not move when the band is rebuilt;
 //! * the CLI's new flags land on the same document the window's own operations
 //!   produce.
 
@@ -21,12 +23,13 @@ use std::time::Duration;
 use gtk4::prelude::*;
 use pixlay::canvas;
 use pixlay::window::Stage;
-use pixlay_core::{CropTransform, Project, templates};
+use pixlay_core::{CropTransform, Project, Rgba8, templates};
 use pixlay_imaging::Source;
 
-/// The threshold from `AGENTS.md`: the same composition at `2N` and `N`,
-/// downsampled, stays below 6.
-const RMSE_THRESHOLD: f64 = 6.0;
+/// A colour as `r,g,b`: the spelling `render --paper` / `--ink` take.
+fn rgb(color: Rgba8) -> String {
+    format!("{},{},{}", color.r, color.g, color.b)
+}
 
 #[test]
 fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
@@ -67,6 +70,26 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
         "the canvas moved when the candidates landed: {placeholder:?} → {filled:?}"
     );
     assert!(filled.1 > 0, "the band has a height");
+    // The band as a human sees it, for S21's own Human line ("the sketch's
+    // legibility at the band's 128x96"): the widget's own snapshot, written through
+    // the product's encoder, so the picture a person judges is the picture the
+    // window draws.
+    let band_picture = support::artifact("layout-band.png");
+    support::save_png(&band_picture, &support::snapshot(&gallery.root()));
+    eprintln!(
+        "the band: canvas {} px, band {} px, a candidate cell {}x{}; its own pixels in {}",
+        filled.0,
+        filled.1,
+        gallery
+            .cell("mosaic-8-s14")
+            .map(|cell| cell.width())
+            .unwrap_or(-1),
+        gallery
+            .cell("mosaic-8-s14")
+            .map(|cell| cell.height())
+            .unwrap_or(-1),
+        band_picture.display(),
+    );
 
     // ---- the band is a band on the document's page ------------------------
     // Below the canvas, on the same page: not a third page, and not a panel beside
@@ -135,54 +158,71 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
         "8 photos can take one"
     );
 
-    // ---- every candidate is the CLI's own render ---------------------------
-    let mut worst = 0.0f64;
+    // ---- every candidate is the CLI's own sketch --------------------------
+    // S21: a candidate is the template's geometry, so the claim is that the band's
+    // picture and `pixlay-render render --template <name> --sketch` at the same
+    // grid and with the same three parameters are the *same pixels* — RMSE 0, not
+    // "below a threshold": both sides call `pixlay_render::sketch_rgb8`.
+    let style = gallery.sketch_style();
     for name in &expected {
         let (width, height, pixels) = gallery
-            .thumbnail(name)
-            .unwrap_or_else(|| panic!("{name} has no thumbnail"));
-        let cli = cli_render(&window, name);
+            .sketch(name)
+            .unwrap_or_else(|| panic!("{name} has no sketch"));
+        let cli = cli_sketch(name, style);
         assert_eq!(
             (width, height),
             (cli.0, cli.1),
-            "{name}: the strip and the CLI must render the same pixel grid"
+            "{name}: the strip and the CLI must draw the same pixel grid"
         );
         let difference = support::rmse(&(width, height, pixels), &cli);
-        worst = worst.max(difference);
-        eprintln!("{name}: gallery vs CLI RMSE {difference:.4}");
-        assert!(
-            difference <= RMSE_THRESHOLD,
-            "{name} diverged from the CLI: RMSE {difference:.4} > {RMSE_THRESHOLD}"
+        assert_eq!(
+            difference, 0.0,
+            "{name} diverged from the CLI: RMSE {difference}"
         );
     }
     eprintln!(
-        "worst candidate RMSE {worst:.4} over {} candidates",
-        expected.len()
+        "the band's {} candidates are the CLI's own sketches (RMSE 0), paper {} ink {}",
+        expected.len(),
+        rgb(style.paper),
+        rgb(style.ink),
     );
 
-    // ---- the band costs no decode of its own, never one per candidate -------
-    // `decoded_sources` counts the decoding *thread*'s work, so what is measured
-    // here is the difference each event makes to it — and `gallery_decodes` is the
-    // band's own share of that work, which is the number S14's criterion is about:
-    // the band names the canvas's preview-grade edge, so its copies are the canvas's
-    // copies and each additional candidate only resamples them. The window asks for
-    // its own grid while the editor's page is pushed, and once more when the widget
-    // settles on open and again on a resize — that is the canvas's own layout, not
-    // the band's. S14's finding on the way: the request made before the canvas was
-    // allocated at all was a 1x1 grid (`refresh_document`).
+    // ---- the caption is gone (ruling 40) -----------------------------------
+    // A candidate is its sketch and nothing else: no label under a cell, so no
+    // template name is text a user reads. (The cell's *accessible* name is the
+    // positional `Layout 3 of 5` — GTK 4.24 exposes no getter for an accessible
+    // name, only "it has one", which `tests/hig.rs::check_gallery` checks.)
+    for name in &expected {
+        let cell = gallery.cell(name).unwrap_or_else(|| panic!("{name} cell"));
+        let labels: Vec<String> = support::descendants(&cell.clone().upcast::<gtk4::Widget>())
+            .iter()
+            .filter_map(|widget| widget.downcast_ref::<gtk4::Label>())
+            .map(|label| label.label().to_string())
+            .collect();
+        assert!(
+            labels.is_empty(),
+            "{name}: the cell still draws a caption: {labels:?}"
+        );
+    }
+
+    // ---- the band costs no decode, because a sketch names no file -----------
+    // S21's criterion, in the counter that remains: `decoded_sources` counts the
+    // decoding *thread*'s work, and a band rebuild must not move it — the band's
+    // job is a list of templates and their grids (see `decode::GalleryJob`), so
+    // there is no file for it to decode. The canvas's own layout is the only
+    // decode in this section. The window asks for its own grid while the editor's
+    // page is pushed, and once more when the widget settles on open and again on a
+    // resize — that is the canvas's own layout, not the band's. S14's finding on
+    // the way: the request made before the canvas was allocated at all was a 1x1
+    // grid (`refresh_document`).
     let decoded = window.decoded_sources();
     assert!(decoded > 0, "opening a project decodes its photos");
     eprintln!("decodes on open: {decoded} for {photos} photos (the canvas's own layout)");
 
-    let band = window.gallery_decodes();
-    assert_eq!(
-        band, 0,
-        "the band's own build decoded {band} files: it names the canvas's preview-grade edge"
-    );
-
-    // A committed framing change: the thumbnails show the new framing too, and
-    // nothing is decoded at all — neither by the canvas (one cell's bitmap is
-    // rebuilt from the cached copy, S12b) nor by the band.
+    // A committed framing change: the sketches are the same drawing (they are the
+    // template's geometry, not the document's), and nothing is decoded at all —
+    // neither by the canvas (one cell's bitmap is rebuilt from the cached copy,
+    // S12b) nor by the band.
     window.select(Some(0));
     window.set_zoom(1.6);
     settle(&window);
@@ -194,7 +234,7 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
 
     // A layout change: the sheet's shape changes with the layout, so the canvas
     // re-cuts its own preview-grade copies — one decode per photo, the canvas's own
-    // — and the band adds nothing to it.
+    // — and the band, whose build is a sketch, adds nothing to it.
     window.select_layout("grid-8-4x2");
     settle(&window);
     assert_eq!(
@@ -212,15 +252,10 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
         after_layout <= 2 * photos as u64,
         "a layout change cost {after_layout} decodes for {photos} photos: the canvas's own, never doubled by the band"
     );
-    assert_eq!(
-        window.gallery_decodes() - band,
-        0,
-        "the band decoded nothing of its own through a layout change"
-    );
 
     // A resize moves the canvas's grid, so the preview-grade copies at the new
-    // edge are the canvas's own downloads — and the band, whose request goes out in
-    // the same batch at that same edge, adds none of its own.
+    // edge are the canvas's own downloads — and the band, whose build is a sketch,
+    // adds nothing to it.
     let area = window.canvas_widget();
     area.set_hexpand(false);
     area.set_vexpand(false);
@@ -233,16 +268,46 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
         "a resize cost {} decodes for {photos} photos",
         after_resize - decoded
     );
+
+    // ---- the band's own build decodes nothing at all (S21) ----------------
+    // Measured where the *canvas* cannot contribute: two layouts with the same
+    // aspect and the same cell count keep the canvas's grid, so the click decodes
+    // nothing for the canvas (S18's "keeps the edge" row), and every file the
+    // counter moves for is the band's. It moves not at all — a sketch is a
+    // template's geometry, and `decode::GalleryJob` carries no path.
+    // (`grid-4-2x2` and `grid-4-2x2g` are the library's only such pair; the
+    // eight-cell layouts are 4:3, 16:9 and 3:2.)
+    window.open_document(document_on("grid-4-2x2"));
+    settle(&window);
+    let before_band = window.decoded_sources();
+    let builds = window.gallery_builds();
+    window.select_layout("grid-4-2x2g");
+    settle(&window);
     assert_eq!(
-        window.gallery_decodes() - band,
-        0,
-        "the band decoded nothing of its own through a resize"
+        window.document().template.name,
+        "grid-4-2x2g",
+        "the click moved the document"
     );
+    assert!(window.gallery_builds() > builds, "and rebuilt the band");
+    assert_eq!(
+        window.decoded_sources(),
+        before_band,
+        "the band's rebuild decoded files: a sketch names no file"
+    );
+    let band_decodes = window.decoded_sources() - before_band;
+
     eprintln!(
-        "decodes: {decoded} on open, {} layout + resize (canvas only), {} band, {photos} photos",
+        "decodes: {decoded} on open, {} layout + resize (canvas only), {band_decodes} band, {photos} photos",
         after_resize - decoded,
-        window.gallery_decodes() - band,
     );
+    // Back to the verification project's own layout for the sections below: they
+    // start from the eight-photo document on `mosaic-8-s14`, having clicked
+    // `grid-8-4x2` last.
+    window
+        .open_path(&project)
+        .expect("the verification project opens again");
+    window.select_layout("grid-8-4x2");
+    settle(&window);
 
     // ---- a layout change keeps the surviving cells -------------------------
     let before = window.document();
@@ -719,36 +784,48 @@ fn settle(window: &pixlay::EditorWindow) {
     assert!(window.wait_for_gallery(support::WAIT), "the band was built");
 }
 
-/// `pixlay-render render` of one candidate, at the grid the strip drew it at.
-fn cli_render(window: &pixlay::EditorWindow, name: &str) -> support::Image {
+/// `pixlay-render render --template <name> --sketch` at the grid the strip draws
+/// that candidate at, with the band's own three parameters.
+///
+/// The band's style is passed in because that is the claim: the same renderer, the
+/// same grid, the same two colours and width — so the two outputs are the same
+/// pixels (RMSE 0) and not merely similar ones.
+fn cli_sketch(name: &str, style: pixlay_render::Sketch) -> support::Image {
     let template = templates::get(name).unwrap_or_else(|| panic!("template {name}"));
-    let mut candidate = window.document();
-    candidate.template = template;
-    candidate
-        .cells
-        .resize(candidate.template.slots.len(), Default::default());
-    let grid = templates::candidate_grid(candidate.template.aspect);
-    let project = support::artifact(&format!("layout-candidate-{name}.pixlay"));
-    // Anchored at the project the window opened, so the candidate's relative photo
-    // paths are rebased onto the artifact directory — exactly as `save as…` does.
-    let anchor = window
-        .project_path()
-        .unwrap_or_else(support::verify_project);
-    Project::new(candidate, &anchor)
-        .expect("the candidate is a valid document")
-        .save_as(&project)
-        .expect("the candidate project is written");
-    let out = support::artifact(&format!("layout-candidate-{name}.png"));
+    let grid = templates::candidate_grid(template.aspect);
+    let out = support::artifact(&format!("layout-sketch-{name}.png"));
+    let channel = |value: u8| value.to_string();
+    let paper = [
+        channel(style.paper.r),
+        channel(style.paper.g),
+        channel(style.paper.b),
+    ]
+    .join(",");
+    let ink = [
+        channel(style.ink.r),
+        channel(style.ink.g),
+        channel(style.ink.b),
+    ]
+    .join(",");
+    let stroke = style.stroke_px.to_string();
+    let long_edge = grid.width.max(grid.height).to_string();
     let status = pixlay_cli::cli::run(&argv(&[
         "render",
-        "--project",
-        path(&project),
+        "--template",
+        name,
+        "--sketch",
         "--long-edge",
-        &grid.width.max(grid.height).to_string(),
+        &long_edge,
+        "--paper",
+        &paper,
+        "--ink",
+        &ink,
+        "--stroke",
+        &stroke,
         "--out",
         path(&out),
     ]))
-    .expect("the CLI renders the candidate");
+    .expect("the CLI draws the sketch");
     assert_eq!(status, 0, "{name}: the CLI reported success");
     read_image(&out)
 }
