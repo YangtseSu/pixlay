@@ -659,6 +659,45 @@ fn a_bitmap_past_the_budget_is_refused_naming_the_slot() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A **square** sheet with two cells side by side, both filled, under `frame_gap`.
+///
+/// The square aspect is what makes the frame's number the same arithmetic in both
+/// axes, and at a 4000 px long edge the canvas is 4000 px tall — so a 4% gap is
+/// exactly 160 px, the number S20's criterion names.
+fn write_square_project(dir: &Path, name: &str, frame_gap: f64) -> PathBuf {
+    let left = Polygon::rect(0.0, 0.0, 0.5, 1.0);
+    let right = Polygon::rect(0.5, 0.0, 1.0, 1.0);
+    let template = Template {
+        name: "test-2-square".to_string(),
+        version: 1,
+        aspect: 1.0,
+        slots: vec![
+            Slot {
+                area: left.area(),
+                outline: left,
+            },
+            Slot {
+                area: right.area(),
+                outline: right,
+            },
+        ],
+    };
+    let mut doc = CollageDoc::new(template);
+    doc.frame.gap_rel = frame_gap;
+    let photos = ["a.png", "b.jpg"];
+    let bytes: [&[u8]; 2] = [
+        include_bytes!("fixtures/photos/square.png"),
+        include_bytes!("fixtures/photos/landscape.jpg"),
+    ];
+    for ((cell, photo), data) in doc.cells.iter_mut().zip(photos).zip(bytes) {
+        std::fs::write(dir.join(photo), data).expect("write photo");
+        cell.source = Some(PathBuf::from(photo));
+    }
+    let path = dir.join(name);
+    std::fs::write(&path, doc.to_json().expect("serializes")).expect("write project");
+    path
+}
+
 #[test]
 fn probe_reports_numbers_the_renderer_can_be_judged_by() {
     let dir = out_dir("probe");
@@ -731,6 +770,162 @@ fn probe_reports_numbers_the_renderer_can_be_judged_by() {
             <= 3.0
     );
     assert_eq!(field(&output, "seam.0.foreign"), "0");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_gap_is_the_distance_between_two_photos() {
+    // S20, ruling 35: the frame's number is the visible stripe — between two photos
+    // *and* between a photo and the sheet's edge. At a 4000 px long edge on a square
+    // sheet a 4% gap is 160 px, and it has to measure 160 px in all five places: the
+    // seam between the two cells and the four borders of the sheet. Before S20 the
+    // borders measured 80 px (half the number, with the seam the whole one) and this
+    // probe reported `passed = false`.
+    let dir = out_dir("gap");
+    let project = write_square_project(&dir, "square.pixlay", 0.04);
+    let output = run(&[
+        "probe",
+        "--project",
+        project.to_str().unwrap(),
+        "--long-edge",
+        "4000",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "out_h"), "4000");
+    assert_eq!(field(&output, "gap_px"), "160.000000");
+    assert_eq!(field(&output, "gap_ok"), "true");
+    for (index, side) in ["top", "right", "bottom", "left"].into_iter().enumerate() {
+        let prefix = format!("border.{index}");
+        assert_eq!(field(&output, &format!("{prefix}.side")), side);
+        assert_eq!(
+            field(&output, &format!("{prefix}.gap_min_px")),
+            "160",
+            "{side}"
+        );
+        assert_eq!(
+            field(&output, &format!("{prefix}.gap_max_px")),
+            "160",
+            "{side}"
+        );
+        assert!(
+            field(&output, &format!("{prefix}.samples"))
+                .parse::<i64>()
+                .unwrap()
+                >= 1,
+            "{side} was not sampled at all"
+        );
+        assert_eq!(
+            field(&output, &format!("{prefix}.gap_ok")),
+            "true",
+            "{side}"
+        );
+    }
+    // One seam: the two cells share the full-height edge at the middle of the sheet.
+    let prefix = "seam.0";
+    assert_eq!(
+        field(&output, &format!("{prefix}.length_px")),
+        "4000.000000"
+    );
+    assert_eq!(
+        field(&output, &format!("{prefix}.gap_min_px")),
+        "160",
+        "{prefix}"
+    );
+    assert_eq!(
+        field(&output, &format!("{prefix}.gap_max_px")),
+        "160",
+        "{prefix}"
+    );
+    assert!(
+        field(&output, &format!("{prefix}.gap_rows"))
+            .parse::<i64>()
+            .unwrap()
+            > 100,
+        "{prefix} was measured on too few rows to mean anything"
+    );
+    // Whole-pixel geometry on a square sheet, so the stripe is exact and the
+    // deviation from what the geometry leaves is zero.
+    assert_eq!(field(&output, &format!("{prefix}.gap_dev_px")), "0.000000");
+    assert_eq!(
+        field(&output, &format!("{prefix}.gap_ok")),
+        "true",
+        "{prefix}"
+    );
+    assert_eq!(field(&output, "passed"), "true");
+
+    // The other two shapes S20's criterion names, on the library's own templates so
+    // the whole machine path is exercised rather than a hand-made document: a rounded
+    // rectangle (the corners are cut, the stripes at the middles are not) and a
+    // single-slot document, which has no seam at all and one uniform border. The
+    // expected width is the probe's own `gap_px`, because these templates are not
+    // square: it is the same number in pixels whatever the aspect is.
+    let photo = dir.join("round.png");
+    std::fs::write(&photo, include_bytes!("fixtures/photos/square.png")).expect("write photo");
+    let second = dir.join("round2.jpg");
+    std::fs::write(&second, include_bytes!("fixtures/photos/landscape.jpg")).expect("write photo");
+    for (template, photos, seams) in [
+        ("strip-2-1x2", vec![&photo, &second], 1usize),
+        ("grid-1-1x1", vec![&photo], 0usize),
+    ] {
+        let plain = dir.join(format!("{template}.pixlay"));
+        let framed = dir.join(format!("{template}-framed.pixlay"));
+        let mut args = vec!["init", "--template", template];
+        for photo in &photos {
+            args.push("--photo");
+            args.push(photo.to_str().unwrap());
+        }
+        args.push("--out");
+        args.push(plain.to_str().unwrap());
+        let output = run(&args);
+        assert_eq!(code(&output), 0, "{}", stderr(&output));
+
+        let output = run(&[
+            "edit",
+            "--project",
+            plain.to_str().unwrap(),
+            "--gap",
+            "0.04",
+            "--radius",
+            "0.03",
+            "--out",
+            framed.to_str().unwrap(),
+        ]);
+        assert_eq!(code(&output), 0, "{}", stderr(&output));
+
+        let output = run(&[
+            "probe",
+            "--project",
+            framed.to_str().unwrap(),
+            "--long-edge",
+            "1000",
+        ]);
+        assert_eq!(code(&output), 0, "{template}: {}", stderr(&output));
+        let expected: f64 = field(&output, "gap_px").parse().unwrap();
+        assert!(expected > 0.0);
+        let rows = stdout(&output)
+            .lines()
+            .filter(|line| line.starts_with("seam.") && line.ends_with(".gap_max_px = 0"))
+            .count();
+        assert_eq!(rows, 0, "{template}: a measured stripe came out at zero px");
+        let measured: Vec<f64> = stdout(&output)
+            .lines()
+            .filter_map(|line| {
+                let (key, value) = line.split_once(" = ")?;
+                (key.ends_with(".gap_min_px") || key.ends_with(".gap_max_px"))
+                    .then(|| value.parse::<f64>().ok())?
+            })
+            .collect();
+        assert_eq!(measured.len(), 2 * (4 + seams), "{template}: {measured:?}");
+        for stripe in measured {
+            // The probe's own tolerance: the stripe is measured as a pixel span, so
+            // a fractional boundary adds up to a pixel at each end.
+            assert!(
+                (stripe - expected).abs() <= 2.0,
+                "{template}: a {stripe} px stripe against the frame's {expected} px"
+            );
+        }
+        assert_eq!(field(&output, "passed"), "true", "{template}");
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 

@@ -1451,6 +1451,30 @@ fn probe(args: ProbeArgs) -> Result<u8, Failure> {
         report.float(&format!("{prefix}.max_residual"), seam.max_residual);
         report.int(&format!("{prefix}.foreign"), seam.foreign as i64);
         report.bool(&format!("{prefix}.clean"), seam.is_clean());
+        // The frame's stripe across this seam (S20): the run between the two
+        // photos, as the render measured it against the frame's own number.
+        report.int(&format!("{prefix}.gap_min_px"), seam.gap_min_px as i64);
+        report.int(&format!("{prefix}.gap_max_px"), seam.gap_max_px as i64);
+        report.int(&format!("{prefix}.gap_rows"), seam.gap_rows as i64);
+        report.int(&format!("{prefix}.gap_skipped"), seam.gap_skipped as i64);
+        report.float(&format!("{prefix}.gap_dev_px"), seam.gap_dev_px);
+        report.bool(&format!("{prefix}.gap_ok"), seam.gap_is_ok());
+    }
+    // The other half of the same claim: the run from each side of the sheet to the
+    // outermost photo that reaches it, which is the frame's number too.
+    report.float("gap_px", result.gap.expected_px);
+    report.bool("gap_ok", result.gap.is_ok());
+    for (index, border) in result.gap.borders.iter().enumerate() {
+        let prefix = report.row("border", index);
+        report.text(&format!("{prefix}.side"), border.side.name());
+        report.int(&format!("{prefix}.gap_min_px"), border.min_px as i64);
+        report.int(&format!("{prefix}.gap_max_px"), border.max_px as i64);
+        report.int(&format!("{prefix}.samples"), border.samples as i64);
+        report.int(&format!("{prefix}.skipped"), border.skipped as i64);
+        report.bool(
+            &format!("{prefix}.gap_ok"),
+            border.is_ok(result.gap.expected_px),
+        );
     }
     report.bool("passed", result.ok());
     add_stats(&mut report, args.stats, compose, None, "none");

@@ -112,6 +112,27 @@ fn widest_run(image: &Rgb8Image, y: i32, color: [u8; 3]) -> i32 {
         .unwrap_or(0)
 }
 
+/// The runs of pixels of exactly `color` in column `x`, as `(y0, y1)` inclusive.
+fn column_runs(image: &Rgb8Image, x: i32, color: [u8; 3]) -> Vec<(i32, i32)> {
+    let mut runs = Vec::new();
+    let mut start = None;
+    for y in 0..image.height {
+        let matches = image.pixel(x, y) == color;
+        match (matches, start) {
+            (true, None) => start = Some(y),
+            (false, Some(from)) => {
+                runs.push((from, y - 1));
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    if let Some(from) = start {
+        runs.push((from, image.height - 1));
+    }
+    runs
+}
+
 /// How many pixels of exactly `color` fall inside `(x0, y0)..(x1, y1)` (exclusive),
 /// skipping a 2 px band at the border so the clip's own antialiasing is not counted.
 fn count_inside(image: &Rgb8Image, rect: (i32, i32, i32, i32), color: [u8; 3], band: i32) -> u64 {
@@ -158,33 +179,108 @@ fn the_identity_frame_leaves_the_cells_untouched() {
 
 #[test]
 fn the_gap_is_the_requested_width_in_pixels() {
-    // The measured width is the assertion: half the gap comes off each side of each
-    // cell, so two neighbours are exactly `gapRel * canvas height` apart, at any
-    // resolution (`gapRel` is a fraction of the canvas height, which is what makes
-    // it resolution-independent).
-    for gap_rel in [0.01, 0.02, 0.04, 0.08] {
+    // The measured width is the assertion, and this document has five stripes to
+    // measure: the two cells share a full-height seam, and the sheet's own edge is a
+    // stripe as well. Half the gap comes off each side of a cell and the whole gap
+    // off the sheet's, so **all five measure `gapRel × canvas height`** — that one
+    // number for the seam and for the border is what ruling 35 of 2026-09-25 asked
+    // for, and it holds at any resolution because `gapRel` is a fraction of the
+    // canvas height. The last row of the table has a radius: the corners are cut
+    // away, and the stripes at the middles must not move because of it.
+    for (gap_rel, radius_rel) in [
+        (0.01, 0.0),
+        (0.02, 0.0),
+        (0.04, 0.0),
+        (0.08, 0.0),
+        (0.04, 0.03),
+    ] {
         let frame = Frame {
             gap_rel,
+            radius_rel,
             ..Frame::default()
         };
         let (image, canvas) = render(frame);
         let expected = (gap_rel * f64::from(canvas.height)).round() as i32;
-        let middle = canvas.height / 2;
-        let stripe = widest_run(&image, middle, [255, 255, 255]);
+        let what = format!("gap {gap_rel} radius {radius_rel}");
+
+        // Across the sheet, in one row: the left border, the seam, the right border.
+        let row: Vec<i32> = runs(&image, canvas.height / 2, [255, 255, 255])
+            .into_iter()
+            .map(|(from, to)| to - from + 1)
+            .collect();
+        assert_eq!(row.len(), 3, "{what}: the row's stripes are {row:?}");
+        for stripe in &row {
+            assert!(
+                (stripe - expected).abs() <= 2,
+                "{what}: a {stripe} px stripe instead of {expected} px in the middle row"
+            );
+        }
+
+        // And down the sheet, through the left cell: the top and bottom borders.
+        let column: Vec<i32> = column_runs(&image, canvas.width / 4, [255, 255, 255])
+            .into_iter()
+            .map(|(from, to)| to - from + 1)
+            .collect();
+        assert_eq!(
+            column.len(),
+            2,
+            "{what}: the column's stripes are {column:?}"
+        );
+        for stripe in &column {
+            assert!(
+                (stripe - expected).abs() <= 2,
+                "{what}: a {stripe} px stripe instead of {expected} px in a column"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_single_slot_document_shows_one_uniform_border() {
+    // The one-photo collage (S19's `grid-1-1x1`): one cell covering the sheet, so
+    // there is no seam at all and the frame is the whole of what is visible — the
+    // same distance on all four sides, which is the border a one-photo document is
+    // framed with.
+    let outline = Polygon::rect(0.0, 0.0, 1.0, 1.0);
+    let template = Template {
+        name: "test-1".to_string(),
+        version: 1,
+        aspect: 4.0 / 3.0,
+        slots: vec![Slot {
+            area: outline.area(),
+            outline,
+        }],
+    };
+    let gap_rel = 0.06;
+    let mut doc = CollageDoc::new(template);
+    doc.frame = Frame {
+        gap_rel,
+        ..Frame::default()
+    };
+    doc.validate().expect("a legal frame");
+    doc.cells[0].source = Some("photo.png".into());
+    let canvas = PixelSize::for_long_edge(doc.template.aspect, LONG_EDGE).expect("canvas size");
+    let image = render_rgb8(&doc, &images(&doc, canvas), canvas, 1.0, None).expect("renders");
+
+    let expected = (gap_rel * f64::from(canvas.height)).round() as i32;
+    let row: Vec<i32> = runs(&image, canvas.height / 2, [255, 255, 255])
+        .into_iter()
+        .map(|(from, to)| to - from + 1)
+        .collect();
+    let column: Vec<i32> = column_runs(&image, canvas.width / 2, [255, 255, 255])
+        .into_iter()
+        .map(|(from, to)| to - from + 1)
+        .collect();
+    assert_eq!(row.len(), 2, "the row's borders are {row:?}");
+    assert_eq!(column.len(), 2, "the column's borders are {column:?}");
+    for stripe in row.iter().chain(column.iter()) {
         assert!(
             (stripe - expected).abs() <= 2,
-            "gap {gap_rel}: a {stripe} px stripe instead of {expected} px"
-        );
-        // And it is a *stripe*: the gap cuts the cells' vertical edges, so the row
-        // above the middle sees the same width (the frame is not a decoration of
-        // one scanline).
-        let top = (f64::from(canvas.height) * 0.2) as i32;
-        assert!(
-            (widest_run(&image, top, [255, 255, 255]) - stripe).abs() <= 2,
-            "gap {gap_rel}: the stripe is {stripe} px at the middle and {} px at 20%",
-            widest_run(&image, top, [255, 255, 255])
+            "a {stripe} px border instead of {expected} px"
         );
     }
+    // The photo is still the middle of the sheet, and it is the only thing there.
+    assert_eq!(image.pixel(canvas.width / 2, canvas.height / 2), LEFT);
 }
 
 #[test]
@@ -209,16 +305,17 @@ fn a_rounded_corner_uncovers_the_backdrop_monotonically() {
         };
         let (image, canvas) = render(frame);
         let (w, h) = (f64::from(canvas.width), f64::from(canvas.height));
-        // Cell 0's inset rectangle in pixels: half the gap off every side, which is
-        // half the gap of the canvas height vertically and the same physical
-        // length — half the gap divided by the canvas aspect — horizontally.
-        let inset_x = gap_rel / 2.0 / (4.0 / 3.0);
-        let inset_y = gap_rel / 2.0;
+        // Cell 0's visible rectangle in pixels, asked of the renderer's own
+        // definition rather than re-derived: half the gap off the cell's sides, cut
+        // back to the sheet with the whole gap off the sheet's (S20). Everything
+        // inside it that is not the photo is the radius's doing.
+        let doc = doc(frame);
+        let (rect, _radius) = doc.frame.clip(&doc.template.slots[0], doc.template.aspect);
         let inset = (
-            (inset_x * w) as i32,
-            (inset_y * h) as i32,
-            ((0.5 - inset_x) * w) as i32,
-            ((1.0 - inset_y) * h) as i32,
+            (rect.x0 * w) as i32,
+            (rect.y0 * h) as i32,
+            (rect.x1 * w) as i32,
+            (rect.y1 * h) as i32,
         );
         let corners = count_inside(&image, inset, rgb(frame.color), 2);
         if radius_rel == 0.0 {
@@ -312,10 +409,19 @@ fn a_radius_larger_than_the_cell_is_clamped_to_a_stadium() {
     };
     let (image, canvas) = render(frame);
     let middle = canvas.height / 2;
-    // The cell is 0.5 - half the gap wide at the middle; the clamp keeps that much
-    // photo, minus the antialiased edges.
+    // The visible rectangle is what the radius is clamped to and what the stadium's
+    // body spans at its centre line: its own width, minus the antialiased edges.
+    let doc = doc(frame);
+    let (rect, radius) = doc.frame.clip(&doc.template.slots[0], doc.template.aspect);
+    let expected = (rect.width() * f64::from(canvas.width)) as i32;
+    let radius_px = radius * f64::from(canvas.height);
+    assert!(
+        (radius_px - f64::from(expected) / 2.0).abs() <= 1.0,
+        "a 1.0 radius is clamped to half the visible rectangle's smaller side, \
+         measured {radius_px} px against a {} px cell",
+        expected / 2
+    );
     let left = widest_run(&image, middle, LEFT);
-    let expected = ((0.5 - 0.02 / (4.0 / 3.0)) * f64::from(canvas.width)) as i32;
     assert!(
         (left - expected).abs() <= 2,
         "a 1.0 radius left {left} px of a {expected} px cell"

@@ -5,8 +5,11 @@
 //! transform, and it is the one stage that paints *around* the photos instead of
 //! inside them. Three fields, three jobs:
 //!
-//! * `gap_rel` takes half of itself off every side of a cell, which is what makes
-//!   two neighbouring cells show a stripe of the canvas between them;
+//! * `gap_rel` is **the visible stripe the frame leaves**: half of it comes off
+//!   every side of a cell, so two neighbouring cells show the whole gap between
+//!   them, and the sheet's own edge takes the whole gap as well, so the outermost
+//!   photos stand the same distance from the sheet's border (ruled 2026-09-25,
+//!   S20);
 //! * `radius_rel` rounds the corners of what is left;
 //! * `color` is what the canvas is painted with where no photo covers it — the
 //!   gaps, the corners, an empty cell, and everything outside the slots.
@@ -16,17 +19,19 @@
 //!
 //! # What the frame changes about the framing clamp
 //!
-//! A cell's *visible* area is `slot.outline ∩ rounded_rect(slot_bbox inset by
-//! gapRel/2, radiusRel)`, and the clamp's job is that the photo covers it. The
-//! reference the clamp measures against ([`Frame::covering`]) is the outline
-//! clipped to the inset rectangle:
+//! A cell's *visible* area is `slot.outline ∩ rounded_rect(visible_rect,
+//! radiusRel)`, where `visible_rect` is the cell's bounding box with half the gap
+//! taken off every side, cut back to the sheet itself with the whole gap taken off
+//! — and the clamp's job is that the photo covers it. The reference the clamp
+//! measures against ([`Frame::covering`]) is the outline clipped to that
+//! rectangle:
 //!
 //! * it contains everything visible, so covering it covers the cell, for a
 //!   concave slot as much as for a rectangle, and it is a polygon — so the clamp
 //!   stays S3's vertex test;
-//! * it is *exactly* the inset rectangle for a rectangular slot, which is every
-//!   slot in the library but one, so the gap does not magnify the photo: it
-//!   crops it at the frame, the way a mount crops a print;
+//! * it is a rectangle for every rectangular slot, which is every slot in the
+//!   library but one, so the gap does not magnify the photo: it crops it at the
+//!   frame, the way a mount crops a print;
 //! * with no gap the clip is the identity, so the reference is the outline itself
 //!   and a project written before the frame existed fits to the same bits.
 //!
@@ -79,9 +84,13 @@ impl Rgba8 {
 /// height.
 ///
 /// Not a design bound but a typo bound: a length past the whole canvas height is
-/// not a frame around anything. A gap *inside* this range can still empty a small
-/// cell, and that is refused per slot by [`CollageDoc::validate`], which names
-/// the slot; this one is what makes the error message name a range.
+/// not a frame around anything. A gap *inside* this range can still leave a cell
+/// with nothing visible, and that is refused per slot by [`CollageDoc::validate`],
+/// which names the slot; this one is what makes the error message name a range.
+/// Since S20 the gap's own limit is **half** the canvas height — past that the
+/// sheet's own band has no interior left and *every* cell is refused — while the
+/// bound itself stays at 1.0 because it governs both lengths and the radius is
+/// clamped at use: a radius past the cell's half-side is a stadium, not a typo.
 ///
 /// [`CollageDoc::validate`]: crate::CollageDoc::validate
 pub const MAX_FRAME_REL: f64 = 1.0;
@@ -94,11 +103,14 @@ pub const MAX_FRAME_REL: f64 = 1.0;
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Frame {
-    /// Gap between neighbouring cells, as a fraction of the canvas height.
+    /// The stripe the frame leaves visible, as a fraction of the canvas height.
     ///
     /// Half of it is taken off every side of every cell, so two cells that share
-    /// an edge are `gapRel` apart and a cell on the canvas border is `gapRel/2`
-    /// from it.
+    /// an edge are `gapRel` apart — and the sheet's own edge is inset by the whole
+    /// gap, so a cell that reaches the sheet's border stands `gapRel` from it too
+    /// (S20). The number is therefore a *distance between photos*, wherever the
+    /// photos are: a template that bakes its own margin (S2's gutter layouts) adds
+    /// that margin to it.
     #[serde(default)]
     pub gap_rel: f64,
     /// Corner radius of a cell, as a fraction of the canvas height.
@@ -149,30 +161,46 @@ impl Frame {
         self.gap_rel == 0.0 && self.radius_rel == 0.0
     }
 
-    /// A cell's inset rectangle: its bounding box, `gapRel/2` off every side.
+    /// A cell's visible rectangle: its bounding box with half the gap off every
+    /// side, cut back to the sheet with the whole gap off every side.
     ///
     /// Normalized coordinates, so the horizontal inset is divided by the canvas
     /// aspect — the gap is a length, and a length means different fractions of the
     /// two axes.
+    ///
+    /// The two insets are the two halves of one claim (ruled 2026-09-25, S20, ruling
+    /// 35): **the number is the distance between two photos**. Two neighbours each
+    /// give up half of it, so the stripe between them measures `gapRel`; the sheet's
+    /// edge has no photo on the other side to give up the second half, so the frame
+    /// gives up all of it and the outermost photos stand `gapRel` from the sheet's
+    /// border as well. Intersecting the two is the same rule everywhere: the visible
+    /// region is never within half a gap of a cell's own edge and never within a
+    /// whole gap of the sheet's, so no photo is closer to the border than the number
+    /// says and none reaches across a seam.
+    ///
+    /// The result may be empty — a cell narrower than the gap it is asked to give up
+    /// — and that is the caller's to refuse ([`Frame::covering`] answers `None`), not
+    /// something to clamp into a sliver.
     fn inset(&self, slot: &Slot, canvas_aspect: f64) -> Rect {
         let bbox = slot.outline.bbox();
-        let x = self.gap_rel / 2.0 / canvas_aspect;
-        let y = self.gap_rel / 2.0;
+        let half = self.gap_rel / 2.0;
+        let sheet_x = self.gap_rel / canvas_aspect;
+        let sheet_y = self.gap_rel;
         Rect {
-            x0: bbox.x0 + x,
-            y0: bbox.y0 + y,
-            x1: bbox.x1 - x,
-            y1: bbox.y1 - y,
+            x0: (bbox.x0 + half / canvas_aspect).max(sheet_x),
+            y0: (bbox.y0 + half).max(sheet_y),
+            x1: (bbox.x1 - half / canvas_aspect).min(1.0 - sheet_x),
+            y1: (bbox.y1 - half).min(1.0 - sheet_y),
         }
     }
 
-    /// The region of `slot` a photo has to cover: the outline clipped to the inset
-    /// rectangle.
+    /// The region of `slot` a photo has to cover: the outline clipped to the
+    /// visible rectangle.
     ///
-    /// `None` when the gap leaves the cell with nothing visible — no inset
-    /// rectangle at all, or a clipping of the outline that has no interior. That is
-    /// an error a document reports (`CollageDoc::validate` names the slot), not a
-    /// framing a renderer can invent.
+    /// `None` when the gap leaves the cell with nothing visible — the visible
+    /// rectangle has no interior at all, or the clipping of the outline is empty.
+    /// That is an error a document reports (`CollageDoc::validate` names the slot),
+    /// not a framing a renderer can invent.
     ///
     /// The radius is not part of this: see the module's comment.
     pub fn covering(&self, slot: &Slot, canvas_aspect: f64) -> Option<Polygon> {
@@ -187,13 +215,13 @@ impl Frame {
         (clipped.points.len() >= Polygon::MIN_VERTICES && clipped.area() > 0.0).then_some(clipped)
     }
 
-    /// Where the canvas clips a cell to: the inset rectangle in normalized canvas
+    /// Where the canvas clips a cell to: the visible rectangle in normalized canvas
     /// coordinates, and the corner radius as a fraction of the canvas height.
     ///
-    /// The radius is clamped here, to half the smaller side of the inset rectangle
-    /// — measured in canvas-height units on both axes, since the two axes are not
-    /// the same length. A call for a cell the frame emptied is a caller bug: the
-    /// rectangle is then degenerate and clips everything away, which is what a
+    /// The radius is clamped here, to half the smaller side of the visible
+    /// rectangle — measured in canvas-height units on both axes, since the two axes
+    /// are not the same length. A call for a cell the frame emptied is a caller bug:
+    /// the rectangle is then degenerate and clips everything away, which is what a
     /// renderer that already refused the document in `covering` never reaches.
     pub fn clip(&self, slot: &Slot, canvas_aspect: f64) -> (Rect, f64) {
         let inset = self.inset(slot, canvas_aspect);

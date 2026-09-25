@@ -150,12 +150,15 @@ pub fn draw(doc: &CollageDoc, images: &Images, target: &Target) -> Result<(), Re
 /// photo's displayed width is `crop.zoom * slot_width` — the absolute zoom the
 /// document stores, measured against the slot's own bounding box.
 ///
-/// The clip is `outline ∩ rounded_rect(inset)`: the outline first, then the
-/// frame's inset rectangle with its corners rounded, which cairo intersects with
-/// whatever clip is current. The second clip is skipped for an identity frame —
-/// clipping to a superset of the outline would be clipping to something let
-/// through, and skipping it is what keeps an unframed document pixel-identical to
-/// the build before S11.
+/// The clip is `outline ∩ rounded_rect(visible)`: the outline first, then the
+/// rectangle the frame leaves visible with its corners rounded, which cairo
+/// intersects with whatever clip is current. The visible rectangle is the cell's
+/// own box with half the gap off every side, cut back to the sheet's border by the
+/// whole gap (S20) — so the stripe between two photos and the stripe from the
+/// photos to the sheet's edge are the same width. The second clip is skipped for an
+/// identity frame — clipping to a superset of the outline would be clipping to
+/// something let through, and skipping it is what keeps an unframed document
+/// pixel-identical to the build before S11.
 fn draw_slot(
     ctx: &Context,
     index: usize,
@@ -213,8 +216,8 @@ fn draw_slot(
             radius * canvas_h,
         );
         // A second `clip` intersects with the first: this is exactly
-        // "outline ∩ rounded inset", and the corner it cuts away shows the
-        // backdrop rather than a stretched photo.
+        // "outline ∩ rounded visible rectangle", and the corner it cuts away shows
+        // the backdrop rather than a stretched photo.
         ctx.clip();
     }
     let pattern = SurfacePattern::create(bitmap.surface());

@@ -285,9 +285,14 @@ at `Cargo.lock` diffs during review.
   radiusRel, color}` defaults to no gap, square corners and white, so a project written before S11 renders
   byte-identically (measured: the S1 golden image at RMSE 0.0 and the S5 verification render byte-identical —
   `docs/CONTRACT.md` §8). **The gap is the distance between two photos** (ruled 2026-09-25, ruling 35):
-  the visible area of a cell is the sheet eroded by `gapRel/2` intersected with the cell eroded by
-  `gapRel/2`, so every seam — between two photos and to the sheet's own edge — measures exactly `gapRel`;
-  the clamp's reference is the outline clipped to that eroded region, and a rounded corner is *not*
+  the visible area of a cell is the cell's bounding box eroded by `gapRel/2`, intersected with the sheet
+  eroded by `gapRel` — two neighbours each give up half, so the seam between them measures `gapRel`, and
+  the sheet's own edge gives up the whole gap because outside the sheet there is no photo to give the
+  second half, so the outermost photos stand `gapRel` from the border too (`docs/CONTRACT.md` §1, and §8
+  "S20" for the measurement). A *concave* slot's interior edge is the template's own geometry and keeps
+  its place, so the stripe beside it is the neighbour's half alone. The clamp's reference is the outline
+  clipped to that eroded region — a rectangle, so for the rectangular slots the library is made of the
+  gap crops the photo rather than magnifying it — and a rounded corner is *not*
   subtracted from it — the reference stays a polygon rather than approximating arcs, which costs a little
   magnification bounded by the radius and exactly nothing at `radiusRel = 0`.
 - **GTK types do not implement `Send`/`Sync`.** Background decoding and scaling must return to the

@@ -110,11 +110,13 @@ RENDER OPTIONS:
                         the export itself.
 
 FRAME OPTIONS (render, edit):
-    --gap <rel>         The gap between cells, as a fraction of the canvas
-                        height, 0..=1. Half of it comes off every side of every
-                        cell, so two cells that share an edge are this far apart.
-                        `render` applies this to the render only; `edit` stores
-                        it in the document. Default is the document's own.
+    --gap <rel>         The distance between two photos, as a fraction of the
+                        canvas height, 0..=1. Half of it comes off every side of
+                        each cell and the whole gap off the sheet's own edge, so
+                        two neighbouring cells are this far apart and so are the
+                        outermost photos from the border. `render` applies this
+                        to the render only; `edit` stores it in the document.
+                        Default is the document's own.
     --radius <rel>      Corner radius of a cell, as a fraction of the canvas
                         height, 0..=1, clamped to half the smaller side of the
                         cell. 0 is a square corner.
@@ -128,6 +130,12 @@ FRAME OPTIONS (render, edit):
 PROBE OPTIONS:
     --project <file>    Project to probe. Required.
     --long-edge <n>     Grid to probe at, 1..=30000. Default 4000.
+                        Prints, for that grid: which photo each occupied cell
+                        shows, whether anything the slots do not cover is the
+                        document's backdrop, how much two neighbours blend along
+                        their shared edge, and whether the frame's gap measures
+                        what the document claims — at the seams and at the
+                        sheet's own border. Exit 2 when the verdict is not passed.
 
 IMAGE OPTIONS:
     --photo <file>      Decode one photo and report what the decoder found: the

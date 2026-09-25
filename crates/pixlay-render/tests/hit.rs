@@ -259,11 +259,12 @@ fn the_frames_backdrop_pixels_are_still_the_cells_geometry() {
     let slot_0 = [COLORS[0].r, COLORS[0].g, COLORS[0].b];
     let height = f64::from(canvas.height);
 
-    // The gap: half of `gapRel` is taken off every side of the cell, so the band
-    // between the canvas border and the cell's own edge is `gapRel/2` of the canvas
-    // height wide. Sample its middle.
-    let half_gap = FRAME.gap_rel / 2.0 * height;
-    let x = (half_gap / 2.0) as i32;
+    // The gap: the frame leaves the sheet's own edge inset by the whole gap (S20),
+    // so the band between the canvas's border and the cell's visible rectangle is
+    // `gapRel` of the canvas height wide. Sample its middle.
+    let (rect, radius_rel) = doc.frame.clip(&doc.template.slots[0], doc.template.aspect);
+    let band = FRAME.gap_rel * height;
+    let x = (band / 2.0) as i32;
     let y = (height / 4.0) as i32;
     let (pixel, hit) = sample(&doc, &image, x, y);
     assert_eq!(pixel, backdrop, "the gap at ({x},{y}) is not the backdrop");
@@ -273,12 +274,12 @@ fn the_frames_backdrop_pixels_are_still_the_cells_geometry() {
         "the gap at ({x},{y}) is not the geometry of the cell behind it"
     );
 
-    // The rounded corner: the arc is centred `radius` in from the inset rectangle's
-    // own corner, and the point 0.15 of the radius along the diagonal from that
-    // corner is outside the disc by 1.2 radii — cut away, and far enough from the
+    // The rounded corner: the arc is centred `radius` in from the visible
+    // rectangle's own corner, and the point 0.15 of the radius along the diagonal
+    // from that corner is well outside the disc — cut away, and far enough from the
     // arc to be a clean pixel rather than a blend.
-    let radius = FRAME.radius_rel * height;
-    let corner = (half_gap + 0.15 * radius) as i32;
+    let radius = radius_rel * height;
+    let corner = ((rect.x0 * f64::from(canvas.width)) + 0.15 * radius) as i32;
     let (pixel, hit) = sample(&doc, &image, corner, corner);
     assert_eq!(
         pixel, backdrop,

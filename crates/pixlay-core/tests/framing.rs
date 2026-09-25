@@ -510,10 +510,20 @@ fn the_floor_is_the_smallest_zoom_that_covers() {
                 );
             }
 
-            // With a gap, the floor is the *inset* rectangle's, and it is still
+            // With a gap, the floor is the *visible* rectangle's, and it is still
             // tight: the gap crops the photo at the frame instead of magnifying it,
             // which is what makes "add a gap" and "zoom the photo" different
             // operations.
+            //
+            // The extents are measured from the slot's own centre, because that is
+            // where the photo is centred at a zero offset — and since S20 that is
+            // not the same as half the visible rectangle: at the sheet's edge the
+            // frame's own band takes a whole gap off the outer side and half of one
+            // off the inner sides, so the rectangle sits off-centre in its cell and
+            // the covering zoom has that much further to reach. The bbox of the
+            // visible polygon is realized by its own vertices, so measuring against
+            // the bbox is exact rather than an over-estimate, for the concave slot
+            // too.
             let gap = 0.02;
             let frame = Frame {
                 gap_rel: gap,
@@ -522,10 +532,12 @@ fn the_floor_is_the_smallest_zoom_that_covers() {
             let visible = covering(&frame, slot, template.aspect);
             let vbox = visible.bbox();
             let visible_points = samples(&visible, 12);
+            let centre = slot.outline.bbox().center();
+            let (cx, cy) = (centre.x * template.aspect, centre.y);
+            let half_width = (vbox.x1 * template.aspect - cx).max(cx - vbox.x0 * template.aspect);
+            let half_height = (vbox.y1 - cy).max(cy - vbox.y0);
             for photo_aspect in [0.6, 1.0, 1.5, 2.8] {
-                let expected = (2.0 / width)
-                    * (vbox.width() * template.aspect / 2.0)
-                        .max(photo_aspect * vbox.height() / 2.0);
+                let expected = (2.0 / width) * half_width.max(photo_aspect * half_height);
                 let transform = fit(
                     CropTransform {
                         zoom: 0.2,

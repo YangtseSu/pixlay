@@ -19,6 +19,25 @@ The contract is **frozen at S1** and every step after it is built on top of it (
 >
 > The rest of the contract is untouched. The rulings themselves are in `docs/archive/2026-09-22-UX-DIRECTION.md` §6,
 > and the steps that carried them out are in `docs/archive/2026-09-22-STEPS.md` (S11 in particular).
+>
+> **What S20 changes in this file.** The frame's gap stops being an inset and becomes the visible
+> distance it is named after (ruled 2026-09-25, ruling 35):
+> - **`gapRel` is the distance between two photos, and the same distance stands between the photos and
+>   the sheet's edge.** Half of it comes off every side of a cell — so two neighbours are `gapRel`
+>   apart — and the sheet's own edge gives up the whole gap, because outside the sheet there is no photo
+>   to give up the second half. Before S20 each cell gave up `gapRel/2` and the sheet's border kept
+>   `gapRel/2`, so the border measured *half* the number while the seam measured all of it; measured at a
+>   4000 px long edge with `--gap 0.04`: the seam 160 px both before and after, the border 80 px before
+>   and 160 px after (§8, "S20");
+> - **the field's shape, its range and the dialog's rows do not change, and `docVersion` does not
+>   bump**: a document written before S20 still loads and still renders, with the gap meaning the new
+>   thing. Only `gapRel = 0` renders byte-identically, which is exactly the promise S11's ruling made
+>   (§8, "S11"), and a version bump would refuse files that this build reads correctly;
+> - a gap of half the canvas height or more now leaves *every* cell with nothing visible, so it is
+>   refused per slot naming the slot (`MAX_FRAME_REL` itself stays 1.0 — it governs the radius too,
+>   which is clamped at use rather than refused).
+>
+> The rest of the contract is untouched.
 
 ---
 
@@ -104,16 +123,22 @@ Conventions:
   (ruled 2026-09-25 in S19): the frame stays opt-in, so the window's `New` and the CLI's `init` write the
   document the field's own defaults describe, and one photo — a legal collage since S19, the one-slot
   `grid-1-1x1` — is framed only when the user asks for a frame
-  (`docs/2026-09-25-STEPS.md`, `S19 · Result`). Both lengths are **fractions of the canvas height**,
-  like every other length the format stores: a gap takes half of itself off every side of every cell (two neighbours are
-  then `gapRel` apart, and the clip shows the backdrop in between), and a radius is clamped to half the
-  smaller side of the cell's inset rectangle so a large request rounds the corners into a stadium. The
-  clamp's coverage reference is the cell's **visible region**: the outline clipped to the inset rectangle,
-  which is that rectangle exactly for the rectangular slots the library is made of. It does *not* subtract
-  the rounded corners — a rounded rectangle's exact support needs circular arcs and the reference stays a
-  polygon, so the corner costs a little more zoom than it strictly needs (bounded by the radius, and zero at
-  `radiusRel = 0`). The clip is `outline ∩ rounded_rect(inset)`, so a corner shows the backdrop rather than a
-  stretched photo.
+  `docs/2026-09-25-STEPS.md`, `S19 · Result`). Both lengths are **fractions of the canvas height**,
+  like every other length the format stores. **The gap is the distance between two photos** (ruled
+  2026-09-25, ruling 35; landed in S20): half of it comes off every side of a cell, so two neighbouring
+  cells are `gapRel` apart, and the sheet's own edge gives up the whole gap, so the outermost photos
+  stand the same distance from the sheet's border — one number, and the same visible stripe between two
+  photos and at the border (measured at a 4000 px long edge with `--gap 0.04`: **160 px** in both places,
+  §8 "S20"). A template that bakes its own margin (the `*g` gutter layouts, S2) adds that margin to the
+  stripe, and that is the template's geometry rather than the frame's. A radius is clamped to half the
+  smaller side of the cell's visible rectangle so a large request rounds the corners into a stadium. The
+  clamp's coverage reference is the cell's **visible region**: the outline clipped to the visible
+  rectangle — the cell's box with half the gap off every side, cut back to the sheet with the whole gap
+  off — which is that rectangle exactly for the rectangular slots the library is made of. It does *not*
+  subtract the rounded corners — a rounded rectangle's exact support needs circular arcs and the reference
+  stays a polygon, so the corner costs a little more zoom than it strictly needs (bounded by the radius,
+  and zero at `radiusRel = 0`). The clip is `outline ∩ rounded_rect(visible)`, so a corner shows the
+  backdrop rather than a stretched photo.
 
 ## 2. Limit constants (all have explicit errors, no panics)
 
@@ -131,7 +156,7 @@ Conventions:
 | framing zoom | `0 < zoom ≤ 1000` | the upper bound is necessary: zoom determines the size of the decoded bitmap, and without an upper bound it overflows. S4's decoder sets a limit **separately by memory budget**; the two layers each mind their own. The fit raises the drawn zoom to the covering value and never lowers a larger request |
 | crop offset | every component \|offset\| ≤ 1 (slot widths / heights) | beyond half a slot the photo centre leaves the slot, and no clamp can cover it again. The fit reduces it further whenever the requested pan would uncover the slot |
 | template aspect query | `templates::of_aspect` matches within ≤ 1e-6 (`ASPECT_TOLERANCE`) | the picker's grouping: layouts whose declared ratio agrees with the named one |
-| frame gap / radius | both finite, `0 ≤ value ≤ 1.0` (`MAX_FRAME_REL`, fraction of canvas height) | the bound is a typo bound, not a design one: a length past the whole canvas height is not a frame around anything. A gap *inside* the range can still empty a small cell, and that is refused per slot by `CollageDoc::validate`, naming the slot |
+| frame gap / radius | both finite, `0 ≤ value ≤ 1.0` (`MAX_FRAME_REL`, fraction of canvas height) | the bound is a typo bound, not a design one: a length past the whole canvas height is not a frame around anything. A gap *inside* the range can still leave a cell with nothing visible, and that is refused per slot by `CollageDoc::validate`, naming the slot. Since S20 a gap of **0.5 or more** leaves *every* cell invisible (the sheet's own band has no interior left), and the bound stays 1.0 because it governs the radius as well — a radius past the cell's half-side is a stadium, not a typo |
 | frame colour alpha | exactly `255` | the backdrop is painted, not blended: a translucent one would make the exported pixel depend on the surface behind it, which is exactly what "preview and export are the same picture" and "an export is never transparent" forbid |
 | `--preview-px` | 1..=20000 (long edge, in pixels) | a preview larger than this cannot be reviewed by eye anyway. The flag bounds the *request*; the grid it scales the base canvas to still has to fit the canvas pixel budget, so `--preview-px 20000` on a square template is 400 MP and is refused with `CanvasTooLarge` (exit 2) before a byte is decoded (S15e, PIX-003) |
 | `--at` (`hit`) | both components inside 0..=1 | the canvas *is* `[0,1]`: normalized coordinates are what the document stores and what `probe` prints, so a point outside the canvas is a caller that mis-scaled something, not a hit test with an unusual answer |
@@ -215,12 +240,12 @@ Images                            // slot → Bitmap; absent = that cell is left
   - **the backdrop** is the first thing `draw` paints — `frame.color`, white by default — so everything a photo does
     not reach (the gaps, a rounded corner, an empty cell, the canvas border) is that colour. It is painted with
     `Operator::Source`, not blended, so the output is opaque whatever the surface held before.
-  - **the clip** is `outline ∩ rounded_rect(inset)` per cell: the outline first, then the inset rectangle with its
-    corners rounded, which cairo intersects with the current clip. A corner therefore shows the backdrop instead of a
+  - **the clip** is `outline ∩ rounded_rect(visible)` per cell: the outline first, then the rectangle the frame leaves visible — the cell's box with half the gap off every side, cut back to the sheet with the whole gap off (S20) — with its corners rounded, which cairo intersects with the current clip. A corner therefore shows the backdrop instead of a
     stretched photo. An identity frame (`gapRel == 0`, `radiusRel == 0`) adds **no** second clip — clipping to a
     superset of the outline would be clipping to something let through — which is what keeps a project written before
     S11 pixel-identical: measured, the S1 golden image is **RMSE 0.0** against the committed PNG, and the S5
-    `verify.pixlay` render is byte-identical (§8, "S11").
+    `verify.pixlay` render is byte-identical (§8, "S11" — and S20 re-measured both after the gap's meaning
+    changed, since only `gapRel = 0` carries that promise).
 - Composite onto an **opaque backdrop, white by default** (`frame.color`): the output is never transparent.
 - **Band rendering**: `Band::out_rows()` partitions on **output pixels** (`first = total * index / count`),
   so at any `scale` the band sizes sum to exactly the whole image. It previously partitioned by canvas rows, rounding each band on its own,
@@ -396,7 +421,7 @@ comparable, and `--quality` was deliberately not added — a knob nobody tests b
 | `render`'s report | carries `long_edge` — the integer the output was **actually rendered at**, `max(out_w, out_h)` of the written file (S15h, PIX-019), so a preview render reports the preview's edge while `preview_px` stays the request — `cells` and `occupied`, next to the written file's facts |
 | `probe`'s report | carries `long_edge` (the integer grid it sampled) instead of a resolution for the same reason |
 | `--stats` | appends `{ms, encode_ms, peak_rss_mb, icc}`; `render` emits all four, `probe` emits no `encode_ms` (it does not encode). `icc` is the description of the profile the written file carries (`sRGB IEC61966-2.1`); a command that writes no file reports `none`. The measurement rules are below |
-| `probe` | samples and outputs numbers (in-slot photo color, out-of-slot backdrop, shared-edge blended pixels, three-color convex combination residual), exit code 2 when the verdict is not passed. The background field is `bg_off_backdrop` — "off the document's backdrop colour", which is `frame.color` and white unless the document says otherwise (S11; it was `bg_non_white` while the backdrop was hard-coded) |
+| `probe` | samples and outputs numbers (in-slot photo color, out-of-slot backdrop, shared-edge blended pixels, three-color convex combination residual, and since S20 the frame's own gap: `gap_px` is the width the document's `gapRel` claims at this grid, `seam.N.gap_min_px`/`gap_max_px`/`gap_rows`/`gap_skipped`/`gap_dev_px`/`gap_ok` the stripe across each shared edge (judged against the stripe the two cells' *geometry* leaves on that row, because the frame insets the bounding box and a concave slot's notch keeps its own place), and `border.N.side`/`gap_min_px`/`gap_max_px`/`samples`/`skipped`/`gap_ok` the run from each side of the sheet to the outermost photo that reaches it), exit code 2 when the verdict is not passed. The background field is `bg_off_backdrop` — "off the document's backdrop colour", which is `frame.color` and white unless the document says otherwise (S11; it was `bg_non_white` while the backdrop was hard-coded) |
 | `image` | one file's decode facts: `mime`, `width`, `height`, `depth` (8 or 16), `aspect`, `exif_bytes`, `date` (EXIF `DateTimeOriginal`, empty when absent). It is how "HEIC decodes" and "orientation 6 is applied" are visible without rendering a project. `--out`/etc. are usage errors: it decodes at the file's own size and writes nothing |
 
 **S6.5's two subcommands** turn the interaction layer's questions into the machine surface (`AGENTS.md`: nothing may be possible only in the GUI). `hit` answers about geometry without decoding a byte; `save` is the one command that writes a document that already holds a user's work.
@@ -451,7 +476,7 @@ three on both commands, and the difference between them is scope:
 
 | Item | Rule |
 |---|---|
-| `--gap <rel>` / `--radius <rel>` | fractions of the sheet height, `0..=1` (exit 1 outside). On `render` they override the document **for that render only** — the file is not touched — and on `edit` they are written into the document through `Command::SetFrame` (S15), so the CLI's edit is one undo step of the same command the window's `Frame…` dialog sends, and a gap that empties a cell is refused where it is asked for rather than when the file is validated. **On `edit` the frame is applied before the framing flags** (S15f, PIX-009): a crop is stored as its *fit*, and the fit reads the frame's `covering` (the cell's outline clipped to its inset rectangle), so `--gap 0.04 --zoom 1.4 --rotate 20` in one command is fitted against the frame the file will carry. Fitting first and applying the frame afterwards wrote a crop the renderer then refits — the file did not hold the fit it claimed, and the same edit run twice moved the bytes |
+| `--gap <rel>` / `--radius <rel>` | fractions of the sheet height, `0..=1` (exit 1 outside). On `render` they override the document **for that render only** — the file is not touched — and on `edit` they are written into the document through `Command::SetFrame` (S15), so the CLI's edit is one undo step of the same command the window's `Frame…` dialog sends, and a gap that empties a cell is refused where it is asked for rather than when the file is validated. **On `edit` the frame is applied before the framing flags** (S15f, PIX-009): a crop is stored as its *fit*, and the fit reads the frame's `covering` (the cell's outline clipped to its visible rectangle, S20), so `--gap 0.04 --zoom 1.4 --rotate 20` in one command is fitted against the frame the file will carry. Fitting first and applying the frame afterwards wrote a crop the renderer then refits — the file did not hold the fit it claimed, and the same edit run twice moved the bytes |
 | `--border-color <r,g,b>` | three channels `0..=255`, stored opaque (the frame's alpha rule is §2). The report prints it back the same way |
 | what `render` reports | `gap`, `radius` and `border` always, so "which frame did that render use" is answerable without counting pixels — the document's own values, unless a flag overrode one |
 | `edit --slot <i>` | the cell the framing flags apply to; `--rotate`/`--zoom`/`--offset`/`--clear` without it are exit 1 **naming the flag**, because taking them as "the frame, then" would drop them silently. `--slot` past the last cell is exit 1 naming the count |
@@ -513,6 +538,7 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
 | in-slot sampled color | **exact equality** (no tolerance) | the sample point is the "point farthest from the boundary", far from antialiasing boundaries |
 | seam blend cap | ≤ 2 px/row, at most 2 px wide | S0 measured 1.08 px/row, at most 1 px wide |
 | three-color convex combination residual cap | 3.0/255 | S0 measured 0.20/255; at 300dpi with eight slots the measured worst was 0.63 |
+| gap stripe tolerance | ± 2 px against the stripe the geometry leaves | the stripe is measured as a *pixel span* — the pixels between the last that is exactly one photo's colour and the first that is exactly the other's — so it is the geometric width rounded outward, up to one pixel per end; measured in S20 over the library's six template families at `gapRel` 0.01–0.08, radius 0 and 0.03, grids 709–1417 (42 runs), worst **1.96 px** |
 
 `probe` uses **flat** content (one color per slot): only when the color blocks are flat can the blended pixels on a seam be distinguished from the content. The three layers its residual model fits are the **document's own backdrop** (`frame.color`) and the two slot colors, so a colored frame does not turn a legitimate blend into a "foreign" pixel (S11). The in-slot sample point for a geometry is
 "the point farthest from the boundary" (a coarse grid search + successive refinement), so the bounding-box center of an L-shaped slot is not misused.
@@ -1087,6 +1113,24 @@ session's; each row is three consecutive runs on a quiet machine.
   take (a second preview-grade edge held in the source cache; a `Preview` of the band's own) are recorded in
   `docs/2026-09-25-STEPS.md`, `S18 · Result`.
 
+### S20 (2026-09-26, `--release`, this machine)
+
+The gap's own meaning, measured as pixels. The ruler is `pixlay-render probe`'s new gap rows (the stripes across
+every shared edge and the run from each side of the sheet to the outermost photo that reaches it); "after" is this
+build, and "before" is the same document against the geometry S19 committed (read with this step's ruler, which is
+new — the *blend* row below was measured against the S19 binary itself, which could report it).
+
+| what | number |
+|---|---|
+| the criterion's document (`grid-4-2x2`: a square library sheet, so 4000 px tall at `--long-edge 4000`), `--gap 0.04` | `gap_px = 160.000000`; **before**: the seam **160 px**, every border **80 px** (`passed = false`, exit 2); **after**: the seam **160 px** and all four borders **160 px** (`passed = true`, exit 0) |
+| the plan's own sketch of the old meaning ("320 px inside and 160 px at the border") | 2x the measured values, and recorded here so nobody re-derives it: the code already took *half* the gap off every side, so the old seam was the number and only the border was half of it. The step's code was written against the measurement, not the sketch |
+| the library's six template families, 42 runs (`gapRel` 0.01/0.02/0.04/0.08, radius 0 and 0.03, grids 709/1000/1417, `grid-1-1x1` … `grid-9-3x3`) | every stripe within **1.96 px** of what the geometry leaves; a border stripe never below its number and at most **0.96 px** above it — the ±2 px tolerance's source, and the reason it is 2 rather than 1: the stripe is measured as a pixel span, so a fractional boundary adds up to a pixel at each end |
+| the concave slot (`mosaic-8-s14`'s L, any gap) | the notch's two seams measure the *neighbour's half* alone (43 px against a frame number of 85 at `--gap 0.08`) — the frame insets a cell's bounding box, so an interior edge of the outline keeps its own place. The probe judges each row against the geometry there, so this is reported and passes; it is the template's geometry, not a defect, and S20 did not change it |
+| the same L, `--gap 0.01`–`0.08` at 709–1417, framed | `probe` still reports **2 of 12 seams unclean**, exactly as it did before S20: the *blend* criterion (S0) sees the notch's two blend bands inside its ±3 px window. Pre-existing (the criterion predates the frame) and unchanged by this step; the numbers it is quoted from (S0: 1.08 px of blend per seam px, §5's `probe` threshold table) are untouched |
+| the interior sample at a gap (S20's one ruler regression, fixed here) | the sample was the point farthest from the *outline's* boundary, so at a large gap a cell on the sheet's edge could be sampled inside the frame's band and read the backdrop (measured: `slot.3.match = false` on `mosaic-8-s14` at `--gap 0.08`). It is now the point farthest from the *visible* region's boundary, and the same document is 8 of 8 |
+| byte-identity at `gapRel = 0` | the S1 golden image is still **RMSE 0.0** (`pixlay-render/tests/render.rs`), and the `AGENTS.md` verification render is the same **9,157,639 bytes** as S19's: the sheet's own band is zero-width at gap 0, so nothing about the identity frame moved |
+| the fit's floor with a frame | unchanged property, moved reference: the framed sweep (36,480 framings) is green, and the floor is now measured about the *slot's* centre against the visible rectangle, which since S20 can sit off-centre in its cell (the sheet's band takes a whole gap off the outer side and half off the inner ones) |
+
 ## 9. The window (S7), and the stages added after it
 
 The GUI is the fifth consumer of the same document, and what it adds is interaction. Its
@@ -1217,7 +1261,8 @@ may rely on:
   (`COMMIT_QUIET`, 250 ms), so one settled frame is one undo step. Its only button is *Close*: there is
   nothing left to confirm, and a Cancel would be a second undo stack.
 - **A value the document refuses is reported, and the rows go back** (S15h, PIX-020). The rows offer
-  0–100 %, and a gap of 100 % leaves every cell of the library's layouts with nothing visible:
+  0–100 %, and a gap of 100 % leaves every cell of the library's layouts with nothing visible — as does
+  every gap from 50 % up, since the sheet's own band leaves no interior then (S20):
   `EditorWindow::set_frame` returns the `CoreError` (which names the slot) instead of swallowing it, the
   dialog shows it in its own `AdwBanner` — a toast would be behind the modal — and re-seeds the three rows
   from the document, so a row can never display a number the document does not hold. Nothing is left
