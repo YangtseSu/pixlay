@@ -345,7 +345,8 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
     list;
   - no per-app style preference (light / dark / system) — amended 2026-09-22: the app is **dark by
     default**, as HIG recommends for one that displays rich visual content, and neither reference app offers
-    the switch; storing a preference would also need a settings file, which ruling 8 forbids;
+    the switch. The settings file ruling 39 of 2026-09-25 allows carries the export's own settings and the
+    last export folder, not this one;
 
   - **the phone's chrome, not its capability** (ruled 2026-09-22, superseded 2026-09-25): the
     picker-first flow came from mobile galleries and was removed with them (ruling 31). What the mobile
