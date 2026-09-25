@@ -1,8 +1,14 @@
 # Pixlay Whole-Project Code Review — 2026-09-24
 
+> **Closed 2026-09-25.** Every finding below was answered by the S15 series (S15b … S15i, plus S15j for
+> PIX-028's ruling) and the answers are recorded in `docs/archive/2026-09-22-STEPS.md`, "The 2026-09-24
+> review's remediation". The file moved here with that plan's retirement. Kept as the record of what was
+> looked at and what was found — a static review, so each finding is a hypothesis that the remediation
+> either reproduced or refuted.
+
 ## Review scope and methodology
 
-This is a static, whole-workspace audit of the current Pixlay tree. The review inspected the workspace manifests and lockfile, all production modules in the five crates, the committed fixtures and fixture generator, every integration-test area, GUI test harness, gettext metadata, and the executable-relevant authoritative documents (`AGENTS.md`, `docs/CONTRACT.md`, and `docs/2026-09-22-STEPS.md`). No formatter, linter, build, test suite, or application run was performed; conclusions are based on direct source and test inspection. The repository's current status says S15 is waiting for the human walk and S16 packaging has not started, so the absence of packaging assets is treated as planned scope rather than as a shipped-package defect.
+This is a static, whole-workspace audit of the current Pixlay tree. The review inspected the workspace manifests and lockfile, all production modules in the five crates, the committed fixtures and fixture generator, every integration-test area, GUI test harness, gettext metadata, and the executable-relevant authoritative documents (`AGENTS.md`, `docs/CONTRACT.md`, and `docs/archive/2026-09-22-STEPS.md`). No formatter, linter, build, test suite, or application run was performed; conclusions are based on direct source and test inspection. The repository's status at the time said S15 was waiting for the human walk and S16 packaging had not started (both have since moved on — the plan of 2026-09-22 is retired, see the banner), so the absence of packaging assets was treated as planned scope rather than as a shipped-package defect.
 
 ### Architecture and invariant map
 
@@ -252,7 +258,7 @@ The S15 machine walk and existing tests cover the happy path well, but they do n
 ### PIX-027 — Low — Synchronize authoritative records with the current implementation
 
 - **Confidence:** High
-- **Locations:** `AGENTS.md:45-46, 28`; `docs/CONTRACT.md:371, 378, 390, 505, 585, 611-619`; `docs/2026-09-22-STEPS.md:239-263, 268-302`; `crates/pixlay-imaging/src/lib.rs:1-55`; `crates/pixlay-core/src/templates/mod.rs:24-40`; `crates/pixlay-render/tests/history.rs:1-25`; `crates/pixlay-cli/tests/history.rs:1-20`.
+- **Locations:** `AGENTS.md:45-46, 28`; `docs/CONTRACT.md:371, 378, 390, 505, 585, 611-619`; `docs/archive/2026-09-22-STEPS.md:239-263, 268-302`; `crates/pixlay-imaging/src/lib.rs:1-55`; `crates/pixlay-core/src/templates/mod.rs:24-40`; `crates/pixlay-render/tests/history.rs:1-25`; `crates/pixlay-cli/tests/history.rs:1-20`.
 - **Evidence:** The authoritative progress block contains two conflicting “Next action” statements, says the narrow strip overlays the neighbor although the current code/test selects a vertical column, and calls S15 built/green while its own gate remains pending. `AGENTS.md` calls `verify.pixlay` docVersion 2 although the fixture starts at 3. `CONTRACT.md` still names removed `Removed::restore`, describes a fit-and-zoom preview although the current implementation and later contract say static `Contain`, says four output formats although only three extensions are accepted, and carries pre-S12c template/string/test counts. Imaging and render module docs still list removed grading, filtering, TIFF, and resolution stages; history test comments still describe removed commands.
 - **Impact:** Future contributors and release reviewers are directed toward APIs, counts, and capabilities that no longer exist, making contract drift and incorrect remediation likely.
 - **Recommendation:** Synchronize only current/authoritative sections with the source while preserving historical step records as history. Give the status block exactly one next action, regenerate source references, and add a lightweight consistency check for the current constants/paths.
@@ -284,7 +290,7 @@ The S15 machine walk and existing tests cover the happy path well, but they do n
 ### PIX-028 — Note — Resolve the picker zoom/pan contract ambiguity before the human gate
 
 - **Confidence:** High
-- **Locations:** `docs/2026-09-22-STEPS.md:34-48, 1180-1192, 1285-1292, 1350-1370`; `crates/pixlay/src/picker.rs:39-45, 564-595`; `docs/CONTRACT.md:1155-1158`.
+- **Locations:** `docs/archive/2026-09-22-STEPS.md:34-48, 1180-1192, 1285-1292, 1350-1370`; `crates/pixlay/src/picker.rs:39-45, 564-595`; `docs/CONTRACT.md:1155-1158`.
 - **Evidence:** The early UX ruling says the picker is “grid + a large preview that can zoom and pan.” The implementation is a static `GtkPicture` with `ContentFit::Contain`, and a later S13 result explicitly reinterprets magnification as editor-only while leaving the open question recorded. The current contract documents the static fit.
 - **Impact:** This is not a confirmed pixel defect, but the authoritative product contract is ambiguous about a user-visible picker capability. A human walk cannot unambiguously accept or reject the stage.
 - **Recommendation:** Record one authoritative ruling: implement a keyboard/pointer zoom-and-pan preview with a machine-visible test surface, or explicitly supersede the earlier ruling. Do not treat this as an implementation bug until that decision is recorded.

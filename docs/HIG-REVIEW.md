@@ -49,9 +49,14 @@ clearly which chapters **have already been read page by page** and which have no
   `reference/keyboard`, which are the three chapters its changes touched. At the start of every UI step
   (S7, S8, S13, S13b, S13c, …), re-read the relevant chapters before updating this file.
 - **Re-routed 2026-09-22**: the main path became `open → pick 2–9 photos → pick a layout → adjust →
-  export` (`docs/2026-09-22-UX-DIRECTION.md`; the rulings are in `docs/2026-09-22-STEPS.md`). Two things
+  export` (`docs/archive/2026-09-22-UX-DIRECTION.md`; the rulings are in `docs/archive/2026-09-22-STEPS.md`). Two things
   in this file changed because of it — **`selection-mode` now applies** (the picker is a collection view)
   and the phone-style deviation is narrower (the chrome, not the capability).
+- **Re-routed again, 2026-09-25**: the picker stage goes (`docs/2026-09-25-STEPS.md`, ruling 31) and the
+  window opens on the editor, so the picker rows below — §1's `selection-mode` row, §2's picker item, §3's
+  check-box and phone-chrome deviations — are **rewritten by S22** of that plan, the step that deletes the
+  stage. Until S22 runs they describe code that is still in the tree. The walk the retired plan was
+  waiting on was replaced by the human's own pass of 2026-09-25, whose findings are that plan's steps.
 - **S13 (2026-09-22) landed the picker stage and read the chapters it needed**: `patterns/containers/selection-mode`,
   `patterns/nav`, `guidelines/navigation` and `guidelines/pointer-touch`. Their criteria are in the table below,
   and the utility pane's row is now "not applicable" rather than "the chapters are unread" — the pane left the
@@ -134,9 +139,13 @@ the canvas is **content** and the interface is **styling**, and the two must not
 
 ### The re-routed main path's scripted step list (the three-minute walk)
 
+**Superseded 2026-09-25** (ruling 31): step 1 of this list is the picker, and it is going. The list is kept
+as the record of what the human's pass of 2026-09-25 walked; the new path's script is written in S22 of
+`docs/2026-09-25-STEPS.md`, together with the shell it describes.
+
 Written for `open → pick 2–9 photos → pick a layout → adjust → export`, and walked once, at the plan's
 S15 — **after the S15 series**, the review's remediation (ruling 2026-09-24,
-`docs/2026-09-22-STEPS.md`). Run the app (`cargo run --release -p pixlay`, or the installed `pixlay` after
+`docs/archive/2026-09-22-STEPS.md`). Run the app (`cargo run --release -p pixlay`, or the installed `pixlay` after
 S16) and time the whole list:
 
 1. *Pick photos*: the window opens on the library; select two to five photos in the thumbnail row (the picked list down the right edge shows them in order, and clicking one of its rows previews that photo; the status bar reads picked/total · pixels · size · zoom).
@@ -170,7 +179,7 @@ feel right, and whether the copy reads well.
 | access keys (`Alt+` mnemonics) | Not doing | this application has no menu bar |
 | Double-clicking to toggle the preview's zoom (HIG `guidelines/pointer-touch`) | Kept, beside a key | That page advises against double clicks ("Actions which are physically challenging to accomplish, such as double-clicking … should be avoided"), and this is the *pointer's* convenience rather than the only path: `Z` toggles the same two states from the keyboard, and the ruling of 2026-09-24 asked for both (PIX-028). The pane has no other click action, so the double click takes nothing away from one |
 | The preview pane's pan has no keyboard path (HIG `guidelines/pointer-touch`) | Deviation, recorded | The chapter's "all actions which can be accomplished with a pointing device should also be possible with a keyboard" is met for the *toggle* (`Z`) but not for the pan: the pane holds no focus of its own, so a pan key would have to be an application accelerator, and the arrow keys on this stage are the grid's and the picked list's own navigation (`reference/keyboard`'s standard set, `Ctrl+Up`/`Ctrl+Down` included). Loupe, the reference viewer, pans by pointer and by scroll only. If S15's walk finds a person reaching for a key here, that is a new step — the same way PIX-008's finding would be |
-| The selection-mode check box (HIG `patterns/containers/selection-mode`) | Not used: a picked cell is shown by a highlight — an accent border or background on the cell | the 2026-09-22 human ruling (`docs/2026-09-22-STEPS.md`, `S13 · Ruling`). A check box is drawn *over* the photo, which is the thing being chosen, and the platform's own `.selection-mode` check is an indicator rather than a control, so it costs a widget per cell to say what a border already says. This is a state, not an action, so HIG `guidelines/pointer-touch`'s "every pointer action has a keyboard path" is untouched |
+| The selection-mode check box (HIG `patterns/containers/selection-mode`) | Not used: a picked cell is shown by a highlight — an accent border or background on the cell | the 2026-09-22 human ruling (`docs/archive/2026-09-22-STEPS.md`, `S13 · Ruling`). A check box is drawn *over* the photo, which is the thing being chosen, and the platform's own `.selection-mode` check is an indicator rather than a control, so it costs a widget per cell to say what a border already says. This is a state, not an action, so HIG `guidelines/pointer-touch`'s "every pointer action has a keyboard path" is untouched |
 
 ## 4. Chapters not yet read page by page (read them and backfill section 1 as the plan's UI steps start)
 

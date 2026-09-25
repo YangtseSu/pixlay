@@ -1,6 +1,7 @@
 # Pixlay
 
-A Linux-native collage tool. Pick 2–9 photos, pick a layout, adjust, export. Regular and irregular
+A Linux-native collage tool. **The editor is the whole application**: open it, add 1–9 photos (a tenth
+and beyond are ignored with one report), pick a layout, adjust, export. Regular and irregular
 templates; per-slot framing (pan / zoom / rotation by any angle); a canvas frame (gap / corner radius /
 colour); export of high-resolution finished images as **PNG or JPEG** (a specified long edge
 in pixels — physical size and DPI left with S12d, TIFF and the JPEG chroma request with S12c).
@@ -10,13 +11,14 @@ and S5's canvas-level text layers were built and then removed, because none of t
 and the text layer was the one feature whose pixels depended on the host's installed fonts.
 GPL-3.0-or-later · Rust · GTK4 + libadwaita shell · Cairo canvas · target platform Arch/AUR.
 
-**Scope criterion: the shortest main path.** "Open → pick 2–9 photos → pick a layout → adjust →
-export" must take under three minutes. Before adding any feature, ask: does it make the main path
-longer? If so, cut it.
-*Ruled 2026-09-22: the path was re-routed from "pick a template first" to "pick photos first". The
-new order is one step shorter in the common case, because the photos land in the cells in selection
-order instead of being dropped in one at a time; the two stages it adds are the price of not starting
-from an empty sheet (`docs/2026-09-22-UX-DIRECTION.md`).*
+**Scope criterion: the shortest main path.** "Open → add photos → pick a layout → adjust → export" must
+take under three minutes. Before adding any feature, ask: does it make the main path longer? If so, cut it.
+*Ruled 2026-09-25: **the picker stage was removed.** The window opens on the collage and photos enter
+from outside it — the platform's file chooser, a drop from the file manager onto the canvas, or
+`pixlay a.jpg b.jpg` on the command line, in argument order — because the picker judged nothing the file
+manager cannot, and its ordered list is replaced by the canvas's own spatial order plus an arbitrary
+two-cell swap (`docs/2026-09-25-STEPS.md`, ruling 31). That supersedes the photos-first route of
+2026-09-22 and the review that proposed it (`docs/archive/2026-09-22-UX-DIRECTION.md`).*
 
 **Locked identifiers**
 
@@ -70,7 +72,7 @@ Measurement rules that go with it:
 - Measuring encoder performance requires **non-flat** content: flat color blocks skew A0 PNG size
   and time by 78× and 4.6× respectively.
 - Every threshold constant in the code carries its **source inline** — the measured value and its date —
-  or cites `docs/CONTRACT.md`. **The plan (`docs/2026-09-22-STEPS.md`), `docs/archive/` and
+  or cites `docs/CONTRACT.md`. **The plan (`docs/2026-09-25-STEPS.md`), `docs/archive/` and
   `docs/completed/` are the process record and are never cited from code**: they are scheduled for
   deletion or archival once their work is done, so a comment that points at them is a comment that stops
   resolving on the day that happens. **S-numbers are the exception and stay citable** — they are how the
@@ -107,7 +109,7 @@ Measurement rules that go with it:
 
 ## Commit discipline
 
-- **Commit once per completed step** (finishing one step in `docs/2026-09-22-STEPS.md` produces at least one
+- **Commit once per completed step** (finishing one step in `docs/2026-09-25-STEPS.md` produces at least one
   commit). Do not batch several steps into one commit.
 - **Pushing requires the user's explicit permission first.** Without it, commit only and never
   push: do not `git push` on your own initiative and do not change remote configuration.
@@ -127,7 +129,7 @@ Measurement rules that go with it:
 
 ## Step discipline
 
-How `docs/2026-09-22-STEPS.md` splits the work, and the cases in which a step has to end a session. The steps
+How `docs/2026-09-25-STEPS.md` splits the work, and the cases in which a step has to end a session. The steps
 themselves are in that file; this is the rule that produced them.
 
 1. Every step must have a **machine-checkable** exit. A "step" with no checkable exit is not a step.
@@ -150,7 +152,7 @@ themselves are in that file; this is the rule that produced them.
 
 **A conversation is not storage.** Sessions get truncated, cleared or deleted; a conclusion that
 exists only in the conversation never happened. A new session reads files, not someone else's
-transcript, and the "Current progress" line in `docs/2026-09-22-STEPS.md` is the **only authority**.
+transcript, and the "Current progress" line in `docs/2026-09-25-STEPS.md` is the **only authority**.
 
 - **A step is complete when the "Current progress" line is rewritten and committed.** Green tests
   and good numbers are necessary, not sufficient.
@@ -166,7 +168,7 @@ transcript, and the "Current progress" line in `docs/2026-09-22-STEPS.md` is the
   *Reference shape: S0's `Ruling (2026-09-20, human): Cairo stays` plus the progress line
   `S0 — done and ruled on`.*
 - **Closing a gate takes five parts; missing one means it is not done**:
-  1. the ruling block written into that step's "Result" subsection in `docs/2026-09-22-STEPS.md`;
+  1. the ruling block written into that step's "Result" subsection in `docs/2026-09-25-STEPS.md`;
   2. the "Current progress" line rewritten to "done and passed \_\_\_ → next X";
   3. the matching entry under "Where humans must step in" marked as passed or removed;
   4. any shape the ruling changed synchronized into `docs/CONTRACT.md`;
@@ -282,10 +284,12 @@ at `Cargo.lock` diffs during review.
 - **The canvas frame is a document field, and the backdrop is painted, not blended.** `frame{gapRel,
   radiusRel, color}` defaults to no gap, square corners and white, so a project written before S11 renders
   byte-identically (measured: the S1 golden image at RMSE 0.0 and the S5 verification render byte-identical —
-  `docs/CONTRACT.md` §8). The visible area of a cell is `outline ∩ rounded_rect(inset)`, the clamp's reference
-  is the outline clipped to that inset rectangle, and a rounded corner is *not* subtracted from it — the
-  reference stays a polygon rather than approximating arcs, which costs a little magnification bounded by the
-  radius and exactly nothing at `radiusRel = 0`.
+  `docs/CONTRACT.md` §8). **The gap is the distance between two photos** (ruled 2026-09-25, ruling 35):
+  the visible area of a cell is the sheet eroded by `gapRel/2` intersected with the cell eroded by
+  `gapRel/2`, so every seam — between two photos and to the sheet's own edge — measures exactly `gapRel`;
+  the clamp's reference is the outline clipped to that eroded region, and a rounded corner is *not*
+  subtracted from it — the reference stays a polygon rather than approximating arcs, which costs a little
+  magnification bounded by the radius and exactly nothing at `radiusRel = 0`.
 - **GTK types do not implement `Send`/`Sync`.** Background decoding and scaling must return to the
   main thread through a channel; a GTK object must never be held across threads.
 - **The shell (`pixlay`) must not touch pixels directly.**
@@ -304,23 +308,14 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
   `AdwBanner`, with one custom-drawn widget — the canvas, whose stated reason is that it draws the
   document itself. A custom-drawn widget is the exception and needs a stated reason. **S13 replaced the
   utility pane** (`AdwOverlaySplitView` + `AdwPreferencesPage` + `F9`, ruling 18) with a sequence of
-  stages: `AdwNavigationView` whose root is the picker — a `GtkGridView` + `GtkMultiSelection` over the
-  folder, an ordered list of the picked photos, and a `GtkPicture` preview pane — and whose
-  pushed page is the editor, so `AdwHeaderBar` gets the back button from the view itself. The 2026-09-22
-  ruling fixed that stage's arrangement, S13b implemented it, and **the ruling of the same day, "the picker,
-  as gthumb has it", re-ruled it** — S13c landed the correction on 2026-09-23: the media area takes the vast
-  majority of the page (80.5 % of the band above the status bar at 1100x760, the reference's own being 88 %),
-  the thumbnails are **one row along its bottom, spanning the full width** (a horizontally-reflowing
-  `GtkGridView`, one item per vertical slice), the picked list runs
-  down the right edge **at the media area's own height** and switches the preview when a row is clicked, a
-  **status bar** closes the window with gthumb's four fields (picked/total · pixels · size · zoom), the cell
-  is **128 logical px** (gthumb's `thumbnail-size` of 256 is in *device* px, so S13b's 256 *logical* cells
-  were twice the app they were copied from), the pane's decode is **the size it draws**, and a picked cell is
-  shown by a highlight rather than the platform's check box — the app's only stylesheet,
-  `crates/pixlay/src/style.css`, and a deviation recorded in `docs/HIG-REVIEW.md` §3 — and order changes by
-  dragging a row or by `Ctrl+Up`/`Ctrl+Down`. **A tile is decoded only for a cell that is on screen**
-  (S13b): GTK's item manager binds far more items than it shows, and the number is a constant of GTK rather
-  than a statement about the folder (`docs/CONTRACT.md` §9). **The header bar's controls follow HIG
+  stages, and **ruling 31 of 2026-09-25 removed the first of them**: the window opens on the editor — one
+  page, nothing to push — because the picker judged nothing the file manager cannot and cost a stage to do
+  it. Its ordered list, its preview and its zoom, the folder scan and the tile cache went with it; a
+  photo's order is the order it was added, and re-ordering is the swap of the new plan's S23
+  (`docs/2026-09-25-STEPS.md`). **The layout band draws sketches**: each candidate is the template's
+  geometry as stroked outlines rather than a render of the user's photos (ruling 32), because a template
+  carries geometry and no style, so a sketch is a complete account of it — and the band decodes nothing.
+  **The header bar's controls follow HIG
   `patterns/containers/header-bars` and the two references**: primary and navigation actions at the *start*,
   the heading in the centre, a primary menu at the *end*. The editor's
   per-cell buttons arrived in S15 as children of the canvas's own `GtkOverlay`, placed by their own
@@ -352,19 +347,19 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
     default**, as HIG recommends for one that displays rich visual content, and neither reference app offers
     the switch; storing a preference would also need a settings file, which ruling 8 forbids;
 
-  - **the phone's chrome, not its capability** (ruled 2026-09-22, replacing "no phone-style layout"):
-    the picker-first flow came from mobile galleries, but its capability is built with desktop idioms
-    — a `GtkGridView` with selection mode and a header-bar Next button, not a tap-and-hold bottom
-    sheet. The ordered list of picked photos stays because it is where selection *order* is visible and
-    re-orderable, and order is cell order: that is a desktop need, not a copied control. Its place on the
-    page is the 2026-09-22 ruling's business (it moved from the bottom to the right edge, `S13 · Ruling`),
-    not this one's.
-- HIG `patterns/containers/selection-mode` **applies from the picker stage on**: the picker *is* a
-  collection view with multi-select batch operations, so the row in `docs/HIG-REVIEW.md` was flipped
-  from "not applicable" when that became true. On the canvas the page's own advice still holds — "when
-  editing is the primary interaction there should be no separate edit mode" — and the canvas keeps no
-  mode of its own.
-- Whatever can be machine-checked lives only in the GUI's tests (see `docs/2026-09-22-STEPS.md`); the visual part
+  - **the phone's chrome, not its capability** (ruled 2026-09-22, superseded 2026-09-25): the
+    picker-first flow came from mobile galleries and was removed with them (ruling 31). What the mobile
+    references still give the product is the layout strip's own form: **a sketch of the geometry rather
+    than a sample image**, the way Xiaomi's layout strip draws it — because a pixlay template carries
+    geometry and no style. Google's strip shows sample photos for the opposite reason: its templates
+    carry style, which a sketch could not show (ruling 32; the research is in
+    `docs/2026-09-25-STEPS.md`).
+- HIG `patterns/containers/selection-mode` **is not applicable again** (ruled 2026-09-25, ruling 31): the
+  picker was this app's only multi-select collection view and it is gone. The layout band is a
+  single-choice set (HIG `patterns/controls/radio-buttons`), and the canvas keeps no mode of its own —
+  the page's own advice, "when editing is the primary interaction there should be no separate edit
+  mode", is what it has always followed.
+- Whatever can be machine-checked lives only in the GUI's tests (see `docs/2026-09-25-STEPS.md`); the visual part
   goes item by item through `docs/HIG-REVIEW.md`.
 
 ## Directions not to "improve"
@@ -413,7 +408,7 @@ only, diagnostics go to stderr, exit codes are fixed, identical input yields ide
 **Nothing may be possible only in the GUI and not in the CLI.**
 *Rationale: the model cannot see windows and can only read the CLI's stdout, and "looks right" is
 not a criterion — a visual conclusion must become a number (a probe) in the CLI. Contract details
-(subcommands, fields, exit codes) live in the tests and `docs/2026-09-22-STEPS.md` and are not repeated here.*
+(subcommands, fields, exit codes) live in the tests and `docs/2026-09-25-STEPS.md` and are not repeated here.*
 
 ## Invariants that must hold
 
@@ -465,7 +460,7 @@ not a criterion — a visual conclusion must become a number (a probe) in the CL
   output resolution, with no strong bleeding. **Ruled 2026-09-22 (human): the seam is accepted** — the
   product is the exported image, and at 300 dpi one pixel is 0.085 mm and invisible; a preview an eighth
   of that size shows the same pixel proportionally larger, and it is the same renderer's
-  (`docs/2026-09-22-STEPS.md`, `S13 · Ruling`).
+  (`docs/archive/2026-09-22-STEPS.md`, `S13 · Ruling`).
 
 ## AUR discipline
 

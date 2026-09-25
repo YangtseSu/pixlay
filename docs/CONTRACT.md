@@ -17,8 +17,8 @@ The contract is **frozen at S1** and every step after it is built on top of it (
 > - `CollageDoc` gains `frame: { gapRel, radiusRel, color }`, and the fit's coverage reference becomes the
 >   **visible rectangle** rather than the slot polygon.
 >
-> The rest of the contract is untouched. The rulings themselves are in `docs/2026-09-22-UX-DIRECTION.md` §6,
-> and the steps that carried them out are in `docs/2026-09-22-STEPS.md` (S11 in particular).
+> The rest of the contract is untouched. The rulings themselves are in `docs/archive/2026-09-22-UX-DIRECTION.md` §6,
+> and the steps that carried them out are in `docs/archive/2026-09-22-STEPS.md` (S11 in particular).
 
 ---
 
@@ -54,7 +54,7 @@ The contract is **frozen at S1** and every step after it is built on top of it (
 > `canvas` keys are gone, and `docVersion` is **3**. That is what the version policy below
 > calls a breaking change: a version-1 or version-2 project is refused with the actionable
 > message rather than silently losing the layers and the size it names (the purity ruling
-> and ruling 17, `docs/2026-09-22-STEPS.md`).
+> and ruling 17, `docs/archive/2026-09-22-STEPS.md`).
 
 **Version policy** (S1 review ruling, 2026-09-20: **breaking changes allowed, but no migrations written**).
 
@@ -566,7 +566,7 @@ numbers are records of the grids the builds rendered — including what a "14043
 edge" *means*, which is why the verification entry still renders that many pixels — and
 not claims about a document field or file chunk this build has. The numbers stay as they
 were taken: they are the process record, and the S12c/S12d results in
-`docs/2026-09-22-STEPS.md` are where the removals themselves are accounted for.
+`docs/archive/2026-09-22-STEPS.md` are where the removals themselves are accounted for.
 
 | Item | Value |
 |---|---|
@@ -958,7 +958,7 @@ pick — it does **not**: ~200 ms per step, and the coarse grid and the caches b
 of ~2.4 (the same cell cost `decode` 171 ms + `resample` 289 ms before them). That is the fork ruling 1
 (2026-09-22) reserved, and it was ruled the same day:
 **the preview's future is a preview-grade source, not a GPU renderer** — a cached, preview-sized reduction per
-photo that the preview's bitmaps are resampled from, inside the one renderer (`docs/2026-09-22-STEPS.md`,
+photo that the preview's bitmaps are resampled from, inside the one renderer (`docs/archive/2026-09-22-STEPS.md`,
 "S12 · Result" and the step "S12b"). So `draw`, `resample` and the export's quality path stay as this
 document describes them, and the preview's pixels stay `draw`'s; the GPU preview path is **not** written, and
 "do not replace Cairo with GPU rendering" needs no amendment.
@@ -1045,7 +1045,7 @@ the way. The identity rows are the committed tests' own assertions; the memory r
 The GUI is the fifth consumer of the same document, and what it adds is interaction. Its
 contract is what a caller can rely on without looking at a widget:
 
-**Since the 2026-09-22 ruling the window is a sequence of stages** (`docs/2026-09-22-STEPS.md`,
+**Since the 2026-09-22 ruling the window is a sequence of stages** (`docs/archive/2026-09-22-STEPS.md`,
 S13–S15), and **S13 landed the first of them**: the picker is the `AdwNavigationView`'s root page and
 the editor of S7 is pushed on top of it, so a new window opens on photos rather than on an empty sheet.
 **S14 landed the layout stage, and it is a band on the document's page rather than a third page** — a
@@ -1206,7 +1206,7 @@ without looking at a widget:
   configuration file (ruling 8). The listing is `pixlay_imaging::list_folder`, the same function the
   CLI's `scan` walks with, so the grid and a listing of the same folder cannot disagree about which
   files are photos or in what order.
-- **Its shape is the 2026-09-22 ruling's, and S13c built it** (`docs/2026-09-22-STEPS.md`, "the picker, as
+- **Its shape is the 2026-09-22 ruling's, and S13c built it** (`docs/archive/2026-09-22-STEPS.md`, "the picker, as
   gthumb has it"): three bands, measured off the reference's own window and off this build.
   **(1) The media area takes the vast majority** — the preview pane with the picked list down its right
   edge, both inside one horizontal `GtkPaned`, so the list's height *is* the pane's. **(2) One row of

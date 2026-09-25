@@ -1,9 +1,16 @@
 # Direction review (2026-09-22): the picker-first UX, and which codebase to build it on
 
+> **Superseded 2026-09-25.** The route this review argued for was removed by the human's ruling 31 of
+> 2026-09-25 (`docs/2026-09-25-STEPS.md`): the picker stage goes, the editor is the app, and photos enter
+> from outside it. §4's Google claim is corrected by the research recorded in the new plan — Google's
+> *canvas* previews the user's photos while its **template strip shows sample images**, because its
+> templates carry style, which a pixlay template does not. Kept as the record of why the plan of
+> 2026-09-22 was routed the way it was, and of which base codebase was ruled out.
+
 **Status: ruled on 2026-09-22, and now the plan's review of record.** The human ruled on all nine
 decisions of §6 and on the seven rule rows of §3 in the same day; the rulings are recorded in §6 below
-and carried into the live plan, [`2026-09-22-STEPS.md`](2026-09-22-STEPS.md), which is the authority from
-here on. The plan of 2026-09-20 is retired to [`docs/archive/`](archive/) (its open half S7/S8; S7's human
+and carried into the plan of 2026-09-22, [`2026-09-22-STEPS.md`](2026-09-22-STEPS.md) (itself retired
+on 2026-09-25 — see the banner), which was the authority from then on. The plan of 2026-09-20 is retired to [`docs/archive/2026-09-20-STEPS.md`](2026-09-20-STEPS.md) (its open half S7/S8; S7's human
 walk is void, S8 is the new plan's last step). The standing `AGENTS.md` clauses this review contradicted
 were rewritten clause by clause the same day — §3 below says which, and how.
 
