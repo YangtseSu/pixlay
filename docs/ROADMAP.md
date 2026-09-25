@@ -105,7 +105,9 @@ which is the point at which categories or a search would have to be considered.
   Costs, in the order they bite: the file grows by the size of the photos; the copy has to respect
   "source images are read-only" (copies, never writes back); and a relative-path policy has to survive
   being moved between systems. It also needs the project format's own specification, which is the same
-  work item as the template specification above.
+  work item as the template specification above. **This is also what would remove the one soft spot in
+  pasting**: an image copied from another application has no file behind it, so S23b writes one out
+  (a PNG) and the document references that path — a self-contained project would carry it instead.
 
 ## The editor's own gaps
 
