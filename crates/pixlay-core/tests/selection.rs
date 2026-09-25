@@ -1,4 +1,4 @@
-//! The selection policy: order, the 2–9 clamp, the count filter and the count rule.
+//! The selection policy: order, the 1–9 clamp, the count filter and the count rule.
 //!
 //! These are the rules the picker (S13), the layout stage (S14) and the CLI's
 //! `init --photo` share, so they are asserted where they live — in `pixlay-core`,
@@ -79,7 +79,7 @@ fn push_refuses_the_tenth_photo_and_names_the_bound() {
     // The message names both bounds, because a user who hits one cannot tell from
     // "too many" whether the limit is 3 or 30.
     let message = refused.to_string();
-    assert!(message.contains("2..=9"), "{message}");
+    assert!(message.contains("1..=9"), "{message}");
     // The refusal changed nothing.
     assert_eq!(selection.len(), MAX_PHOTOS);
 
@@ -99,26 +99,32 @@ fn push_refuses_the_tenth_photo_and_names_the_bound() {
 
 #[test]
 fn a_selection_below_the_floor_cannot_become_a_document() {
-    let template = templates::get("strip-2-2x1").expect("registered");
-    for count in [0, 1] {
-        let selection = selection(count);
-        let refused = selection
-            .document(&template)
-            .expect_err("no collage of fewer than two photos");
-        assert_eq!(
-            refused,
-            SelectionError::PhotoCount {
-                found: count,
-                min: MIN_PHOTOS,
-                max: MAX_PHOTOS,
-            }
-        );
-        assert!(refused.to_string().contains("2..=9"), "{refused}");
-    }
-    // The floor is only a floor for a *document*: the pick may hold one photo
-    // while the user is still picking, which is why `push` allows it.
+    // Since S19 the floor is one photo (ruling 34), so the empty selection is the
+    // only one below it — and a single photo is not a special case anywhere: it
+    // becomes the one-slot sheet like any other count.
+    let sheet = templates::get("grid-1-1x1").expect("registered");
+    let refused = selection(0)
+        .document(&sheet)
+        .expect_err("no collage of zero photos");
+    assert_eq!(
+        refused,
+        SelectionError::PhotoCount {
+            found: 0,
+            min: MIN_PHOTOS,
+            max: MAX_PHOTOS,
+        }
+    );
+    assert!(refused.to_string().contains("1..=9"), "{refused}");
+    let one = selection(1)
+        .document(&sheet)
+        .expect("one photo on the sheet");
+    assert_eq!(one.cells.len(), 1);
+    assert!(one.cells[0].source.is_some());
+    one.validate().expect("a valid document");
+
+    // The floor is only a floor for a *document*: the pick may hold no photo while
+    // the user is still picking, which is why `push` allows it.
     assert!(selection(0).accepts_more());
-    assert!(selection(1).accepts_more());
 }
 
 #[test]
@@ -365,9 +371,9 @@ fn the_count_rule_picks_the_layout_that_follows_the_document() {
             }
         }
     }
-    // Outside the range there is nothing to offer — one photo has no layout, and
-    // ten left the library with S12c.
-    for count in [0, 1, 10, 11] {
+    // Outside the range there is nothing to offer — zero photos have no layout,
+    // and ten left the library with S12c.
+    for count in [0, 10, 11] {
         assert_eq!(named(count, 1.0, None), None, "{count} photos");
     }
 

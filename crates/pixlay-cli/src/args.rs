@@ -225,7 +225,7 @@ SWITCH OPTIONS:
 TEMPLATES OPTIONS:
     --aspect <ratio>    List only the templates authored for this layout shape,
                         as W:H (4:3) or a decimal (1.333333). Omit to list all.
-    --slots <n>         List only the templates with exactly n slots, 2..=9. This
+    --slots <n>         List only the templates with exactly n slots, 1..=9. This
                         is the layout gallery's own query (S14): the candidates
                         for a collage of n photos. The two filters combine.
 
@@ -254,13 +254,15 @@ INIT OPTIONS:
     --out <file>        Project to write, .pixlay. Required, and never
                         overwritten: `init` refuses to replace an existing file.
     --photo <file>      A photo of the project, repeated once per photo:
-                        **argument order is cell order**. 2..=9 photos
+                        **argument order is cell order**. 1..=9 photos
                         inclusive, and the template's slot count must equal the
                         number of photos (both bounds are named on refusal).
-                        Omit for the photo-free project. Paths are stored
-                        relative to the project file when the two share a root,
-                        absolute otherwise, and a photo that is not there is
-                        refused rather than written into the project.
+                        A list past nine is refused (exit 1) rather than
+                        trimmed: a machine caller may not have input dropped
+                        silently. Omit for the photo-free project. Paths are
+                        stored relative to the project file when the two share a
+                        root, absolute otherwise, and a photo that is not there
+                        is refused rather than written into the project.
 
 EDIT OPTIONS:
     --project <file>    Project to read. Required.
@@ -278,12 +280,18 @@ EDIT OPTIONS:
                         count is the layout's, so this is how a collage grows to
                         hold one more photo.
     --remove-cell       Take the layout with one slot fewer, dropping the last
-                        cell whatever it holds — the window's `−`. Refused at two
-                        cells, the floor. The mirror image of --add-cell, and
-                        refused together with it: run `edit` twice for both.
+                        cell whatever it holds — the window's `−`. Refused at one
+                        cell, the floor (a single photo is a legal collage, and
+                        the sheet is its layout). The mirror image of
+                        --add-cell, and refused together with it: run `edit`
+                        twice for both.
     --add-photo <file>  Append a photo: it goes to the first empty cell, and if
                         there is none the layout grows by one slot. Repeated
-                        once per photo, in argument order.
+                        once per photo, in argument order. Refused past nine
+                        photos (exit 2: the document cannot take it, and nothing
+                        is written), where `init --photo` refuses such a list as a
+                        usage error (exit 1): the CLI never trims a list, and the
+                        two exit codes are its contract.
     --swap <i>,<j>      Exchange two cells whole — photo and framing both, since
                         the framing is what makes a photo look right in *that*
                         cell. Refused for the same cell twice (exit 1) and for a

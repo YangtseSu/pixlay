@@ -171,8 +171,8 @@ fn every_slot_region_holds_what_the_slot_shows() {
     }
     assert_eq!(
         studied,
-        142 * framings.len(),
-        "the sweep must cover every slot (S10 grew the library from 64)"
+        143 * framings.len(),
+        "the sweep must cover every slot (S10 grew the library from 64; S19 added the sheet)"
     );
 }
 

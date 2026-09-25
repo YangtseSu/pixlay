@@ -31,10 +31,12 @@
 //!
 //! A `g` suffix marks a **gutter** — a strip or a grid whose panes stop short of
 //! each other, so the slots do not tile the canvas and their areas sum to less
-//! than 1.0 (`grid-4-2x2g`, `strip-2-2x1g`). Since S10 the picker's range carries
-//! at least three layouts for every photo count from 2 to 9, in at least two
-//! aspect families; nine is the ceiling, because S12c removed the ten-slot recipe
-//! that used to sit above it.
+//! than 1.0 (`grid-4-2x2g`, `strip-2-2x1g`). Since S10 every photo count from 2
+//! to 9 carries at least three layouts, in at least two aspect families; nine is
+//! the ceiling, because S12c removed the ten-slot recipe that used to sit above
+//! it. Count 1 has exactly one member since S19 — `grid-1-1x1`, the whole sheet —
+//! because one photo is a legal collage (ruling 34) and a second one-slot layout
+//! would be the same geometry under another name.
 //!
 //! `mosaic-8-s14` predates the scheme: it is the template S1 froze and the name
 //! `AGENTS.md`'s verification command uses, so its name, version, aspect, slot

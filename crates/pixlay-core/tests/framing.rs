@@ -222,7 +222,7 @@ fn every_framing_covers_its_cell() {
     }
 
     // The sweep is only evidence if it actually reaches the branches: 27
-    // templates and 142 slots of the shipped library.
+    // templates and 143 slots of the shipped library.
     eprintln!("unframed sweep: {checked} framings, {panned} pan-clamped");
     assert!(
         checked > 100_000,

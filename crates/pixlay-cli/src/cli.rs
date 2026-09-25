@@ -456,7 +456,7 @@ fn list_templates(args: TemplatesArgs) -> Result<u8, Failure> {
 /// With `--photo`, **argument order is cell order** and the mapping goes through
 /// the selection policy (`pixlay_core::Selection`), which is the same function the
 /// picker and the layout stage use — so "the third photo the user picked is the
-/// third cell" is one rule with one implementation, and the 2..=9 clamp and the
+/// third cell" is one rule with one implementation, and the 1..=9 clamp and the
 /// slot-count check are applied here exactly as they are in the GUI.
 fn init_project(args: InitArgs) -> Result<u8, Failure> {
     let template = pixlay_core::templates::get(&args.template).ok_or_else(|| {

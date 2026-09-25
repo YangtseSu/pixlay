@@ -90,13 +90,29 @@ const R_2_3: f64 = 2.0 / 3.0;
 /// the list is one a printed canvas uses (1:1, 4:3, 3:2, 16:9) or its portrait
 /// counterpart (2:3).
 ///
-/// Since S10 the picker's range — 2..=9 photos, ruling 3 — carries **at least
-/// three layouts per count, in at least two aspect families**, because a gallery
-/// that offers one candidate is not a choice (asserted by
-/// `crates/pixlay-core/tests/templates.rs`). Since S12c the library stops at nine
-/// slots: `strip-10-10x1` was the only member above the picker's cap, and it left
-/// with the purity ruling, so `MAX_SLOTS` and `MAX_PHOTOS` are one number.
+/// Since S10 the counts 2..=9 carry **at least three layouts per count, in at
+/// least two aspect families**, because a gallery that offers one candidate is not
+/// a choice (asserted by `crates/pixlay-core/tests/templates.rs`). Count 1 has
+/// exactly one member since S19: `grid-1-1x1`, the whole sheet, because three
+/// one-photo layouts would be three names for one geometry (ruling 34 — a single
+/// photo is a legal collage). Since S12c the library stops at nine slots:
+/// `strip-10-10x1` was the only member above the picker's cap, and it left with
+/// the purity ruling, so `MAX_SLOTS` and `MAX_PHOTOS` are one number.
 static RECIPES: &[Recipe] = &[
+    // The whole sheet, as one cell. The library's first member since S19, when
+    // the floor became one photo (ruling 34): a single photo is a legal collage,
+    // and its template is the sheet itself — the frame is what gives it a border,
+    // which is why this layout's whole canvas is one slot. 4:3, the album page
+    // `mosaic-5-hero` was authored for, so a new document opens on the shape the
+    // editor used to start at. `grid-` rather than `strip-` or `mosaic-`: a
+    // 1x1 tiling is the plainest rectangular one.
+    Recipe {
+        name: "grid-1-1x1",
+        version: 1,
+        aspect: R_4_3,
+        grid: 16,
+        slots: &[rect(0, 0, 16, 16)],
+    },
     // Two rows on a portrait canvas. The simplest layout there is, and the
     // portrait counterpart of `strip-2-2x1`: the picker offers one or the other
     // depending on the canvas shape.

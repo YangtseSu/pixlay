@@ -1,7 +1,7 @@
 //! The layout stage: every candidate layout of the current photo count, drawn with
 //! the user's own photos, plus the count control that decides what that count is.
 //!
-//! Stage 3 of the main path (`AGENTS.md`: `open → pick 2–9 photos → pick a layout →
+//! Stage 3 of the main path (`AGENTS.md`: `open → add photos → pick a layout →
 //! adjust → export`), and **a band on the document's page rather than a third
 //! page** (S14): a second `AdwNavigationPage` would have to own a second canvas, and
 //! S15's compose controls attach to the canvas this band sits under.
@@ -78,9 +78,9 @@ pub struct Gallery {
     strip: gtk::ScrolledWindow,
     /// The candidate cells, in library order.
     cells: gtk::Box,
-    /// What the strip shows when the count has no layout: the editor cannot be
-    /// reached with fewer than two photos, but a per-cell clear can empty the
-    /// document underneath it.
+    /// What the strip shows when the count has no layout: the count is in
+    /// `1..=MAX_PHOTOS` whatever the document does, so this stands for the empty
+    /// case a per-cell clear can leave behind rather than for a reachable count.
     placeholder: gtk::ToggleButton,
     /// The candidate buttons by template name, and the pictures behind them.
     buttons: RefCell<HashMap<String, gtk::ToggleButton>>,
@@ -295,7 +295,7 @@ impl Gallery {
         self.minus.set_tooltip_text(Some(&if cells > MIN_PHOTOS {
             gettext("Remove the last cell")
         } else {
-            fill(gettext("A collage needs at least {} photos"), &[MIN_PHOTOS])
+            gettext("A collage needs at least one photo")
         }));
         self.plus.set_tooltip_text(Some(&if cells < MAX_PHOTOS {
             gettext("Add a cell")

@@ -752,15 +752,21 @@ fn the_count_control_takes_and_drops_a_cell_without_remembering_it() {
     assert_eq!(full.undo_depth(), 0);
 
     let mut two = History::new(occupied("strip-2-2x1")).expect("a valid document");
+    // Since S19 the floor is one cell (ruling 34): a two-cell layout drops to the
+    // one-slot sheet, and only *its* removal is refused.
+    two.apply(Command::RemoveLastCell)
+        .expect("two cells can drop to one");
+    assert_eq!(two.doc().cells.len(), 1);
+    assert_eq!(two.doc().template.name, "grid-1-1x1");
     let refused = two
         .apply(Command::RemoveLastCell)
-        .expect_err("no one-cell layout");
+        .expect_err("no zero-cell layout");
     assert!(
-        matches!(refused, CoreError::TooFewCells { min: 2 }),
+        matches!(refused, CoreError::TooFewCells { min: 1 }),
         "{refused}"
     );
-    assert_eq!(two.doc().cells.len(), 2, "the refusal changed nothing");
-    assert_eq!(two.undo_depth(), 0);
+    assert_eq!(two.doc().cells.len(), 1, "the refusal changed nothing");
+    assert_eq!(two.undo_depth(), 1, "only the accepted removal is a step");
 }
 
 #[test]

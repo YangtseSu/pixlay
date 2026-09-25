@@ -29,6 +29,14 @@ pub struct Frozen {
 #[rustfmt::skip]
 pub const TEMPLATES: &[Frozen] = &[
     Frozen {
+        name: "grid-1-1x1",
+        version: 1,
+        aspect: 1.3333333333333333,
+        slots: &[
+            (&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)], 1.0),
+        ],
+    },
+    Frozen {
         name: "strip-2-1x2",
         version: 1,
         aspect: 0.6666666666666666,

@@ -248,7 +248,7 @@ fn the_picker_stage_meets_its_own_criteria() {
         "removing a photo drops exactly that one"
     );
 
-    // ---- Next is gated by the floor of two, and reports the cap ------------
+    // ---- Next is gated by the floor of one, and reports the cap ------------
     let next = picker.next_button();
     let grid = picker.grid();
     picker.clear_selection(&window);
@@ -258,13 +258,18 @@ fn the_picker_stage_meets_its_own_criteria() {
     );
     picker.toggle(&window, 0);
     assert!(
-        !next.is_sensitive(),
-        "Next is insensitive with one photo picked"
+        next.is_sensitive(),
+        "Next is enabled with one photo picked: a single photo is a legal collage (S19)"
+    );
+    assert!(
+        next_label(&picker).contains('1'),
+        "Next carries the count: {:?}",
+        next_label(&picker)
     );
     picker.toggle(&window, 1);
     assert!(
         next.is_sensitive(),
-        "Next is enabled once two photos are picked"
+        "and two photos are still inside the range"
     );
     assert!(
         next_label(&picker).contains('2'),

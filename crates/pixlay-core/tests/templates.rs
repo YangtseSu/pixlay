@@ -23,8 +23,7 @@ use std::process::Command;
 
 use pixlay_core::templates::{SMOKE_TEMPLATE, TEMPLATE_VERSION, generator};
 use pixlay_core::{
-    CoreError, MAX_PHOTOS, MAX_SLOTS, MIN_PHOTOS, MIN_SLOTS, Point, Polygon, Slot, Template,
-    templates,
+    CoreError, MAX_PHOTOS, MAX_SLOTS, MIN_SLOTS, Point, Polygon, Slot, Template, templates,
 };
 
 /// Points sampled per axis when rasterizing a template. 512 per axis is 262144
@@ -494,10 +493,11 @@ fn every_slot_shares_an_edge_with_its_neighbours_or_meets_the_border() {
 }
 
 #[test]
-fn every_slot_count_from_two_to_ten_is_covered() {
-    // S2's exit criterion: "covers 2-10 slots, at least one template each". The
-    // bound comes from the constants, not from a literal, so widening the product
-    // range fails here rather than silently shipping a gap.
+fn every_slot_count_in_the_range_is_covered() {
+    // S2's exit criterion was "covers 2-10 slots, at least one template each"; the
+    // range has moved twice since (S12c dropped ten, S19 added one) and the bound
+    // comes from the constants, not from a literal, so widening the product range
+    // fails here rather than silently shipping a gap.
     let templates = templates_under_test();
     for count in MIN_SLOTS..=MAX_SLOTS {
         let found: Vec<&str> = templates
@@ -521,17 +521,17 @@ fn every_slot_count_from_two_to_ten_is_covered() {
 }
 
 #[test]
-fn every_count_the_picker_offers_carries_three_layouts_in_two_aspect_families() {
+fn every_count_from_two_up_carries_three_layouts_in_two_aspect_families() {
     // S10's exit criterion (ruling 10): the gallery of S14 has to give a person a
-    // choice, so every photo count the picker can produce carries at least three
-    // layouts, spread over at least two aspect families. The range is the
-    // *selection's* own pair of constants — a picker cannot ask for a count it
-    // refuses to select — and that pair is the library's `MIN_SLOTS..=MAX_SLOTS`
-    // again since S12c removed the ten-slot recipe (ruling 3 kept the picker's
-    // cap at 9 while the format allowed 10; there is no count above nine now).
+    // choice, so every photo count from two carries at least three layouts, spread
+    // over at least two aspect families. **Count 1 is the exception and the reason
+    // the range starts at two**: it has exactly one layout — the whole sheet, added
+    // by S19 — because three one-photo layouts would be three names for one
+    // geometry (ruling 34, a single photo is a legal collage). Nine is the ceiling,
+    // since S12c removed the ten-slot recipe.
     let templates = templates_under_test();
     let mut histogram = Vec::new();
-    for count in MIN_PHOTOS..=MAX_PHOTOS {
+    for count in 2..=MAX_PHOTOS {
         let layouts: Vec<&Template> = templates
             .iter()
             .filter(|template| template.slots.len() == count)
@@ -548,8 +548,19 @@ fn every_count_the_picker_offers_carries_three_layouts_in_two_aspect_families() 
         histogram
             .iter()
             .all(|&(_, layouts, families)| layouts >= 3 && families >= 2),
-        "every count from {MIN_PHOTOS} to {MAX_PHOTOS} needs at least three layouts in at least two \
+        "every count from 2 to {MAX_PHOTOS} needs at least three layouts in at least two \
          aspect families; the histogram is {histogram:?}"
+    );
+
+    let one: Vec<&str> = templates
+        .iter()
+        .filter(|template| template.slots.len() == 1)
+        .map(|template| template.name.as_str())
+        .collect();
+    assert_eq!(
+        one,
+        ["grid-1-1x1"],
+        "one photo is the sheet and the sheet alone (S19, ruling 34)"
     );
 }
 

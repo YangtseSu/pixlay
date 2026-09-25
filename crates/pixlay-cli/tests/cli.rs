@@ -1299,7 +1299,7 @@ fn templates_lists_the_library_and_filters_by_aspect() {
             .unwrap();
         let aspect = field(&all, &format!("template.{index}.aspect"));
         assert!(!name.is_empty());
-        assert!((2..=9).contains(&slots), "{name}: {slots} slots");
+        assert!((1..=9).contains(&slots), "{name}: {slots} slots");
         assert!(
             aspect.contains(':'),
             "{name}: aspect {aspect} is not in W:H form"
@@ -1308,7 +1308,7 @@ fn templates_lists_the_library_and_filters_by_aspect() {
             slot_counts.push(slots);
         }
     }
-    for wanted in 2..=9 {
+    for wanted in 1..=9 {
         assert!(
             slot_counts.contains(&wanted),
             "no template with {wanted} slots in {slot_counts:?}"
@@ -1426,6 +1426,17 @@ fn templates_filters_by_slot_count_which_is_the_gallery_s_query() {
         assert_eq!(listed, expected, "{slots} slots");
     }
 
+    // Count 1 is the exception to the "at least three layouts" rule and the reason
+    // the loop above starts at two: since S19 a single photo is a legal collage and
+    // its layout is the sheet itself, so the filter answers with exactly one name
+    // (ruling 34).
+    let one = run(&["templates", "--slots", "1"]);
+    assert_eq!(code(&one), 0, "{}", stderr(&one));
+    assert_eq!(field(&one, "slots"), "1");
+    assert_eq!(field(&one, "count"), "1");
+    assert_eq!(field(&one, "template.0.name"), "grid-1-1x1");
+    assert_eq!(field(&one, "template.0.aspect"), "4:3");
+
     // The two filters combine, and the shape filter is still the library's own.
     let both = run(&["templates", "--slots", "5", "--aspect", "4:3"]);
     assert_eq!(code(&both), 0, "{}", stderr(&both));
@@ -1433,8 +1444,8 @@ fn templates_filters_by_slot_count_which_is_the_gallery_s_query() {
     assert_eq!(field(&both, "template.0.name"), "mosaic-5-hero");
 
     // A count outside the format's range is a usage error with an empty stdout: no
-    // layout has one slot, and ten left the library with S12c.
-    for bad in ["0", "1", "10", "-2", "x"] {
+    // layout has zero slots, and ten left the library with S12c.
+    for bad in ["0", "10", "-2", "x"] {
         let output = run(&["templates", "--slots", bad]);
         assert_eq!(code(&output), 1, "--slots {bad}");
         assert!(stdout(&output).is_empty(), "--slots {bad} wrote to stdout");
@@ -2570,19 +2581,33 @@ fn edit_grows_and_shrinks_the_layout_one_cell_at_a_time() {
         "add then remove lands on the document it started from"
     );
 
-    // The floor: two cells is the smallest layout the library has.
-    let refused = dir.join("floor.pixlay");
+    // The floor: the two-cell layout drops to the one-cell sheet, and only that
+    // refuses — one cell is the smallest layout the library has since S19.
+    let floor = dir.join("floor.pixlay");
     let output = run(&[
         "edit",
         "--project",
         project.to_str().expect("utf-8"),
         "--remove-cell",
         "--out",
+        floor.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "cells"), "1");
+    assert_eq!(field(&output, "template"), "grid-1-1x1");
+
+    let refused = dir.join("refused.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        floor.to_str().expect("utf-8"),
+        "--remove-cell",
+        "--out",
         refused.to_str().expect("utf-8"),
     ]);
-    assert_eq!(code(&output), 2, "there is no one-cell layout");
+    assert_eq!(code(&output), 2, "there is no zero-cell layout");
     assert!(
-        stderr(&output).contains("at least 2 cells"),
+        stderr(&output).contains("at least 1 cell"),
         "{}",
         stderr(&output)
     );
@@ -2818,7 +2843,7 @@ fn edit_appends_a_photo_and_grows_the_layout_with_the_count() {
 fn edit_shrinks_the_layout_one_cell_at_a_time() {
     // The other half of the count control (S14b): `−` takes the layout with one
     // cell fewer, so the last *cell* goes whether or not it holds a photo — and
-    // never below two, which is the floor `Selection` enforces.
+    // never below one, the floor `Selection` has had since S19.
     let dir = out_dir("edit-remove");
     let photos = dir.join("photos");
     std::fs::create_dir_all(&photos).expect("create photos");
@@ -2877,9 +2902,9 @@ fn edit_shrinks_the_layout_one_cell_at_a_time() {
         "the survivors are the first three cells, unchanged"
     );
 
-    // The floor: a two-cell layout is the smallest the library has, so `−` is exit 2
-    // there — whatever the *photo* count of those two cells is, since the control
-    // moves the layout.
+    // Two cells — whatever their *photo* count: the control moves the layout, and
+    // a cell that holds no photo is still a cell of it. One of the two is emptied
+    // on its own to say exactly that.
     let two = dir.join("two.pixlay");
     let output = run(&[
         "edit",
@@ -2892,9 +2917,6 @@ fn edit_shrinks_the_layout_one_cell_at_a_time() {
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     assert_eq!(field(&output, "template"), "strip-2-2x1");
 
-    // Two cells, one of them emptied on its own: the layout floor still refuses,
-    // because "how many photos" and "how many cells" are different questions — a
-    // cell that holds no photo is still a cell of the layout.
     let holed = dir.join("holed.pixlay");
     let output = run(&[
         "edit",
@@ -2908,11 +2930,33 @@ fn edit_shrinks_the_layout_one_cell_at_a_time() {
     ]);
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     assert_eq!(field(&output, "photos"), "1");
-    let refused = dir.join("refused.pixlay");
+
+    // The floor (S19): the two-cell layout still drops to the one-cell sheet, and
+    // it is the sheet that refuses a further removal — one cell is the smallest
+    // layout the library has.
+    let sheet = dir.join("sheet.pixlay");
     let output = run(&[
         "edit",
         "--project",
         holed.to_str().expect("utf-8"),
+        "--remove-cell",
+        "--out",
+        sheet.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "cells"), "1");
+    assert_eq!(field(&output, "template"), "grid-1-1x1");
+    assert_eq!(
+        field(&output, "photos"),
+        "1",
+        "the surviving cell keeps its photo"
+    );
+
+    let refused = dir.join("refused.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        sheet.to_str().expect("utf-8"),
         "--remove-cell",
         "--out",
         refused.to_str().expect("utf-8"),
@@ -2920,11 +2964,11 @@ fn edit_shrinks_the_layout_one_cell_at_a_time() {
     assert_eq!(
         code(&output),
         2,
-        "a two-cell layout has no smaller one: {}",
+        "a one-cell layout has no smaller one: {}",
         stderr(&output)
     );
     assert!(
-        stderr(&output).contains("at least 2 cells"),
+        stderr(&output).contains("at least 1 cell"),
         "{}",
         stderr(&output)
     );
@@ -4039,30 +4083,52 @@ fn init_refuses_a_photo_count_outside_the_range_or_a_wrong_slot_count() {
     let path = dir.join("out.pixlay");
     let photo_arg = photo.to_str().unwrap().to_string();
 
-    // One photo and ten: the 2..=9 clamp names both bounds, exits 1, and writes
-    // nothing — a refused command leaves no half-made project behind.
-    for count in [1usize, 10] {
-        let mut args = vec![
-            "init",
-            "--template",
-            "mosaic-8-s14",
-            "--out",
-            path.to_str().unwrap(),
-        ];
-        for _ in 0..count {
-            args.push("--photo");
-            args.push(&photo_arg);
-        }
-        let output = run(&args);
-        assert_eq!(code(&output), 1, "{count} photos: {}", stderr(&output));
-        assert!(stdout(&output).is_empty(), "{count} wrote to stdout");
-        assert!(
-            stderr(&output).contains("2..=9"),
-            "{count} photos: {}",
-            stderr(&output)
-        );
+    // Ten photos: the 1..=9 clamp names both bounds, exits 1, and writes nothing —
+    // a refused command leaves no half-made project behind. One photo left this
+    // list in S19: a single photo is a legal collage (ruling 34), and `--template
+    // grid-1-1x1` is its layout, which the positive case below exercises.
+    let mut ten = vec![
+        "init",
+        "--template",
+        "mosaic-8-s14",
+        "--out",
+        path.to_str().unwrap(),
+    ];
+    for _ in 0..10 {
+        ten.push("--photo");
+        ten.push(&photo_arg);
     }
+    let output = run(&ten);
+    assert_eq!(code(&output), 1, "ten photos: {}", stderr(&output));
+    assert!(stdout(&output).is_empty(), "ten photos wrote to stdout");
+    assert!(
+        stderr(&output).contains("1..=9"),
+        "ten photos: {}",
+        stderr(&output)
+    );
     assert!(!path.exists(), "a refused init must write nothing");
+
+    // One photo on the one-slot sheet: the collage of a single photo, from the
+    // machine surface, and the CLI is not allowed to trim a longer list — it
+    // refuses one instead (the window is the surface that trims, with a report).
+    let one = run(&[
+        "init",
+        "--template",
+        "grid-1-1x1",
+        "--out",
+        path.to_str().unwrap(),
+        "--photo",
+        &photo_arg,
+    ]);
+    assert_eq!(code(&one), 0, "{}", stderr(&one));
+    assert_eq!(field(&one, "cells"), "1");
+    assert_eq!(field(&one, "photos"), "1");
+    assert_eq!(field(&one, "aspect"), "4:3");
+    let single = CollageDoc::load(&path).expect("loads");
+    assert_eq!(single.cells.len(), 1);
+    assert!(single.cells[0].source.is_some());
+    single.validate().expect("a valid document");
+    std::fs::remove_file(&path).expect("remove the one-photo project");
 
     // Three photos into a two-slot template: the numbers are named.
     let output = run(&[

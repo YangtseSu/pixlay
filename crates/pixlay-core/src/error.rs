@@ -107,9 +107,11 @@ pub enum CoreError {
     /// The count control's `−` on a document already at the floor (S14b).
     ///
     /// A *request* limit like [`TooManyPhotos`](Self::TooManyPhotos), and the same
-    /// number the picker's floor names: `MIN_SLOTS` is `MIN_PHOTOS`, so a layout
-    /// cannot shrink into a collage the picker would not make.
-    #[error("a collage's layout has at least {min} cells")]
+    /// number the selection's floor names: `MIN_SLOTS` is `MIN_PHOTOS`, so a layout
+    /// cannot shrink into a collage the selection would not make. The floor is 1
+    /// since S19, so the message is written for either number of cells —
+    /// "at least 1 cells" is not a sentence.
+    #[error("a collage's layout has at least {min} cell{}", if *min == 1 { "" } else { "s" })]
     TooFewCells { min: usize },
 
     /// The count control's `+` on a document at the format's slot limit (S14b).

@@ -1,8 +1,7 @@
 //! The selection policy: which photos a collage holds, and in which order.
 //!
-//! Stages 1–2 of the main path (`AGENTS.md`: `open → pick 2–9 photos → pick a
-//! layout → adjust → export`) are a list of photos in the order the user picked
-//! them, and **order is cell order**: the picker's picked list is where that mapping is
+//! The list of photos in the order the user gave them is a mapping onto cells, and
+//! **order is cell order**: the picker's picked list is where that mapping is
 //! visible and re-orderable, not decoration. This module is the mapping itself,
 //! and it is pure — no cairo, no GTK, no filesystem — so the picker (S13), the
 //! layout stage (S14) and the CLI's `init --photo` share one implementation
@@ -10,12 +9,14 @@
 //!
 //! Three rules live here:
 //!
-//! * **the floor and the ceiling.** A collage needs `2..=9` photos (ruling 3).
-//!   The floor is enforced where a selection becomes a document
-//!   ([`Selection::document`]) and the ceiling where a photo is added
-//!   ([`Selection::push`]), because those are the two moments a user can hit them:
-//!   the picked list legitimately holds zero or one photo while the user is still
-//!   picking, and a tenth is refused with a message rather than truncated.
+//! * **the floor and the ceiling.** A collage needs `1..=9` photos: one since S19
+//!   (ruling 34 — a single photo is a legal collage), nine since S12c. The floor is
+//!   enforced where a selection becomes a document ([`Selection::document`]) and the
+//!   ceiling where a photo is added ([`Selection::push`]), because those are the two
+//!   moments a user can hit them: the picked list legitimately holds no photo while
+//!   the user is still picking, and a tenth is refused with a message rather than
+//!   truncated — the *caller* may trim a longer list, and the window does, but core
+//!   never drops input on its own.
 //! * **the count filter.** The layouts a selection can use are the library's
 //!   templates with exactly that many slots ([`Selection::layouts`]) — the picker
 //!   offers a layout exactly when it has as many slots as the user picked photos,
@@ -43,7 +44,11 @@ use crate::template::{Family, Template};
 use crate::templates;
 
 /// Fewest photos a collage can be made of.
-pub const MIN_PHOTOS: usize = 2;
+///
+/// One since S19: a single photo is a legal collage (ruling 34) — the library's
+/// one-slot sheet gives it a layout, and the frame is what gives it a border.
+/// The floor was 2 for as long as a "collage" was assumed to be several photos.
+pub const MIN_PHOTOS: usize = 1;
 
 /// Most photos a collage can be made of (ruling 3).
 ///

@@ -1,6 +1,6 @@
-//! The picker stage: browse a folder, look at a photo, pick 2–9 in order, Next.
+//! The picker stage: browse a folder, look at a photo, pick 1–9 in order, Next.
 //!
-//! Stages 1–2 of the main path (`AGENTS.md`: `open → pick 2–9 photos → pick a
+//! Stages 1–2 of the main path (`AGENTS.md`: `open → add photos → pick a
 //! layout → adjust → export`). This is the root page of the window's
 //! `AdwNavigationView`; the editor of S7 is pushed on top of it when Next is
 //! pressed.
@@ -2193,7 +2193,8 @@ impl Picker {
         self.selection.borrow().len()
     }
 
-    /// Whether Next can be pressed: the product's floor of two photos.
+    /// Whether Next can be pressed: the product's floor of one photo (S19 — a
+    /// single photo is a legal collage).
     pub fn can_continue(&self) -> bool {
         self.selected_count() >= MIN_PHOTOS
     }
@@ -2402,7 +2403,7 @@ impl Picker {
         self.next.set_tooltip_text(Some(&if self.can_continue() {
             gettext("Open the picked photos in a collage")
         } else {
-            fill(gettext("Pick at least {} photos"), &[MIN_PHOTOS])
+            gettext("Pick at least one photo")
         }));
         self.title.set_subtitle(&match self.folder_name() {
             Some(name) => name,

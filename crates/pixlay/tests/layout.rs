@@ -480,17 +480,45 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
     );
 
     // ---- the count control's two bounds ------------------------------------
-    // The floor: two cells is the smallest layout the library has, so `−` is
-    // insensitive and the refusal names the number the picker names.
+    // The floor: one cell is the smallest layout the library has since S19 — the
+    // sheet — so that is where `−` is insensitive and the refusal names a photo.
+    let one = one_photo_document();
+    window.open_document(one.clone());
+    settle(&window);
+    assert_eq!(gallery.count_label().label(), "1");
+    assert!(
+        !gallery.minus_button().is_sensitive(),
+        "one cell is the floor"
+    );
+    assert!(gallery.plus_button().is_sensitive(), "and 1 < 9");
+    assert_eq!(
+        gallery.candidates(),
+        layouts_of(&one),
+        "the band lists the one-slot layout"
+    );
+    assert_eq!(
+        gallery.candidates(),
+        vec!["grid-1-1x1".to_string()],
+        "and the sheet is the only one"
+    );
+    window.remove_photo();
+    assert!(
+        window
+            .last_toast()
+            .is_some_and(|message| message.contains("at least one photo")),
+        "a removal below the floor reports the floor: {:?}",
+        window.last_toast()
+    );
+    assert_eq!(window.photo_count(), 1, "and changes nothing");
+    assert_eq!(window.document().cells.len(), 1);
+
+    // The floor is one cell and not two: a two-cell document drops to the sheet,
+    // and the survivor keeps its photo.
     let two = two_photo_document();
     window.open_document(two.clone());
     settle(&window);
     assert_eq!(gallery.count_label().label(), "2");
-    assert!(
-        !gallery.minus_button().is_sensitive(),
-        "two cells is the floor"
-    );
-    assert!(gallery.plus_button().is_sensitive(), "and 2 < 9");
+    assert!(gallery.minus_button().is_sensitive(), "and 2 > 1");
     assert_eq!(
         gallery.candidates(),
         layouts_of(&two),
@@ -507,15 +535,13 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
         );
     }
     window.remove_photo();
-    assert!(
-        window
-            .last_toast()
-            .is_some_and(|message| message.contains('2')),
-        "a removal below the floor reports the floor: {:?}",
-        window.last_toast()
+    settle(&window);
+    assert_eq!(window.document().template.name, "grid-1-1x1");
+    assert_eq!(
+        window.photo_count(),
+        1,
+        "the surviving cell keeps its photo"
     );
-    assert_eq!(window.photo_count(), 2, "and changes nothing");
-    assert_eq!(window.document().cells.len(), 2);
 
     // The ceiling: nine, which is also the format's slot limit (S12c).
     let nine = nine_photo_document();
@@ -535,6 +561,92 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
     );
     assert_eq!(window.toasts(), toasts + 1, "reported once");
     assert_eq!(window.photo_count(), 9, "and changes nothing");
+
+    // ---- a list past nine is trimmed once, with one report (S19) -----------
+    // Ruling 34: a selection or a drop past nine keeps its **first nine in the
+    // order given**, and one report says how many were not used. The window is the
+    // surface that trims — core refuses a tenth rather than dropping it — and both
+    // of its list paths do it the same way.
+    let twelve: Vec<PathBuf> = [
+        "landscape.jpg",
+        "portrait.jpg",
+        "square.png",
+        "dated.jpg",
+        "alpha.png",
+        "oriented-6.jpg",
+        "photo-16bit.png",
+        "photo-gray.png",
+        "ratio-4-3.png",
+        "resample-source.png",
+        "adobe-rgb.jpg",
+        "adobe-rgb-srgb.png",
+    ]
+    .iter()
+    .map(|name| support::photo(name))
+    .collect();
+    assert_eq!(twelve.len(), 12);
+
+    // A drop onto a full nine-cell collage: the first nine land, in the order they
+    // were dropped, and the three that do not fit are reported once.
+    let nine = nine_photo_document();
+    window.open_document(nine);
+    settle(&window);
+    let toasts = window.toasts();
+    window.drop_files(twelve.clone(), Some(0));
+    settle(&window);
+    assert_eq!(window.photo_count(), 9, "nine photos land, not twelve");
+    let dropped = window.document();
+    for (slot, path) in twelve.iter().take(9).enumerate() {
+        assert_eq!(
+            dropped.cells[slot].source.as_deref().map(same_file),
+            Some(same_file(path)),
+            "cell {slot} holds the {slot}th file of the drop"
+        );
+    }
+    assert_eq!(window.toasts(), toasts + 1, "one report, not one per file");
+    assert!(
+        window
+            .last_toast()
+            .is_some_and(|message| message.contains('3') && message.contains("not used")),
+        "the report says how many were not used: {:?}",
+        window.last_toast()
+    );
+
+    // The chooser's own path trims to the room the ceiling leaves, because its
+    // command is all-or-nothing: two photos are already in the collage, so seven of
+    // the twelve fit, the layout grows to nine cells, and five are reported unused.
+    let two = two_photo_document();
+    window.open_document(two);
+    settle(&window);
+    let toasts = window.toasts();
+    window.add_photos(twelve.clone());
+    settle(&window);
+    assert_eq!(
+        window.photo_count(),
+        9,
+        "the collage fills up to nine photos"
+    );
+    assert_eq!(
+        window.document().cells.len(),
+        9,
+        "and the layout grew one cell at a time to hold them"
+    );
+    assert_eq!(window.toasts(), toasts + 1, "one report");
+    assert!(
+        window
+            .last_toast()
+            .is_some_and(|message| message.contains('5') && message.contains("not used")),
+        "the report says how many were not used: {:?}",
+        window.last_toast()
+    );
+    let filled = window.document();
+    for (offset, path) in twelve.iter().take(7).enumerate() {
+        assert_eq!(
+            filled.cells[2 + offset].source.as_deref().map(same_file),
+            Some(same_file(path)),
+            "the file at {offset} took the cell the growth made"
+        );
+    }
 
     // ---- the CLI carries the same capabilities -----------------------------
     // The three operations, on a document both sides start from: the file the
@@ -684,7 +796,12 @@ fn document_on(template: &str) -> pixlay_core::CollageDoc {
     doc
 }
 
-/// The smallest collage the product makes: two photos, two slots.
+/// The smallest collage the product makes: one photo on the sheet (S19).
+fn one_photo_document() -> pixlay_core::CollageDoc {
+    document_on("grid-1-1x1")
+}
+
+/// The smallest collage the product made before S19: two photos, two slots.
 fn two_photo_document() -> pixlay_core::CollageDoc {
     document_on("strip-2-2x1")
 }

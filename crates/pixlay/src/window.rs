@@ -68,9 +68,13 @@ use crate::workers::{Down, Kind as WorkerKind, Workers};
 type Boundary = Rc<dyn Fn(&EditorWindow)>;
 type Saved = Rc<dyn Fn(&EditorWindow, &Path)>;
 
-/// The template a new document starts from: 4:3 like an album page, five slots,
-/// so the main path starts with a layout that does not need nine photos.
-pub const DEFAULT_TEMPLATE: &str = "mosaic-5-hero";
+/// The template a new document starts from: the sheet itself, one cell (S19).
+///
+/// Ruling 34 made one photo a legal collage, so a new document opens on the layout
+/// of one photo — 4:3, the album page `mosaic-5-hero` was authored for — and the
+/// cell's own `+` asks for the photo that goes in it. Growing is the count
+/// control's job, and `layout_for` picks the layout each count lands on.
+pub const DEFAULT_TEMPLATE: &str = "grid-1-1x1";
 
 /// The long edge a new export form starts at, in pixels: the one size
 /// parameter (S12d), shared with the CLI's own default (`render --long-edge`,
@@ -1234,11 +1238,46 @@ impl EditorWindow {
         });
     }
 
+    /// The photos a caller offers, trimmed to `limit` with one report (S19).
+    ///
+    /// Ruling 34: a selection or a drop past nine keeps the **first nine in the
+    /// order given**, and one report says how many were not used. The truncation is
+    /// the *caller's* — `Command::AddPhotos` and `Selection::new` still refuse past
+    /// `MAX_PHOTOS`, so nothing in core drops a photo on its own — and it happens
+    /// here once so both of the window's list paths trim the same way instead of
+    /// twice.
+    ///
+    /// `limit` is each caller's own capacity, which is why it is a parameter: a
+    /// **drop** places into cells (replacing what a cell holds when it has to, so a
+    /// full collage can still take nine), while **`Add photos…`** appends through
+    /// `Command::AddPhotos`, which is all-or-nothing and grows the layout — so it
+    /// can use exactly the photos the ceiling leaves room for, and a longer list
+    /// would make the whole command refuse and place nothing.
+    fn at_most(&self, paths: Vec<PathBuf>, limit: usize) -> Vec<PathBuf> {
+        if paths.len() <= limit {
+            return paths;
+        }
+        let unused = paths.len() - limit;
+        self.toast(&fill(
+            ngettext(
+                "{} photo was not used: a collage takes at most {} photos",
+                "{} photos were not used: a collage takes at most {} photos",
+                unused as u32,
+            ),
+            &[unused, MAX_PHOTOS],
+        ));
+        paths.into_iter().take(limit).collect()
+    }
+
     /// Files dropped on the canvas: the slot under the pointer first, then the
     /// slots after it, so a drop of five photos fills five slots in order. Slots
     /// that already hold a photo are skipped unless there is nothing else left,
     /// which is the rule that keeps a drop from silently replacing work.
+    ///
+    /// A drop longer than [`MAX_PHOTOS`] is trimmed first, with one report (S19):
+    /// the drop places into cells, so nine is the whole list it can use.
     pub fn drop_files(&self, paths: Vec<PathBuf>, at: Option<usize>) {
+        let paths = self.at_most(paths, MAX_PHOTOS);
         let slots = self.document().template.slots.len();
         let start = at
             .or_else(|| self.selection())
@@ -1344,10 +1383,7 @@ impl EditorWindow {
     pub fn remove_photo(&self) {
         let cells = self.document().cells.len();
         if cells <= MIN_PHOTOS {
-            self.toast(&fill(
-                gettext("A collage needs at least {} photos"),
-                &[MIN_PHOTOS],
-            ));
+            self.toast(&gettext("A collage needs at least one photo"));
             return;
         }
         // The selection can name a cell that is about to stop existing.
@@ -1410,7 +1446,17 @@ impl EditorWindow {
     }
 
     /// Appends `paths` in the order they arrive, one command.
+    ///
+    /// A list longer than the room the ceiling leaves is trimmed to what fits,
+    /// with one report (S19, ruling 34) — `Command::AddPhotos` is all-or-nothing
+    /// and would refuse the whole list, and a chosen folder of twenty photos is not
+    /// an error the user should have to answer.
     pub fn add_photos(&self, paths: Vec<PathBuf>) {
+        if paths.is_empty() {
+            return;
+        }
+        let room = MAX_PHOTOS.saturating_sub(self.photo_count());
+        let paths = self.at_most(paths, room);
         if paths.is_empty() {
             return;
         }

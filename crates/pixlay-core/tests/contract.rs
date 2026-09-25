@@ -212,8 +212,9 @@ fn unknown_json_fields_are_rejected() {
 #[test]
 fn slot_count_outside_the_limits_is_rejected() {
     // 10 is in the list because it *was* legal: `strip-10-10x1` shipped ten slots
-    // until S12c removed it together with the product's above-nine range.
-    for count in [0, 1, 10, 11] {
+    // until S12c removed it together with the product's above-nine range. 1 left
+    // the list in S19, when it became the floor (ruling 34).
+    for count in [0, 10, 11] {
         let mut doc = two_slot_doc();
         doc.template.slots = (0..count)
             .map(|_| pixlay_core::Slot {
@@ -224,7 +225,7 @@ fn slot_count_outside_the_limits_is_rejected() {
         doc.cells = vec![Cell::default(); count];
         let err = doc.validate().expect_err("slot count must be limited");
         assert!(
-            err.to_string().contains("slots; the limit is 2..=9"),
+            err.to_string().contains("slots; the limit is 1..=9"),
             "{count}: {err}"
         );
     }
@@ -853,7 +854,7 @@ fn the_live_documents_carry_the_codes_numbers() {
         ),
         (
             "docs/CONTRACT.md",
-            format!("slot count | 2..={}", pixlay_core::MAX_PHOTOS),
+            format!("slot count | 1..={}", pixlay_core::MAX_PHOTOS),
         ),
         ("docs/CONTRACT.md", format!("1..={MAX_LONG_EDGE_PX} px")),
         (

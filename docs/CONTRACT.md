@@ -100,7 +100,11 @@ Conventions:
   case over the whole library and every photo aspect is **21.7x** — 46x below the cap (§8, "S11").
 - **The frame is the canvas decoration** (`CollageDoc::frame`, S11): `gapRel`, `radiusRel` and `color`, all
   with defaults that are what the renderer painted before the field existed (no gap, no radius, white), so
-  a project written earlier renders byte-identically. Both lengths are **fractions of the canvas height**,
+  a project written earlier renders byte-identically. **A new document starts at exactly those defaults**
+  (ruled 2026-09-25 in S19): the frame stays opt-in, so the window's `New` and the CLI's `init` write the
+  document the field's own defaults describe, and one photo — a legal collage since S19, the one-slot
+  `grid-1-1x1` — is framed only when the user asks for a frame
+  (`docs/2026-09-25-STEPS.md`, `S19 · Result`). Both lengths are **fractions of the canvas height**,
   like every other length the format stores: a gap takes half of itself off every side of every cell (two neighbours are
   then `gapRel` apart, and the clip shows the backdrop in between), and a radius is clamped to half the
   smaller side of the cell's inset rectangle so a large request rounds the corners into a stadium. The
@@ -116,7 +120,7 @@ Conventions:
 | Item | Value | Source |
 |---|---|---|
 | `docVersion` | exactly `DOC_VERSION` (currently **3**); higher refused, lower refused too | see "Version policy" |
-| slot count | 2..=9 | `AGENTS.md`; nine since S12c removed the ten-slot recipe |
+| slot count | 1..=9 | `AGENTS.md`; nine since S12c removed the ten-slot recipe, one since S19 (ruling 34: a single photo is a legal collage, and `grid-1-1x1` is its layout) |
 | long edge | 1..=30000 px (`MAX_LONG_EDGE_PX`) | a pixel count, the one size parameter: what a render renders and what an export writes |
 | canvas pixels | ≤ 200 MP | the largest grid the product has rendered measured 139.5 MP (§8, "S0"); 43% of headroom left. Checked wherever a grid is **asked for** (S15e): the grid a long edge derives, and the scaled grid `render --preview-px` and `gesture --grid` derive from it |
 | one slot's bitmap | ≤ 200 MP texels (`MAX_BITMAP_PIXELS`, the same budget at the bitmap boundary — S15e) | a bitmap is the part of the photo the slot can show: the slot's own extent in output pixels plus the axis-aligned box a rotation needs, so it is bounded by the canvas rather than by the zoom. Refused per slot with the slot named and the conversion's peak bytes reported (§8, "S15e") |
@@ -173,13 +177,15 @@ limit that is not in this table is a contract gap.
   `mosaic-<slots>-<variant>` (mixed splits or a non-rectangular slot) — plus the frozen `mosaic-8-s14`, whose name, `version`, aspect,
   slot order and coordinates are unchanged by S2 (S1's hand-written geometry is now produced by the generator instead of written out).
   A `g` suffix marks a **gutter** in either family (`grid-4-2x2g`, `strip-2-2x1g`): the panes stop short of each other, so the template
-  does not tile its canvas and its areas sum to less than 1.0.
+  does not tile its canvas and its areas sum to less than 1.0. S19's one-slot member is `grid-1-1x1`: a 1x1 tiling, the whole
+  sheet as one cell, 4:3.
 - **Geometry version and document version are separate**: `template.version` follows the template family, `docVersion` follows the format.
-- **The library covers every slot count from 2 to 9**, at least three layouts each in at least two aspect families (S10); the CLI's `templates` reports the matrix and filters it by aspect ratio. `strip-10-10x1` was the only member above nine and left with S12c.
+- **The library covers every slot count from 1 to 9**: counts 2..=9 carry at least three layouts each in at least two aspect families (S10), and count 1 carries exactly one — `grid-1-1x1`, the whole sheet (S19, ruling 34), because one photo is a legal collage and a second one-slot layout would be the same geometry under another name. The CLI's `templates` reports the matrix and filters it by aspect ratio. `strip-10-10x1` was the only member above nine and left with S12c.
 - **The picker's range is deeper than one layout** (S10, ruling 10): every count from 2 to 9 carries **at least three
-  layouts, in at least two aspect families** — 26 templates and 142 slots in all since S12c removed the ten-slot
-  recipe, which `pixlay-render templates` reports
-  and `crates/pixlay-core/tests/templates.rs` asserts as a histogram over `MIN_PHOTOS..=MAX_PHOTOS`.
+  layouts, in at least two aspect families** — 27 templates and 143 slots in all since S19 added the one-slot
+  sheet, which `pixlay-render templates` reports
+  and `crates/pixlay-core/tests/templates.rs` asserts as a histogram over `2..=MAX_PHOTOS` plus the
+  one-layout rule for count 1.
 - **A shipped name keeps its geometry and its `templateVersion` forever**: S10 added 15 layouts and moved none, and that is a
   test as well as a regeneration diff — `crates/pixlay-core/tests/templates.rs` pins a fingerprint of the geometry every
   template that had shipped before S10 still has, because the determinism test alone cannot see a recipe edit that was
@@ -434,10 +440,10 @@ comparable, and `--quality` was deliberately not added — a knob nobody tests b
 | Item | Rule |
 |---|---|
 | order | **argument order is cell order**; the source of cell *i* is the *i*-th `--photo` |
-| count | 2..=9 inclusive (ruling 3). Outside it: usage error (exit 1) naming both bounds (`a collage needs 2..=9 photos, got 10`). Omitting `--photo` entirely is still the photo-free project S2 shipped |
+| count | 1..=9 inclusive (ruling 3's ceiling, ruling 34's floor: a single photo is a legal collage, and `grid-1-1x1` is its one-slot layout). Outside it: usage error (exit 1) naming both bounds (`a collage needs 1..=9 photos, got 10`). **The CLI never trims**: a list past nine is refused rather than cut to nine, because a machine caller may not have input dropped on its behalf — the window is the surface that trims, with one report of how many photos were not used. Omitting `--photo` entirely is still the photo-free project S2 shipped |
 | template | the slot count must equal the number of photos; a mismatch is a usage error (exit 1) naming the template, its slots and the photo count |
 | paths | a **photo that is not there** is a failure (exit 2, the path named) — the same rule a project that points at a deleted file follows. Each stored `source` is relative to the project file when the two share a root (`pixlay_core::relative_to`, the function `Project::save_as` rebases with) and absolute otherwise, so a project whose photos sit beside it can be moved. Both sides of that comparison are lexically normalized first (`pixlay_core::normalize_lexical`, S15d), so a `..` in the project path or the copy path cannot produce a relative source that resolves somewhere else |
-| the policy itself | `pixlay_core::selection`: `Selection` (ordered photos, the 2..=9 clamp, `layouts()` = the templates with that many slots), `layout_for` (the count rule, S14: same aspect → same recipe family → nearest aspect → library order), `last_photo` / `remove_last` (the batch rule: the last **occupied** cell, because a per-cell clear leaves holes — and the removal is now only a removal, since S14b retired ruling 7's add-back: `+` gives the layout a cell back and leaves it empty). Pure functions, no filesystem |
+| the policy itself | `pixlay_core::selection`: `Selection` (ordered photos, the 1..=9 clamp, `layouts()` = the templates with that many slots), `layout_for` (the count rule, S14: same aspect → same recipe family → nearest aspect → library order), `last_photo` / `remove_last` (the batch rule: the last **occupied** cell, because a per-cell clear leaves holes — and the removal is now only a removal, since S14b retired ruling 7's add-back: `+` gives the layout a cell back and leaves it empty). Pure functions, no filesystem |
 
 **S11 added one subcommand (`edit`) and three shared flags**, because the free rotation and the frame are things a *person*
 does and a machine has to be able to do too (`AGENTS.md`: nothing may be possible only in the GUI). The flags are the same
@@ -488,10 +494,10 @@ operations the band performs:
 
 | Item | Rule |
 |---|---|
-| `templates --slots <n>` | only the templates with exactly `n` slots, `2..=9` (exit 1 outside, and the same bound the format's slot limit gives). This is `Selection::layouts` — the gallery's own query — seen from the outside, so a caller can list a photo count's candidates; the two filters combine with `--aspect`. The report echoes `slots` beside `aspect` |
+| `templates --slots <n>` | only the templates with exactly `n` slots, `1..=9` (exit 1 outside, and the same bound the format's slot limit gives). This is `Selection::layouts` — the gallery's own query — seen from the outside, so a caller can list a photo count's candidates; the two filters combine with `--aspect`. The report echoes `slots` beside `aspect`. Count 1 answers with `grid-1-1x1` alone (S19) |
 | `edit --template <name>` | switches the document to another layout, keeping the surviving cells' photos and framing (`Command::SetTemplate`'s retention: a layout with fewer slots drops the tail, one with more appends empty cells). An unknown name is exit 1 with the library listed |
 | `edit --add-cell` | takes the layout with one cell more, leaving it empty (`Command::AddCell`, the window's `+`). An edit *about the layout*, so it moves the count without placing a photo: the cell the user wants filled is the one that shows a `+`, and clicking that is what asks for the file (S14b) |
-| `edit --remove-cell` | takes the layout with one cell fewer, dropping the last cell whatever it holds (`Command::RemoveLastCell`, the window's `−`). Exit 2 at two cells (`a collage's layout has at least 2 cells`) — the floor is the layout's, not the photo count's. The mirror image of `--add-cell`, and refused together with it (exit 1): they are opposites, and one edit is one intent |
+| `edit --remove-cell` | takes the layout with one cell fewer, dropping the last cell whatever it holds (`Command::RemoveLastCell`, the window's `−`). Exit 2 at one cell (`a collage's layout has at least 1 cell`) — the floor is the layout's, not the photo count's, and it is one cell since S19 (ruling 34). The mirror image of `--add-cell`, and refused together with it (exit 1): they are opposites, and one edit is one intent |
 | `edit --swap <i>,<j>` | exchanges two cells **whole** — photo and framing both (`Command::SwapCells`), because the framing is what makes a photo look right in *that* cell. Exit 2 for the same cell twice (`slot i cannot be swapped with itself`) and for a cell the layout does not have; a malformed pair is exit 1. The window's own path is `Ctrl+Shift+Arrow`, which names the neighbour geometrically (`Template::neighbour`, S14b) |
 | `edit --add-photo <file>` | appends a photo: the first empty cell, else the layout with one slot more (`Command::AddPhotos`). Repeated once per photo in argument order; a photo that is not there is exit 2 with the path named, and a tenth is exit 2 (`a collage takes at most 9 photos`) |
 | `edit --slot <i> --photo <file>` | the photo that cell shows instead. Needs `--slot` (exit 1 otherwise, like the framing flags), and the stored path follows `init --photo`'s rule (relative to the project when the two share a root, absolute otherwise) |
@@ -552,7 +558,7 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
 | the image pipeline | **S4, landed**; the preview-grade reduction landed in **S12b**; the grading stage removed by **S12c** | `pixlay-imaging`: `Source::decode`, `resample`, `slot_bitmap`/`slot_bitmaps`, `probe`, and the preview's `Preview` caches + `reduce::PreviewSource`; the buffer ladder and the colour decisions are §4.1 |
 | command history / hit testing / project writing | **S6.5, landed**; `SetTemplate` added by **S7**; the grade/filter/text commands removed by **S12c** | `pixlay-core`: `Command` (one edit: source, framing, or the template) and `History` (snapshot undo/redo; `apply` is all-or-nothing, answers whether the command was a **step** — one that changes nothing is not (S15d) — and the document has no mutable accessor; the GUI commits **one command per gesture**, §9), `Template::slot_at(point)` for hit testing, `CollageDoc::save` / `Project::save` / `Project::save_as` for writing a document. The CLI's `hit` and `save` are the machine surface of the first and the last; the command history is a test surface only, on purpose (§5) |
 | encoding and metadata | **S6, landed**; TIFF and the chroma request removed by **S12c**, resolutions by **S12d** | `pixlay_imaging::encode`: one pass per format writing pixels, sampling and the ICC profile (`icc`), for PNG / JPEG; the CLI's `--long-edge` and the per-format rules are §5, the profile is §4.1 |
-| the library and the selection | **S9, landed** | `pixlay_core::selection`: `Selection` (the ordered photo list, the 2..=9 clamp, `layouts()`), `last_photo` / `remove_last` — pure, no filesystem (the batch add-back left with S14b). `pixlay_imaging::thumb`: `thumbnail(source, long_edge)`, the same `resample` at a preview grid. The CLI's `scan` / `thumb` / `init --photo` are the machine surface (the rules are §5) |
+| the library and the selection | **S9, landed** | `pixlay_core::selection`: `Selection` (the ordered photo list, the clamp, `layouts()`), `last_photo` / `remove_last` — pure, no filesystem (the batch add-back left with S14b; the clamp's floor is 1 since S19). `pixlay_imaging::thumb`: `thumbnail(source, long_edge)`, the same `resample` at a preview grid. The CLI's `scan` / `thumb` / `init --photo` are the machine surface (the rules are §5) |
 
 ## 8. Measured (2026-09-20, this machine)
 
@@ -1127,6 +1133,14 @@ rely on:
   (`MIN_PHOTOS` / `MAX_PHOTOS`, the picker's own floor and ceiling), with the picker's own message if a
   caller asks anyway, and `selection::layout_for` (same aspect → same recipe family → nearest aspect →
   library order) is the one rule that decides *which* layout either one moves to.
+- **A list of photos longer than the ceiling is trimmed once, with one report** (S19, ruling 34): the
+  window is the surface that trims, and each of its two list paths trims to what *it* can use —
+  `Add photos…` to the room the ceiling leaves (`MAX_PHOTOS - photo count`), because `Command::AddPhotos`
+  is all-or-nothing and grows the layout one cell at a time, and a **drop** to `MAX_PHOTOS` itself,
+  because a drop places into the document's cells (replacing what one holds when there is nothing empty
+  left), so nine is the longest list it can use. The rest is **one toast** naming how many photos were not
+  used. Core never truncates: `Command::AddPhotos` and `Selection::new` still refuse past the cap, which is
+  what the CLI's `init --photo` and `edit --add-photo` report (exit 1 and exit 2).
 - **An empty cell is a control of its own.** The canvas is wrapped in a `GtkOverlay` and each empty cell
   carries a real `GtkButton` with `list-add-symbolic` at the cell's centre (32x32, `osd` + `circular`
   classes, explicit accessible name): clicking it asks for the photo of *that* cell

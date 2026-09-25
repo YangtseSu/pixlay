@@ -342,7 +342,7 @@ fn has_accessible_name(widget: &gtk4::Widget) -> bool {
 /// multi-selection, a picked cell shown by a highlight — the one part of the page
 /// this product deviates on, recorded in `docs/HIG-REVIEW.md` §3 — and the batch
 /// action in the header, the Next button, carrying the count and insensitive below
-/// the floor of two.
+/// the floor of one.
 ///
 /// The arrangement is `guidelines/adaptive`'s half: the preview above, the
 /// thumbnails below it, the picked list down the right edge, which is checked as
@@ -391,8 +391,8 @@ fn check_picker(window: &EditorWindow, failures: &mut Vec<String>) {
 
     // The count is the content's own label — not the button's, which would replace
     // the `AdwButtonContent` and lose the icon (`S13c`, the defect this checks) — and
-    // the floor of the product's 2–9 rule turns it off rather than letting Next open
-    // an empty collage.
+    // the floor of the product's 1–9 rule turns it off rather than letting Next open
+    // a collage with no photo in it.
     let next = picker.next_button();
     let label = next_label(&picker);
     if !label.contains('0') {
@@ -420,8 +420,10 @@ fn check_picker(window: &EditorWindow, failures: &mut Vec<String>) {
         return;
     }
     picker.toggle(window, 0);
-    if next.is_sensitive() {
-        failures.push("Next is sensitive with one photo picked".to_string());
+    // One photo is a legal collage since S19 (ruling 34), so the floor the walk
+    // holds Next to is "nothing picked", not "one photo picked".
+    if !next.is_sensitive() {
+        failures.push("Next is insensitive with one photo picked".to_string());
     }
     let picked_cell = picker
         .cell_widget(0)
