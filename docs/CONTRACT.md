@@ -1074,6 +1074,12 @@ session's; each row is three consecutive runs on a quiet machine.
 - **The switch is one-shot per session in the CLI by construction.** A window that clicks back and forth pays the
   composite every time (the eviction row above) but not the decodes; a fresh process pays the decodes because its
   source cache is empty. Both are real, and the two rows of the table are the fresh one.
+- **Ruling (2026-09-25, human): the measured switch stands as the baseline, and no optimisation step is added.**
+  `SWITCH_BUDGET_MS = 210` is therefore a regression line and not a provisional number: the switch is re-measured
+  against it after S21's sketch band, which is expected to remove both the band's own rebuild and the eviction above
+  — an expectation to re-measure, not a measurement. The two cheaper optimisations the ruling was offered and did not
+  take (a second preview-grade edge held in the source cache; a `Preview` of the band's own) are recorded in
+  `docs/2026-09-25-STEPS.md`, `S18 · Result`.
 
 ## 9. The window (S7), and the stages added after it
 
