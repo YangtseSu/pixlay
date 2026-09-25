@@ -10,10 +10,12 @@
 //!
 //! # The grid
 //!
-//! A preview needs its own pixel grid, and it is the widget's: [`preferred_grid`]
-//! is the largest canvas-aspect grid that fits the widget inside [`MARGIN`]. The
-//! bitmaps are resampled for exactly that grid by the background decoder, so at
-//! rest `scale == 1.0` and the canvas only blits and clips. While the widget has
+//! A preview needs its own pixel grid, and it is the widget's:
+//! `pixlay_core::canvas_grid` (which is also what the CLI's `switch` ruler derives a
+//! grid with, S18) is the largest canvas-aspect grid that fits the widget inside
+//! `pixlay_core::CANVAS_MARGIN`. The bitmaps are resampled for exactly that grid by
+//! the background decoder, so at rest `scale == 1.0` and the canvas only blits and
+//! clips. While the widget has
 //! just changed size and the new bitmaps are still being prepared,
 //! [`placement`] draws the previous grid with a uniform scale — a *preview* scale
 //! in the sense `Target::scale` already has, applied to the whole canvas, never a
@@ -50,14 +52,6 @@ use pixlay_render::{Images, RenderError, Target, draw};
 use crate::a11y;
 use crate::i18n::gettext;
 use crate::window::{EditorWindow, PLACEHOLDER_GRID};
-
-/// Space between the sheet and the edge of the widget, in device pixels.
-///
-/// It is the canvas view's own placement of its content, not styling: no style
-/// class or CSS variable describes "how far the paper sits from the pane", and it
-/// deliberately does not come from the theme (a sheet of paper has the same
-/// margin in dark and light mode).
-pub const MARGIN: f64 = 12.0;
 
 /// How the sheet is placed inside a widget of a given size.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -110,17 +104,7 @@ impl Placement {
 /// and the decoder resamples for them: a preview is a real render at a smaller
 /// size, not a big render shrunk by Cairo (`docs/CONTRACT.md` §5, `--preview-px`).
 pub fn preferred_grid(canvas_aspect: f64, width: i32, height: i32) -> PixelSize {
-    let available_width = (f64::from(width) - 2.0 * MARGIN).max(1.0);
-    let available_height = (f64::from(height) - 2.0 * MARGIN).max(1.0);
-    let (w, h) = if available_width / available_height > canvas_aspect {
-        (available_height * canvas_aspect, available_height)
-    } else {
-        (available_width, available_width / canvas_aspect)
-    };
-    PixelSize {
-        width: (w.round() as i32).max(1),
-        height: (h.round() as i32).max(1),
-    }
+    pixlay_core::canvas_grid(canvas_aspect, width, height)
 }
 
 /// Where the grid `grid` sits in a widget of this size.

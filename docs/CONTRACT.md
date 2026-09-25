@@ -1040,6 +1040,41 @@ the way. The identity rows are the committed tests' own assertions; the memory r
 | the **stale unbind** the step's test found (before the fix) | after a folder change: `bind_tile(0)` then the *previous* binding's `unbind_tile(0)` left **1 request, 0 built, 0 in flight, no failure and no bound cell**, and **2831 frames** of pumping changed nothing. The guard — only the row that is the position's current binding may take its entry away — is 3 lines |
 | the verification render (`verify.pixlay`, `--long-edge 14043`) | 14043x10532, **ms 8150.6** + **encode_ms 2343.9**, **`peak_rss_mb` 1629.6**, 9,157,639 bytes; `probe` on the same document reports `passed = true` with 8/8 slot colours exact and 0 foreign pixels on all 12 seams |
 
+### S18 (2026-09-25, `--release`, this machine)
+
+The layout switch's own numbers: the human's finding 1 of 2026-09-25 ("switching a layout in the editor takes
+too long before the new preview is on screen"), turned into a measurement **before** any code changed, so
+that a ruling can be made about it. Two rulers, one experiment: `pixlay-render switch --project <p>
+--template <t> --canvas <w>x<h> [--band]` drives the click in a windowless process (`SetTemplate` through a
+`History`, both grids from the canvas box — `pixlay_core::canvas_grid` — the preview-grade copies, the cell
+bitmaps), and `crates/pixlay/tests/switch.rs` drives the same click in the window and times it to the frame
+that shows the new render. Both at the editor's default window, whose canvas widget is **1100x575**, and both
+in a **fresh session** — the CLI starts a process, the test opens a window — because the caches are the
+session's; each row is three consecutive runs on a quiet machine.
+
+| what | number |
+|---|---|
+| the click `mosaic-8-s14` → `strip-8-8x1` (grid 735x551 → 980x551) | CLI **123.5 / 124.6 / 124.8 ms** — `template_ms` 0.013–0.014, `sources_ms` 80.1–82.6, `composite_ms` 42.2–43.4 — and the window **149.0 / 151.0 / 151.1 ms** |
+| the click `mosaic-8-s14` → `grid-8-4x2` (735x551 → 827x551) | CLI **176.9 / 176.9 / 179.0 ms** — `sources_ms` 97.6–100.2, `composite_ms` 78.9–79.2 — and the window **204.1 / 206.7 / 204.0 ms** |
+| the two rulers against each other | the window is the CLI **+26 / +27 ms**, the two rows within 1 ms of each other: one 16.6 ms display frame plus the window's own blit and paint, which a windowless command cannot reach |
+| decodes per click | **7** — every distinct file, both rows and both rulers: a layout change moves the grid's shape and with it the preview-grade edge (1.25 x 735 = 919 → 1225 / 1034), and the copies are keyed by the edge (S15f, PIX-004) |
+| a switch that *keeps* the edge | **0 decodes** (`crates/pixlay-cli/tests/cli.rs`: a two-slot project at a tall canvas box, 276x207 → 276x184, both at edge 345) — the reason `sources_ms` is a phase of its own |
+| the same session's **second** click (strip → mosaic after the row above) | the window **115.3 / 120.0 / 120.9 ms** with **0 decodes**: the copies are still in hand, and every bitmap is rebuilt — the band's candidate builds share the canvas's `Preview`, whose bitmap cache is `MAX_GRIDS = 2`, so a candidate's grid evicts the canvas's. Recorded, not fixed: S18 does not optimise |
+| the band's rebuild after the same click | CLI **169.6–172.5 ms** for the three candidates (`--band`); window **165.8–178.2 ms** — about as much as the preview it follows, on the same worker. The band's **own** decodes are **0** in every row: S14's claim holds through a switch |
+| peak `VmHWM` | the CLI **63.8–65.6 MB** for the eight-photo document at this grid, the whole process including the seven decodes and both caches |
+| the **budget** | `SWITCH_BUDGET_MS = 210` — the worse row's worst run (206.7 ms) rounded up to the next 10 ms. It governs the canvas half (`switch_ms`), which is what the finding is about; the band's share is reported beside it. It is a regression line, not a tolerance: S21 re-measures the switch against it, and **100 ms** — the usual instant-response threshold — is a number this baseline does not meet |
+
+- **The cost is not the layout change; it is the copies.** `template_ms` is 0.01–0.02 ms — a `SetTemplate` and
+  a grid derivation — while `sources_ms` is 80–100 ms of it: seven decodes plus their reductions, paid because
+  the new grid asks for a **new edge**. `composite_ms` (42–79 ms) is the resample and quantization of the eight
+  cells at the new grid, and it follows the *target's* cell shapes: the same canvas from the strip to the mosaic
+  costs 95–113 ms where the mosaic to the strip costs 42–43 ms.
+- **The band costs about as much as the preview it follows**, and it is serialized behind it on the same worker:
+  a click's whole turn is 294–374 ms. That is finding 1 in one number, and S21's sketch is the step it points at.
+- **The switch is one-shot per session in the CLI by construction.** A window that clicks back and forth pays the
+  composite every time (the eviction row above) but not the decodes; a fresh process pays the decodes because its
+  source cache is empty. Both are real, and the two rows of the table are the fresh one.
+
 ## 9. The window (S7), and the stages added after it
 
 The GUI is the fifth consumer of the same document, and what it adds is interaction. Its

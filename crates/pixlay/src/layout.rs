@@ -33,7 +33,7 @@
 //! Candidates never wrap: the strip is a horizontal `GtkBox` inside a scroller
 //! whose vertical policy is `Never`, so a candidate is one cell tall whatever the
 //! window does, and a wide library scrolls sideways. A cell is
-//! [`THUMB_BOX`] whatever the layout's aspect — a 2:3 layout and a 16:9 one are the
+//! [`CANDIDATE_BOX`] whatever the layout's aspect — a 2:3 layout and a 16:9 one are the
 //! same cell across and the picture is fitted inside it — because the band's height
 //! is taken from the canvas, and a cell that followed its layout's own shape would
 //! make the band taller than the tallest layout in the library.
@@ -46,42 +46,14 @@ use gtk4 as gtk;
 use gtk4::glib;
 use gtk4::prelude::*;
 
-use pixlay_core::{MAX_PHOTOS, MIN_PHOTOS, PixelSize};
+use pixlay_core::templates::CANDIDATE_BOX;
+use pixlay_core::{MAX_PHOTOS, MIN_PHOTOS};
 use pixlay_render::Rgb8Image;
 
 use crate::a11y;
 use crate::i18n::{fill, gettext};
 use crate::picture::Picture;
 use crate::window::EditorWindow;
-
-/// The box a candidate's thumbnail is drawn inside, in logical pixels.
-///
-/// One cell for every candidate, whatever the layout's aspect: the band's height is
-/// taken from the canvas above it, and the library's tallest shape is 2:3 — a cell
-/// that followed its own layout's proportions would make the band 192 px tall for a
-/// three-photo column and 72 for a 16:9 strip. 128x96 is the largest box that
-/// leaves the canvas the majority of the page at the default 1100x760 window.
-pub const THUMB_BOX: (i32, i32) = (128, 96);
-
-/// The grid one candidate is rendered at: the largest grid with `aspect`'s shape
-/// that fits inside [`THUMB_BOX`].
-///
-/// This is `canvas::preferred_grid`'s arithmetic with a fixed box instead of a
-/// widget, and for the same reason: the render is a real render at a smaller size
-/// (`docs/CONTRACT.md` §5), so a candidate's pixels are comparable with
-/// `pixlay-render render` of the same document at the same grid.
-pub fn thumb_grid(aspect: f64) -> PixelSize {
-    let (box_width, box_height) = (f64::from(THUMB_BOX.0), f64::from(THUMB_BOX.1));
-    let (width, height) = if box_width / box_height > aspect {
-        (box_height * aspect, box_height)
-    } else {
-        (box_width, box_width / aspect)
-    };
-    PixelSize {
-        width: (width.round() as i32).max(1),
-        height: (height.round() as i32).max(1),
-    }
-}
 
 /// One rendered candidate, as the worker hands it back.
 ///
@@ -344,12 +316,12 @@ impl Gallery {
 /// filled, and the eight-photo verification document was decoded 21 times instead of
 /// 14). Same widgets, same height, whatever the theme and whatever the font size.
 ///
-/// The caption is short because a cell is [`THUMB_BOX`] wide; the whole sentence is
+/// The caption is short because a cell is [`CANDIDATE_BOX`] wide; the whole sentence is
 /// the tooltip and the accessible name.
 fn placeholder_cell() -> gtk::ToggleButton {
     let spacer = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    spacer.set_width_request(THUMB_BOX.0);
-    spacer.set_height_request(THUMB_BOX.1);
+    spacer.set_width_request(CANDIDATE_BOX.0);
+    spacer.set_height_request(CANDIDATE_BOX.1);
     let caption = gtk::Label::builder()
         .label(gettext("No layout"))
         .ellipsize(gtk::pango::EllipsizeMode::Middle)
@@ -383,8 +355,8 @@ fn candidate_cell(
     let image = gtk::Picture::builder()
         .content_fit(gtk::ContentFit::Contain)
         .can_shrink(true)
-        .width_request(THUMB_BOX.0)
-        .height_request(THUMB_BOX.1)
+        .width_request(CANDIDATE_BOX.0)
+        .height_request(CANDIDATE_BOX.1)
         .paintable(picture.texture())
         .build();
     let caption = gtk::Label::builder()

@@ -45,6 +45,18 @@ pub const MIN_GESTURE_STEPS: u32 = 2;
 /// Most steps one `gesture` sequence may have: a minute of a 60 Hz gesture.
 pub const MAX_GESTURE_STEPS: u32 = 3600;
 
+/// The canvas widget's size at the editor's default window (1100x760), in logical
+/// pixels: what `switch` measures at when `--canvas` is not given.
+///
+/// Measured 2026-09-25, `--release`, in the GUI test that drives the same change
+/// (`crates/pixlay/tests/switch.rs`): the editor's canvas widget is **1100x575**, so
+/// a 4:3 document rests at a 735x551 grid and a 16:9 one at 980x551. The number is
+/// here rather than taken from the shell because the CLI must not depend on gtk4
+/// (`AGENTS.md`, module boundaries), and the test prints it on every run, so a
+/// window layout that moves the widget is a fact the next measurement shows rather
+/// than a constant that silently drifts.
+pub const DEFAULT_CANVAS_BOX: (i32, i32) = (1100, 575);
+
 /// The one size parameter: what `render` uses when `--long-edge` is not given,
 /// and what `probe` measures at, and what the window's export form starts at
 /// (the GUI's own copy is in `crates/pixlay/src/window.rs`).
@@ -71,6 +83,7 @@ USAGE:
     pixlay-render templates [--aspect <ratio>] [--slots <n>] [--json]
     pixlay-render init --template <name> --out <file.pixlay> [--photo <p>...] [--json]
     pixlay-render gesture --project <file.pixlay> --grid <px> [--slot <i>] [--steps <n>] [--json]
+    pixlay-render switch --project <file.pixlay> --template <name> [--canvas <w>x<h>] [--band] [--json]
     pixlay-render edit   --project <file.pixlay> --out <file.pixlay> [EDIT OPTIONS] [--json]
     pixlay-render hit    --project <file.pixlay> --at <x>,<y> [--json]
     pixlay-render hit    --template <name> --at <x>,<y> [--json]
@@ -178,6 +191,37 @@ GESTURE OPTIONS:
     and an exit code that moved with the host's speed would make the same input's
     result depend on the machine.
 
+SWITCH OPTIONS:
+    --project <file>    Project whose layout to switch. Required, and every
+                        occupied cell must decode: a switch whose photos could not
+                        be drawn is not the number this measures.
+    --template <name>   The layout to switch to, by name — the vocabulary `edit
+                        --template` and the document's own `template.name` use.
+                        Required. Any template this build ships: the window's own
+                        click takes a candidate of the document's cell count, which
+                        `templates --slots <n>` lists.
+    --canvas <w>x<h>    The canvas widget the window shows the document in, in
+                        logical pixels, 1..=20000 each. Optional: the editor's own
+                        canvas at the default window is 1100x575, which is the
+                        default. The grid is *derived* from it for each document
+                        (`pixlay_core::canvas_grid`), because a layout change moves
+                        the grid: the default window's canvas rests at 735x551 for
+                        a 4:3 sheet and 980x551 for a 16:9 one, so the switch's
+                        preview-grade copies are for another edge.
+    --band              Measure the layout band's rebuild with the switch: every
+                        candidate of the new cell count, rendered at the grid the
+                        window renders a candidate at. Its share is `band_ms`, so
+                        `with and without the band` is two runs of this command.
+    `switch` measures the layout change the window's click produces, on a project
+    already open on another layout: `template_ms` (the SetTemplate step and the new
+    grid), `sources_ms` (the preview-grade copies — one decode per file whose copy
+    is not in hand, because the new grid asks for another edge) and `composite_ms`
+    (the cell bitmaps, resampled and quantized),
+    with `switch_ms` their sum. The window additionally blits them and paints a
+    frame, which a windowless command cannot reach; `verdict` reads `switch_ms`
+    against `budget_ms` and the exit code is 0 whatever it says, for `gesture`'s
+    reason: the measurement is the result (S18).
+
 TEMPLATES OPTIONS:
     --aspect <ratio>    List only the templates authored for this layout shape,
                         as W:H (4:3) or a decimal (1.333333). Omit to list all.
@@ -272,7 +316,9 @@ COMMON OPTIONS:
     --json              Print one JSON object instead of key = value lines.
     --stats             Add measured fields: ms, peak_rss_mb, icc. `render`
                         adds encode_ms as well; `gesture` adds its four phase
-                        times and the worst warm step; `probe` does not encode.
+                        times and the worst warm step; `switch` adds its three
+                        phases, the band's share and the verdict; `probe` does
+                        not encode.
     -h, --help          Print this help.
     -V, --version       Print the version.
 
@@ -302,6 +348,7 @@ pub enum Command {
     Hit(HitArgs),
     Save(SaveArgs),
     Gesture(GestureArgs),
+    Switch(SwitchArgs),
     Help,
     Version,
 }
@@ -429,6 +476,24 @@ pub struct GestureArgs {
     pub json: bool,
 }
 
+/// `switch`: one layout change, measured (S18).
+pub struct SwitchArgs {
+    pub project: PathBuf,
+    /// The layout to switch to, by name — the vocabulary `edit --template` and the
+    /// document's own `template.name` use.
+    pub template: String,
+    /// The canvas widget's size, in logical pixels: the box both grids are derived
+    /// from (`pixlay_core::canvas_grid`), which is what the window does. Default:
+    /// [`DEFAULT_CANVAS_BOX`].
+    pub canvas: (i32, i32),
+    /// Whether the band's rebuild is measured with it: the candidates a layout
+    /// change puts on the strip, rendered the way the window renders them
+    /// (`pixlay_core::templates::candidate_grid`).
+    pub band: bool,
+    pub stats: bool,
+    pub json: bool,
+}
+
 pub struct ProbeArgs {
     pub project: PathBuf,
     /// The one size parameter; `None` probes at [`DEFAULT_LONG_EDGE_PX`].
@@ -498,6 +563,10 @@ struct Flags {
     region: Option<Rect>,
     grid: Option<u32>,
     steps: Option<u32>,
+    /// `--band`: measure the layout band's own rebuild as part of a switch.
+    band: bool,
+    /// `--canvas <w>x<h>`: the canvas widget a switch's two grids are derived from.
+    canvas: Option<(i32, i32)>,
     gap: Option<f64>,
     radius: Option<f64>,
     border: Option<Rgba8>,
@@ -561,9 +630,10 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
         "hit" => &["project", "template", "at"],
         "save" => &["project", "out"],
         "gesture" => &["project", "grid", "slot", "steps", "stats"],
+        "switch" => &["project", "template", "canvas", "band", "stats"],
         _ => &[],
     };
-    let present: [(&'static str, bool); 28] = [
+    let present: [(&'static str, bool); 30] = [
         ("project", flags.project.is_some()),
         ("template", flags.template.is_some()),
         ("out", flags.out.is_some()),
@@ -583,6 +653,8 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
         ("region", flags.region.is_some()),
         ("grid", flags.grid.is_some()),
         ("steps", flags.steps.is_some()),
+        ("band", flags.band),
+        ("canvas", flags.canvas.is_some()),
         ("gap", flags.gap.is_some()),
         ("radius", flags.radius.is_some()),
         ("border-color", flags.border.is_some()),
@@ -632,8 +704,10 @@ fn reason(name: &str, flag: &str) -> &'static str {
         (_, "recursive") => "only `scan` descends into subdirectories",
         (_, "px") => "only `thumb` sizes a preview",
         (_, "region") => "only `thumb` resamples one rectangle of a photo",
-        (_, "grid") => "only `gesture` measures at a grid",
+        (_, "grid") => "only `gesture` measures at a canvas grid",
         (_, "steps") => "only `gesture` runs a sequence of steps",
+        (_, "band") => "only `switch` measures the layout band's rebuild",
+        (_, "canvas") => "only `switch` measures at a canvas widget's size",
         (
             "probe" | "image" | "scan" | "thumb" | "templates" | "init" | "hit" | "save",
             "gap" | "radius" | "border-color",
@@ -666,7 +740,7 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
         .ok_or_else(|| Failure::Usage("subcommand must be valid UTF-8".to_string()))?;
     let subcommand = match head {
         "render" | "probe" | "image" | "templates" | "init" | "edit" | "hit" | "save" | "scan"
-        | "thumb" | "gesture" => head,
+        | "thumb" | "gesture" | "switch" => head,
         "--help" | "-h" | "help" => return Ok(Command::Help),
         "--version" | "-V" | "version" => return Ok(Command::Version),
         other if other.starts_with('-') => {
@@ -814,6 +888,11 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                 }
                 set_once(&mut flags.steps, steps, "steps")?;
             }
+            "band" => flags.band = true,
+            "canvas" => {
+                let box_size = parse_size(&value("canvas")?, "canvas")?;
+                set_once(&mut flags.canvas, box_size, "canvas")?;
+            }
             "aspect" => {
                 let raw = value("aspect")?;
                 let aspect = parse_aspect(&raw)?;
@@ -944,6 +1023,22 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                 grid,
                 slot: flags.slot,
                 steps: flags.steps.unwrap_or(DEFAULT_GESTURE_STEPS),
+                stats: flags.stats,
+                json: flags.json,
+            }))
+        }
+        "switch" => {
+            let project = flags.project.ok_or_else(|| {
+                Failure::Usage("switch needs --project <file.pixlay>".to_string())
+            })?;
+            let template = flags
+                .template
+                .ok_or_else(|| Failure::Usage("switch needs --template <name>".to_string()))?;
+            Ok(Command::Switch(SwitchArgs {
+                project,
+                template,
+                canvas: flags.canvas.unwrap_or(DEFAULT_CANVAS_BOX),
+                band: flags.band,
                 stats: flags.stats,
                 json: flags.json,
             }))
@@ -1263,6 +1358,32 @@ fn parse_swap(value: &OsString) -> Result<(usize, usize), Failure> {
             .map_err(|_| Failure::Usage(format!("--swap {side} must be a cell index, got {raw}")))
     };
     Ok((index("i", left)?, index("j", right)?))
+}
+
+/// Parses `w`x`h`, each 1..=[`MAX_PREVIEW_PX`], as a widget's size.
+///
+/// The `x` is the one GTK itself prints a size with (`GdkRectangle`), so a size
+/// copied out of a window's own report reads back unchanged.
+fn parse_size(value: &OsString, flag: &str) -> Result<(i32, i32), Failure> {
+    let text = value
+        .to_str()
+        .ok_or_else(|| Failure::Usage(format!("--{flag} must be valid UTF-8")))?;
+    let (width, height) = text
+        .split_once('x')
+        .ok_or_else(|| Failure::Usage(format!("--{flag} must be <w>x<h>, got {text}")))?;
+    let side = |which: &str, raw: &str| -> Result<i32, Failure> {
+        let pixels = raw
+            .trim()
+            .parse::<i32>()
+            .map_err(|_| Failure::Usage(format!("--{flag} {which} must be a number, got {raw}")))?;
+        if !(1..=MAX_PREVIEW_PX).contains(&pixels) {
+            return Err(Failure::Usage(format!(
+                "--{flag} {which} {pixels} is outside 1..={MAX_PREVIEW_PX}"
+            )));
+        }
+        Ok(pixels)
+    };
+    Ok((side("width", width)?, side("height", height)?))
 }
 
 /// Parses `r,g,b`, each 0..=255, as an opaque [`Rgba8`].

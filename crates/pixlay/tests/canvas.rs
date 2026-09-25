@@ -17,8 +17,8 @@ mod support;
 use std::time::Duration;
 
 use gtk4::prelude::*;
-use pixlay::canvas::{self, MARGIN};
-use pixlay_core::{CropTransform, PixelSize, templates};
+use pixlay::canvas;
+use pixlay_core::{CANVAS_MARGIN, CropTransform, PixelSize, templates};
 
 /// The long edge the test renders at, in pixels. Small enough to stay fast, large
 /// enough that a one-pixel geometry error is visible.
@@ -71,8 +71,8 @@ fn the_canvas_draws_what_the_cli_writes() {
     area.set_hexpand(false);
     area.set_vexpand(false);
     area.set_size_request(
-        grid.width + 2 * MARGIN as i32,
-        grid.height + 2 * MARGIN as i32,
+        grid.width + 2 * CANVAS_MARGIN as i32,
+        grid.height + 2 * CANVAS_MARGIN as i32,
     );
     window.pump(Duration::from_millis(300));
     assert!(

@@ -4734,6 +4734,353 @@ fn gesture_keeps_the_usage_and_locale_rules() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `switch` (S18): one layout change, in phases, at a canvas box.
+///
+/// The numbers themselves are the step's measurement and live in
+/// `docs/CONTRACT.md` §8; what is pinned here is the *shape*: which phases the
+/// report splits, that the two grids come from the box (the widget's own rule, less
+/// its margin), and that a layout change which moves the preview-grade edge decodes
+/// the photos again while one that does not keeps them.
+#[test]
+fn switch_measures_a_layout_change_at_the_canvas_box() {
+    let dir = out_dir("switch");
+    let project = write_full_project(&dir, "two.pixlay");
+    let path = project.to_str().unwrap().to_string();
+
+    let output = run(&[
+        "switch",
+        "--project",
+        &path,
+        "--template",
+        "strip-2-1x2",
+        "--canvas",
+        "400x300",
+        "--stats",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert!(stderr(&output).is_empty(), "{}", stderr(&output));
+
+    let report = stdout(&output);
+    let fields: Vec<&str> = report
+        .lines()
+        .map(|line| line.split_once(" = ").expect("key = value").0)
+        .collect();
+    assert_eq!(
+        fields,
+        vec![
+            "budget_ms",
+            "canvas_h",
+            "canvas_w",
+            "command",
+            "composite_ms",
+            "decodes",
+            "from_grid_h",
+            "from_grid_w",
+            "from_template",
+            "grid_h",
+            "grid_w",
+            "icc",
+            "ms",
+            "occupied",
+            "open_decodes",
+            "open_ms",
+            "peak_rss_mb",
+            "slots",
+            "sources_ms",
+            "src_h",
+            "src_w",
+            "switch_ms",
+            "template",
+            "template_ms",
+            "verdict",
+            "version",
+        ]
+    );
+    assert_eq!(field(&output, "command"), "switch");
+    assert_eq!(field(&output, "from_template"), "test-2");
+    assert_eq!(field(&output, "template"), "strip-2-1x2");
+    assert_eq!(field(&output, "version"), "1");
+    assert_eq!(field(&output, "slots"), "2");
+    assert_eq!(field(&output, "occupied"), "2");
+    // The canvas box is what both grids come from, and the rule is the window's
+    // (`pixlay_core::canvas_grid`): 400x300 less the 12 px margin on every side is
+    // 376x276, and the largest 4:3 grid inside it is 368x276 while the largest 2:3
+    // one is 184x276 — the first is height-limited (376/276 > 4/3) and the second is
+    // too (376/276 > 2/3), which is exactly the asymmetry a layout change hits.
+    assert_eq!(field(&output, "canvas_w"), "400");
+    assert_eq!(field(&output, "canvas_h"), "300");
+    assert_eq!(field(&output, "from_grid_w"), "368");
+    assert_eq!(field(&output, "from_grid_h"), "276");
+    assert_eq!(field(&output, "grid_w"), "184");
+    assert_eq!(field(&output, "grid_h"), "276");
+    // The document's own template is the test's 4:3 one and the target is portrait:
+    // the preview-grade edge moves with the grid (1.25 x the long edge: 470 → 345),
+    // so both photos are decoded again. This is the phase the human's finding is
+    // about, and a switch that *keeps* the edge decodes nothing — the second run
+    // below.
+    assert_eq!(field(&output, "open_decodes"), "2");
+    assert_eq!(field(&output, "decodes"), "2");
+    // The copy the composite resampled: a 640x640 photo at a 345-px target.
+    assert_eq!(field(&output, "src_w"), "345");
+    assert_eq!(field(&output, "src_h"), "345");
+    // `verdict` is a reading, like `--stats`'s times: it is reported against
+    // `budget_ms` and the exit code does not move with it (S18's gate is the human's
+    // ruling on the number, so a test that pinned it would pin the machine).
+
+    // A switch whose grids share their long edge keeps the copies and decodes
+    // nothing: at a 300x600 box the available 276x576 is taller than both layouts'
+    // aspects, so the width limits both — 276x207 for the 4:3 document and 276x184
+    // for a 3:2 target — and the preview-grade edge (1.25 x 276 = 345) is the one the
+    // open already built. The grids still differ, so the *bitmaps* are rebuilt; the
+    // difference between this run and the one above is the whole of `sources_ms`.
+    let kept = run(&[
+        "switch",
+        "--project",
+        &path,
+        "--template",
+        "strip-2-2x1",
+        "--canvas",
+        "300x600",
+        "--stats",
+    ]);
+    assert_eq!(code(&kept), 0, "{}", stderr(&kept));
+    assert_eq!(field(&kept, "from_grid_w"), "276");
+    assert_eq!(field(&kept, "from_grid_h"), "207");
+    assert_eq!(field(&kept, "grid_w"), "276");
+    assert_eq!(field(&kept, "grid_h"), "184");
+    assert_eq!(
+        field(&kept, "decodes"),
+        "0",
+        "the same edge means the copies are in hand"
+    );
+    assert_eq!(field(&kept, "open_decodes"), "2");
+
+    // The band's own rebuild, when it is asked for: every candidate of the new cell
+    // count, at the grid the window draws a candidate at.
+    let banded = run(&[
+        "switch",
+        "--project",
+        &path,
+        "--template",
+        "strip-2-1x2",
+        "--canvas",
+        "400x300",
+        "--band",
+        "--stats",
+    ]);
+    assert_eq!(code(&banded), 0, "{}", stderr(&banded));
+    assert_eq!(
+        field(&banded, "band_candidates"),
+        templates::with_slots(2).len().to_string()
+    );
+    assert!(
+        stdout(&banded).contains("band_ms = "),
+        "--band prints the band's own time"
+    );
+    // Without the flag the band is not built, and nothing about it is reported.
+    assert!(
+        !stdout(&output).contains("band_ms"),
+        "a run without --band measured the band"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `switch` refuses what it cannot measure, and refuses flags that are not its own.
+#[test]
+fn switch_refuses_what_it_cannot_measure() {
+    let dir = out_dir("switch-refusals");
+    let project = write_full_project(&dir, "two.pixlay");
+    let path = project.to_str().unwrap().to_string();
+
+    for args in [
+        vec!["switch"],
+        vec!["switch", "--template", "strip-2-1x2"],
+        vec!["switch", "--project", &path],
+        vec!["switch", "--project", &path, "--template", "nope"],
+        vec![
+            "switch",
+            "--project",
+            &path,
+            "--template",
+            "strip-2-1x2",
+            "--canvas",
+            "0x300",
+        ],
+        vec![
+            "switch",
+            "--project",
+            &path,
+            "--template",
+            "strip-2-1x2",
+            "--canvas",
+            "400",
+        ],
+        vec![
+            "switch",
+            "--project",
+            &path,
+            "--template",
+            "strip-2-1x2",
+            "--canvas",
+            "400x20001",
+        ],
+        vec![
+            "switch",
+            "--project",
+            &path,
+            "--template",
+            "strip-2-1x2",
+            "--canvas",
+            "400x300",
+            "--grid",
+            "400",
+        ],
+        vec![
+            "switch",
+            "--project",
+            &path,
+            "--template",
+            "strip-2-1x2",
+            "--out",
+            "x.png",
+        ],
+        vec![
+            "switch",
+            "--project",
+            &path,
+            "--template",
+            "strip-2-1x2",
+            "--steps",
+            "3",
+        ],
+        vec![
+            "switch",
+            "--project",
+            &path,
+            "--template",
+            "strip-2-1x2",
+            "--long-edge",
+            "300",
+        ],
+        vec![
+            "switch",
+            "--project",
+            &path,
+            "--template",
+            "strip-2-1x2",
+            "--slot",
+            "0",
+        ],
+        // The flags belong to `switch` alone.
+        vec![
+            "render",
+            "--template",
+            "mosaic-8-s14",
+            "--band",
+            "--out",
+            "x.png",
+        ],
+        vec![
+            "gesture",
+            "--project",
+            &path,
+            "--grid",
+            "400",
+            "--canvas",
+            "400x300",
+        ],
+        vec!["probe", "--project", &path, "--band"],
+    ] {
+        let output = run(&args);
+        assert_eq!(code(&output), 1, "{args:?}: {}", stderr(&output));
+        assert!(stdout(&output).is_empty(), "{args:?} wrote to stdout");
+        assert!(!stderr(&output).is_empty(), "{args:?} said nothing");
+    }
+
+    // A project that is not there, and one whose photo is gone: exit 2, with the
+    // reason on stderr. A switch that could not draw its photos is not a number.
+    let missing = dir.join("missing.pixlay");
+    let output = run(&[
+        "switch",
+        "--project",
+        missing.to_str().unwrap(),
+        "--template",
+        "strip-2-1x2",
+    ]);
+    assert_eq!(code(&output), 2, "{}", stderr(&output));
+    assert!(stdout(&output).is_empty());
+
+    let gone = write_project(&dir, "gone.pixlay", true);
+    std::fs::remove_file(project_photo(&dir)).expect("remove the photo");
+    let output = run(&[
+        "switch",
+        "--project",
+        gone.to_str().unwrap(),
+        "--template",
+        "strip-2-1x2",
+    ]);
+    assert_eq!(code(&output), 2, "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("photo.png"),
+        "the reason names the file: {}",
+        stderr(&output)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `switch` keeps the usage and locale rules every subcommand shares.
+#[test]
+fn switch_keeps_the_usage_and_locale_rules() {
+    let dir = out_dir("switch-locale");
+    let project = write_full_project(&dir, "two.pixlay");
+    let path = project.to_str().unwrap().to_string();
+
+    // The report is the same under every locale. The measured fields are the
+    // documented exception (`--stats`), and the verdict is a reading of one, so the
+    // byte-identical claim is made on the shape without them — which is also the
+    // shape the counts and the grids live in.
+    let mut listed = Vec::new();
+    for (lang, all) in [
+        ("C", "C"),
+        ("zh_CN.UTF-8", "zh_CN.UTF-8"),
+        ("de_DE.UTF-8", "de_DE.UTF-8"),
+    ] {
+        let switch = run_in(
+            &[
+                "switch",
+                "--project",
+                &path,
+                "--template",
+                "strip-2-1x2",
+                "--canvas",
+                "400x300",
+                "--json",
+            ],
+            None,
+            Some((lang, all)),
+        );
+        assert_eq!(code(&switch), 0, "{lang}: {}", stderr(&switch));
+        assert!(switch.stderr.is_empty(), "{lang}: {}", stderr(&switch));
+        listed.push(switch.stdout.clone());
+    }
+    assert!(
+        listed.iter().all(|stdout| stdout == &listed[0]),
+        "switch changed under a locale: {}",
+        String::from_utf8_lossy(&listed[1])
+    );
+
+    // `--help` documents the flags this command takes, including the required one.
+    let help = run(&["--help"]);
+    assert_eq!(code(&help), 0);
+    for flag in ["--canvas", "--band", "switch", "--template <name>"] {
+        assert!(
+            stdout(&help).contains(flag),
+            "--help does not mention {flag}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// The photo `write_project` put in cell 0, as the path the CLI is asked to write over.
 fn project_photo(dir: &Path) -> PathBuf {
     dir.join("photo.png")

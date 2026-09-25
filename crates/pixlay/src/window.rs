@@ -876,6 +876,16 @@ impl EditorWindow {
         self.imp().gallery_decodes.get()
     }
 
+    /// Layout-band builds that have landed since the window opened.
+    ///
+    /// The tests' handle on the *second* half of a layout change (S18): the band's
+    /// rebuild goes to the same worker as the canvas's and arrives after it, so a wait
+    /// that has to be a condition on the reply — rather than a pump that may cost a
+    /// second of grace — reads this. Nothing else reads it.
+    pub fn gallery_builds(&self) -> u64 {
+        self.imp().gallery_builds.get()
+    }
+
     pub fn guides(&self) -> bool {
         self.imp().guides.get()
     }
@@ -2069,7 +2079,7 @@ impl EditorWindow {
             .candidate_templates()
             .into_iter()
             .map(|template| {
-                let grid = crate::layout::thumb_grid(template.aspect);
+                let grid = templates::candidate_grid(template.aspect);
                 (template, grid)
             })
             .collect();

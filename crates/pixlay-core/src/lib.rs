@@ -47,7 +47,7 @@ mod topology;
 /// should be able to read where the geometry came from.
 pub mod templates;
 
-pub use canvas::PixelSize;
+pub use canvas::{CANVAS_MARGIN, PixelSize, canvas_grid};
 pub use crop::{CropFit, CropTransform, DisplayRegion};
 pub use doc::{Cell, CollageDoc, Project, normalize_lexical, relative_to};
 pub use error::CoreError;

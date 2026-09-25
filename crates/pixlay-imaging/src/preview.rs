@@ -549,6 +549,32 @@ impl Preview {
         }
     }
 
+    /// Loads the preview-grade copies a [`build`](Self::build) at `grid` would read,
+    /// and reports how many files that decoded.
+    ///
+    /// One build's work splits in two — the copies (one decode per file whose copy is
+    /// not in hand, plus the reduction) and the bitmaps (the resample and the
+    /// quantization) — and this is the first half on its own. It changes no pixels:
+    /// the build that follows finds every copy in the cache and resamples exactly
+    /// what it would have resampled. S18's `switch` ruler times the two apart with
+    /// it, which is why it exists; the window's own worker builds as it always did,
+    /// in one call.
+    pub fn warm_sources(&mut self, sources: &[Option<PathBuf>], grid: PixelSize) -> u64 {
+        let long_edge = preview_source_long_edge(grid);
+        let limits = DecodeLimits::default();
+        let before = self.sources.decodes;
+        for path in sources.iter().flatten() {
+            // The modification time is read here and again by the build that
+            // follows — one `stat` per occupied cell either way — and a refusal is
+            // not this call's to report: the build that follows produces the same
+            // one, on the slot that owns the file.
+            let _ = self
+                .sources
+                .source(path, modified_time(path), long_edge, &limits);
+        }
+        self.sources.decodes - before
+    }
+
     /// Files this preview has been asked to decode over its lifetime.
     pub fn decodes(&self) -> u64 {
         self.sources.decodes

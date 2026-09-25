@@ -842,7 +842,7 @@ fn check_picker_minimum(window: &EditorWindow, failures: &mut Vec<String>) {
 /// window.
 fn check_gallery(window: &EditorWindow, failures: &mut Vec<String>) {
     /// HIG `guidelines/pointer-touch`: "ensure that all interactive elements are
-    /// at least 24x24 pixels". The band's cells are [`THUMB_BOX`] wide by
+    /// at least 24x24 pixels". The band's cells are 128 logical pixels wide by
     /// construction; the check is here so a later change cannot make them small.
     const MIN_TARGET: i32 = 24;
 

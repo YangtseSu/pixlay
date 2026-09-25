@@ -10,15 +10,15 @@ use std::os::unix::ffi::OsStrExt;
 
 use std::path::{Path, PathBuf};
 
-use pixlay_core::{Command as Edit, CropTransform, History, PixelSize, Project};
+use pixlay_core::{Command as Edit, CropTransform, History, PixelSize, Project, canvas_grid};
 use pixlay_imaging::destination::refuse_source_alias;
-use pixlay_imaging::preview::GESTURE_STEP_DEG;
+use pixlay_imaging::preview::{GESTURE_STEP_DEG, preview_source_long_edge};
 use pixlay_imaging::{Export, Format, Preview, Rgb8View, SlotBitmap, gesture_grid, icc};
 use pixlay_render::Images;
 
 use crate::args::{
     self, Command, DEFAULT_LONG_EDGE_PX, EditArgs, GestureArgs, HitArgs, ImageArgs, InitArgs,
-    ProbeArgs, RenderArgs, SaveArgs, ScanArgs, Source, TemplatesArgs, ThumbArgs, USAGE,
+    ProbeArgs, RenderArgs, SaveArgs, ScanArgs, Source, SwitchArgs, TemplatesArgs, ThumbArgs, USAGE,
 };
 use crate::report::Report;
 use crate::stats;
@@ -32,6 +32,43 @@ use crate::stats;
 /// divergence risk that ruling accepted — so the constant names a frame rate
 /// rather than a target somebody picked.
 pub const GESTURE_STEP_BUDGET_MS: f64 = 1000.0 / 60.0;
+
+/// Budget for one layout switch, in milliseconds: the click to the frame that shows
+/// the new preview (S18).
+///
+/// **It is S18's own baseline, measured before any optimisation** — the human's
+/// finding 1 of 2026-09-25 ("switching a layout in the editor takes too long before
+/// the new preview is on screen") turned into a number, so that a decision can be
+/// made about it. The measured source: `--release` on this machine, 2026-09-25, the
+/// eight-photo verification project clicked in a **fresh session** at the editor's
+/// default window (canvas widget 1100x575), once per candidate the band offers —
+/// the window's canvas half (three runs each) and the CLI's `switch_ms`, which is
+/// the same pipeline without the blit and the frame:
+///
+/// | click | grid | window | CLI |
+/// |---|---|---|---|
+/// | `mosaic-8-s14` → `strip-8-8x1` | 735x551 → 980x551 | 144.9 / 146.8 / 146.8 ms | 123.0 / 123.2 / 125.2 ms |
+/// | `mosaic-8-s14` → `grid-8-4x2` | 735x551 → 827x551 | 199.7 / 201.7 / 202.2 ms | 174.2 / 178.0 / 181.2 ms |
+///
+/// Both clicks move the preview-grade edge, so both decode all seven files (the
+/// copies are keyed by the edge, S15f/PIX-004). The budget is the worse row's worst
+/// run rounded up to the next 10 ms, so it is a regression line rather than a
+/// tolerance: what it says is "a layout switch costs about this much". The CLI's
+/// numbers are this table's floor — the difference is one display frame plus the
+/// window's own blit, measured 2026-09-25 at a constant **+21 ms** on both rows —
+/// and the full table is in `docs/CONTRACT.md` §8, "S18".
+///
+/// Two numbers belong beside it and neither is in it: the **band's** rebuild after
+/// the click (165.7–168.0 ms in the window, more than the canvas half — S21
+/// replaces it with a sketch) is `band_ms`, and 100 ms is the usual instant-response
+/// threshold, which this baseline does not meet — whether that matters is the
+/// human's ruling, which this number exists to be given against.
+///
+/// It governs the **preview** and not the whole command: the band's rebuild runs
+/// after the canvas's job on the same worker and is reported rather than added,
+/// because the finding is about the picture on the canvas. `switch_ms` is the number
+/// compared against this.
+pub const SWITCH_BUDGET_MS: f64 = 210.0;
 
 /// Exit codes, as the contract fixes them.
 pub const EXIT_SUCCESS: u8 = 0;
@@ -69,6 +106,7 @@ pub fn run(argv: &[OsString]) -> Result<u8, Failure> {
         Command::Hit(args) => hit(args),
         Command::Save(args) => save_project(args),
         Command::Gesture(args) => gesture(args),
+        Command::Switch(args) => switch(args),
     }
 }
 
@@ -1142,6 +1180,199 @@ fn gesture(args: GestureArgs) -> Result<u8, Failure> {
         report.float("warm_ms", warm_median);
         report.float("warm_max_ms", warm_max);
         report.float("refine_ms", refine_ms);
+    }
+    add_stats(&mut report, args.stats, total, None, "none");
+    emit(&report, args.json);
+    Ok(EXIT_SUCCESS)
+}
+
+/// `switch`: one layout change, measured (S18).
+///
+/// The human's finding 1 of 2026-09-25 — "switching a layout in the editor takes too
+/// long before the new preview is on screen" — as a number, before any code changes.
+/// It drives the same pipeline the window's click drives, in the same order and with
+/// the same calls:
+///
+/// * `template_ms` — `Command::SetTemplate` through a `History` (the window's own
+///   `apply`), and the new resting grid derived from the new aspect and the same
+///   canvas box ([`canvas_grid`](pixlay_core::canvas_grid)). The window then refreshes
+///   a dozen widgets; a windowless command has none of them, so this is the document's
+///   half of the click and the smallest of the three.
+/// * `sources_ms` — the preview-grade copies the new grid asks for
+///   ([`Preview::warm_sources`]): a decode per file whose copy is not in hand, plus
+///   the reduction. This is the phase the finding is probably about: the copies are
+///   keyed by the edge they were reduced to (S15f, PIX-004), so a switch that keeps
+///   the edge — two layouts of the same aspect in the same box — finds them in hand
+///   and decodes nothing, while one that moves the edge (any of the default window's
+///   candidate layouts, whose grids are 735x551 and 980x551) pays a decode per photo.
+/// * `composite_ms` — the cell bitmaps at the new grid, resampled from those copies
+///   and quantized: the `Preview::build` the window's worker runs.
+/// * `band_ms`, with `--band` — the layout band's rebuild: every candidate of the
+///   document's new cell count, rendered at
+///   [`candidate_grid`](pixlay_core::templates::candidate_grid) from the canvas's own
+///   edge. The window runs that loop on the worker after the canvas's job
+///   (`decode.rs`); here it is the same calls in the same order, and the render is
+///   thrown away — what is measured is its cost, and "with and without the band" is
+///   two runs of this command.
+///
+/// `switch_ms` is the first three, which is what the user waits for: the picture on
+/// the canvas. It is the number `SWITCH_BUDGET_MS` judges, and the band's share is
+/// reported beside it rather than added to it. What no windowless command can reach
+/// is the rest of the window's own frame — the blit into `Images`, `queue_draw`, and
+/// the paint — so `crates/pixlay/tests/switch.rs` measures the same change from
+/// inside the window and S18's Result compares the two.
+///
+/// A project whose photos are all there but one of which cannot be decoded is
+/// refused (exit 2), the rule `gesture` follows: a switch timed on a cell that does
+/// not render is a number about a different document.
+fn switch(args: SwitchArgs) -> Result<u8, Failure> {
+    let project =
+        Project::load(&args.project).map_err(|error| Failure::Failed(error.to_string()))?;
+    let from_template = project.doc().template.name.clone();
+    let before = project.doc().clone();
+    let sources = project
+        .sources()
+        .map_err(|error| Failure::Failed(error.to_string()))?;
+    let template = pixlay_core::templates::get(&args.template).ok_or_else(|| {
+        Failure::Usage(format!(
+            "unknown template {}; this build knows: {}",
+            args.template,
+            pixlay_core::templates::names().join(", ")
+        ))
+    })?;
+    // The grid the editor is resting at before the click: the widget's own box, less
+    // the canvas margin, fitted to the document's aspect — `canvas_grid`, the same
+    // function the window's `resting_grid` is. This is the grid a *click* happens at,
+    // and the reason the ruler takes a widget rather than one long edge: a layout
+    // change moves the grid's *shape*, and with it the preview-grade edge.
+    let before_grid = canvas_grid(before.template.aspect, args.canvas.0, args.canvas.1);
+
+    // One `Preview` is one editing session (S12b), and the click happens inside one:
+    // the editor is already showing this document on this grid, so its caches hold
+    // that layout's copies. A fresh cache here would measure an open, not a click.
+    let mut preview = Preview::new();
+    let watch = stats::Stopwatch::start();
+    let open_step = stats::Stopwatch::start();
+    let opened = preview.build(&before, &sources, before_grid);
+    let open_ms = open_step.elapsed().as_secs_f64() * 1000.0;
+
+    // ---- the click ---------------------------------------------------------
+    let mut history = History::new(before).map_err(|error| Failure::Failed(error.to_string()))?;
+    let template_step = stats::Stopwatch::start();
+    apply(&mut history, Edit::SetTemplate { template })?;
+    let doc = history.doc().clone();
+    let grid = canvas_grid(doc.template.aspect, args.canvas.0, args.canvas.1);
+    let template_ms = template_step.elapsed().as_secs_f64() * 1000.0;
+    // A layout with fewer cells drops the last ones — that is how `SetTemplate`
+    // resizes a document — and the resolved sources follow the same way.
+    let mut sources = sources;
+    sources.resize(doc.cells.len(), None);
+    let occupied = sources.iter().filter(|source| source.is_some()).count();
+
+    // ---- the worker's two halves ------------------------------------------
+    // The window's worker runs one `build`; its work is the copies (a decode per file
+    // whose copy is not in hand) plus the bitmaps, and the ruler times them apart
+    // because the first is what a switch between two aspects pays for.
+    let sources_step = stats::Stopwatch::start();
+    let decodes = preview.warm_sources(&sources, grid);
+    let sources_ms = sources_step.elapsed().as_secs_f64() * 1000.0;
+    let composite_step = stats::Stopwatch::start();
+    let built = preview.build(&doc, &sources, grid);
+    let composite_ms = composite_step.elapsed().as_secs_f64() * 1000.0;
+
+    // ---- the band, when it is asked for ------------------------------------
+    let mut band_ms = 0.0;
+    let mut band_candidates = 0;
+    if args.band {
+        let band_step = stats::Stopwatch::start();
+        // The canvas's own edge (S14): the band's copies *are* the canvas's, so its
+        // builds decode nothing the switch has not decoded already.
+        let edge = preview_source_long_edge(grid);
+        let listed = pixlay_core::templates::with_slots(doc.cells.len());
+        for listed_template in &listed {
+            let mut candidate = doc.clone();
+            candidate.template = listed_template.clone();
+            candidate
+                .cells
+                .resize(listed_template.slots.len(), Default::default());
+            let slice = &sources[..candidate.cells.len().min(sources.len())];
+            let candidate_grid = pixlay_core::templates::candidate_grid(listed_template.aspect);
+            let candidate_built =
+                preview.build_at_source_edge(&candidate, slice, candidate_grid, edge);
+            let mut images = Images::new();
+            for bitmap in &candidate_built.bitmaps {
+                images.insert(bitmap.slot, render_bitmap(bitmap)?);
+            }
+            pixlay_render::render_rgb8(&candidate, &images, candidate_grid, 1.0, None)
+                .map_err(|error| Failure::Failed(error.to_string()))?;
+        }
+        band_candidates = listed.len();
+        band_ms = band_step.elapsed().as_secs_f64() * 1000.0;
+    }
+    let total = watch.elapsed();
+
+    // A cell that does not render is not a cell a switch can be timed on — `gesture`'s
+    // rule. The band's own candidates are not asked: a candidate carrying an
+    // unreadable photo is a candidate with a white cell, which is what the window's
+    // band shows too.
+    let mut failed = opened.failed.clone();
+    failed.extend(built.failed.iter().cloned());
+    if !failed.is_empty() {
+        return Err(Failure::Failed(format!(
+            "{}: {}",
+            args.project.display(),
+            failed
+                .iter()
+                .map(|(slot, reason)| format!("slot {slot}: {reason}"))
+                .collect::<Vec<_>>()
+                .join("; ")
+        )));
+    }
+
+    // The number the finding is about: the click to the pixels, without the band,
+    // which runs after the canvas's own job.
+    let switch_ms = template_ms + sources_ms + composite_ms;
+    let verdict = if switch_ms <= SWITCH_BUDGET_MS {
+        "within_budget"
+    } else {
+        "over_budget"
+    };
+
+    let mut report = Report::new();
+    report.text("command", "switch");
+    report.text("from_template", from_template);
+    report.text("template", doc.template.name.clone());
+    report.int("version", i64::from(doc.template.version));
+    report.int("slots", doc.cells.len() as i64);
+    report.int("occupied", occupied as i64);
+    report.int("canvas_w", i64::from(args.canvas.0));
+    report.int("canvas_h", i64::from(args.canvas.1));
+    report.int("from_grid_w", i64::from(before_grid.width));
+    report.int("from_grid_h", i64::from(before_grid.height));
+    report.int("grid_w", i64::from(grid.width));
+    report.int("grid_h", i64::from(grid.height));
+    report.int("open_decodes", opened.decodes as i64);
+    report.int("decodes", decodes as i64);
+    report.int("src_w", i64::from(built.source_px.width));
+    report.int("src_h", i64::from(built.source_px.height));
+    if args.band {
+        report.int("band_candidates", band_candidates as i64);
+    }
+    report.float("budget_ms", SWITCH_BUDGET_MS);
+    if args.stats {
+        // A reading of a measurement, so it is printed with the measurements: the
+        // documented exception to "the same input is byte-identical" is `--stats`,
+        // and a verdict that could flip between two runs of the same command line
+        // must not sit in the shape that promises it cannot.
+        report.text("verdict", verdict);
+        report.float("open_ms", open_ms);
+        report.float("template_ms", template_ms);
+        report.float("sources_ms", sources_ms);
+        report.float("composite_ms", composite_ms);
+        report.float("switch_ms", switch_ms);
+        if args.band {
+            report.float("band_ms", band_ms);
+        }
     }
     add_stats(&mut report, args.stats, total, None, "none");
     emit(&report, args.json);

@@ -35,8 +35,8 @@ use std::time::Duration;
 
 use gtk4::prelude::*;
 
-use pixlay::canvas::{Gesture, MARGIN};
-use pixlay_core::{Command, CropTransform, templates};
+use pixlay::canvas::Gesture;
+use pixlay_core::{CANVAS_MARGIN, Command, CropTransform, templates};
 use pixlay_imaging::gesture_grid;
 
 /// The canvas grid this test works at, in pixels: small, so the whole test is a
@@ -67,7 +67,10 @@ fn a_live_gesture_refines_into_the_resting_grids_own_pixels() {
     let area = window.canvas_widget();
     area.set_hexpand(false);
     area.set_vexpand(false);
-    area.set_size_request(GRID + 2 * MARGIN as i32, GRID + 2 * MARGIN as i32);
+    area.set_size_request(
+        GRID + 2 * CANVAS_MARGIN as i32,
+        GRID + 2 * CANVAS_MARGIN as i32,
+    );
     window.pump(Duration::from_millis(300));
     assert!(
         window.wait_for_idle(support::WAIT),

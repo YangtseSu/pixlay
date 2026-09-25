@@ -615,7 +615,7 @@ fn cli_render(window: &pixlay::EditorWindow, name: &str) -> support::Image {
     candidate
         .cells
         .resize(candidate.template.slots.len(), Default::default());
-    let grid = pixlay::layout::thumb_grid(candidate.template.aspect);
+    let grid = templates::candidate_grid(candidate.template.aspect);
     let project = support::artifact(&format!("layout-candidate-{name}.pixlay"));
     // Anchored at the project the window opened, so the candidate's relative photo
     // paths are rebased onto the artifact directory — exactly as `save as…` does.

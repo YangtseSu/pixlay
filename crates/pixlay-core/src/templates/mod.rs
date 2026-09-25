@@ -46,7 +46,7 @@ mod frozen;
 pub mod generator;
 
 use crate::geometry::{Point, Polygon};
-use crate::{ASPECT_TOLERANCE, CollageDoc, Slot, Template};
+use crate::{ASPECT_TOLERANCE, CollageDoc, PixelSize, Slot, Template};
 
 /// The name `AGENTS.md`'s verification command uses. S2 keeps this name and
 /// freezes the geometry behind [`TEMPLATE_VERSION`]; changing either afterwards
@@ -107,6 +107,28 @@ pub fn with_slots(slots: usize) -> Vec<Template> {
         .filter(|entry| entry.slots.len() == slots)
         .map(thaw)
         .collect()
+}
+
+/// The box one layout candidate is drawn in, in logical pixels.
+///
+/// The layout band's own surface — and S18's `switch --band` measures that same
+/// rebuild from the CLI, so the box lives here beside [`candidate_grid`] rather
+/// than in either caller: two copies of it would be two answers to "how big is a
+/// candidate". 128x96 is the largest box that leaves the canvas the majority of the
+/// page at the default window (S14).
+pub const CANDIDATE_BOX: (i32, i32) = (128, 96);
+
+/// The grid one candidate is rendered at: the largest grid with `aspect`'s shape
+/// that fits inside [`CANDIDATE_BOX`].
+///
+/// A candidate is a real render at a smaller size (`docs/CONTRACT.md` §5), so its
+/// pixels are comparable with `pixlay-render render` of the same document at this
+/// grid.
+pub fn candidate_grid(aspect: f64) -> PixelSize {
+    PixelSize::fit_in_bounds(
+        aspect,
+        (f64::from(CANDIDATE_BOX.0), f64::from(CANDIDATE_BOX.1)),
+    )
 }
 
 /// Looks a template up by name.
