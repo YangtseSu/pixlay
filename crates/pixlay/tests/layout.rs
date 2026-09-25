@@ -1,7 +1,7 @@
 //! S14's exit criteria, as one test: the layout band and the count control.
 //!
 //! One `#[test]` because GTK lives on one thread (see `support`). What is checked
-//! here, in the order the criteria are written in `docs/2026-09-22-STEPS.md`:
+//! here, in the order S14's criteria are written:
 //!
 //! * the strip lists every layout with the photo count, and only those;
 //! * every candidate's thumbnail is `pixlay-render render` of the same document at

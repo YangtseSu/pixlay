@@ -5,10 +5,10 @@
 //! `AdwNavigationView`; the editor of S7 is pushed on top of it when Next is
 //! pressed.
 //!
-//! # The shape (the 2026-09-22 ruling "the picker, as gthumb has it")
+//! # The shape (S13c's ruling, "the picker, as gthumb has it")
 //!
 //! Three bands, measured off the reference app's own window
-//! (`docs/2026-09-22-STEPS.md`, `S13c`): **the media area takes the vast majority**
+//! (S13c): **the media area takes the vast majority**
 //! — the preview pane with the picked list down its right edge at the pane's own
 //! height — **one row of thumbnails spans the page's width** under it, and **a
 //! status bar closes the window** with gthumb's four fields (`picked / total`,
@@ -169,8 +169,7 @@ use crate::workers::{Down, Kind as WorkerKind};
 /// 128 is gthumb's own size — its `thumbnail-size` default of 256
 /// (`data/schemas/org.gnome.gthumb.gschema.xml`) is in **device** pixels, and the
 /// reference's own cells measure 250 device = **125 logical** on a 2× display
-/// (measured off the two screenshots in `docs/2026-09-22-STEPS.md`, `S13c · What
-/// the reference actually measures`), which is why the 2026-09-22 ruling moved it
+/// (measured off the two screenshots, S13c), which is why the 2026-09-22 ruling moved it
 /// back down from S13b's 256 *logical*. Well past the minimum click target HIG
 /// `guidelines/pointer-touch` asks of a click target.
 pub const TILE_SIZE: i32 = 128;
@@ -190,7 +189,7 @@ pub const PREVIEW_PX_STEP: u32 = 128;
 /// 2048 px costs 593 ms and 3840 px costs 1112 ms. 2048 is one step below the
 /// display's own long edge (3840x2160, `/sys/class/drm/*/modes`), so a maximized
 /// window upscales by at most 1.9x and one focus costs at most 0.59 s
-/// (`docs/2026-09-22-STEPS.md`, `S13 · Ruling`).
+/// (S13's ruling).
 ///
 /// **The cap is the fit's, and the 1:1 view is not subject to it** (S15j): 1:1 *is*
 /// one image pixel per device pixel, so a rectangle decoded at anything smaller would

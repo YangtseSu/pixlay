@@ -179,8 +179,8 @@ impl Thumbs {
     ///
     /// The queued jobs are dropped when the worker reaches them, and a job already
     /// decoding replies with the epoch it was sent under, which the picker
-    /// recognises as stale and ignores (`docs/2026-09-22-STEPS.md`, `S13 · Ruling`:
-    /// "a folder change invalidates all of it").
+    /// recognises as stale and ignores (S13's ruling: "a folder change
+    /// invalidates all of it").
     pub fn forget(&self) {
         self.wanted
             .lock()

@@ -11,9 +11,8 @@
 //!
 //! **Re-routed 2026-09-22** (ruling 12): the path starts by picking photos in the
 //! picker stage, and the document only exists once Next has been pressed. The
-//! retired walk — "pick a template, then place photos into an empty sheet" — is in
-//! `docs/archive/2026-09-20-STEPS.md`; S13 rewrote this test for the path that
-//! replaced it.
+//! walk it replaced — "pick a template, then place photos into an empty sheet" —
+//! was S7's, and S13 rewrote this test for the new path.
 
 mod support;
 

@@ -3,9 +3,8 @@
 //!
 //! Stage 3 of the main path (`AGENTS.md`: `open → pick 2–9 photos → pick a layout →
 //! adjust → export`), and **a band on the document's page rather than a third
-//! page**: a second `AdwNavigationPage` would have to own a second canvas, and
-//! S15's compose controls attach to the canvas this band sits under
-//! (`docs/2026-09-22-STEPS.md`, "S14 · The layout stage").
+//! page** (S14): a second `AdwNavigationPage` would have to own a second canvas, and
+//! S15's compose controls attach to the canvas this band sits under.
 //!
 //! # The candidates are real documents
 //!

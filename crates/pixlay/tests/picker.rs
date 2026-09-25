@@ -765,8 +765,7 @@ fn the_picker_stage_meets_its_own_criteria() {
     // "The band above the status bar" is the ruling's own measurement, so it is the
     // **content** band: from the pane's top edge to the status bar's — the header bar
     // is chrome above it, and the reference's own 88 % is `860 / 974`, the media area
-    // against the content band *excluding* the header (`docs/2026-09-22-STEPS.md`,
-    // `S13c · What the reference actually measures`).
+    // against the content band *excluding* the header (S13c).
     let root = picker.root().upcast::<gtk4::Widget>();
     let pane = picker.preview_widget().upcast::<gtk4::Widget>();
     let list = picker.picked_list().upcast::<gtk4::Widget>();

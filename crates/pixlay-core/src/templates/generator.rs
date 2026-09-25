@@ -92,8 +92,7 @@ const R_2_3: f64 = 2.0 / 3.0;
 ///
 /// Since S10 the picker's range — 2..=9 photos, ruling 3 — carries **at least
 /// three layouts per count, in at least two aspect families**, because a gallery
-/// that offers one candidate is not a choice
-/// (`docs/2026-09-22-STEPS.md`, S10; asserted by
+/// that offers one candidate is not a choice (asserted by
 /// `crates/pixlay-core/tests/templates.rs`). Since S12c the library stops at nine
 /// slots: `strip-10-10x1` was the only member above the picker's cap, and it left
 /// with the purity ruling, so `MAX_SLOTS` and `MAX_PHOTOS` are one number.

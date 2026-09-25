@@ -2,7 +2,7 @@
 //! dialogs.
 //!
 //! One `#[test]` because GTK lives on one thread (see `support`). What is checked
-//! here, in the order the criteria are written in `docs/2026-09-22-STEPS.md`:
+//! here, in the order S15's criteria are written:
 //!
 //! * the selected cell's strip is real, named, keyboard-reachable GTK and sits inside
 //!   the selected slot's own rectangle (`Placement` is the reference);

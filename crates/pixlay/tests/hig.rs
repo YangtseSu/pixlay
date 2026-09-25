@@ -485,7 +485,7 @@ fn check_picker(window: &EditorWindow, failures: &mut Vec<String>) {
 }
 
 /// The picker's input paths, and the three defects S13c fixed while it rewrote the
-/// same code (`docs/2026-09-22-STEPS.md`, `S13c · Work` (a)–(c)).
+/// same code.
 ///
 /// Every one of them is driven through the platform's own route: `Enter` is GTK's
 /// `list.activate-item` action (the one the key is bound to), `Ctrl+A` is

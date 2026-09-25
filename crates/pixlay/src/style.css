@@ -2,8 +2,7 @@
  * padding (S13c).
  *
  * A picked cell is shown by a highlight, not by the platform's
- * `.selection-mode` check box: the 2026-09-22 ruling
- * (`docs/2026-09-22-STEPS.md`, `S13 · Ruling`) chose the highlight, and the
+ * `.selection-mode` check box: S13's ruling chose the highlight, and the
  * deviation from HIG `patterns/containers/selection-mode` is recorded in
  * `docs/HIG-REVIEW.md` §3.
  *
@@ -19,8 +18,7 @@
  * The geometry is the reference's *measured* one, not its stylesheet's: gthumb's
  * `data/css/style.css` asks for `padding: 10px` on the grid and `margin: 10px` on
  * every child, but its own window shows cells at a **250 device = 125 logical**
- * pitch (`docs/2026-09-22-STEPS.md`, `S13c · What the reference actually
- * measures`), i.e. touching. The margins are therefore zero and the outline is
+ * pitch (S13c), i.e. touching. The margins are therefore zero and the outline is
  * drawn *on* the cell: with gthumb's 10 px margins plus its 10 px padding a 128 px
  * cell would make the strip 170 logical px tall, which puts the media area at 75 %
  * of the band above the status bar — below the ruling's own measured 88 % and
@@ -69,9 +67,9 @@
 
 /* gthumb's `.statusbar { padding: 4px }` (`data/css/style.css`), with the horizontal
  * margin a window's edge wants and the band's own height: 24 px of content plus the
- * padding is the reference's measured 32 px status band (`docs/2026-09-22-STEPS.md`,
- * `S13c · What the reference actually measures`), and it keeps the bar a band even
- * while its fields have nothing to say (an empty label has no height at all). */
+ * padding is the reference's measured 32 px status band (S13c), and it keeps the bar
+ * a band even while its fields have nothing to say (an empty label has no height at
+ * all). */
 .statusbar {
   padding: 4px 12px;
   min-height: 24px;

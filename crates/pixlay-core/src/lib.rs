@@ -65,8 +65,7 @@ pub use template::{AREA_TOLERANCE, Family, SharedEdge, Slot, Template};
 /// change the policy below says bumps this number. A version-1 or version-2
 /// project is refused with `VersionUnsupported` instead of a `serde`
 /// unknown-field error, and there is no migration: a file from either shape is a
-/// file this build cannot express (the rulings of 2026-09-22,
-/// `docs/2026-09-22-STEPS.md`).
+/// file this build cannot express (the rulings of S12c and S12d).
 pub const DOC_VERSION: u32 = 3;
 
 /// Oldest `docVersion` this build reads.
