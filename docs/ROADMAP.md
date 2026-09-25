@@ -116,9 +116,6 @@ that parked the question, or the assistant's suggestion.
   ruling 31 handed that job to the file manager's own viewer, so the editor has no way to look at one
   photo's pixels. If a walk asks for it, the canvas is where it would live — a *view* transform on the
   whole sheet, which is a different thing from a cell's framing and must not be confusable with it.
-- **Drag a cell onto another.** *From S23's "not doing".* S23 gives every pair of cells a swap
-  (`Shift`+click and the keyboard); a pointer drag from one cell to another, with a drop on an occupied
-  cell exchanging the two, is the follow-on it leaves out.
 - **The frame's backdrop as a hit region.** *Parked by a ruling* (2026-09-24, PIX-008): the hit stays
   geometry-only, and the backdrop — thin by construction — does not select the cell behind it. The same
   ruling says a person who expects it to *is* the trigger for a new step, so the question is parked here
