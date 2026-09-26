@@ -37,6 +37,6 @@
   </provides>
   <translation type="gettext">pixlay</translation>
   <releases>
-    <release version="0.1.0" date="2026-09-26"/>
+    <release version="0.1.0" date="2026-09-27"/>
   </releases>
 </component>
