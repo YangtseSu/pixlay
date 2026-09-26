@@ -60,14 +60,22 @@ jobs:
       - name: Publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Every `gh` call names the repository, so nothing here depends on a local git
+        # checkout: inside the container `gh` could not discover one (measured 2026-09-27,
+        # "failed to run git: fatal: not a git repository"), and `--repo` uses the API
+        # instead.
+        working-directory: ${{ github.workspace }}
         run: |
           tag="$GITHUB_REF_NAME"
+          gh --version | head -1
+          gh api "/repos/$GITHUB_REPOSITORY" --jq .full_name
           cat > /var/tmp/notes.md <<'EOF'
           The two binaries for x86_64 Linux (`pixlay` and `pixlay-render`), built from this tag.
           They link the gtk4, libadwaita and glycin the system provides, so they run on a machine
           that has them; on Arch the package installed from the AUR brings all of that.
           EOF
-          gh release view "$tag" >/dev/null 2>&1 ||
-            gh release create "$tag" --title "Pixlay $tag" --notes-file /var/tmp/notes.md --generate-notes
-          gh release upload "$tag" --clobber \
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "Pixlay $tag" --notes-file /var/tmp/notes.md --generate-notes
+          gh release upload "$tag" --repo "$GITHUB_REPOSITORY" --clobber \
             pixlay-*-linux-amd64.tar.gz pixlay-*-linux-amd64.tar.gz.sha256
