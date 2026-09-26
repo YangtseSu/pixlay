@@ -533,7 +533,9 @@ not repeated here.*
   `meson.build`'s `project(version:)`, which the workflow checks — and `release.yml` builds the tree with
   the project's own build and attaches the **amd64 binaries** (`pixlay-<version>-linux-amd64.tar.gz` and
   its `.sha256`) to that tag's GitHub Release. Then, on the machine: **update `pkgver` and `sha256sums`**
-  (`updpkgsums`, so the sums stop being `SKIP`); **build the package** (`makepkg` in `packaging/arch`, which
+  (`updpkgsums`, so the sums stop being `SKIP` — and when the tag was re-pointed, delete the cached
+  `packaging/arch/*.tar.gz` first: `updpkgsums` reads the file already in `SRCDEST` and would print the
+  old tag's sum, measured 2026-09-27); **build the package** (`makepkg` in `packaging/arch`, which
   leaves `x86_64.pkg.tar.zst` beside the PKGBUILD); **upload it to the same release** (`gh release upload
   <tag> --clobber …`), so the release carries the binaries and the package together; and **delete the
   previous version's files** — `packaging/arch/{src,pkg}`, its `.pkg.tar.zst`, the `*.tar.gz` `makepkg`
