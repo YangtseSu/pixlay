@@ -109,8 +109,14 @@ Conventions:
   cairo's `rotate` in that space is clockwise, and the renderer passes it through as-is).
 - **A crop is a request; what gets drawn is its fit** (`CropTransform::fit`, S3). The sheet and the slot never grow, so the
   fit has exactly two levers: `zoom` is raised to the value that covers the visible cell with the photo centred (a larger
-  request is kept as it is), and `offset` is pulled back along the line to the slot centre until the photo covers again — a
-  pan stops at the frame edge rather than being paid for with magnification. `rotationDeg` is kept **exactly as asked**:
+  request is kept as it is), and `offset` is pulled back **along each of its own axes** until the photo covers again — a
+  pan stops at the frame edge rather than being paid for with magnification, and an axis that still has travel keeps the
+  part of the pan the other one's limit leaves it. Since S27 the pull-back is per axis (the horizontal one first, then the
+  vertical against it); the rule until then scaled *both* components by one factor, which coupled them — at the covering
+  zoom the axis a photo exactly fills has no travel, so any request with a component in it (a pointer drag is never
+  axis-aligned) came back at the centre. Measured on `verify.pixlay`'s cell 0, a 2:3 photo in a 4:3 cell (all the travel
+  vertical, none horizontal), `edit --slot 0 --offset 0.02,0.2`: **`(0.0000, 0.2000)` since S27, `(0.0000, 0.0000)`
+  before** (§8). `rotationDeg` is kept **exactly as asked**:
   since 2026-09-22 the angle is free and the fit never reduces it, so `CLAMP_ZOOM_LIMIT` and
   `CropFit::rotation_limited` are gone (S11) and `CropFit` is the drawn transform alone. The fit is **idempotent**, so
   clamping on an edit and again in `draw` costs nothing. `draw` applies the fit, so no document this build accepts can
@@ -527,7 +533,7 @@ operations the band performs:
 | `edit --template <name>` | switches the document to another layout, keeping the surviving cells' photos and framing (`Command::SetTemplate`'s retention: a layout with fewer slots drops the tail, one with more appends empty cells). An unknown name is exit 1 with the library listed |
 | `edit --add-cell` | takes the layout with one cell more, leaving it empty (`Command::AddCell`, the window's `+`). An edit *about the layout*, so it moves the count without placing a photo: the cell the user wants filled is the one that shows a `+`, and clicking that is what asks for the file (S14b) |
 | `edit --remove-cell` | takes the layout with one cell fewer, dropping the last cell whatever it holds (`Command::RemoveLastCell`, the window's `−`). Exit 2 at one cell (`a collage's layout has at least 1 cell`) — the floor is the layout's, not the photo count's, and it is one cell since S19 (ruling 34). The mirror image of `--add-cell`, and refused together with it (exit 1): they are opposites, and one edit is one intent |
-| `edit --swap <i>,<j>` | exchanges two cells **whole** — photo and framing both (`Command::SwapCells`), because the framing is what makes a photo look right in *that* cell. Exit 2 for the same cell twice (`slot i cannot be swapped with itself`) and for a cell the layout does not have; a malformed pair is exit 1. The window's own paths are the three ruling 33 gave it (S23): a `Shift`+drag from one cell onto another, a `Shift`+click on another cell, and the strip's swap control plus `Return`; `Ctrl+Shift+Arrow` (S14b) names the neighbour geometrically (`Template::neighbour`) and stays |
+| `edit --swap <i>,<j>` | exchanges two cells **whole** — photo and framing both (`Command::SwapCells`), because the framing is what makes a photo look right in *that* cell. Exit 2 for the same cell twice (`slot i cannot be swapped with itself`) and for a cell the layout does not have; a malformed pair is exit 1. The window's own paths are the four ruling 33 gave it (S23, plus S27's marked press): a `Shift`+drag from one cell onto another, a `Shift`+click on another cell, the strip's swap control plus `Return` — or plus a press on the target cell (S27) — and `Ctrl+Shift+Arrow` (S14b), which names the neighbour geometrically (`Template::neighbour`) and stays |
 | `edit --add-photo <file>` | appends a photo: the first empty cell, else the layout with one slot more (`Command::AddPhotos`). Repeated once per photo in argument order; a photo that is not there is exit 2 with the path named, and a tenth is exit 2 (`a collage takes at most 9 photos`) |
 | `edit --slot <i> --photo <file>` | the photo that cell shows instead. Needs `--slot` (exit 1 otherwise, like the framing flags), and the stored path follows `init --photo`'s rule (relative to the project when the two share a root, absolute otherwise). **An arrival that points several cells at once — a drop from the file manager, a paste (S23b, `Command::PlacePhotos`) — is the same document as one of these per cell**; the difference is the history's, not the file's: the window keeps the whole arrival as *one* undo step and reports the files that did not fit once, while a machine caller gets no history and no silent drop at all |
 | the order of one `edit` | `--template`, `--add-cell`/`--remove-cell`, `--swap`, `--add-photo`, `--slot`/`--photo`, then the framing — so the framing is fitted against the document the earlier flags produced, and `--swap 0,3 --slot 0 --rotate 10` frames the cell that ends up at index 0. `--clear` is exclusive with `--photo` as well as with the framing flags |
@@ -582,7 +588,7 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
 
 | Item | Lands in | Shape |
 |---|---|---|
-| clamp math | **S3, landed**; the angle-reduction half retired and the visible-region reference landed in **S11 (2026-09-22)** | `CropTransform::fit(slot, covering, canvas_aspect, photo_aspect) -> CropFit { transform }`: the angle is never reduced and the coverage reference is the cell's visible region (`Frame::covering`), applied by `draw`; the fit is idempotent and never exceeds `MAX_ZOOM`. `CollageDoc::fitted_crop` / `fit_crop` are the two entry points that pair the frame with the clamp |
+| clamp math | **S3, landed**; the angle-reduction half retired and the visible-region reference landed in **S11 (2026-09-22)**; the pull-back made per axis by **S27** | `CropTransform::fit(slot, covering, canvas_aspect, photo_aspect) -> CropFit { transform }`: the angle is never reduced and the coverage reference is the cell's visible region (`Frame::covering`), applied by `draw`; the fit is idempotent and never exceeds `MAX_ZOOM`. `CollageDoc::fitted_crop` / `fit_crop` are the two entry points that pair the frame with the clamp |
 | canvas decoration (the frame) | **S11, landed**; its editor is a command since **S15** | `CollageDoc::frame`: `Frame { gapRel, radiusRel, color }`, plus `Frame::covering` / `Frame::clip` and the backdrop + clip stage in `draw`; the CLI's `render --gap/--radius/--border-color` (render-time) and `edit` (§5), and since S15 `Command::SetFrame { frame }` is the one writer both `edit` and the window's `Frame…` dialog send (one undo step, validated per slot). Measured cost at A0: none — the frame is a clip path and a fill (§8, "S11") |
 | template generator | **S2, landed** | `pixlay_core::templates` (`generator` recipes + the committed `frozen` data) and the `templates` / `init` subcommands; see §3 and §5 |
 | the image pipeline | **S4, landed**; the preview-grade reduction landed in **S12b**; the grading stage removed by **S12c** | `pixlay-imaging`: `Source::decode`, `resample`, `slot_bitmap`/`slot_bitmaps`, `probe`, and the preview's `Preview` caches + `reduce::PreviewSource`; the buffer ladder and the colour decisions are §4.1 |
@@ -754,6 +760,7 @@ Two changes were measured against the build before them, and neither costs anyth
 | the frame at A0 (the same document at 6 degrees, `--gap 0.02 --radius 0.03 --border-color 240,240,235`) | **ms 8418** + encode 1574, **`peak_rss_mb` 1450**, 8,187,135 bytes: a fill plus one more clip path per cell, inside the run-to-run spread of the unframed render |
 | the frame's pixels (300 dpi, two half-canvas cells) | the gap's stripe measures the requested width to ±2 px over `gapRel` 0.01/0.02/0.04/0.08 (42 px at 0.04); the rounded corner's exactly-backdrop pixels are **0 at radius 0** and rise monotonically to **4,831** at radius 0.08 (a 85 px radius, whose four corners are 6,202 px of which the rest is arc antialiasing); a coloured backdrop is the requested colour **to the byte** in every one of them, with `white = 0` over the whole sheet |
 | `edit` | stores the fit: a 25° request on a portrait cell with a landscape photo writes `rotationDeg = 25` with the zoom the angle needs, and the same edit twice writes **byte-identical** files (also with a frame, and with a pan that has to be clamped); a request above the floor keeps the user's zoom exactly (`3.5` stays `3.5`) |
+| a pan beside a clamped axis (**S27**) | `verify.pixlay`'s cell 0 is the case by construction — a 2:3 photo in a 4:3 cell, so the covering zoom is 1.0 and **all** of the travel is vertical: `edit --slot 0 --offset <x,y>` stores `(0, 0.02)` → `(0.0000, 0.0200)` and `(0.02, 0)` → `(0.0000, 0.0000)` both before and after (those are the two single-axis requests), while **`(0.02, 0.02)` → `(0.0000, 0.0000)` before, `(0.0000, 0.0200)` after** and **`(0.02, 0.2)` → `(0.0000, 0.0000)` before, `(0.0000, 0.2000)` after**: the horizontal component lands on its limit (this cell has none) and the vertical one is no longer paid for it. The same shape through a **real pointer** (`gtk4-broadwayd` + a browser, 2026-09-26): with the old rule a diagonal drag of 60x40 device px asked for an offset of `(0.1402, 0.0702)` and the document held `(0.0012, 0.0006)`; with the per-axis rule the photo's vertical pan is what moves (`/var/tmp/pixlay-s7/s27-drag-before.png` and `…-after.png` are the same drag, looked at) |
 | the test suite | `cargo test`: the core framing sweep is 125,400 framings (11 angles across the whole circle, 5 offsets, 5 photo aspects, 3 zooms, all 27 templates) plus a 36,480-framing framed sweep; the render crate adds `tests/frame.rs` (five pixel probes) |
 
 **Decisions this step made** (recorded here because each one is a shape later steps build on):
@@ -1296,6 +1303,14 @@ rely on:
     them; `Esc` takes the mark off and
     touches nothing. The canvas's accessible name carries the state while the mark is up
     (`Collage canvas, cell 3 of 8, swapping with cell 1`), so the sequence is audible.
+  - **The marked swap + a press** — the control's own pointer ending (S27). With a swap marked, a plain
+    press on *another* cell **means the exchange**, and that press's **release** does it: one undo step, no
+    modifier — which is what a user who pressed the control and then clicked a cell expects (finding 4 of
+    the walk of 2026-09-26: the mark had no pointer ending at all, so the control read as doing nothing).
+    It is deferred to the release exactly as `Shift`+click is, so a press that becomes a drag is still the
+    framing's own drag. A press on the marked cell itself is not a swap — two cells are what a swap is — so
+    it takes the mark back and selects; the release's own cell is what gets selected, because that is where
+    the photo now is.
   - **`Ctrl+Shift+Arrow`** (S14b) names the neighbour geometrically — `Template::neighbour` is in
     `pixlay-core`, so the canvas and the CLI cannot disagree about which cell is "to the right" — and the
     edge of the sheet answers `None` rather than clamping.
@@ -1303,8 +1318,10 @@ rely on:
   The same cell twice and a cell the layout does not have are refused by the command itself
   (`CoreError::SameSlot` / `NoSuchSlot`), so the window and the CLI report them the same way, and the mark
   is spent by every swap the window applies (a refusal included), so no stale source survives a layout
-  change. `tests/swap.rs` is the machine walk: the three paths, the document, the pixels (the swapped
-  document's own render, RMSE 0) and one undo step each.
+  change. `tests/swap.rs` is the machine walk: every path, the document, the pixels (the swapped
+  document's own render, RMSE 0) and one undo step each — and since S27 it drives the canvas's own
+  `GtkGestureClick`/`GtkGestureDrag` for the pointer's two halves instead of the window methods behind
+  them.
 - **The selected cell is marked in the theme's accent** (S24; finding 6 of the human's pass of 2026-09-25,
   "the selected cell is not distinguishable enough"): the canvas strokes the selected slot's *own outline*
   (`slot_path`), 2 device px wide, in `canvas::accent()` — `Adw.StyleManager:accent-color-rgba`, the
@@ -1492,6 +1509,16 @@ became the platform's. What a caller may rely on:
   finite angle and never reduces it. A gesture fits its own candidate numbers against the same
   visible region the canvas is drawing (`CollageDoc::fit_crop`), so what the user sees while
   dragging is what the renderer will paint.
+- **Every framing gesture starts from the same base, bitmap or not** (S27):
+  `EditorWindow::gesture_base` is the crop the cell is *shown* with when the canvas holds a decoded
+  bitmap for it, and the cell's own stored crop when it does not — the fit needs the photo's own aspect,
+  and nothing before the decoder answers knows it. With no bitmap, `fit_for` passes the request through
+  **unfitted** and `draw` fits it at the boundary (§1's "a crop is a request"), so the drag, the keyboard's
+  pan, the wheel and the strip's zoom/rotate all work on a cell whose bitmap has not arrived. Before S27 the
+  drag asked `fitted_crop` alone and gave up on `None` — no command, no draw, no report, no undo step —
+  while the keyboard's own pan went through `fit_for` and still moved the photo, which is the "the keyboard
+  works, the drag does not" of the walk of 2026-09-26; and a step that is refused anyway is **reported once
+  per gesture** (S15h's idiom: one toast, not one per motion event), never dropped in silence.
 - **One renderer.** The canvas paints the document with `pixlay_render::draw` into the widget's
   own cairo context — the same call the CLI and the export make. Measured: what the window
   draws and what `pixlay-render render` writes differ by an RMSE of **0.0077** over 307,200

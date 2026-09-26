@@ -16,6 +16,23 @@ use crate::template::Slot;
 /// to the same bits.
 const BISECTION_STEPS: u32 = 60;
 
+/// How much of a pan is no pan at all, in slot widths (S27).
+///
+/// The coverage test's own arithmetic is good to about `1e-16` of a slot width, so an
+/// axis whose slack is *exactly* zero — the covering zoom is exactly that axis' floor,
+/// which is the usual case for the axis a photo exactly fills — comes back with a limit
+/// of that size rather than a limit of zero. It is a limit nobody can see, but a command
+/// whose fit differs from the framing by `1e-16` is a *step* in the history: the user
+/// would have to press `Ctrl+Z` through a drag that moved nothing. So a pull-back that
+/// moves an axis this little answers the anchor exactly, which is what makes "a drag
+/// that ends where it started is not a step" true (S15d).
+///
+/// The number is a measurement, not a taste: `1e-12` of a slot width is **at most 1.4e-8
+/// px** on the A0 grid — `docs/CONTRACT.md` §8's 14043 px long edge, and no slot is wider
+/// than the sheet — i.e. eight orders of magnitude below a pixel and four above the
+/// `1e-16` noise it has to clear.
+const PAN_IS_NOTHING: f64 = 1e-12;
+
 /// How one photo is framed inside one slot.
 ///
 /// The state is *absolute*, not a multiple of "fill the slot": `zoom` is the
@@ -183,9 +200,10 @@ impl CropTransform {
     ///
     /// * `zoom` is raised to the value that covers the photo centred at **exactly
     ///   the requested angle**, and a larger request is kept as it is;
-    /// * `offset` is pulled back along the line to the cell centre until the photo
-    ///   covers again — a pan must stop at the frame edge rather than be paid for
-    ///   with more magnification, or dragging a photo would zoom it;
+    /// * `offset` is pulled back along each of its own axes until the photo covers
+    ///   again — a pan must stop at the frame edge rather than be paid for with more
+    ///   magnification, or dragging a photo would zoom it — and each axis keeps as much
+    ///   of the request as the other one's limit leaves it (`Frame::clamp_offset`);
     /// * `rotation_deg` is **never touched**: the angle is free (ruled 2026-09-22),
     ///   and the zoom is what pays for it. The ±45° cap and the
     ///   `CLAMP_ZOOM_LIMIT` rule that reduced an over-asking angle are gone, so the
@@ -464,21 +482,61 @@ impl<'a> Frame<'a> {
     /// The largest part of `offset` that still covers at `rotation_deg` and
     /// `zoom`.
     ///
-    /// Every vertex contributes a strip of feasible photo centres (the vertex
-    /// must fall inside the rotated rectangle), so the feasible set is convex and
-    /// contains the slot centre — the zoom is at least the upright floor, which
-    /// is exactly the zoom that covers with a zero offset. The feasible part of
-    /// the segment from the centre to the requested centre is therefore an
-    /// interval `[0, t]`, which is what the bisection finds.
+    /// **One axis at a time, the horizontal one first** (S27). The rule this replaces
+    /// walked the segment from the centre to the requested centre and scaled both
+    /// components by the same factor, which couples the axes: at the covering zoom the
+    /// axis the photo exactly fills has no slack at all, so a request with *any*
+    /// component in it — and a pointer drag is never perfectly axis-aligned — pulled the
+    /// other axis' pan back too. Measured on the verification project (2026-09-26): a
+    /// diagonal pointer drag of 60x40 device px asked for an offset of `(0.1402,
+    /// 0.0702)` and stored `(0.0012, 0.0006)`, so the photo did not move at all, while
+    /// a `Shift`+arrow step along the free axis did.
     ///
-    /// The segment is walked by scaling the offset, not by interpolating the
-    /// centre: the result is stored as an offset, so scaling it in the offset's
-    /// own coordinates is what makes fitting a fit return the same bits.
+    /// So each component is pulled back along its own line: the horizontal one first,
+    /// from a vertically centred photo (which is where that axis has the most travel),
+    /// and then the vertical one from that result. Where the two axes are independent —
+    /// a zero rotation, which is every slot in the library as long as the photo is
+    /// upright — this is exactly each axis clamped to its own limit and the order does
+    /// not matter. At an angle the horizontal component keeps the larger share, because
+    /// a sideways drag is the one a user makes.
     fn clamp_offset(&self, offset: (f64, f64), rotation_deg: f64, zoom: f64) -> (f64, f64) {
-        let scaled = |t: f64| (offset.0 * t, offset.1 * t);
-        let fits = |t: f64| self.covers(rotation_deg, self.centre_for(scaled(t)), zoom);
-        if offset == (0.0, 0.0) || fits(1.0) {
+        if self.covers(rotation_deg, self.centre_for(offset), zoom) {
             return offset;
+        }
+        let horizontal = self.pull_back(offset, (0.0, 0.0), 0, rotation_deg, zoom);
+        self.pull_back(offset, horizontal, 1, rotation_deg, zoom)
+    }
+
+    /// The furthest point along one axis that still covers, walking from `anchor`.
+    ///
+    /// `axis` is `0` for the horizontal component and `1` for the vertical one, and
+    /// `anchor` is a centre that covers — the slot centre, or the other axis' own
+    /// result. Every vertex contributes a strip of feasible photo centres (the vertex
+    /// must fall inside the rotated rectangle), so the feasible set is convex and
+    /// contains the anchor: the feasible part of the segment from the anchor to the
+    /// requested centre is an interval `[0, t]`, which is what the bisection finds. A
+    /// request that falls past it comes back at the largest `t` that fits — a pan stops
+    /// at the frame edge rather than being paid for with magnification.
+    ///
+    /// The segment is walked by scaling the request, not by interpolating the centre,
+    /// and the axis that already fits is returned untouched: the result is stored as an
+    /// offset, so scaling it in the offset's own coordinates is what makes fitting a
+    /// fit return the same bits.
+    fn pull_back(
+        &self,
+        offset: (f64, f64),
+        anchor: (f64, f64),
+        axis: usize,
+        rotation_deg: f64,
+        zoom: f64,
+    ) -> (f64, f64) {
+        let along = |t: f64| match axis {
+            0 => (anchor.0 + offset.0 * t, anchor.1),
+            _ => (anchor.0, anchor.1 + offset.1 * t),
+        };
+        let fits = |t: f64| self.covers(rotation_deg, self.centre_for(along(t)), zoom);
+        if fits(1.0) {
+            return along(1.0);
         }
         let (mut low, mut high) = (0.0, 1.0);
         for _ in 0..BISECTION_STEPS {
@@ -489,6 +547,16 @@ impl<'a> Frame<'a> {
                 high = mid;
             }
         }
-        scaled(low)
+        // A pull-back this small is the coverage arithmetic's own noise around a limit of
+        // zero, not a pan: answer the anchor, so a drag with no travel in an axis stays
+        // the framing it started from (S15d, `PAN_IS_NOTHING`).
+        let moved = match axis {
+            0 => offset.0 * low,
+            _ => offset.1 * low,
+        };
+        if moved.abs() <= PAN_IS_NOTHING {
+            return along(0.0);
+        }
+        along(low)
     }
 }

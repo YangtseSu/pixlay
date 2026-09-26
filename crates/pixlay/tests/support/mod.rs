@@ -824,6 +824,87 @@ pub fn press_on(
     false
 }
 
+/// Presses the pointer on the canvas at a widget point, through the widget's own
+/// controller (S27).
+///
+/// The pointer's counterpart of [`press_on`], with the same limit and the same reason:
+/// GTK4 exposes no way to move a pointer without a seat — `GdkEvent` has no public
+/// constructor, and `GtkTestUtils` ships no button or motion helper — so the press is
+/// delivered to the canvas's own `GtkGestureClick` by emitting *its* `pressed` signal,
+/// which runs the handler the product installed and nothing else. What that does not
+/// prove is GTK's own delivery of a pointer event to the widget under it; what it does
+/// prove is the binding the product wrote, which is what the pointer criteria are about.
+///
+/// **The delivery itself was checked against a real pointer once** (S27, 2026-09-26),
+/// because "the handler is right" and "the handler is reached" are two claims and only
+/// the second one is GTK's: the same presses and drags were driven through
+/// `gtk4-broadwayd` — which ships with gtk4 — with a browser on
+/// `http://127.0.0.1:8085/`, i.e. real `GdkEvent`s from a real seat, and they reached
+/// these handlers with `current_event_state()` reading the modifier, so both the plain
+/// and the `Shift` branch fire as the canvas assumes.
+///
+/// With no event behind it, `current_event_state()` reads empty — which *is* the
+/// `Shift`-less branch, so that is the half these helpers drive; the `Shift`+press and
+/// `Shift`+drag forms go through the window methods their branches call
+/// (`swap_click`, `swap_drag_begin`/`update`/`end`).
+pub fn press_canvas(window: &EditorWindow, x: f64, y: f64) {
+    let canvas = window.canvas_widget();
+    let controllers = canvas.clone().upcast::<gtk::Widget>().observe_controllers();
+    for index in 0..controllers.n_items() {
+        if let Some(click) = controllers.item(index).and_downcast::<gtk::GestureClick>() {
+            click.emit_by_name::<()>("pressed", &[&1i32, &x, &y]);
+            return;
+        }
+    }
+    panic!("the canvas has no click controller");
+}
+
+/// Releases the pointer where [`press_canvas`] pressed it, through the same controller
+/// (S27).
+///
+/// The canvas defers two things to a press's release — `Shift`+click's exchange, and the
+/// plain press that completes a marked swap (S27) — so the release is half of that
+/// interaction rather than an afterthought. With no event behind it,
+/// `current_event_state()` reads empty, which is the branch both of those take.
+pub fn release_canvas(window: &EditorWindow, x: f64, y: f64) {
+    let canvas = window.canvas_widget();
+    let controllers = canvas.clone().upcast::<gtk::Widget>().observe_controllers();
+    for index in 0..controllers.n_items() {
+        if let Some(click) = controllers.item(index).and_downcast::<gtk::GestureClick>() {
+            click.emit_by_name::<()>("released", &[&1i32, &x, &y]);
+            return;
+        }
+    }
+    panic!("the canvas has no click controller");
+}
+
+/// One drag to its release, through the canvas's own `GtkGestureDrag` (S27):
+/// `drag-begin` at `from`, a `drag-update` per step on the way to `to`, and `drag-end`
+/// there.
+///
+/// The steps are not decoration: the gesture's own contract is that every motion asks
+/// the decoder for a coarse frame and the release refines it (S12), so a drag that
+/// emitted no update would not be the gesture the product has. Four is enough for the
+/// live path to run more than once and few enough to stay readable in a failure.
+pub fn drag_canvas(window: &EditorWindow, from: (f64, f64), to: (f64, f64)) {
+    const STEPS: u32 = 4;
+    let (dx, dy) = (to.0 - from.0, to.1 - from.1);
+    let canvas = window.canvas_widget();
+    let controllers = canvas.clone().upcast::<gtk::Widget>().observe_controllers();
+    for index in 0..controllers.n_items() {
+        if let Some(drag) = controllers.item(index).and_downcast::<gtk::GestureDrag>() {
+            drag.emit_by_name::<()>("drag-begin", &[&from.0, &from.1]);
+            for step in 1..=STEPS {
+                let t = f64::from(step) / f64::from(STEPS);
+                drag.emit_by_name::<()>("drag-update", &[&(dx * t), &(dy * t)]);
+            }
+            drag.emit_by_name::<()>("drag-end", &[&dx, &dy]);
+            return;
+        }
+    }
+    panic!("the canvas has no drag controller");
+}
+
 /// The alert dialog the window is showing, if it is showing one.
 ///
 /// The confirmations are `AdwAlertDialog`s over a dialog or over the window, and

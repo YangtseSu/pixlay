@@ -705,6 +705,140 @@ fn an_elongated_slot_keeps_its_rotation() {
 }
 
 #[test]
+fn an_axis_that_can_still_pan_keeps_its_pan() {
+    // Finding 2 of the walk of 2026-09-26. At the covering zoom the axis the photo
+    // exactly fills has no slack, and the rule the clamp used until S27 scaled both
+    // components of the offset by one factor — the segment from the centre to the
+    // request — so any request with a component in the filled axis pulled the other
+    // axis' pan back with it. A pointer drag is never perfectly axis-aligned, so it
+    // came back to the centre: measured on the verification project (2026-09-26)
+    // before the fix, a diagonal drag asked for (0.1402, 0.0702) and stored
+    // (0.0012, 0.0006), while a `Shift`+arrow step along the free axis moved the
+    // photo.
+    //
+    // The slot here is half the sheet wide and the whole sheet tall — aspect 0.5 —
+    // with a square photo, so the floor is 2x: the photo's height is exactly the
+    // cell's (no vertical travel at all) and it is half a slot width wider than the
+    // cell (0.5 slot widths of travel each way).
+    let canvas_aspect = 1.0;
+    let photo_aspect = 1.0;
+    let slot = rect_slot(0.25, 0.0, 0.75, 1.0);
+    let frame = Frame::default();
+    let points = samples(&slot.outline, 24);
+    let floor = fit(
+        CropTransform {
+            zoom: 1.0,
+            offset: (0.0, 0.0),
+            rotation_deg: 0.0,
+        },
+        &slot,
+        &frame,
+        canvas_aspect,
+        photo_aspect,
+    );
+    assert!(
+        (floor.zoom - 2.0).abs() <= 1e-12,
+        "the floor of this slot is 2x, got {}",
+        floor.zoom
+    );
+
+    // A horizontal pan the axis can take, asked for together with a vertical one it
+    // cannot: the horizontal one survives and the vertical one is the axis that gives.
+    for x in [0.1, 0.25, 0.5] {
+        let what = format!("({x}, 0.07)");
+        let fitted = fit(
+            CropTransform {
+                zoom: 1.0,
+                offset: (x, 0.07),
+                rotation_deg: 0.0,
+            },
+            &slot,
+            &frame,
+            canvas_aspect,
+            photo_aspect,
+        );
+        assert!(
+            (fitted.offset.0 - x).abs() <= 1e-9,
+            "{what}: the horizontal pan came back as {} instead of {x}",
+            fitted.offset.0
+        );
+        assert!(
+            fitted.offset.1.abs() <= 1e-9,
+            "{what}: this axis has no travel, but the fit kept {}",
+            fitted.offset.1
+        );
+        let outside = worst(&fitted, &slot, canvas_aspect, photo_aspect, &points);
+        assert!(
+            outside <= 1.0 + COVERAGE_EPSILON,
+            "{what}: covered {outside}"
+        );
+    }
+
+    // Past the travel the pan stops at the frame's edge — the photo's edge exactly on
+    // the cell's — and a vertical component in the same request does not move that
+    // limit: the horizontal axis is the one that was asked for and it gets all of it.
+    let far = fit(
+        CropTransform {
+            zoom: 1.0,
+            offset: (0.9, 0.07),
+            rotation_deg: 0.0,
+        },
+        &slot,
+        &frame,
+        canvas_aspect,
+        photo_aspect,
+    );
+    assert!(
+        (far.offset.0 - 0.5).abs() <= 1e-6,
+        "the pan stopped at {} instead of the edge, 0.5",
+        far.offset.0
+    );
+    let outside = worst(&far, &slot, canvas_aspect, photo_aspect, &points);
+    assert!(
+        outside <= 1.0 + COVERAGE_EPSILON,
+        "at the edge: covered {outside}"
+    );
+
+    // And the fix keeps the property the clamp has to have in every case: a second fit
+    // changes nothing, bit for bit. This is what `edit` writes and re-writes (the CLI
+    // stores the fit, so a re-run of the same edit must write the same bytes).
+    for request in [
+        CropTransform {
+            zoom: 1.0,
+            offset: (0.3, 0.07),
+            rotation_deg: 0.0,
+        },
+        CropTransform {
+            zoom: 1.0,
+            offset: (0.9, -0.9),
+            rotation_deg: 0.0,
+        },
+        CropTransform {
+            zoom: 4.0,
+            offset: (0.3, 0.07),
+            rotation_deg: 30.0,
+        },
+        CropTransform {
+            zoom: 1.0,
+            offset: (-0.5, 0.4),
+            rotation_deg: 137.5,
+        },
+    ] {
+        let once = fit(request, &slot, &frame, canvas_aspect, photo_aspect);
+        let twice = fit(once, &slot, &frame, canvas_aspect, photo_aspect);
+        assert!(
+            same_bits(&twice, &once),
+            "{request:?} is not a fixed point: {twice:?} != {once:?}"
+        );
+        let outside = worst(&once, &slot, canvas_aspect, photo_aspect, &points);
+        assert!(
+            outside <= 1.0 + COVERAGE_EPSILON,
+            "{request:?}: covered {outside}"
+        );
+    }
+}
+
+#[test]
 fn fitting_a_fit_returns_it() {
     // Idempotence is what lets the clamp run on every edit *and* at the render
     // boundary: the second pass changes nothing. `edit`'s own idempotence (the CLI

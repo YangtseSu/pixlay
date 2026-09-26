@@ -43,6 +43,12 @@
 //! drag inside a cell still pans" would then be a question about the toolkit rather than a
 //! fact about this file. The marks the swap draws are overlays like the selection's: no
 //! photo's pixels are touched (`render`'s `swap_source` / `swap_target`).
+//!
+//! **The strip's swap control is the same swap, marked instead of held** (S23's keyboard
+//! path, and since S27 the pointer's too): pressing it marks the selected cell, and the
+//! next plain press on another cell completes the exchange — one press to pick the cell
+//! the photo is going to. `Shift`+press and the marked press are both driven from
+//! [`add_click`], and every path ends in [`EditorWindow::swap_click`].
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -473,13 +479,18 @@ pub fn build(window: &EditorWindow) -> gtk::DrawingArea {
 }
 
 /// Press selects; a second press acts on the slot (photo chooser or reframing);
-/// `Shift`+press is the swap's one-press form (S23).
+/// `Shift`+press is the swap's one-press form (S23), and with a swap marked by the
+/// strip's control a plain press on another cell is the swap's pointer ending (S27).
 ///
 /// A `Shift`+press is **deferred to the release**, and that is the whole of why the
 /// clicked slot is remembered here rather than swapped on the press: the same press can
 /// become a drag ([`add_drag`]'s `Shift` branch), and a swap that had already happened on
 /// the press could not be taken back. A press that ends as a click swaps once; a press
 /// that becomes a drag clears the memory first and swaps from the cell it started on.
+///
+/// The *marked* swap uses the same deferral: the strip's toggle marks a cell, and a plain
+/// press on another cell means the exchange — remembered on the press and done on its
+/// release, so the press may still become the framing's own drag instead.
 fn add_click(area: &gtk::DrawingArea, window: &EditorWindow, swap_click: &Rc<Cell<Option<usize>>>) {
     let click = gtk::GestureClick::new();
     click.set_button(gdk::BUTTON_PRIMARY);
@@ -508,6 +519,23 @@ fn add_click(area: &gtk::DrawingArea, window: &EditorWindow, swap_click: &Rc<Cel
                 return;
             }
             swap_click.set(None);
+            // The mark's own pointer ending (S27): with a swap marked — by the strip's
+            // toggle or by a `Shift`+press — a plain press on *another* cell means the
+            // exchange, and it is remembered here to happen on this press's release,
+            // exactly as the `Shift`+click above is, so a press that becomes a drag is
+            // the drag. A press on the marked cell itself takes the mark back: two cells
+            // are what a swap is, and `Esc` already means "never mind".
+            if presses == 1
+                && let Some(source) = window.swap_source()
+            {
+                if source == slot {
+                    window.cancel_swap();
+                } else {
+                    swap_click.set(Some(slot));
+                    area.grab_focus();
+                    return;
+                }
+            }
             window.select(Some(slot));
             if presses == 2 {
                 // The gesture a photo editor has always had: an empty slot asks
@@ -529,8 +557,9 @@ fn add_click(area: &gtk::DrawingArea, window: &EditorWindow, swap_click: &Rc<Cel
         #[strong]
         swap_click,
         move |_gesture: &gtk::GestureClick, _presses: i32, _x: f64, _y: f64| {
-            // The press that is still remembered became a click: `Shift`+click, the swap's
-            // one-press form (S23, ruling 33). A press that became a drag cleared it.
+            // The press that is still remembered became a click: `Shift`+click (S23,
+            // ruling 33) or a plain press on a marked cell's other half (S27). A press
+            // that became a drag cleared it.
             if let Some(slot) = swap_click.take() {
                 window.swap_click(slot);
             }
@@ -580,12 +609,17 @@ fn add_drag(area: &gtk::DrawingArea, window: &EditorWindow, swap_click: &Rc<Cell
                 *base.borrow_mut() = Some(Drag::Swap { start: (x, y) });
                 return;
             }
+            // A press that is a drag now is the framing's own gesture, so the click's
+            // half is off: a marked swap must not also complete on this release (S27).
+            swap_click.set(None);
             let Some(slot) = window.slot_at_widget(x, y) else {
                 return;
             };
             window.select(Some(slot));
+            // The same base the keyboard's pan starts from (S27): the fit when there is a
+            // bitmap, the cell's own stored crop when there is not.
             *base.borrow_mut() = window
-                .fitted_crop(slot)
+                .gesture_base(slot)
                 .map(|crop| Drag::Pan { slot, crop });
         }
     ));
@@ -653,7 +687,7 @@ fn add_scroll(area: &gtk::DrawingArea, window: &EditorWindow) {
             let Some(slot) = window.selection() else {
                 return glib::Propagation::Proceed;
             };
-            let Some(crop) = window.fitted_crop(slot) else {
+            let Some(crop) = window.gesture_base(slot) else {
                 return glib::Propagation::Proceed;
             };
             // One notch per event; the direction follows the wheel, which GTK
@@ -777,7 +811,7 @@ fn add_keys(area: &gtk::DrawingArea, window: &EditorWindow) {
                 // reaches every control in the pane.
                 return glib::Propagation::Proceed;
             };
-            let Some(crop) = window.fitted_crop(slot) else {
+            let Some(crop) = window.gesture_base(slot) else {
                 return glib::Propagation::Proceed;
             };
             let step = if control { 0.1 } else { 0.02 };

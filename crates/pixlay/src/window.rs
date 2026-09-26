@@ -155,6 +155,11 @@ mod imp {
         /// Whether the decoding worker's failure has already been reported: the
         /// toast is news once, and the edit that asks again is not a second failure.
         pub decode_reported: Cell<bool>,
+        /// Whether the gesture in flight has already reported a refusal (S27): the same
+        /// S15h idiom, because a refusal that arrives per motion event would be a toast
+        /// per motion event. Cleared when the gesture ends, so the next one reports on
+        /// its own.
+        pub gesture_reported: Cell<bool>,
         /// The canvas's current accessible name.
         ///
         /// A copy for the tests, because GTK4 has no getter for an accessible
@@ -259,6 +264,7 @@ mod imp {
                 settings_dialog: OnceCell::new(),
                 workers: Cell::new(Workers::default()),
                 decode_reported: Cell::new(false),
+                gesture_reported: Cell::new(false),
                 canvas_label: RefCell::new(String::new()),
                 gallery: OnceCell::new(),
                 gallery_generation: Cell::new(0),
@@ -925,6 +931,11 @@ impl EditorWindow {
     /// Every gesture starts from this rather than from the request, because the
     /// fit is what the user is looking at: dragging a photo by ten pixels has to
     /// move it by ten pixels whatever zoom the document happens to ask for.
+    ///
+    /// `None` when the canvas holds no bitmap for that slot: the fit needs the photo's
+    /// own aspect, and nothing before the decoder answers knows it. A *gesture* does not
+    /// give up there — it starts from [`gesture_base`](Self::gesture_base) instead,
+    /// which is this when it can be this and the cell's own stored crop when it cannot.
     pub fn fitted_crop(&self, slot: usize) -> Option<CropTransform> {
         let doc = self.document();
         let (grid, images) = self.images();
@@ -935,6 +946,26 @@ impl EditorWindow {
         doc.fitted_crop(slot, grid.aspect(), aspect)
             .ok()
             .map(|fit| fit.transform)
+    }
+
+    /// The framing a gesture on `slot` starts from, whichever path asks (S27).
+    ///
+    /// **[`fitted_crop`](Self::fitted_crop) when there is a bitmap, the cell's own stored
+    /// crop when there is not.** The fit needs the photo's own aspect and nothing before
+    /// the decoder answers knows it, so a gesture that insisted on the fit would be dead
+    /// until the first bitmap arrived — and dead *silently*, since the drag's early exits
+    /// produce no command, no draw and no report. The keyboard's pan went through
+    /// `fit_for`, which keeps the request in that case, and the drag did not: that
+    /// asymmetry is the "the keyboard works, the drag does not" of the walk of
+    /// 2026-09-26, and one shared name is what makes the paths agree.
+    ///
+    /// The stored crop is a legal starting point in its own right: it is the request the
+    /// document holds, `fit_for` passes a request through unfitted while there is no
+    /// aspect, and `draw` fits it at the boundary — "a crop is a request; what gets drawn
+    /// is its fit" (`docs/CONTRACT.md` §1).
+    pub fn gesture_base(&self, slot: usize) -> Option<CropTransform> {
+        self.fitted_crop(slot)
+            .or_else(|| self.document().cells.get(slot).map(|cell| cell.crop))
     }
 
     // ---- edits ------------------------------------------------------------
@@ -961,8 +992,17 @@ impl EditorWindow {
                 self.imp().guides.set(rotation_changed);
                 // A refused step is not a gesture in flight: `guides` goes back with
                 // it, and no commit is scheduled for a command nobody took.
-                if self.live(Command::SetCrop { slot, crop: fitted }).is_err() {
+                if let Err(error) = self.live(Command::SetCrop { slot, crop: fitted }) {
+                    // A step that cannot be applied is **reported, not dropped** (S27):
+                    // the refusal names its reason, and once per gesture rather than once
+                    // per motion event — a drag refuses the same crop for every pixel it
+                    // moves past it, and forty identical toasts say nothing the first one
+                    // did (S15h's own idiom).
                     self.imp().guides.set(false);
+                    if !self.imp().gesture_reported.replace(true) {
+                        glib::g_warning!("pixlay", "the framing step was refused: {error}");
+                        self.toast(&error.to_string());
+                    }
                     return;
                 }
                 // A slider cannot say "the drag ended"; the commit happens once
@@ -999,7 +1039,12 @@ impl EditorWindow {
         let doc = self.document();
         let (grid, images) = self.images();
         let Some(aspect) = images.get(slot).map(|bitmap| bitmap.aspect()) else {
-            return doc.cells.get(slot).map(|cell| cell.crop).unwrap_or(crop);
+            // No bitmap for this slot, so there is no photo aspect to fit against: the
+            // request goes through as it stands and `draw` fits it later (S27, and §1's
+            // "a crop is a request"). Keep the request rather than the stored crop: the
+            // caller is a gesture holding its own numbers, and a gesture on a cell whose
+            // bitmap has not arrived is still a gesture (`gesture_base`).
+            return crop;
         };
         // The same reference the renderer clamps against, for the gesture's own
         // numbers: the canvas and the gesture cannot disagree about what covers the
@@ -1031,6 +1076,8 @@ impl EditorWindow {
             timer.remove();
         }
         self.imp().guides.set(false);
+        // The next gesture reports its own refusals (S27).
+        self.imp().gesture_reported.set(false);
         self.imp().editor.borrow_mut().commit();
         // Committed or not, the canvas goes back to the resting grid: a gesture
         // that ended where it started still drew *coarse* frames, and a refused
@@ -1161,7 +1208,7 @@ impl EditorWindow {
     pub fn set_zoom(&self, zoom: f64) {
         if let (Some(slot), Some(crop)) = (
             self.selection(),
-            self.selection().and_then(|slot| self.fitted_crop(slot)),
+            self.selection().and_then(|slot| self.gesture_base(slot)),
         ) {
             let next = self.fit_for(
                 slot,
@@ -1184,7 +1231,7 @@ impl EditorWindow {
         let Some(slot) = self.selection() else {
             return;
         };
-        let Some(crop) = self.fitted_crop(slot) else {
+        let Some(crop) = self.gesture_base(slot) else {
             return;
         };
         self.set_zoom(crop.zoom * factor);
@@ -1200,7 +1247,7 @@ impl EditorWindow {
         let Some(slot) = self.selection() else {
             return;
         };
-        let Some(crop) = self.fitted_crop(slot) else {
+        let Some(crop) = self.gesture_base(slot) else {
             return;
         };
         let next = self.fit_for(
@@ -1220,7 +1267,7 @@ impl EditorWindow {
         let Some(slot) = self.selection() else {
             return;
         };
-        let Some(crop) = self.fitted_crop(slot) else {
+        let Some(crop) = self.gesture_base(slot) else {
             return;
         };
         self.imp().guides.set(true);
