@@ -147,7 +147,7 @@ fn the_package_ships_the_identity_the_code_declares() {
     let desktop = read(&format!("data/{app}.desktop.in"));
     let metainfo = without_comments(&read(&format!("data/{app}.metainfo.xml.in")));
     let mime = without_comments(&read(&format!("data/{app}.mime.xml")));
-    let pkgbuild = read("PKGBUILD");
+    let pkgbuild = read("packaging/arch/PKGBUILD");
 
     // --- the desktop entry -------------------------------------------------
     // It is the template the package generates the installed file from, so

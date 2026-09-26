@@ -498,12 +498,12 @@ not a criterion — a visual conclusion must become a number (a probe) in the CL
   the `.pixlay` MIME registration and the catalogs `po/LINGUAS` lists (`docs/CONTRACT.md` §10). GNOME's
   applications are built this way and this is one, so a distribution other than Arch installs it with
   `meson setup build && meson compile -C build && meson install -C build` and nothing else
-- The PKGBUILD wraps that install and adds what is Arch's: `source=` is the release tag's tarball built
-  from `pkgver` (a release pushes `vX.Y.Z`, fills `sha256sums` with `updpkgsums` and writes `.SRCINFO`),
-  the registry is vendored (`CARGO_NET_OFFLINE=true` for the cargo meson starts), `depends=('gtk4'
-  'libadwaita' 'glycin')` (the decoding backend of "Open / to be proven" is a linked library, so it is a
-  runtime dependency), `makedepends` names `cargo`, `rust`, `meson` and `gettext`, and the license goes to
-  `/usr/share/licenses/$pkgname/` — Arch's path, not the prefix's
+- The PKGBUILD (`packaging/arch/PKGBUILD`) wraps that install and adds what is Arch's: `source=` is the
+  release tag's tarball built from `pkgver` (a release pushes `vX.Y.Z`, fills `sha256sums` with
+  `updpkgsums` and writes `.SRCINFO`), the registry is vendored (`CARGO_NET_OFFLINE=true` for the cargo
+  meson starts), `depends=('gtk4' 'libadwaita' 'glycin')` (the decoding backend of "Open / to be proven"
+  is a linked library, so it is a runtime dependency), `makedepends` names `cargo`, `rust`, `meson` and
+  `gettext`, and the license goes to `/usr/share/licenses/$pkgname/` — Arch's path, not the prefix's
 - **No tests run in a package build** (ruled 2026-09-26, human): `makepkg`'s standard is that it builds and
   packages, the suite is the verification entry's (and CI's), and the two artifact validators
   (`desktop-file-validate`, `appstreamcli validate --no-net`) run in `meson test` wherever they are

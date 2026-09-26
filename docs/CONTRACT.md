@@ -1731,12 +1731,14 @@ rely on without reading the PKGBUILD:
   the prefix's localedir into the binary as `PIXLAY_LOCALEDIR`, which `crates/pixlay/src/i18n.rs` reads at
   compile time. A distribution installs the application with `meson setup build && meson compile -C build &&
   meson install -C build` and nothing else.
-- **The PKGBUILD wraps that install**: `source=` is the release tag's tarball, built from `pkgver`; a release
-  pushes `vX.Y.Z`, fills `sha256sums` (`updpkgsums`) and writes `.SRCINFO`. The registry is vendored once
-  (`cargo vendor`, with `CARGO_NET_OFFLINE=true` for the cargo call meson makes), `depends` is `gtk4`,
-  `libadwaita` and `glycin` — the decoding backend S4 measured is a linked library, so it is a runtime
-  dependency — with `libheif` an optdepend for HEIC and AVIF (as it is for `glycin` itself), and the license
-  goes to `/usr/share/licenses/pixlay/`, which is Arch's path and not the prefix's.
+- **The PKGBUILD wraps that install** (at `packaging/arch/PKGBUILD`, where a `makepkg` run's own work tree
+  and packages land beside it and `.gitignore` covers them): `source=` is the release tag's tarball, built
+  from `pkgver`; a release pushes `vX.Y.Z`, fills `sha256sums` (`updpkgsums`) and writes `.SRCINFO`. The
+  registry is vendored once (`cargo vendor`, with `CARGO_NET_OFFLINE=true` for the cargo call meson
+  makes), `depends` is `gtk4`, `libadwaita` and `glycin` — the decoding backend S4 measured is a linked
+  library, so it is a runtime dependency — with `libheif` an optdepend for HEIC and AVIF (as it is for
+  `glycin` itself), and the license goes to `/usr/share/licenses/pixlay/`, which is Arch's path and not
+  the prefix's.
 - **A package build runs no tests** (ruled 2026-09-26, human): `makepkg`'s standard is that it builds and
   packages, the suite is the verification entry's (`AGENTS.md`) and CI's, and the two artifact validators
   (`desktop-file-validate`, `appstreamcli validate --no-net`) are `meson test`'s wherever the tools are
