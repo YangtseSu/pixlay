@@ -9,9 +9,10 @@ were arrived at. **These are records, not instructions.**
 | [2026-09-22-UX-DIRECTION.md](2026-09-22-UX-DIRECTION.md) | the direction review of 2026-09-22: why the plan was re-routed to the picker-first flow, which base codebase was ruled out, and the web check whose §4 Google claim the research of 2026-09-25 corrected |
 | [2026-09-20-STEPS.md](2026-09-20-STEPS.md) | the plan that began on 2026-09-20: the open half (S7, S8) as it stood when it was retired, plus a banner saying what replaced it and which of its steps are void. Its closed half (S0 … S6.5) is not here — it moved earlier and lives in [`../completed/`](../completed/) |
 
-The live plan is [`../2026-09-25-STEPS.md`](../2026-09-25-STEPS.md); the shapes are in
-[`../CONTRACT.md`](../CONTRACT.md) and the constraints in `AGENTS.md`, both of which stay authoritative
-over anything written here.
+The live plan is [`../steps/`](../steps/) — one file per step since 2026-09-27, when the plan of
+2026-09-25 closed into [`../completed/2026-09-25-STEPS.md`](../completed/2026-09-25-STEPS.md); the shapes
+are in [`../CONTRACT.md`](../CONTRACT.md) and the constraints in `AGENTS.md`, both of which stay
+authoritative over anything written here.
 
 **Why a separate directory from `completed/`:** a retired plan is not a finished one. The plan of
 2026-09-20 was retired with a step still waiting on a human walk and one not started, and the plan of

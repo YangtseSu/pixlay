@@ -1,8 +1,8 @@
 # Direction review (2026-09-22): the picker-first UX, and which codebase to build it on
 
 > **Superseded 2026-09-25.** The route this review argued for was removed by the human's ruling 31 of
-> 2026-09-25 (`docs/2026-09-25-STEPS.md`): the picker stage goes, the editor is the app, and photos enter
-> from outside it. §4's Google claim is corrected by the research recorded in the new plan — Google's
+> 2026-09-25 (`docs/completed/2026-09-25-STEPS.md`): the picker stage goes, the editor is the app, and photos enter
+> from outside it. §4's Google claim is corrected by the research recorded in that plan — Google's
 > *canvas* previews the user's photos while its **template strip shows sample images**, because its
 > templates carry style, which a pixlay template does not. Kept as the record of why the plan of
 > 2026-09-22 was routed the way it was, and of which base codebase was ruled out.

@@ -154,7 +154,7 @@ Conventions:
   (ruled 2026-09-25 in S19): the frame stays opt-in, so the window's `New` and the CLI's `init` write the
   document the field's own defaults describe, and one photo — a legal collage since S19, the one-slot
   `grid-1-1x1` — is framed only when the user asks for a frame
-  `docs/2026-09-25-STEPS.md`, `S19 · Result`). Both lengths are **fractions of the canvas height**,
+  `docs/completed/2026-09-25-STEPS.md`, `S19 · Result`). Both lengths are **fractions of the canvas height**,
   like every other length the format stores. **The gap is the distance between two photos** (ruled
   2026-09-25, ruling 35; landed in S20): half of it comes off every side of a cell, so two neighbouring
   cells are `gapRel` apart, and the sheet's own edge gives up the whole gap, so the outermost photos
@@ -1159,7 +1159,7 @@ session's; each row is three consecutive runs on a quiet machine.
   against it after S21's sketch band, which is expected to remove both the band's own rebuild and the eviction above
   — an expectation to re-measure, not a measurement. The two cheaper optimisations the ruling was offered and did not
   take (a second preview-grade edge held in the source cache; a `Preview` of the band's own) are recorded in
-  `docs/2026-09-25-STEPS.md`, `S18 · Result`. **S21 re-measured it (2026-09-26): the numbers are the "S21"
+  `docs/completed/2026-09-25-STEPS.md`, `S18 · Result`. **S21 re-measured it (2026-09-26): the numbers are the "S21"
   section below**, and what it found about the eviction is the reason the second optimisation is moot.
 
 ### S20 (2026-09-26, `--release`, this machine)
@@ -1221,7 +1221,7 @@ from a snapshot with the guttered document open.
 ### S16 (2026-09-26, this machine)
 
 The package, measured where it can be measured without root (the step's own record is
-`docs/2026-09-25-STEPS.md`, `S16 · Result`):
+`docs/completed/2026-09-25-STEPS.md`, `S16 · Result`):
 
 | | |
 |---|---|

@@ -88,7 +88,7 @@ clearly which chapters **have already been read page by page** and which have no
   history now: `selection-mode` applied (the picker was a collection view) and the phone-style deviation was
   narrower. The bullet below is what replaced them.
 - **Re-routed again 2026-09-25, and landed 2026-09-26 (S22)**: the picker stage is gone
-  (`docs/2026-09-25-STEPS.md`, ruling 31) and the window opens on the editor, so this file's picker rows are
+  (`docs/completed/2026-09-25-STEPS.md`, ruling 31) and the window opens on the editor, so this file's picker rows are
   rewritten: §1's `selection-mode` is **not applicable again** (the app has no multi-select collection view),
   `patterns/nav` + `guidelines/navigation` leave the table with the `AdwNavigationView` that carried them, and
   §3's check-box, phone-chrome and preview-pane deviations go with the stage they described. The walk the
@@ -288,7 +288,7 @@ the canvas is **content** and the interface is **styling**, and the two must not
 
 Written for `open → add photos → pick a layout → adjust → export` — the path ruling 31 re-routed to on
 2026-09-25 and S22 landed — and **not yet walked** at the time of writing: the gate after S22–S24 is where a
-human walks it (`docs/2026-09-25-STEPS.md`, "Where humans must step in"). Run the app
+human walks it (`docs/completed/2026-09-25-STEPS.md`, "Where humans must step in"). Run the app
 (`cargo run --release -p pixlay`, the installed `pixlay` after S16, or `pixlay a.jpg b.jpg` for the second
 entry) and time the whole list:
 
@@ -309,7 +309,7 @@ entry) and time the whole list:
 
 The picker era's script — `open → pick 2–9 photos → Next → pick a layout → adjust → export`, which the human
 actually walked on 2026-09-25 — is the record of that pass, and its findings are
-`docs/2026-09-25-STEPS.md`'s six steps. The plan before that one, `pick a template → place photos → adjust
+`docs/completed/2026-09-25-STEPS.md`'s six steps. The plan before that one, `pick a template → place photos → adjust
 framing → export`, is in `docs/archive/2026-09-20-STEPS.md`; its walk was **voided** on 2026-09-22 (ruling 6),
 because that path is not the product's any more.
 
@@ -327,7 +327,7 @@ framing and rotation gestures feel right, and whether the copy reads well.
 | HIG item | Decision | Reason |
 |---|---|---|
 | GNOME Shell search provider, notification workflow | Not doing | the same discipline as the "Not doing" list: add no feature that does not serve the main path |
-| Phone-style layout — the *chrome*, not the capability (2026-09-22; amended 2026-09-25) | the capability is built with desktop idioms; the chrome is not copied | the picker-first flow came from mobile galleries and **went with the picker** (ruling 31): the editor is the app, and photos enter from the platform. What the mobile references still give the product is the layout band's own form — **a sketch of the geometry rather than a sample image**, the way Xiaomi's layout strip draws it — because a pixlay template carries geometry and no style, where Google's strip shows sample photos for the opposite reason (ruling 32; the research is in `docs/2026-09-25-STEPS.md`) |
+| Phone-style layout — the *chrome*, not the capability (2026-09-22; amended 2026-09-25) | the capability is built with desktop idioms; the chrome is not copied | the picker-first flow came from mobile galleries and **went with the picker** (ruling 31): the editor is the app, and photos enter from the platform. What the mobile references still give the product is the layout band's own form — **a sketch of the geometry rather than a sample image**, the way Xiaomi's layout strip draws it — because a pixlay template carries geometry and no style, where Google's strip shows sample photos for the opposite reason (ruling 32; the research is in `docs/completed/2026-09-25-STEPS.md`) |
 | Double-clicking to toggle the preview's zoom, and the preview pane's pan (HIG `guidelines/pointer-touch`) | Removed with the pane (S22) | S15j had recorded both as deviations: a double click toggled fit ↔ 1:1 and the pan had no keyboard path. The pane was the picker's, the stage is gone (ruling 31), and the deviations are moot rather than kept |
 | The selection-mode check box (HIG `patterns/containers/selection-mode`) | Not used, and the chapter is not applicable again | the 2026-09-22 ruling showed a picked cell by a highlight instead (`docs/archive/2026-09-22-STEPS.md`, `S13 · Ruling`); S22 deleted the stage, so the app has no multi-select collection view and the chapter governs nothing (the §1 row) |
 | Per-app style preference (light / dark / system, pick one of the three) | Not doing | amended 2026-09-22: the app is **dark by default**, which is what this page's `ui-styling` guidance recommends for one that displays rich visual content, and neither reference app (gthumb, loupe) offers the switch. A stored preference would also need a settings file: ruling 39 of 2026-09-25 allows one for the export's settings and the last export folder and **not** for this (the file carries exactly those three fields). Dark is not a substitute for high contrast, which stays a separate system mode and is checked in §2 |

@@ -17,7 +17,7 @@ take under three minutes. Before adding any feature, ask: does it make the main 
 from outside it — the platform's file chooser, a drop from the file manager onto the canvas, or
 `pixlay a.jpg b.jpg` on the command line, in argument order — because the picker judged nothing the file
 manager cannot, and its ordered list is replaced by the canvas's own spatial order plus an arbitrary
-two-cell swap (`docs/2026-09-25-STEPS.md`, ruling 31). That supersedes the photos-first route of
+two-cell swap (`docs/completed/2026-09-25-STEPS.md`, ruling 31). That supersedes the photos-first route of
 2026-09-22 and the review that proposed it (`docs/archive/2026-09-22-UX-DIRECTION.md`).*
 
 **Locked identifiers**
@@ -84,7 +84,7 @@ Measurement rules that go with it:
 - Measuring encoder performance requires **non-flat** content: flat color blocks skew A0 PNG size
   and time by 78× and 4.6× respectively.
 - Every threshold constant in the code carries its **source inline** — the measured value and its date —
-  or cites `docs/CONTRACT.md`. **The plan (`docs/2026-09-25-STEPS.md`), `docs/archive/` and
+  or cites `docs/CONTRACT.md`. **`docs/steps/`, `docs/archive/` and
   `docs/completed/` are the process record and are never cited from code**: they are scheduled for
   deletion or archival once their work is done, so a comment that points at them is a comment that stops
   resolving on the day that happens. **S-numbers are the exception and stay citable** — they are how the
@@ -121,8 +121,8 @@ Measurement rules that go with it:
 
 ## Commit discipline
 
-- **Commit once per completed step** (finishing one step in `docs/2026-09-25-STEPS.md` produces at least one
-  commit). Do not batch several steps into one commit.
+- **Commit once per completed step**: finishing one step — its file under `docs/steps/`, renamed to
+  `…-done.md` — produces at least one commit. Do not batch several steps into one commit.
 - **Pushing requires the user's explicit permission first.** Without it, commit only and never
   push: do not `git push` on your own initiative and do not change remote configuration.
 - **End every commit message's first line with `🤖`.** The criterion is whether the change
@@ -138,13 +138,21 @@ Measurement rules that go with it:
   repository layout — runs the one command that reads what changed, and a step's own verification
   command is that command when the step names one. If it is red, do not commit.
 - Never committed: `target/` (see `.gitignore`). Committed: `Cargo.lock` (AUR discipline).
-- **"Done" means the progress line is rewritten and committed** (see "Session and persistence
+- **"Done" means the step's `**Progress**` line is rewritten and committed** (see "Session and persistence
   discipline"), not that the code is written and the tests are green.
 
 ## Step discipline
 
-How `docs/2026-09-25-STEPS.md` splits the work, and the cases in which a step has to end a session. The steps
-themselves are in that file; this is the rule that produced them.
+How the work splits into steps, what a step's own file records, and the cases in which a step has to end a
+session. The steps themselves are one file each under `docs/steps/`.
+
+**One file per step** (ruled 2026-09-27, human): `docs/steps/<S-number>-<slug>-<status>.md` — the slug a
+few words, the **status last** and one of `todo`, `doing`, `blocked`, `done`, so a directory listing is
+the plan — carrying the step's goal, work, machine-checkable exit, `Human` line, rulings, `Result` and the
+one `**Progress**` line that says where it stands. A status change renames the file
+(`git mv S32-…-doing.md S32-…-done.md`) in the same commit as that line. The directory is **`steps`** and
+not `plans` because a plan is a set of steps and this is the unit that has a file, and not `phases`
+because nothing here is one; the S-numbering continues across plans.
 
 1. Every step must have a **machine-checkable** exit. A "step" with no checkable exit is not a step.
 2. First do the one thing that can overturn the whole choice of technology (S0).
@@ -156,7 +164,8 @@ themselves are in that file; this is the rule that produced them.
    deciding S8's `depends`); the step **may overturn an earlier choice of technology**.
    *Rationale: within one session, the model treats its own unwritten draft as an established premise and keeps building on it; a contract review is only meaningful
    when executed by a session that did not write that draft.*
-   *Precondition: a boundary holds only if the **conclusion is already on disk** (the threshold constants in the tests + the measured numbers in this file + the "Current progress" line).
+   *Precondition: a boundary holds only if the **conclusion is already on disk** (the threshold constants in the tests + the measured numbers in `docs/CONTRACT.md` + the step's
+   `**Progress**` line).
    A conclusion that is not on disk means switching session equals measuring it again.*
    By this rule the natural boundaries are `S0 ┊ S1 ┊ S2+S3 ┊ S4 ┊ S5+S6 ┊ S7 ┊ S8` (six sessions, not nine).
    *That line belongs to the retired plan of 2026-09-20 and is kept as the example that produced the rule;
@@ -166,10 +175,10 @@ themselves are in that file; this is the rule that produced them.
 
 **A conversation is not storage.** Sessions get truncated, cleared or deleted; a conclusion that
 exists only in the conversation never happened. A new session reads files, not someone else's
-transcript, and the "Current progress" line in `docs/2026-09-25-STEPS.md` is the **only authority**.
+transcript, and the `**Progress**` line in that step's own file under `docs/steps/` is the **only authority**.
 
-- **A step is complete when the "Current progress" line is rewritten and committed.** Green tests
-  and good numbers are necessary, not sufficient.
+- **A step is complete when its file's `**Progress**` line is rewritten — the file renamed to
+  `…-done.md` — and committed.** Green tests and good numbers are necessary, not sufficient.
   *Rationale: the S1 contract review had actually passed; the AI only committed the defect fixes
   and the measurements and never touched the progress line, so deleting the original session erased
   the gate — the next session would have read "next: review the contract" as if the review had
@@ -182,9 +191,9 @@ transcript, and the "Current progress" line in `docs/2026-09-25-STEPS.md` is the
   *Reference shape: S0's `Ruling (2026-09-20, human): Cairo stays` plus the progress line
   `S0 — done and ruled on`.*
 - **Closing a gate takes five parts; missing one means it is not done**:
-  1. the ruling block written into that step's "Result" subsection in `docs/2026-09-25-STEPS.md`;
-  2. the "Current progress" line rewritten to "done and passed \_\_\_ → next X";
-  3. the matching entry under "Where humans must step in" marked as passed or removed;
+  1. the ruling block written into that step's own `Result` subsection (`docs/steps/…`);
+  2. its `**Progress**` line rewritten to "done and passed \_\_\_ → next X";
+  3. the step's `Human` line marked as passed (a walk is the matching item of `docs/HIG-REVIEW.md` §2);
   4. any shape the ruling changed synchronized into `docs/CONTRACT.md`;
   5. commit.
 - **Writing it down is not a prerequisite of the next step; it is the other half of this ruling.**
@@ -341,7 +350,7 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
   editor — one page, nothing to push, and `AdwNavigationView` went with the stage it held — because the
   picker judged nothing the file manager cannot and cost a stage to do it. Its ordered list, its preview
   and its zoom, the folder scan and the tile cache went with it; a photo's order is the order it was
-  added, and re-ordering is the swap of the new plan's S23 (`docs/2026-09-25-STEPS.md`). **The layout band draws sketches**: each candidate is the template's
+  added, and re-ordering is the swap of S23 (`docs/completed/2026-09-25-STEPS.md`). **The layout band draws sketches**: each candidate is the template's
   geometry drawn in ink — its cells in paper, every cell's outline and the sheet's ground no cell covers in
   ink, so a layout whose cells leave a gutter shows it as a gap (S29) — rather than a render of the user's
   photos (ruling 32), because a template carries geometry and no style, so a sketch is a complete account of
@@ -395,14 +404,14 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
     than a sample image**, the way Xiaomi's layout strip draws it — because a pixlay template carries
     geometry and no style. Google's strip shows sample photos for the opposite reason: its templates
     carry style, which a sketch could not show (ruling 32; the research is in
-    `docs/2026-09-25-STEPS.md`).
+    `docs/completed/2026-09-25-STEPS.md`).
 - HIG `patterns/containers/selection-mode` **is not applicable again** (ruled 2026-09-25, ruling 31): the
   picker was this app's only multi-select collection view and it is gone. The layout band is a
   single-choice set (HIG `patterns/controls/radio-buttons`), and the canvas keeps no mode of its own —
   the page's own advice, "when editing is the primary interaction there should be no separate edit
   mode", is what it has always followed.
-- Whatever can be machine-checked lives only in the GUI's tests (see `docs/2026-09-25-STEPS.md`); the visual part
-  goes item by item through `docs/HIG-REVIEW.md`.
+- Whatever can be machine-checked lives only in the GUI's tests (see the step's own file under `docs/steps/`); the visual
+  part goes item by item through `docs/HIG-REVIEW.md`.
 
 ## Directions not to "improve"
 
@@ -450,7 +459,8 @@ only, diagnostics go to stderr, exit codes are fixed, identical input yields ide
 **Nothing may be possible only in the GUI and not in the CLI.**
 *Rationale: the model cannot see windows and can only read the CLI's stdout, and "looks right" is
 not a criterion — a visual conclusion must become a number (a probe) in the CLI. Contract details
-(subcommands, fields, exit codes) live in the tests and `docs/2026-09-25-STEPS.md` and are not repeated here.*
+(subcommands, fields, exit codes) live in the tests and the step's own file under `docs/steps/` and are
+not repeated here.*
 
 ## Invariants that must hold
 

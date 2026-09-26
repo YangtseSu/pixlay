@@ -2,11 +2,11 @@
 
 Future directions that are **not** steps.
 
-`docs/2026-09-25-STEPS.md` is the plan: the work that is scheduled, ordered and owned, with a
-machine-checkable exit for each step. This file holds what a person has said they want to build later,
-together with the research already done, so a later session does not repeat it. **Nothing here is an
-instruction and nothing here is a promise**: when a direction is ruled in it becomes a step in the plan
-(or a plan of its own) and moves out of this file.
+[`docs/steps/`](steps/) holds the plan: one file per step — `<S-number>-<slug>-<status>.md`, the status in
+the file's own name — with a machine-checkable exit for each. This file holds what a person has said they
+want to build later, together with the research already done, so a later session does not repeat it.
+**Nothing here is an instruction and nothing here is a promise**: when a direction is ruled in it becomes a
+step in the plan and moves out of this file.
 
 Provenance is marked per item: *asked for* means the human named the direction, *proposed* means it is
 the assistant's suggestion, recorded for a decision nobody has made yet.
