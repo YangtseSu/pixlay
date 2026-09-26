@@ -144,13 +144,11 @@ mod imp {
         /// window's (`update_title` writes the document's name here).
         pub header: OnceCell<adw::HeaderBar>,
         pub title: OnceCell<adw::WindowTitle>,
-        /// The document-level dialog (S15): `Frame…`, built once and presented by the
-        /// header bar's button. The export has none since S25 — the platform's own save
-        /// dialog is the one dialog an export has (ruling 36).
-        pub frame_dialog: OnceCell<Rc<dialogs::FrameDialog>>,
-        /// The app's settings surface (S25, ruling 36): the export's format and long
-        /// edge, presented by the menu's *Preferences* item and `Ctrl+,`.
-        pub settings_dialog: OnceCell<Rc<settings::Dialog>>,
+        /// The app's one dialog (S25b): the document's frame above the export's two
+        /// settings, built once and presented by both entry points — the header bar's
+        /// frame button (`win.frame`) and the menu's *Preferences* item
+        /// (`app.settings`, `Ctrl+,`).
+        pub settings_dialog: OnceCell<Rc<dialogs::SettingsDialog>>,
         /// How this window's two workers start (S15h, PIX-014): the product's own
         /// plan unless a test named another one.
         pub workers: Cell<Workers>,
@@ -258,7 +256,6 @@ mod imp {
                 cell_controls: OnceCell::new(),
                 header: OnceCell::new(),
                 title: OnceCell::new(),
-                frame_dialog: OnceCell::new(),
                 settings_dialog: OnceCell::new(),
                 workers: Cell::new(Workers::default()),
                 decode_reported: Cell::new(false),
@@ -521,8 +518,9 @@ impl EditorWindow {
         imp.cell_controls.set(controls).ok();
         imp.header.set(header).ok();
         imp.title.set(title).ok();
-        imp.frame_dialog.set(dialogs::FrameDialog::build(self)).ok();
-        imp.settings_dialog.set(settings::Dialog::build(self)).ok();
+        imp.settings_dialog
+            .set(dialogs::SettingsDialog::build(self))
+            .ok();
         imp.banner.set(banner.clone()).ok();
         imp.toast.set(toast).ok();
         imp.progress.set(progress).ok();
@@ -770,13 +768,8 @@ impl EditorWindow {
         self.imp().clipboard_usable.get()
     }
 
-    /// The `Frame…` dialog (S15).
-    pub fn frame_dialog(&self) -> Option<Rc<dialogs::FrameDialog>> {
-        self.imp().frame_dialog.get().cloned()
-    }
-
-    /// The app's settings surface (S25, ruling 36).
-    pub fn settings_dialog(&self) -> Option<Rc<settings::Dialog>> {
+    /// The app's one dialog (S25b): the frame's rows and the export's settings.
+    pub fn settings_dialog(&self) -> Option<Rc<dialogs::SettingsDialog>> {
         self.imp().settings_dialog.get().cloned()
     }
 
@@ -2295,11 +2288,10 @@ impl EditorWindow {
         self.start_export(path.to_path_buf());
     }
 
-    /// Presents the `Frame…` dialog (S15): the document's frame as three rows.
+    /// Presents the app's dialog (S15; one surface since S25b) — the frame's rows above
+    /// the export's, over this window. The header bar's frame button lands here.
     pub fn frame(&self) {
-        if let Some(dialog) = self.frame_dialog() {
-            dialog.present(self);
-        }
+        self.show_settings();
     }
 
     /// Sets the document's frame as a live edit (S15): the canvas redraws while the
@@ -2323,12 +2315,12 @@ impl EditorWindow {
         Ok(())
     }
 
-    /// Presents the Settings surface (S25, ruling 36): the export's format and long
-    /// edge, over this window, with the settings the window holds in its rows.
+    /// Presents the app's dialog (S25, ruling 36; one surface since S25b): the
+    /// document's frame and the export's settings, over this window, seeded from both.
     ///
-    /// The menu's *Preferences* item and `Ctrl+,` both land here, through the
-    /// application's own `app.settings` action, so the menu item, the accelerator and
-    /// the dialog cannot ask three different questions.
+    /// The menu's *Preferences* item and `Ctrl+,` land here through the application's
+    /// own `app.settings` action, and the header bar's frame button through `win.frame`
+    /// — one dialog, two entry points, so neither can show a different state.
     pub fn show_settings(&self) {
         if let Some(dialog) = self.settings_dialog() {
             dialog.present(self);

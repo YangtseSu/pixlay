@@ -28,6 +28,7 @@ mod support;
 use std::path::{Path, PathBuf};
 
 use gtk4::prelude::*;
+use libadwaita::prelude::*;
 
 use pixlay::canvas::Gesture;
 use pixlay::i18n::gettext;
@@ -107,8 +108,8 @@ fn the_pending_edit_and_the_document_survive_every_boundary() {
     // commits is the value the user was looking at — not the last one that happened
     // to be quiet for 250 ms.
     let dialog = window
-        .frame_dialog()
-        .expect("the window has a Frame dialog");
+        .settings_dialog()
+        .expect("the window has the settings dialog");
     window.select(None);
     let plain = window.document().frame;
     assert!(
@@ -127,8 +128,11 @@ fn the_pending_edit_and_the_document_survive_every_boundary() {
         plain.gap_rel,
         "and the history does not have it yet"
     );
-    dialog.close_button().emit_clicked();
-    support::close_dialog(&dialog.widget(), &window);
+    // **Closing the dialog is the boundary** (S15d, PIX-002): `AdwDialog::closed` is
+    // what commits the pending frame, so what it commits is the value the user was
+    // looking at — not the last one that happened to be quiet for 250 ms.
+    dialog.widget().close();
+    support::close_dialog(&dialog.widget().upcast::<libadwaita::Dialog>(), &window);
     assert_eq!(
         window.document().frame.gap_rel,
         0.04,
@@ -192,7 +196,7 @@ fn the_pending_edit_and_the_document_survive_every_boundary() {
         "the file does not hold the pending edit"
     );
     assert!(!window.is_dirty(), "saving is the file's own state again");
-    support::close_dialog(&dialog.widget(), &window);
+    support::close_dialog(&dialog.widget().upcast::<libadwaita::Dialog>(), &window);
 
     // ---- save → edit → undo is not dirty ---------------------------------
     window

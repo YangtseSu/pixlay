@@ -504,44 +504,37 @@ fn check_compose(window: &EditorWindow, failures: &mut Vec<String>) {
         }
     }
 
-    // The two dialogs, each presented so that its own tree can be walked: a dialog
-    // that is not on screen has no allocation and no accessible tree. `Preferences` is
-    // S25's settings surface (ruling 36), which replaced the export's own dialog.
-    for (name, dialog) in [
-        ("Frame", window.frame_dialog().map(|dialog| dialog.widget())),
-        (
-            "Preferences",
-            window
-                .settings_dialog()
-                .map(|dialog| dialog.widget().upcast::<adw::Dialog>()),
-        ),
-    ] {
-        let Some(dialog) = dialog else {
-            failures.push(format!("the window has no {name} dialog"));
-            continue;
-        };
-        dialog.present(Some(window));
-        window.pump(Duration::from_millis(50));
-        let root = dialog.clone().upcast::<gtk4::Widget>();
-        check_accessible_names_in(&root, failures);
-        // The heading. `Frame` is an action dialog and its affirmative's verb is the
-        // action's name (HIG `patterns/feedback/dialogs`); the settings surface has no
-        // affirmative — its rows apply as they move — and its way out is the close
-        // button libadwaita's own dialog carries.
-        let controls = support::descendants(&root);
-        let labels: Vec<String> = controls
-            .iter()
-            .filter_map(|widget| widget.downcast_ref::<gtk4::Label>())
-            .map(|label| label.label().to_string())
-            .collect();
-        if !labels.iter().any(|label| label == name) {
-            failures.push(format!("the {name} dialog has no heading reading {name:?}"));
-        }
-        if name == "Frame" && !labels.iter().any(|label| label == "Close") {
-            failures.push("the Frame dialog has no way out".into());
-        }
-        dialog.force_close();
+    // The app's one dialog (S25b), presented so that its own tree can be walked: a
+    // dialog that is not on screen has no allocation and no accessible tree. It is the
+    // document's frame above the export's settings, and its heading is its own title.
+    let dialog = window
+        .settings_dialog()
+        .map(|dialog| dialog.widget().upcast::<adw::Dialog>());
+    let Some(dialog) = dialog else {
+        failures.push("the window has no settings dialog".into());
+        return;
+    };
+    dialog.present(Some(window));
+    window.pump(Duration::from_millis(50));
+    let root = dialog.clone().upcast::<gtk4::Widget>();
+    check_accessible_names_in(&root, failures);
+    // The heading, and the two groups the dialog carries: the frame's rows are the
+    // document's and the export's are the app's (S25b's order — the collage first).
+    let controls = support::descendants(&root);
+    let labels: Vec<String> = controls
+        .iter()
+        .filter_map(|widget| widget.downcast_ref::<gtk4::Label>())
+        .map(|label| label.label().to_string())
+        .collect();
+    if !labels.iter().any(|label| label == "Preferences") {
+        failures.push("the settings dialog has no heading reading \"Preferences\"".into());
     }
+    for group in ["Frame", "Export"] {
+        if !labels.iter().any(|label| label == group) {
+            failures.push(format!("the settings dialog has no {group} group"));
+        }
+    }
+    dialog.force_close();
     // Leave the window as this check found it: the colour-scheme probe that follows
     // samples the sheet near its edges, and a selection outline is interface drawn on
     // top of the content.

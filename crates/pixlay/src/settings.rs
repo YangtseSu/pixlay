@@ -16,46 +16,20 @@
 //! it for the same reason — the file is the app's own, and a hand-edited `999999` is a
 //! number to clamp, not a reason to lose the other two settings.
 //!
-//! **The surface is `AdwPreferencesDialog`** (libadwaita 1.5): `AdwPreferencesWindow`
-//! is deprecated since 1.6, and a deprecated constructor is what
-//! `cargo clippy -- -D warnings` refuses — the same reason the export's own dialog
-//! could not use `GtkFileChooserWidget` (the research of 2026-09-25). It carries one
-//! `AdwPreferencesPage` with one group and two rows: the format, and the long edge in
-//! pixels with the unit in its accessible name. The dialog's title is this app's own
-//! `gettext("Preferences")` rather than libadwaita's default of the same word, so the
-//! heading and the menu item are one string in one catalog.
+//! **The rows that edit this file are the dialog's export group**
+//! (`crate::dialogs::SettingsDialog`, which S25b merged with the document's frame
+//! rows): the format, and the long edge in pixels with the unit in its accessible name.
+//! This module owns the value and the file, not the surface.
 
-use std::cell::Cell;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 
-use adw::prelude::*;
-use gtk4 as gtk;
 use gtk4::glib;
-use libadwaita as adw;
 use serde::{Deserialize, Serialize};
 
 use pixlay_imaging::encode::Format;
 
-use crate::a11y;
 use crate::export::{MAX_EXPORT_PX, MIN_EXPORT_PX};
-use crate::i18n::gettext;
-use crate::window::EditorWindow;
-
-/// The formats the settings' row offers, in the row's own order.
-///
-/// The row's index *is* the index into this table, so the two cannot drift. It is the
-/// export form's own table, moved here with the question it answers (S25).
-const FORMATS: [Format; 2] = [Format::Jpeg, Format::Png];
-
-/// The formats' names, which are identifiers and never translated (`AGENTS.md`,
-/// "Language conventions"): a user reads "PNG" and a file carries `.png`.
-const FORMAT_NAMES: [&str; 2] = ["JPEG", "PNG"];
-
-/// The step the long edge moves in, in pixels: 100 is a round number a person can type
-/// over, and the bounds are the export form's own (`MIN_EXPORT_PX` / `MAX_EXPORT_PX`).
-const SIZE_STEP: u32 = 100;
 
 /// The export settings this app remembers, and nothing else (ruling 39).
 ///
@@ -168,141 +142,6 @@ impl Settings {
         pixlay_core::atomic::write_atomic(path, |file| file.write_all(json.as_bytes()))
             .map(|_bytes| ())
             .map_err(|failure| failure.into_io().to_string())
-    }
-}
-
-/// The Settings surface: the export's format and long edge as two rows (S25).
-///
-/// One page, one group, two rows — the whole of what ruling 39 lets the file carry.
-/// Each row writes the window's settings as it moves, so a change is on disk before the
-/// dialog is closed; there is nothing to confirm and no *Save* button, which is what
-/// every libadwaita preferences dialog does.
-pub struct Dialog {
-    dialog: adw::PreferencesDialog,
-    format: adw::ComboRow,
-    long_edge: adw::SpinRow,
-    /// Set while this module writes the rows, so seeding the surface from the settings
-    /// is not read back as a user editing it (the frame dialog's own idiom).
-    updating: Rc<Cell<bool>>,
-}
-
-impl Dialog {
-    /// Builds the surface, which the menu's *Preferences* item and `Ctrl+,` present.
-    pub fn build(window: &EditorWindow) -> Rc<Self> {
-        let format = adw::ComboRow::builder()
-            .title(gettext("Format"))
-            .model(&gtk::StringList::new(&FORMAT_NAMES))
-            .build();
-        a11y::label(&format, &gettext("Export format"));
-        let long_edge = adw::SpinRow::with_range(
-            f64::from(MIN_EXPORT_PX),
-            f64::from(MAX_EXPORT_PX),
-            f64::from(SIZE_STEP),
-        );
-        long_edge.set_digits(0);
-        long_edge.set_title(&gettext("Long edge"));
-        long_edge.set_subtitle(&gettext("In pixels"));
-        a11y::label_spin_row(&long_edge, &gettext("Long edge in pixels"));
-
-        let group = adw::PreferencesGroup::builder()
-            .title(gettext("Export"))
-            .description(gettext("The format and the size of an export"))
-            .build();
-        group.add(&format);
-        group.add(&long_edge);
-
-        let page = adw::PreferencesPage::new();
-        page.set_title(&gettext("Export"));
-        page.add(&group);
-
-        let dialog = adw::PreferencesDialog::new();
-        dialog.set_title(&gettext("Preferences"));
-        dialog.add(&page);
-
-        let surface = Rc::new(Self {
-            dialog,
-            format,
-            long_edge,
-            updating: Rc::new(Cell::new(false)),
-        });
-        // Weak self-references, for the reason the frame dialog's handlers are weak:
-        // these closures live on widgets the dialog owns.
-        let weak = Rc::downgrade(&surface);
-        surface.format.connect_selected_notify(glib::clone!(
-            #[weak]
-            window,
-            #[strong]
-            weak,
-            move |row| {
-                let Some(dialog) = weak.upgrade() else {
-                    return;
-                };
-                if dialog.updating.get() {
-                    return;
-                }
-                let Some(format) = FORMATS.get(row.selected() as usize) else {
-                    return;
-                };
-                let mut settings = window.settings();
-                settings.format = *format;
-                window.remember_settings(&settings);
-            }
-        ));
-        let weak = Rc::downgrade(&surface);
-        surface.long_edge.connect_value_notify(glib::clone!(
-            #[weak]
-            window,
-            #[strong]
-            weak,
-            move |row| {
-                let Some(dialog) = weak.upgrade() else {
-                    return;
-                };
-                if dialog.updating.get() {
-                    return;
-                }
-                let mut settings = window.settings();
-                settings.long_edge = row.value().round() as u32;
-                window.remember_settings(&settings);
-            }
-        ));
-        surface
-    }
-
-    /// Shows the surface over `window`, with the window's own settings in its rows.
-    pub fn present(&self, window: &EditorWindow) {
-        self.seed(window);
-        self.dialog.present(Some(window));
-    }
-
-    /// Puts the window's own settings into the rows.
-    ///
-    /// The settings are the authority rather than the dialog's last state, and the seed
-    /// is guarded: writing the rows is not a user editing them, and without the guard
-    /// opening the surface would write the settings file again.
-    pub fn seed(&self, window: &EditorWindow) {
-        let settings = window.settings();
-        let index = FORMATS
-            .iter()
-            .position(|format| *format == settings.format)
-            .unwrap_or(0) as u32;
-        self.updating.set(true);
-        self.format.set_selected(index);
-        self.long_edge.set_value(f64::from(settings.long_edge));
-        self.updating.set(false);
-    }
-
-    /// The dialog itself, for the tests and the HIG checks.
-    pub fn widget(&self) -> adw::PreferencesDialog {
-        self.dialog.clone()
-    }
-
-    pub fn format_row(&self) -> adw::ComboRow {
-        self.format.clone()
-    }
-
-    pub fn long_edge_row(&self) -> adw::SpinRow {
-        self.long_edge.clone()
     }
 }
 

@@ -27,6 +27,7 @@ mod support;
 use std::time::{Duration, Instant};
 
 use gtk4::prelude::*;
+use libadwaita::prelude::*;
 use pixlay::canvas;
 use pixlay_core::{PixelSize, Point, Rgba8};
 use pixlay_imaging::encode::Format;
@@ -287,12 +288,12 @@ fn the_compose_stage_edits_the_selected_cell_and_the_document() {
     settle(&window);
     assert!(window.document().cells[0].source.is_some());
 
-    // ---- the Frame… dialog ------------------------------------------------
+    // ---- the frame's rows, in the app's one dialog (S25b) ------------------
     // Ruling 30: three rows in the document's own order — gap, radius, colour — over
-    // `frame{gapRel, radiusRel, color}`.
-    let frame_dialog = window
-        .frame_dialog()
-        .expect("the window has a Frame dialog");
+    // `frame{gapRel, radiusRel, color}`, in the group above the export's (S25b).
+    let dialog = window
+        .settings_dialog()
+        .expect("the window has the settings dialog");
     // **The probe's own point**: the four-way junction of the verification template's
     // top-left cells (cell 0 ends at 3/8 of the sheet, and so does cell 3 beside it and
     // cell 1 under it). With no frame it is photo; with one it is the backdrop, and the
@@ -319,19 +320,19 @@ fn the_compose_stage_edits_the_selected_cell_and_the_document() {
         "the win.frame action is installed"
     );
     assert!(
-        frame_dialog.widget().is_visible(),
+        dialog.widget().is_visible(),
         "the header bar's Frame button presents the dialog"
     );
-    frame_dialog.seed(&window);
-    assert_eq!(frame_dialog.gap_row().value(), 0.0);
-    assert_eq!(frame_dialog.radius_row().value(), 0.0);
-    assert_eq!(frame_dialog.color_button().rgba(), gtk4::gdk::RGBA::WHITE);
+    dialog.seed(&window);
+    assert_eq!(dialog.gap_row().value(), 0.0);
+    assert_eq!(dialog.radius_row().value(), 0.0);
+    assert_eq!(dialog.color_button().rgba(), gtk4::gdk::RGBA::WHITE);
 
     // The rows are a share of the collage's height, so 4.0 is `gapRel = 0.04`. The
     // write is **live**: the document the canvas draws carries the row's value while
     // the dialog is open, and the history only sees it once the value is quiet — the
     // same pending-command path a slider gesture takes.
-    frame_dialog.gap_row().set_value(4.0);
+    dialog.gap_row().set_value(4.0);
     assert_eq!(
         window.display_document().frame.gap_rel,
         0.04,
@@ -348,10 +349,10 @@ fn the_compose_stage_edits_the_selected_cell_and_the_document() {
         0.04,
         "the gap row round-trips into the document"
     );
-    frame_dialog.radius_row().set_value(2.5);
+    dialog.radius_row().set_value(2.5);
     window.commit();
     assert_eq!(window.document().frame.radius_rel, 0.025);
-    frame_dialog
+    dialog
         .color_button()
         .set_rgba(&gtk4::gdk::RGBA::new(1.0, 0.0, 0.0, 1.0));
     window.commit();
@@ -367,8 +368,11 @@ fn the_compose_stage_edits_the_selected_cell_and_the_document() {
     // produced no node at all for the 180 s the frame dialog was open), so a pixel probe
     // of the sheet is taken with the dialog out of the way. The *live* half is the claim
     // above: the document the canvas draws already carries the row's value.
-    frame_dialog.close_button().emit_clicked();
-    support::close_dialog(&frame_dialog.widget(), &window);
+    // Closing is a boundary (S15d): the pending frame becomes the undo step it looked
+    // like (`AdwDialog::closed`), and the harness finishes the dismissal a headless
+    // server never does.
+    dialog.widget().close();
+    support::close_dialog(&dialog.widget().upcast::<libadwaita::Dialog>(), &window);
     settle(&window);
     // The probe waits for *its* observation, not for a span of time: the canvas's own
     // redraw is what carries the frame's colour, and on a background window the frame
@@ -410,24 +414,24 @@ fn the_compose_stage_edits_the_selected_cell_and_the_document() {
         gtk4::prelude::WidgetExt::activate_action(&window, "win.frame", None).is_ok(),
         "the win.frame action is installed"
     );
-    frame_dialog.seed(&window);
+    dialog.seed(&window);
     assert_eq!(
-        frame_dialog.notice(),
+        dialog.notice(),
         None,
         "a freshly presented dialog has nothing to report"
     );
     let before_refusal = window.document();
-    frame_dialog.gap_row().set_value(100.0);
-    let notice = frame_dialog.notice();
+    dialog.gap_row().set_value(100.0);
+    let notice = dialog.notice();
     assert!(
         notice.is_some(),
         "a refused value is reported in the dialog's own banner (row {}, document gap {}, \
          display gap {}, toast {:?}, dialog visible {})",
-        frame_dialog.gap_row().value(),
+        dialog.gap_row().value(),
         window.document().frame.gap_rel,
         window.display_document().frame.gap_rel,
         window.last_toast(),
-        frame_dialog.widget().is_visible()
+        dialog.widget().is_visible()
     );
     let notice = notice.expect("checked above");
     assert!(
@@ -435,7 +439,7 @@ fn the_compose_stage_edits_the_selected_cell_and_the_document() {
         "the reason names the cell the gap emptied, got {notice:?}"
     );
     assert_eq!(
-        frame_dialog.gap_row().value(),
+        dialog.gap_row().value(),
         0.0,
         "the row goes back to what the document holds"
     );
@@ -458,16 +462,15 @@ fn the_compose_stage_edits_the_selected_cell_and_the_document() {
         "a refused value is not a commit waiting to happen"
     );
     // The next accepted value clears the report: the row's number is the document's.
-    frame_dialog.radius_row().set_value(1.0);
-    assert_eq!(
-        frame_dialog.notice(),
-        None,
-        "an accepted value clears the report"
-    );
+    dialog.radius_row().set_value(1.0);
+    assert_eq!(dialog.notice(), None, "an accepted value clears the report");
     window.commit();
     assert_eq!(window.document().frame.radius_rel, 0.01);
-    frame_dialog.close_button().emit_clicked();
-    support::close_dialog(&frame_dialog.widget(), &window);
+    // Closing is a boundary (S15d): the pending frame becomes the undo step it looked
+    // like (`AdwDialog::closed`), and the harness finishes the dismissal a headless
+    // server never does.
+    dialog.widget().close();
+    support::close_dialog(&dialog.widget().upcast::<libadwaita::Dialog>(), &window);
 
     // ---- the export (S25) -------------------------------------------------
     // Ruling 36 moved the export's two parameters into the settings and its one dialog

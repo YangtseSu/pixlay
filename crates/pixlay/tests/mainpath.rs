@@ -300,8 +300,8 @@ fn the_main_path_can_be_walked() {
     // The rows write live — the canvas redraws behind the dialog — and the settled
     // value is one undo step, which is what `commit` is here.
     let frame_dialog = window
-        .frame_dialog()
-        .expect("the window has a Frame dialog");
+        .settings_dialog()
+        .expect("the window has the settings dialog");
     assert!(
         gtk4::prelude::WidgetExt::activate_action(&window, "win.frame", None).is_ok(),
         "the win.frame action is installed"
@@ -324,7 +324,10 @@ fn the_main_path_can_be_walked() {
         window.wait_for_idle(support::WAIT),
         "the framed re-decode finished"
     );
-    support::close_dialog(&frame_dialog.widget(), &window);
+    support::close_dialog(
+        &frame_dialog.widget().upcast::<libadwaita::Dialog>(),
+        &window,
+    );
     // The frame is a document field the CLI writes with its own flags, so the same
     // edit has to be expressible there: the three numbers in `edit`'s vocabulary.
     let stored_frame = support::artifact("mainpath-framed.pixlay");

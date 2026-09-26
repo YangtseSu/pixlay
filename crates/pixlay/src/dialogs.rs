@@ -1,27 +1,28 @@
-//! The document-level dialog: `Frame…` (S15, ruling 18).
+//! The app's one dialog: the document's frame above the app's export settings
+//! (S15, ruling 18; merged by S25b).
 //!
-//! Ruling 18 removed the utility pane, and of its groups the frame's three settings had
-//! no other home: they became an `AdwDialog` rather than permanent rows — HIG
-//! `patterns/feedback/dialogs`, "Action Dialogs" (a header bar, a heading which
-//! describes the action, and the affirmative button carrying an imperative verb).
+//! Ruling 18 removed the utility pane, and the frame's three settings had no other home:
+//! they became rows in a dialog rather than permanent controls. S25 moved the export's
+//! two parameters into a surface of their own, and **S25b merged the two** (the human's
+//! ruling of 2026-09-26): one `AdwPreferencesDialog` titled *Preferences*, the frame's
+//! group above the export's, behind both entry points — the header bar's frame button
+//! (`win.frame`) and the menu's *Preferences* item (`app.settings`, `Ctrl+,`). HIG
+//! `patterns/containers/windows` allows exactly this: a secondary window "can contain
+//! information and preferences that are relevant to the entire app, or … information and
+//! options for a single content item".
 //!
-//! **It writes as its rows move**: the canvas behind it redraws, the change becomes one
-//! undo step when the value stops moving, and `Ctrl+Z` is the way back — so its only
-//! button is *Close*. A dialog that has already applied everything has nothing to
-//! confirm, and a Cancel that had to unwind a stack of live edits would be a second
-//! undo stack (`S14b · Ruling`, the same reason `+` does not remember the cell it
-//! dropped).
-//!
-//! **The export's own dialog left in S25** (ruling 36): its two parameters moved into
-//! the app's settings surface (`crate::settings`), its name row and folder chooser
-//! became the platform's own save dialog (`crate::export::seed`), and the file's
-//! extension is the settings' format's rather than a row's. What is left here is the
-//! document's own dialog, which the export never was.
+//! **The two groups write differently, and that is the point.** The frame's rows write
+//! *live*: the canvas redraws behind the dialog, the change becomes one undo step when
+//! the value stops moving, and `Ctrl+Z` is the way back. A value the document refuses is
+//! reported inside the dialog — libadwaita's own toast surface, `add_toast`, because a
+//! window toast would be behind the modal — and the row goes back to the document's own
+//! number. The export's rows are the app's settings: a move writes the settings file
+//! (`crate::settings`) and touches no document.
 //!
 //! The dialog holds no GTK object across a thread: the canvas redraws on the main
 //! thread, and nothing here starts a worker.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -31,8 +32,10 @@ use gtk4::prelude::*;
 use libadwaita as adw;
 
 use pixlay_core::{Frame, Rgba8};
+use pixlay_imaging::encode::Format;
 
 use crate::a11y;
+use crate::export::{MAX_EXPORT_PX, MIN_EXPORT_PX};
 use crate::i18n::{fill, gettext};
 use crate::window::EditorWindow;
 
@@ -51,30 +54,51 @@ const PERCENT: f64 = 100.0;
 /// hundred times that. A comparison without one would call a seed's own echo a change.
 const ROW_EPSILON: f64 = 1e-6;
 
-/// The `Frame…` dialog: the document's frame as three rows, in the document's own
-/// order — gap, radius, colour (ruling 30, 2026-09-23).
-pub struct FrameDialog {
-    dialog: adw::Dialog,
-    close: gtk::Button,
+/// The formats the export's row offers, in the row's own order.
+///
+/// The row's index *is* the index into this table, so the two cannot drift.
+const FORMATS: [Format; 2] = [Format::Jpeg, Format::Png];
+
+/// The formats' names, which are identifiers and never translated (`AGENTS.md`,
+/// "Language conventions"): a user reads "PNG" and a file carries `.png`.
+const FORMAT_NAMES: [&str; 2] = ["JPEG", "PNG"];
+
+/// The step the long edge moves in, in pixels: 100 is a round number a person can type
+/// over, and the bounds are the export's own (`MIN_EXPORT_PX` / `MAX_EXPORT_PX`).
+const SIZE_STEP: u32 = 100;
+
+/// The app's one dialog: the frame's three rows and the export's two (S25b).
+///
+/// The frame's rows are the document's, in the document's own order — gap, radius,
+/// colour (ruling 30, 2026-09-23) — and the export's are the app's own settings
+/// (S25, rulings 36 and 39). The document's group comes first, because the collage is
+/// what the window is about.
+pub struct SettingsDialog {
+    dialog: adw::PreferencesDialog,
     gap: adw::SpinRow,
     radius: adw::SpinRow,
     color: gtk::ColorDialogButton,
-    /// The dialog's own report of a value the document refused (S15h, PIX-020).
+    format: adw::ComboRow,
+    long_edge: adw::SpinRow,
+    /// The last message this dialog showed about a value the document refused (S15h,
+    /// PIX-020).
     ///
-    /// A banner rather than a toast, because a toast would be shown by the *window*,
-    /// which is behind this modal dialog and covered by its dim: the row that could
-    /// not be applied is where the reason belongs. The rows' own numbers do not carry
-    /// it — "100 %" is a legal-looking figure — and a screen reader reaches the
-    /// banner as a label, so the refusal is not a colour.
-    banner: adw::Banner,
+    /// The toast itself is libadwaita's own surface *inside* the dialog
+    /// (`AdwPreferencesDialog::add_toast`), and a toast is transient — so the message
+    /// is kept here as well, exactly as the window keeps `last_toast`, because "the
+    /// row says why it did not apply" is a claim a test has to be able to read.
+    notice: RefCell<Option<String>>,
     /// Set while this module writes the rows, so that seeding the dialog from the
-    /// document is not read back as a user editing it (the retired pane's own idiom).
+    /// document and the settings is not read back as a user editing it (the retired
+    /// pane's own idiom).
     updating: Rc<Cell<bool>>,
 }
 
-impl FrameDialog {
-    /// Builds the dialog, which the header bar's `Frame…` button presents.
+impl SettingsDialog {
+    /// Builds the dialog, which the header bar's frame button and the menu's
+    /// *Preferences* item both present.
     pub fn build(window: &EditorWindow) -> Rc<Self> {
+        // ---- the document's frame (S15) --------------------------------------
         let gap = percent_row(&gettext("Gap"), &gettext("Between the photos"));
         let radius = percent_row(&gettext("Radius"), &gettext("Rounded corners"));
         // Alpha is off in the chooser itself as well as dropped on the way in: the
@@ -89,75 +113,66 @@ impl FrameDialog {
             .subtitle(gettext("Behind and between the photos"))
             .build();
         color_row.add_suffix(&color);
-
-        let group = adw::PreferencesGroup::builder()
+        let frame_group = adw::PreferencesGroup::builder()
             .title(gettext("Frame"))
             // The unit belongs here rather than on both rows: the two lengths are the
             // same measure of the same canvas.
             .description(gettext("Both lengths are a share of the collage's height"))
             .build();
-        group.add(&gap);
-        group.add(&radius);
-        group.add(&color_row);
+        frame_group.add(&gap);
+        frame_group.add(&radius);
+        frame_group.add(&color_row);
 
-        let close = gtk::Button::with_label(&gettext("Close"));
-        a11y::label(&close, &gettext("Close"));
-        let header = adw::HeaderBar::new();
-        header.set_title_widget(Some(&adw::WindowTitle::new(&gettext("Frame"), "")));
-        header.pack_end(&close);
+        // ---- the app's export settings (S25) ---------------------------------
+        let format = adw::ComboRow::builder()
+            .title(gettext("Format"))
+            .model(&gtk::StringList::new(&FORMAT_NAMES))
+            .build();
+        a11y::label(&format, &gettext("Export format"));
+        let long_edge = adw::SpinRow::with_range(
+            f64::from(MIN_EXPORT_PX),
+            f64::from(MAX_EXPORT_PX),
+            f64::from(SIZE_STEP),
+        );
+        long_edge.set_digits(0);
+        long_edge.set_title(&gettext("Long edge"));
+        long_edge.set_subtitle(&gettext("In pixels"));
+        a11y::label_spin_row(&long_edge, &gettext("Long edge in pixels"));
+        let export_group = adw::PreferencesGroup::builder()
+            .title(gettext("Export"))
+            .description(gettext("The format and the size of an export"))
+            .build();
+        export_group.add(&format);
+        export_group.add(&long_edge);
 
         let page = adw::PreferencesPage::new();
-        page.add(&group);
-        // The refused value is reported here, above the rows that hold it (S15h,
-        // PIX-020): the group's own numbers cannot say why they did not apply.
-        let banner = adw::Banner::new("");
-        banner.set_revealed(false);
-        let view = adw::ToolbarView::new();
-        view.add_top_bar(&header);
-        view.add_top_bar(&banner);
-        view.set_content(Some(&page));
-        let dialog = adw::Dialog::builder()
-            .title(gettext("Frame"))
-            .content_width(480)
-            .child(&view)
-            .build();
+        page.set_title(&gettext("Preferences"));
+        page.add(&frame_group);
+        page.add(&export_group);
 
-        let frame_dialog = Rc::new(Self {
+        let dialog = adw::PreferencesDialog::new();
+        dialog.set_title(&gettext("Preferences"));
+        dialog.add(&page);
+
+        let settings_dialog = Rc::new(Self {
             dialog,
-            close: close.clone(),
             gap,
             radius,
             color,
-            banner,
+            format,
+            long_edge,
+            notice: RefCell::new(None),
             updating: Rc::new(Cell::new(false)),
         });
         // The handlers live on the dialog's own children, so they hold *weak*
-        // references to it: a strong one would be a cycle (the dialog owns the
-        // buttons, the buttons own the handler) and the dialog would outlive the
-        // window that made it.
-        let weak = Rc::downgrade(&frame_dialog);
-        close.connect_clicked(glib::clone!(
-            #[strong]
-            weak,
-            #[weak]
-            window,
-            move |_| {
-                let Some(dialog) = weak.upgrade() else {
-                    return;
-                };
-                // Closing the dialog is a boundary (S15d, PIX-002): the frame change
-                // that is still inside its quiet interval becomes the undo step it
-                // looked like, and the window's own commit drops the timer so it
-                // cannot fire again a moment later.
-                window.commit();
-                dialog.dialog.close();
-            }
-        ));
-        // Live: every settled change is a document edit, and the canvas behind the
-        // dialog redraws (`EditorWindow::set_frame` keeps it pending while the value
-        // moves and commits it once it stops).
-        for row in [&frame_dialog.gap, &frame_dialog.radius] {
-            let weak = Rc::downgrade(&frame_dialog);
+        // references to it: a strong one would be a cycle (the dialog owns the rows, the
+        // rows own the handler) and the dialog would outlive the window that made it.
+        //
+        // The frame's rows are live: every settled change is a document edit, and the
+        // canvas behind the dialog redraws (`EditorWindow::set_frame` keeps it pending
+        // while the value moves and commits it once it stops).
+        for row in [&settings_dialog.gap, &settings_dialog.radius] {
+            let weak = Rc::downgrade(&settings_dialog);
             row.connect_value_notify(glib::clone!(
                 #[weak]
                 window,
@@ -174,8 +189,8 @@ impl FrameDialog {
                 }
             ));
         }
-        let weak = Rc::downgrade(&frame_dialog);
-        frame_dialog.color.connect_rgba_notify(glib::clone!(
+        let weak = Rc::downgrade(&settings_dialog);
+        settings_dialog.color.connect_rgba_notify(glib::clone!(
             #[weak]
             window,
             #[strong]
@@ -190,32 +205,81 @@ impl FrameDialog {
                 dialog.apply(&window);
             }
         ));
-        frame_dialog
+        // The export's rows are the app's settings: a move is written to the settings
+        // file and nothing about the document changes.
+        let weak = Rc::downgrade(&settings_dialog);
+        settings_dialog.format.connect_selected_notify(glib::clone!(
+            #[weak]
+            window,
+            #[strong]
+            weak,
+            move |_| {
+                let Some(dialog) = weak.upgrade() else {
+                    return;
+                };
+                if dialog.updating.get() {
+                    return;
+                }
+                dialog.remember(&window);
+            }
+        ));
+        let weak = Rc::downgrade(&settings_dialog);
+        settings_dialog.long_edge.connect_value_notify(glib::clone!(
+            #[weak]
+            window,
+            #[strong]
+            weak,
+            move |_| {
+                let Some(dialog) = weak.upgrade() else {
+                    return;
+                };
+                if dialog.updating.get() {
+                    return;
+                }
+                dialog.remember(&window);
+            }
+        ));
+        // Closing the dialog is a boundary (S15d, PIX-002): the frame change that is
+        // still inside its quiet interval becomes the undo step it looked like. The
+        // quiet timer would commit it anyway; this is what makes "close" immediate.
+        let weak = Rc::downgrade(&settings_dialog);
+        settings_dialog.dialog.connect_closed(glib::clone!(
+            #[weak]
+            window,
+            #[strong]
+            weak,
+            move |_| {
+                if weak.upgrade().is_some() {
+                    window.commit();
+                }
+            }
+        ));
+        settings_dialog
     }
 
     /// Hands the rows' frame to the document, and answers a refusal where the value
     /// came from (S15h, PIX-020).
     ///
-    /// On acceptance the banner goes away: the row's number *is* the document's. On a
+    /// On acceptance the report goes away: the row's number *is* the document's. On a
     /// refusal the rows go back to the document's own frame — what the canvas is
     /// showing — so the dialog cannot display a value the document never took, and the
-    /// banner says why with the message the core wrote (which names the offending
-    /// slot).
+    /// toast says why with the message the core wrote (which names the offending slot).
     fn apply(&self, window: &EditorWindow) {
         // **The rows already say what the document says**: this is the echo of a seed
-        // rather than an edit, and reporting it would clear the banner the refusal just
+        // rather than an edit, and reporting it would clear the notice the refusal just
         // raised. Measured 2026-09-25: GTK defers the value notification a restore
         // causes to after the handler that restored it, so the echo arrives *after* the
-        // refusal was reported and used to put the banner away again — the row snapped
+        // refusal was reported and used to put the notice away again — the row snapped
         // back and the user was told nothing.
         if self.echoes_document(window) {
             return;
         }
         match window.set_frame(self.frame()) {
-            Ok(()) => self.banner.set_revealed(false),
+            Ok(()) => *self.notice.borrow_mut() = None,
             Err(error) => {
-                self.banner.set_title(&error.to_string());
-                self.banner.set_revealed(true);
+                let message = error.to_string();
+                *self.notice.borrow_mut() = Some(message.clone());
+                self.dialog.add_toast(adw::Toast::new(&message));
                 self.seed(window);
             }
         }
@@ -235,9 +299,22 @@ impl FrameDialog {
             && frame.color == document.color
     }
 
-    /// Shows the dialog over `window`, with the document's own frame in its rows.
+    /// Writes the export rows into the app's settings (S25).
+    ///
+    /// The settings are the window's, written through the one writer
+    /// (`EditorWindow::remember_settings`), so the rows, the window and the file cannot
+    /// drift apart.
+    fn remember(&self, window: &EditorWindow) {
+        let mut settings = window.settings();
+        settings.format = FORMATS[self.format_index()];
+        settings.long_edge = self.long_edge.value().round() as u32;
+        window.remember_settings(&settings);
+    }
+
+    /// Shows the dialog over `window`, with the document's frame and the app's settings
+    /// in its rows.
     pub fn present(&self, window: &EditorWindow) {
-        self.banner.set_revealed(false);
+        *self.notice.borrow_mut() = None;
         self.seed(window);
         self.dialog.present(Some(window));
     }
@@ -245,16 +322,14 @@ impl FrameDialog {
     /// The reason the last value was refused, while it is being shown (S15h,
     /// PIX-020); `None` when the dialog has nothing to report.
     ///
-    /// The tests' handle on "the row says so": the banner's text is the core's own
-    /// message, which names the offending slot.
+    /// The tests' handle on "the row says so": the message is the core's own, which
+    /// names the offending slot.
     pub fn notice(&self) -> Option<String> {
-        self.banner
-            .is_revealed()
-            .then(|| self.banner.title().to_string())
+        self.notice.borrow().clone()
     }
 
     /// The dialog itself, for the tests and the HIG checks.
-    pub fn widget(&self) -> adw::Dialog {
+    pub fn widget(&self) -> adw::PreferencesDialog {
         self.dialog.clone()
     }
 
@@ -270,7 +345,15 @@ impl FrameDialog {
         self.color.clone()
     }
 
-    /// The frame the three rows describe.
+    pub fn format_row(&self) -> adw::ComboRow {
+        self.format.clone()
+    }
+
+    pub fn long_edge_row(&self) -> adw::SpinRow {
+        self.long_edge.clone()
+    }
+
+    /// The frame the three document rows describe.
     pub fn frame(&self) -> Frame {
         Frame {
             gap_rel: self.gap.value() / PERCENT,
@@ -279,24 +362,31 @@ impl FrameDialog {
         }
     }
 
-    /// The dialog's own way out, for the tests: clicking it is what a person does.
-    pub fn close_button(&self) -> gtk::Button {
-        self.close.clone()
-    }
-
-    /// Puts the document's own frame into the rows.
+    /// Puts the document's own frame and the app's own settings into the rows.
     ///
-    /// The document is the authority rather than the dialog's last state: the frame
-    /// can change without the dialog being touched (an undo, a project opened, the
-    /// CLI's `edit --gap`), and a row that followed its own history would show a
-    /// number the file does not have.
+    /// The document and the settings are the authority rather than the dialog's last
+    /// state: either can change without the dialog being touched (an undo, a project
+    /// opened, the CLI's `edit --gap`, an export that remembered its folder), and a row
+    /// that followed its own history would show a number nothing else has.
     pub fn seed(&self, window: &EditorWindow) {
         let frame = window.document().frame;
+        let settings = window.settings();
+        let index = FORMATS
+            .iter()
+            .position(|format| *format == settings.format)
+            .unwrap_or(0) as u32;
         self.updating.set(true);
         self.gap.set_value(frame.gap_rel * PERCENT);
         self.radius.set_value(frame.radius_rel * PERCENT);
         self.color.set_rgba(&to_rgba(frame.color));
+        self.format.set_selected(index);
+        self.long_edge.set_value(f64::from(settings.long_edge));
         self.updating.set(false);
+    }
+
+    /// The index of the selected format, clamped to the table.
+    fn format_index(&self) -> usize {
+        (self.format.selected() as usize).min(FORMATS.len() - 1)
     }
 }
 
