@@ -11,6 +11,41 @@ step in the plan and moves out of this file.
 Provenance is marked per item: *asked for* means the human named the direction, *proposed* means it is
 the assistant's suggestion, recorded for a decision nobody has made yet.
 
+## More layouts in the library
+
+**Status: not scheduled.** *Asked for* (2026-09-27): the shipped library should offer more layouts.
+
+- **What it holds today** (`pixlay-render templates`, 2026-09-27): **27 templates** over cell counts 1 … 9
+  — one, three, three, four, three, four, three, three and three layouts per count, counts one through nine,
+  the single-cell one being `grid-1-1x1`, which is `DEFAULT_TEMPLATE` — and over five aspects: **4:3** (8),
+  **16:9** (7), **1:1** (5), **3:2** (4), **2:3** (3). A two-to-four-photo collage, which is what the main
+  path mostly is, therefore picks from three or four candidates, and a one-photo document has nothing to
+  choose at all.
+- **Adding one is cheap by construction**, which is why this is a direction and not a step with a decision
+  in it: a template is a `Recipe` in `pixlay-core/src/templates/generator.rs` (an integer lattice),
+  `frozen.rs` is regenerated from it and byte-compared by `crates/pixlay-core/tests/templates.rs`, the band
+  draws **sketches** rather than artwork (`CANDIDATE_BOX` is 128x96), and the CLI's `templates` and
+  `render --template` expose a new one the day it lands. No asset, no translation, no per-template code.
+  The template *creator* is the generator's CLI half, which the "nothing only in the GUI" rule wants
+  anyway.
+- **What an addition must not do, and this is the whole cost**: the geometry is frozen data under a
+  `templateVersion` and a document embeds a copy of its own, so an addition is an **addition** — an
+  existing name's geometry may never move, because that would move an old project's pixels. Every addition
+  also carries the invariants that are already tests (zero overlap, no interior hole, cell areas summing to
+  exactly 1.0, simple outlines) and has to stay legible as a sketch at the band's own 128x96 (S21, S29 and
+  S30 are the record of how narrow that is: the ink's tone and the gutter's very existence were each
+  findings there).
+- **The four shapes "more" can take** (the step that takes this on decides their order): (1) **more layouts
+  per count** — the band is a `GtkScrolledWindow`, so the cost is scrolling rather than a redesign, and the
+  counts with three candidates are where a person notices the thinness; (2) **more aspects** — the aspect
+  is a template field and the canvas follows it, so another aspect is another family of layouts and not a
+  feature; (3) **a fourth family** — the three families are read out of the *name* (`Family::of`, which
+  `layout_for` uses as its second preference), so a family that is not `strip` / `grid` / `mosaic` is worth
+  adding only after the explicit field the template-format item below proposes; (4) **irregular cells** —
+  the library has exactly **one** non-rectangular slot (`mosaic-8-s14`'s L-shaped `Shape::Poly`), and the
+  machinery is already general (the clamp tests the outline's own vertices, the sketch strokes any simple
+  polygon), so this is the shape of "more" with design risk rather than the one with cost.
+
 ## Template editing (custom layouts)
 
 **Status: not scheduled.** *Asked for* (2026-09-25). A layout should be authorable, not only shipped.
