@@ -68,12 +68,12 @@ use the display the process already has — `PIXLAY_TEST_CHILD=1`, e.g. `PIXLAY_
 test` — and its own failure message says so; **an Xvfb is not mutter's equal**: with no window manager GTK
 frames the window inside its own surface, so every window geometry the suite reads comes out 10 px smaller in
 each direction (measured 1090x584 against 1100x594), and a run on it is a fallback run whose numbers are that
-display's. So the entry works on a build box and on a machine that is in use. **On GitHub's runners mutter
-does not survive** (measured 2026-09-27: with no GPU node it dies of its own GL setup — `Mutter terminated
-with a failure: The command exited with a nonzero status: 139`), so `ci.yml` gives the job a headless
-**Weston** on llvmpipe and runs the suite with `PIXLAY_TEST_CHILD=1`: Weston is a real compositor, so the
-box the suite reads is a session's, but the numbers recorded in this file stay mutter's and a Weston run's
-are that compositor's.
+display's. So the entry works on a build box and on a machine that is in use. **The GUI suite is the
+machine's, not CI's** (ruled 2026-09-27, human): no display a runner could give it worked — the
+`archlinux:latest` container's headless mutter never presented a frame, the runner's own mutter dies of its
+GL setup, and a headless Weston runs the suite only to fail the HIG walk against the runner's older GTK —
+so `ci.yml` runs the entry's commands **minus this suite** (`cargo test --workspace --exclude pixlay`), and
+every error is recorded in `docs/steps/S33-ci-skips-the-gui-suite-done.md`.
 
 
 Measurement rules that go with it:
@@ -231,15 +231,13 @@ versions**. Everything follows the latest stable release.
   Downgrade a binding only when it demands a newer system version than Arch ships — never downgrade
   the system.
 - **CI / packaging**: `runs-on: ubuntu-26.04` — the newest hosted Ubuntu image, named explicitly because
-  `ubuntu-latest` still resolves to 24.04 — and **no container** (both ruled 2026-09-27, human): the
-  `archlinux:latest` container this ran in could not present a frame from its headless mutter
-  (`the widget never produced a render node … waited 180.0s, 0 frames arrived`), so the GUI suite never
-  went green there, and the suite now runs on the runner's own stack with the distribution's libraries —
-  inside a headless **Weston** on llvmpipe, because the runner's mutter dies of its own GL setup (the
-  entry above has both measurements). CI therefore answers "does the program run" on Ubuntu's stack — the
-  Arch build is the machine's, through `makepkg` (below). The actions move with their major tags
-  (`actions/checkout@v7`, `pyvista/setup-headless-display-action@v3`) rather than being pinned to a commit
-  SHA: under this policy a pin is the thing that has to be justified
+  `ubuntu-latest` still resolves to 24.04 — with **no container** and **no GUI suite** (both ruled
+  2026-09-27, human): the suite needs a display, a compositor and the libraries the product targets, and a
+  runner could not give it all three, so CI runs the entry's commands minus that suite and every failure is
+  recorded in `docs/steps/S33-ci-skips-the-gui-suite-done.md`. CI therefore answers "does the windowless
+  half run" — the shell and the Arch build are the machine's, through `cargo test` and `makepkg` (below).
+  The one action moves with its major tag (`actions/checkout@v7`) rather than being pinned to a commit SHA:
+  under this policy a pin is the thing that has to be justified
 - **Keeping the dependency set minimal** does not conflict with tracking the latest: few, but each
   one current.
 
