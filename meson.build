@@ -22,8 +22,13 @@ dependency('gtk4', version: '>= 4.12.0')
 dependency('libadwaita-1', version: '>= 1.8.0')
 # The decoding backend (S4): glycin's loader, and the seccomp it sandboxes itself with.
 # The version floor is the crate's own (`pixlay-imaging`'s `glycin` dependency), which
-# checks it where it is used.
-dependency('glycin-1')
+# checks it where it is used. The **2.x** name is the one that resolves: what links is
+# `libglycin-2.so.0`, and stock Arch's `glycin` ships `glycin-2.pc` — `glycin-1.pc` is a
+# 1.x compatibility file that only some builds still carry, and requiring it failed the
+# first release run in CI (measured 2026-09-27: the `archlinux:latest` container with
+# `extra`'s glycin 2.1.5-2 has no `glycin-1.pc`, while this machine's gnome-unstable
+# 2.2.1-1 has both, which is why the wrong name worked here).
+dependency('glycin-2')
 dependency('libseccomp')
 # `pixlay-imaging` drives a glib main context and gio files directly.
 dependency('glib-2.0')

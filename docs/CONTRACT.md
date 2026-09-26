@@ -1722,7 +1722,7 @@ rely on without reading the PKGBUILD:
   catalog at all today and the two generated files are their templates verbatim; a language pack is a
   `.po` file plus a line in `LINGUAS`, and nothing else changes.
 - **The build and the install are the project's own** (S31). `meson.build` declares the system libraries
-  (`gtk4 >= 4.12`, `libadwaita-1 >= 1.8`, `glycin-1`, `libseccomp`, `glib-2.0`, `gio-2.0`), so `meson setup`
+  (`gtk4 >= 4.12`, `libadwaita-1 >= 1.8`, `glycin-2`, `libseccomp`, `glib-2.0`, `gio-2.0`), so `meson setup`
   fails naming the one that is missing rather than failing inside a cargo build, and `crates/meson.build`
   runs `cargo build --profile release --locked` over the workspace with its target directory inside the build
   directory. `meson install` puts both binaries in `bindir`, merges the catalogs into the desktop entry and

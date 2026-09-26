@@ -319,7 +319,7 @@ fn the_package_ships_the_identity_the_code_declares() {
     for (package, pc) in [
         ("gtk4", "gtk4"),
         ("libadwaita", "libadwaita-1"),
-        ("glycin", "glycin-1"),
+        ("glycin", "glycin-2"),
     ] {
         assert!(
             meson.contains(&format!("dependency('{pc}'")),
