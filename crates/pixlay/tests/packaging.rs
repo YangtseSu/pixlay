@@ -6,16 +6,16 @@
 //! the icon and the metainfo — a package whose desktop file says a name its
 //! icon does not have shows a blank icon, and whose metainfo id differs is not
 //! the component the desktop file launches; the **version**, which lives in
-//! `Cargo.toml`, in the PKGBUILD's `pkgver` and in the metainfo's `<release>`;
-//! and the **file names**, which the desktop file, the metainfo and the MIME
-//! registration all spell out and the PKGBUILD installs.
+//! `Cargo.toml`, in the PKGBUILD's `pkgver`, in `meson.build`'s `project()` and in
+//! the metainfo's `<release>`; and the **file names**, which the desktop file, the
+//! metainfo and the MIME registration all spell out and the meson files install.
 //!
-//! All three are text, so all three are checked here — offline, without
-//! `makepkg` and without the validators, which are the PKGBUILD's `check()`
-//! (`desktop-file-validate`, `appstreamcli validate --no-net`, `msgfmt`). What
-//! this file reads is the repository as committed: the templates the package
-//! generates its installed files from (`AGENTS.md`'s AUR discipline, "the
-//! PKGBUILD uses `--frozen --offline`").
+//! All three are text, so all three are checked here — offline, without `makepkg`, and
+//! without the validators, which `meson test` runs wherever they are installed
+//! (`data/meson.build`). What this file reads is the repository as committed: the
+//! templates the install generates its files from, the three `meson.build` files that
+//! name every installed path, and the PKGBUILD that wraps them (`AGENTS.md`'s AUR
+//! discipline: the install is the project's, and a package build runs no tests).
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -295,48 +295,119 @@ fn the_package_ships_the_identity_the_code_declares() {
             "{dependency} is a runtime dependency",
         );
     }
-    // And what the package installs is what the other files name: the two
-    // binaries, the app-id's desktop file, metainfo and icons, the mime
-    // registration, and the locale tree the domain is bound to.
-    for installed in [
-        "usr/bin/pixlay",
-        "usr/bin/pixlay-render",
-        "usr/share/applications/org.yangtse.Pixlay.desktop",
-        "usr/share/metainfo/org.yangtse.Pixlay.metainfo.xml",
-        "usr/share/icons/hicolor/scalable/apps/org.yangtse.Pixlay.svg",
-        "usr/share/icons/hicolor/symbolic/apps/org.yangtse.Pixlay-symbolic.svg",
-        "usr/share/mime/packages/org.yangtse.Pixlay.xml",
-        "usr/share/locale",
+    // And what the package installs is the project's own install definition (S31):
+    // `meson.build` and the two files under it name every installed path, and the
+    // PKGBUILD wraps them rather than repeating them. So the identity is checked where
+    // it can drift silently: the meson files against the data files' own names.
+    let meson = read("meson.build");
+    let crates_meson = read("crates/meson.build");
+    let data_meson = read("data/meson.build");
+    let po_meson = read("po/meson.build");
+    let install_script = read("po/install-catalogs.sh");
+
+    assert!(
+        meson.contains(&format!("version: '{}'", env!("CARGO_PKG_VERSION"))),
+        "meson.build names the workspace's version (meson cannot read Cargo.toml, so it is \
+         written twice and a release has to move both)",
+    );
+    assert!(
+        meson.contains(&format!("license: '{}'", env!("CARGO_PKG_LICENSE"))),
+        "and the manifest's SPDX license",
+    );
+    // Every runtime dependency the package names is one meson has to find by name,
+    // with the version the bindings need (`AGENTS.md`, the dependency registry).
+    for (package, pc) in [
+        ("gtk4", "gtk4"),
+        ("libadwaita", "libadwaita-1"),
+        ("glycin", "glycin-1"),
     ] {
         assert!(
-            pkgbuild.contains(installed),
-            "the PKGBUILD installs {installed}",
+            meson.contains(&format!("dependency('{pc}'")),
+            "meson.build declares {pc}, which is what depends=('{package}') links",
         );
     }
+    // The two binaries: `crates/meson.build` copies what the workspace builds into the
+    // build directory, under the names `bindir` gets.
+    for binary in [env!("CARGO_PKG_NAME"), "pixlay-render"] {
+        assert!(
+            crates_meson.contains(&format!("'{binary}'")),
+            "crates/meson.build installs {binary} into the bindir",
+        );
+    }
+    assert!(
+        crates_meson.contains("get_option('bindir')"),
+        "and installs them where the desktop entry's Exec= looks for them",
+    );
+    // The data files, each named from the app-id this crate declares — which is the
+    // drift that matters: a file renamed under the desktop entry's `Icon=` or the
+    // metainfo's `<id>` is a package that installs files nothing finds.
+    for suffix in [".desktop", ".metainfo.xml", ".svg", "-symbolic.svg", ".xml"] {
+        assert!(
+            data_meson.contains(&format!("app_id + '{suffix}'")),
+            "data/meson.build installs app_id + '{suffix}'",
+        );
+    }
+    for directory in [
+        "applications",
+        "metainfo",
+        "icons",
+        "hicolor",
+        "scalable",
+        "symbolic",
+        "mime",
+        "packages",
+    ] {
+        assert!(
+            data_meson.contains(&format!("'{directory}'")),
+            "data/meson.build installs into {directory}/",
+        );
+    }
+    // The catalogs: one per language `LINGUAS` lists, installed as the domain the
+    // shell binds, under the prefix `localedir` names (which is also what
+    // `crates/meson.build` passes as `PIXLAY_LOCALEDIR`, the value `i18n.rs` reads).
+    assert!(
+        po_meson.contains("'LINGUAS'") && po_meson.contains("msgfmt"),
+        "po/meson.build compiles the catalogs `LINGUAS` lists",
+    );
+    assert!(
+        install_script.contains(&format!("LC_MESSAGES/{}.mo", pixlay::i18n::DOMAIN)),
+        "the catalogs are installed as the domain the shell binds",
+    );
+    assert!(
+        crates_meson.contains("PIXLAY_LOCALEDIR"),
+        "the build passes the prefix's localedir into the binary",
+    );
     assert!(
         read("crates/pixlay-cli/Cargo.toml").contains("name = \"pixlay-render\""),
         "the second binary the package installs is the CLI's own name",
     );
 
-    // --- what `check()` needs to work where it runs ------------------------
-    // S16's own requirement, and the reason it is asserted: `makepkg` runs
-    // check() in a chroot with no display, so the GUI tests have to be given one —
-    // and it is the compositor they are written for, not an Xvfb (`AGENTS.md`'s
-    // entry: mutter when mutter is available). mutter needs no GPU node (measured
-    // 2026-09-26 with `/dev/dri` hidden: `Created surfaceless renderer without
-    // GPU`) but it does need a session bus, which `dbus-run-session` is; a bare
-    // Xvfb is not the same session at all — with no window manager GTK frames the
-    // window inside its own surface there, and every window geometry the suite
-    // reads comes out 10 px smaller in each direction (1090x584 against
-    // 1100x594).
+    // --- the PKGBUILD wraps that install, and tests nothing ----------------
+    // What a package has to get right is building and packaging (`AGENTS.md`, "AUR
+    // discipline"): the suite is the verification entry's, and the PKGBUILD names no
+    // `check()` at all.
     assert!(
-        pkgbuild.contains("dbus-run-session"),
-        "check() starts the compositor with a session bus of its own",
+        pkgbuild.contains("cargo vendor") && pkgbuild.contains("CARGO_NET_OFFLINE=true"),
+        "the build runs offline against the vendored registry",
     );
-    for dependency in ["mutter", "dbus", "mesa"] {
+    for step in ["meson setup", "meson compile", "meson install"] {
+        assert!(
+            pkgbuild.contains(step),
+            "the PKGBUILD runs the project's own build and install: `{step}`",
+        );
+    }
+    assert!(
+        pkgbuild.contains("--destdir \"$pkgdir\""),
+        "and installs into the package root",
+    );
+    assert!(
+        !pkgbuild.contains("check()"),
+        "the PKGBUILD runs no tests: the suite is CI's and the entry's (ruled 2026-09-26)",
+    );
+    for dependency in ["cargo", "rust", "meson", "gettext"] {
         assert!(
             lists(&pkgbuild, "makedepends", dependency),
-            "{dependency} is a makedepend of the package whose check() starts that compositor",
+            "{dependency} is a makedepend of the build meson drives",
         );
     }
 }

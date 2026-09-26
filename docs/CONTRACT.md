@@ -1232,14 +1232,11 @@ The package, measured where it can be measured without root (the step's own reco
 | the translation template | `po/extract-pot` writes **111** messages: the shell's Rust strings plus the desktop entry's and the metainfo's, in one `po/pixlay.pot` |
 | the entry's render (unchanged by this step) | 14043x10532, **ms 5133.1 + encode_ms 1217.5**, `peak_rss_mb` **1633.4**, **9,157,670 bytes**, `cmp`-identical to the S30 render — packaging moves no pixel of a document |
 
-**Not measured here**: the clean-chroot `makepkg` and `check()` inside it (both root). The two things recorded
-beside it as skipped have since been done: `check()` has been run on this machine with the same PKGBUILD — the
-suite green on the harness's own headless `mutter`, which `check()` gives a session bus and a runtime directory
-of its own, no Xvfb and no root — and the rootless container's one open finding was reproduced by the first CI
-run and closed the same day (the step's Result, and the ruling of 2026-09-26: the tests run on mutter wherever
-mutter runs, and CI builds no package). That `check()` run's package is **4,130,536 bytes** against the
-**3,727,778** of the table above — a build artifact, not a source change, and this session did not chase it
-further.
+**Not measured here**: the clean-chroot `makepkg`, and two things recorded beside it as skipped have since
+been done on this machine from the same PKGBUILD (2026-09-26): the package built — **4,130,536 bytes** against
+the table's 3,727,778, a build artifact and not a source change, and not chased further — and, until S31
+removed it, a `check()` that ran the whole suite. The install is the project's own now (§10), and a package
+build runs no tests.
 
 ## 9. The window (S7), and the shell ruling 31 re-cut (S22)
 
@@ -1724,18 +1721,25 @@ rely on without reading the PKGBUILD:
   is the English source string. `po/LINGUAS` is empty in this repository, so the package installs no
   catalog at all today and the two generated files are their templates verbatim; a language pack is a
   `.po` file plus a line in `LINGUAS`, and nothing else changes.
-- **The build.** `source=` is the release tag's tarball, built from `pkgver`; a release pushes `vX.Y.Z`,
-  fills `sha256sums` (`updpkgsums`) and writes `.SRCINFO`. The build calls `cargo vendor` once and every
-  `cargo` call after it is `--frozen --offline` against the committed `Cargo.lock`. `depends` is
-  `gtk4`, `libadwaita` and `glycin` — the decoding backend S4 measured is a linked library, so it is a
-  runtime dependency — with `libheif` an optdepend for HEIC and AVIF (as it is for `glycin` itself).
-- **`check()`** validates the generated artifacts as installed files (`desktop-file-validate` wants the
-  `.desktop` name), runs `appstreamcli validate --no-net` and `msgfmt --check` on every catalog, and
-  then runs the whole test suite — on the compositor those tests are written for, because a chroot has no
-  display and this suite measures window geometry: the harness starts its own headless `mutter`
-  (`crates/pixlay/tests/support/mod.rs`), which needs no GPU node but does need a session bus and a
-  runtime directory of its own (ruled 2026-09-26, human: mutter wherever mutter runs; `PIXLAY_TEST_CHILD=1`
-  with a display of your own is the fallback, and a bare Xvfb is a different session — **1090x584** against
-  **1100x594**). Nothing in `check()` reaches the network: the registry is vendored and every fixture is in
-  the repository.
+- **The build and the install are the project's own** (S31). `meson.build` declares the system libraries
+  (`gtk4 >= 4.12`, `libadwaita-1 >= 1.8`, `glycin-1`, `libseccomp`, `glib-2.0`, `gio-2.0`), so `meson setup`
+  fails naming the one that is missing rather than failing inside a cargo build, and `crates/meson.build`
+  runs `cargo build --profile release --locked` over the workspace with its target directory inside the build
+  directory. `meson install` puts both binaries in `bindir`, merges the catalogs into the desktop entry and
+  the metainfo (`msgfmt --desktop` / `--xml`), installs both icons, the `.pixlay` MIME registration (under
+  the app-id) and `<localedir>/<language>/LC_MESSAGES/pixlay.mo` per language `po/LINGUAS` lists, and passes
+  the prefix's localedir into the binary as `PIXLAY_LOCALEDIR`, which `crates/pixlay/src/i18n.rs` reads at
+  compile time. A distribution installs the application with `meson setup build && meson compile -C build &&
+  meson install -C build` and nothing else.
+- **The PKGBUILD wraps that install**: `source=` is the release tag's tarball, built from `pkgver`; a release
+  pushes `vX.Y.Z`, fills `sha256sums` (`updpkgsums`) and writes `.SRCINFO`. The registry is vendored once
+  (`cargo vendor`, with `CARGO_NET_OFFLINE=true` for the cargo call meson makes), `depends` is `gtk4`,
+  `libadwaita` and `glycin` — the decoding backend S4 measured is a linked library, so it is a runtime
+  dependency — with `libheif` an optdepend for HEIC and AVIF (as it is for `glycin` itself), and the license
+  goes to `/usr/share/licenses/pixlay/`, which is Arch's path and not the prefix's.
+- **A package build runs no tests** (ruled 2026-09-26, human): `makepkg`'s standard is that it builds and
+  packages, the suite is the verification entry's (`AGENTS.md`) and CI's, and the two artifact validators
+  (`desktop-file-validate`, `appstreamcli validate --no-net`) are `meson test`'s wherever the tools are
+  installed (`data/meson.build`, `required: false`). Nothing in the build reaches the network, and every
+  fixture is in the repository.
 - **Not doing** (the plan's own list): Flatpak, Snap, any other distribution.

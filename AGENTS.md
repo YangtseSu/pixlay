@@ -355,7 +355,7 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
   name, and the desktop file's `Icon=` is the same string), and the desktop entry, the AppStream metainfo
   and the `.pixlay` MIME registration live as templates under `data/`, generated with `msgfmt` at build
   time. `crates/pixlay/tests/packaging.rs` holds the names, the version and the license to
-  `pixlay::APP_ID` and the manifests; what only the tools can judge is the PKGBUILD's `check()`
+  `pixlay::APP_ID` and the manifests; what only the tools can judge is the install's own `meson test`
   (`desktop-file-validate`, `appstreamcli validate`).
 - **Keyboard**: standard shortcuts per HIG `reference/keyboard`; `Alt+*`, `Super+*` and
   system-reserved combinations are forbidden; the main path must be walkable with the keyboard
@@ -492,20 +492,25 @@ not a criterion — a visual conclusion must become a number (a probe) in the CL
 ## AUR discipline
 
 - Commit `Cargo.lock`; keep dependencies minimal; `cargo vendor` must pass
-- The PKGBUILD uses `--frozen --offline`, `depends=('gtk4' 'libadwaita' 'glycin')` (the decoding
-  backend of "Open / to be proven" is a linked library, so it is a runtime dependency) and installs
-  both binaries, the app icon with its symbolic variant, the generated desktop entry and metainfo, the
-  `.pixlay` MIME type and the catalogs `po/LINGUAS` lists (`docs/CONTRACT.md` §10)
-- `source=` is the release tag's tarball built from `pkgver`; a release pushes `vX.Y.Z`, fills
-  `sha256sums` with `updpkgsums` and writes `.SRCINFO`
-- `check()` validates the generated artifacts (`desktop-file-validate`, `appstreamcli validate
-  --no-net`), checks every catalog with `msgfmt`, and runs the workspace's tests offline on the compositor
-  those tests are written for — the harness's own headless `mutter`, which `check()` gives a session bus and
-  a runtime directory of its own (`mutter`, `dbus` and `mesa` are makedepends for that: no GPU node is
-  needed, and no Xvfb) — every fixture is in the repository
-- **CI runs the verification entry and does not build the package** (ruled 2026-09-26, human): `makepkg`,
-  the PKGBUILD and its `check()` are verified on a machine, where a package can be built *and installed*;
-  the container's job is to answer whether the program runs
+- **The build and the install are the project's own** (S31): `meson.build` runs cargo over the workspace
+  (`--locked`, offline against the vendored registry) and installs everything the desktop reads — both
+  binaries, the desktop entry and the metainfo generated from their templates with `msgfmt`, the two icons,
+  the `.pixlay` MIME registration and the catalogs `po/LINGUAS` lists (`docs/CONTRACT.md` §10). GNOME's
+  applications are built this way and this is one, so a distribution other than Arch installs it with
+  `meson setup build && meson compile -C build && meson install -C build` and nothing else
+- The PKGBUILD wraps that install and adds what is Arch's: `source=` is the release tag's tarball built
+  from `pkgver` (a release pushes `vX.Y.Z`, fills `sha256sums` with `updpkgsums` and writes `.SRCINFO`),
+  the registry is vendored (`CARGO_NET_OFFLINE=true` for the cargo meson starts), `depends=('gtk4'
+  'libadwaita' 'glycin')` (the decoding backend of "Open / to be proven" is a linked library, so it is a
+  runtime dependency), `makedepends` names `cargo`, `rust`, `meson` and `gettext`, and the license goes to
+  `/usr/share/licenses/$pkgname/` — Arch's path, not the prefix's
+- **No tests run in a package build** (ruled 2026-09-26, human): `makepkg`'s standard is that it builds and
+  packages, the suite is the verification entry's (and CI's), and the two artifact validators
+  (`desktop-file-validate`, `appstreamcli validate --no-net`) run in `meson test` wherever they are
+  installed (`data/meson.build`, `required: false`)
+- **CI runs the verification entry and does not build the package** (same ruling): `makepkg`, the PKGBUILD
+  and the install are verified on a machine, where a package can be built *and installed*; the container's
+  job is to answer whether the program runs
 - SPDX is `GPL-3.0-or-later` throughout (not `-only`)
 
 ## Dependency registry
