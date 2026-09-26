@@ -694,6 +694,37 @@ pub fn same_document(left: &pixlay_core::Project, right: &pixlay_core::Project) 
                 (Some(left), Some(right)) => resolved(left) == resolved(right),
                 _ => false,
             })
+        // The cells a layout change kept are part of the document too (S28): two
+        // documents that hold the same sheet but different waiting cells are not the
+        // same document.
+        && a.kept.len() == b.kept.len()
+        && a.kept
+            .iter()
+            .zip(&b.kept)
+            .all(|(left, right)| left.crop == right.crop)
+        && kept_sources(left) == kept_sources(right)
+}
+
+/// The photos a document keeps off the sheet, resolved the way
+/// [`Project::sources`] resolves the placed ones: a kept `source` is likewise
+/// relative to the project file.
+fn kept_sources(project: &pixlay_core::Project) -> Vec<Option<PathBuf>> {
+    project
+        .doc()
+        .kept
+        .iter()
+        .map(|cell| match &cell.source {
+            None => None,
+            Some(source) => {
+                let path = if source.is_absolute() {
+                    source.clone()
+                } else {
+                    project.dir().join(source)
+                };
+                Some(resolved(&path))
+            }
+        })
+        .collect()
 }
 
 /// `../../../…` and the path it points at are the same photo.

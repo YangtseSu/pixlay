@@ -1583,14 +1583,70 @@ impl EditorWindow {
         self.document().template.name
     }
 
-    /// How many photos the collage holds. The gallery's candidates are for that
-    /// count, and the count control's two bounds are about it.
+    /// How many photos the collage **has on the sheet**. The gallery's candidates
+    /// are for the *cell* count, and the count control's two bounds are about it.
+    ///
+    /// A photo a layout change kept is not one of these (S28): it has no cell, so it
+    /// is not drawn, and the count control's label counts cells rather than photos
+    /// either way.
     pub fn photo_count(&self) -> usize {
         self.document()
             .cells
             .iter()
             .filter(|cell| cell.source.is_some())
             .count()
+    }
+
+    /// How many cells the document keeps off the sheet (S28): what a layout change
+    /// took away, waiting for a growth to place them again.
+    pub fn kept_count(&self) -> usize {
+        self.document().kept.len()
+    }
+
+    /// The name of the photo a growth would place back first, for the `+`'s own
+    /// hint (S28): the front of the kept list that holds a photo, by its file name —
+    /// the name a user knows it by.
+    ///
+    /// The front of the list can be a cell that was already empty when it left the
+    /// sheet, which is nothing to name: the hint then names the first kept *photo*,
+    /// which is the one the user is looking for.
+    fn kept_hint(&self) -> Option<String> {
+        self.document()
+            .kept
+            .iter()
+            .find_map(|cell| cell.source.as_deref())
+            .map(|source| match source.file_name() {
+                Some(name) => name.to_string_lossy().into_owned(),
+                None => source.to_string_lossy().into_owned(),
+            })
+    }
+
+    /// Says once that a layout change kept photos (S28, ruling 43).
+    ///
+    /// `doc` is the document *before* the change and `cells` the slot count after
+    /// it: what the change took off the sheet is the tail beyond that count, counted
+    /// by the photos it holds — a cell that was empty is not something a user can
+    /// miss. One report for the whole change, not one per cell (ruling 34's trim and
+    /// S23b's drop are the same idiom), and the `+`'s own hint is what makes the
+    /// photo findable afterwards.
+    fn report_kept(&self, doc: &CollageDoc, cells: usize) {
+        let kept = doc
+            .cells
+            .iter()
+            .skip(cells)
+            .filter(|cell| cell.source.is_some())
+            .count();
+        if kept == 0 {
+            return;
+        }
+        self.toast(&fill(
+            ngettext(
+                "{} photo is kept and returns when the layout grows",
+                "{} photos are kept and return when the layout grows",
+                kept as u32,
+            ),
+            &[kept],
+        ));
     }
 
     /// The layouts the gallery lists: every template with the document's own **cell**
@@ -1626,7 +1682,11 @@ impl EditorWindow {
         let Some(template) = templates::get(name) else {
             return;
         };
-        let _ = self.apply(Command::SetTemplate { template });
+        let before = self.document();
+        let cells = template.slots.len();
+        if self.apply(Command::SetTemplate { template }).is_ok() {
+            self.report_kept(&before, cells);
+        }
     }
 
     /// Writes the gallery's highlight from the document.
@@ -1640,10 +1700,10 @@ impl EditorWindow {
     /// The count control's `−`: one cell fewer, and the layout follows (S14b).
     ///
     /// The control addresses the *layout* — the same thing [`add_photo`] does — so
-    /// this is one command and not two: the last cell leaves with whatever it held,
-    /// and `Ctrl+Z` is the way back. The cell's photo is not remembered anywhere,
-    /// which is the point: `+` means "switch to a layout with one more cell", not
-    /// "undo the last removal".
+    /// this is one command and not two: the last cell leaves the sheet **whole**,
+    /// and since S28 it is not deleted but *kept* (ruling 43): the next `+` places
+    /// it again, with its photo and its framing. What a shrink takes away is
+    /// reported once, so a photo that left the sheet does not read as lost.
     ///
     /// [`add_photo`]: Self::add_photo
     pub fn remove_photo(&self) {
@@ -1652,20 +1712,23 @@ impl EditorWindow {
             self.toast(&gettext("A collage needs at least one photo"));
             return;
         }
-        // The selection can name a cell that is about to stop existing.
+        // The selection can name a cell that is about to leave the sheet.
         if self.selection().is_some_and(|slot| slot >= cells - 1) {
             self.select(None);
         }
-        let _ = self.apply(Command::RemoveLastCell);
+        let before = self.document();
+        if self.apply(Command::RemoveLastCell).is_ok() {
+            self.report_kept(&before, cells - 1);
+        }
     }
 
-    /// The count control's `+`: switch to the layout with one cell more, and leave
-    /// the new cell empty (S14b).
+    /// The count control's `+`: switch to the layout with one cell more (S14b).
     ///
     /// Ruled 2026-09-23: `+`'s job is to change the layout, not to open a file
-    /// chooser and not to undo the last removal. The cell it adds is empty on
-    /// purpose, and an empty cell is a control of its own — the canvas draws a `+`
-    /// over it, and clicking that region is what asks for a photo
+    /// chooser. The cell it adds is empty on purpose — a cell a layout change kept
+    /// **returns** here instead (S28, ruling 43), which is how a kept photo comes
+    /// back — and an empty cell is a control of its own: the canvas draws a `+` over
+    /// it, and clicking that region is what asks for a photo
     /// (`EditorWindow::choose_photo`, the same path a double click on an empty cell
     /// already took).
     pub fn add_photo(&self) {
@@ -1864,11 +1927,17 @@ impl EditorWindow {
     /// with one report (S19, ruling 34) — `Command::AddPhotos` is all-or-nothing
     /// and would refuse the whole list, and a chosen folder of twenty photos is not
     /// an error the user should have to answer.
+    ///
+    /// The room is what the ceiling leaves **after the kept cells** (S28): a photo a
+    /// layout change kept is still one of the nine, so it is spent from the room even
+    /// though it is not on the sheet. What remains is exactly what `AddPhotos` can
+    /// place — the empty cells plus one cell per growth — so a list trimmed here is
+    /// a list the command accepts.
     pub fn add_photos(&self, paths: Vec<PathBuf>) {
         if paths.is_empty() {
             return;
         }
-        let room = MAX_PHOTOS.saturating_sub(self.photo_count());
+        let room = MAX_PHOTOS.saturating_sub(self.photo_count() + self.kept_count());
         let paths = self.at_most(paths, room);
         if paths.is_empty() {
             return;
@@ -2839,18 +2908,19 @@ impl EditorWindow {
         self.canvas_widget().queue_draw();
     }
 
-    /// Writes the count control: the document's own cell count and the two bounds
-    /// it acts on (`MIN_PHOTOS` / `MAX_PHOTOS`).
+    /// Writes the count control: the document's own cell count, the kept cells it
+    /// is not showing, and the two bounds the buttons act on (`MIN_PHOTOS` /
+    /// `MAX_PHOTOS`).
     ///
     /// The number is the **cell** count, because that is the number the two buttons
     /// move (S14b): `+` takes the layout with one cell more, `−` the layout with one
     /// cell fewer, and the control reads out the count it edits. It is also the
     /// number the strip below it filters by, so the three always agree — while the
     /// photo count can legitimately be lower (a `+` whose cell has no photo yet, a
-    /// per-cell clear).
+    /// per-cell clear, and since S28 the photos a layout change kept).
     fn update_gallery_control(&self) {
         if let Some(gallery) = self.imp().gallery.get() {
-            gallery.update_control(self.document().cells.len());
+            gallery.update_control(self.document().cells.len(), self.kept_hint().as_deref());
         }
     }
 

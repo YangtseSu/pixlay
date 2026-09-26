@@ -305,20 +305,27 @@ EDIT OPTIONS:
     --photo <file>      The photo the `--slot` cell shows instead of the one it
                         has. Needs --slot, and a file that is not there is
                         refused rather than written into the project.
-    --add-cell          Take the layout with one slot more, leaving the new cell
+    --add-cell          Take the layout with one slot more. A cell the layout kept
+                        is placed again first (see --remove-cell), so this is also
+                        how a kept photo comes back; otherwise the new cell is
                         empty — the window's `+` (`Command::AddCell`). The cell
                         count is the layout's, so this is how a collage grows to
                         hold one more photo.
-    --remove-cell       Take the layout with one slot fewer, dropping the last
-                        cell whatever it holds — the window's `−`. Refused at one
-                        cell, the floor (a single photo is a legal collage, and
-                        the sheet is its layout). The mirror image of
-                        --add-cell, and refused together with it: run `edit`
-                        twice for both.
+    --remove-cell       Take the layout with one slot fewer — the window's `−`. The
+                        cell leaves the sheet **whole and kept**: a photo leaves
+                        the collage only when it is deleted (`--slot <i> --clear`,
+                        a replace, a cut), and a later growth places the kept cell
+                        again, so `--remove-cell` then `--add-cell` is the
+                        document it was (S28, ruling 43). Refused at one cell, the
+                        floor (a single photo is a legal collage, and the sheet is
+                        its layout). The mirror image of --add-cell, and refused
+                        together with it: run `edit` twice for both.
     --add-photo <file>  Append a photo: it goes to the first empty cell, and if
-                        there is none the layout grows by one slot. Repeated
-                        once per photo, in argument order. Refused past nine
-                        photos (exit 2: the document cannot take it, and nothing
+                        there is none the layout grows by one slot — an arrival
+                        always lands in a cell of its own, so a kept cell keeps
+                        waiting (S28). Repeated once per photo, in argument order.
+                        Refused past nine photos in the document, placed and kept
+                        together (exit 2: the document cannot take it, and nothing
                         is written), where `init --photo` refuses such a list as a
                         usage error (exit 1): the CLI never trims a list, and the
                         two exit codes are its contract.
@@ -328,9 +335,10 @@ EDIT OPTIONS:
                         cell the layout does not have (exit 1).
     --template <name>   Switch the document to another layout (see
                         `templates`), keeping the surviving cells' photos and
-                        framing. The count is not required to match: a layout
-                        with fewer slots drops the tail, one with more appends
-                        empty cells.
+                        framing. The count is not required to match: a layout with
+                        fewer slots keeps the tail it cannot place, and one with
+                        more places the kept cells again and then appends empty
+                        ones (S28, ruling 43).
     --rotate <deg>      Set the cell's rotation to any finite angle, clockwise
                         on screen. It is stored wrapped into -180..=180 and is
                         never reduced by the clamp; the zoom is raised to
@@ -348,7 +356,9 @@ EDIT OPTIONS:
     the *fit* of what was asked for (a crop is a request; what is drawn is what
     covers), so `edit` applied twice to the same project writes the same bytes. A
     cell with no photo has nothing to fit against and keeps the numbers as given;
-    the fit returns when the cell gets a photo.
+    the fit returns when the cell gets a photo. The report's `kept` counts the
+    cells a layout change took off the sheet: they are kept, not lost, and a
+    later growth places them again.
 
 COMMON OPTIONS:
     --json              Print one JSON object instead of key = value lines.

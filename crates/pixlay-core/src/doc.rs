@@ -10,7 +10,7 @@ use crate::crop::{CropFit, CropTransform};
 use crate::error::CoreError;
 use crate::frame::Frame;
 use crate::template::Template;
-use crate::{DOC_VERSION, DOC_VERSION_MIN};
+use crate::{DOC_VERSION, DOC_VERSION_MIN, MAX_SLOTS};
 
 /// What one slot shows.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -53,6 +53,24 @@ pub struct CollageDoc {
     /// not move for it.
     #[serde(default)]
     pub frame: Frame,
+    /// The cells a layout change took off the sheet, in the order a growth places
+    /// them again (S28, ruling 43): **a photo leaves the collage only when it is
+    /// deleted**.
+    ///
+    /// A `−`, or a template with fewer slots, parks the cells it cannot place here;
+    /// a later growth — `+`, a template with more slots — places them again from the
+    /// front, so `−` then `+` is the document it was, cell for cell and framing for
+    /// framing. An explicit delete ([`Command::ClearCell`](crate::Command::ClearCell),
+    /// a replace, a cut) writes into `cells` and never into this list, which is what
+    /// keeps "kept" and "deleted" two different states.
+    ///
+    /// The list is empty for a document that never shrank, and **skipped in JSON
+    /// then**, so a project written before this field reads and writes
+    /// byte-identically; a document that does keep a cell is a statement an earlier
+    /// build refuses loudly (through `deny_unknown_fields`) rather than re-laying
+    /// out wrongly.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kept: Vec<Cell>,
 }
 
 impl CollageDoc {
@@ -68,6 +86,7 @@ impl CollageDoc {
             template,
             cells,
             frame: Frame::default(),
+            kept: Vec::new(),
         }
     }
 
@@ -101,6 +120,16 @@ impl CollageDoc {
                 slots: self.template.slots.len(),
             });
         }
+        // Since S28 a layout change keeps the cells it takes away, so the ceiling
+        // counts both lists: `cells + kept` is the document's own cell total — on
+        // the sheet and off it — and `MAX_SLOTS` is what bounds it.
+        if self.cells.len() + self.kept.len() > MAX_SLOTS {
+            return Err(CoreError::CellTotalOverLimit {
+                placed: self.cells.len(),
+                kept: self.kept.len(),
+                max: MAX_SLOTS,
+            });
+        }
         // The frame is checked against the geometry it decorates, slot by slot: a
         // gap that leaves a cell with nothing visible is not a document this build
         // can render, and the error has to name which cell. The check is the same
@@ -115,7 +144,7 @@ impl CollageDoc {
                 });
             }
         }
-        for cell in &self.cells {
+        for cell in self.cells.iter().chain(self.kept.iter()) {
             cell.crop.validate()?;
         }
         Ok(())
@@ -166,8 +195,10 @@ impl CollageDoc {
     ///
     /// Idempotent, and a cell whose rotation is already inside the range is left
     /// bit-identical — which is what leaves the JSON of an old project unchanged.
+    /// The kept cells are stored crops like the placed ones (S28), so they are
+    /// wrapped the same way: a file may say any finite angle for either.
     pub fn normalize(&mut self) {
-        for cell in &mut self.cells {
+        for cell in self.cells.iter_mut().chain(self.kept.iter_mut()) {
             cell.crop = cell.crop.normalized();
         }
     }
@@ -404,6 +435,10 @@ impl Project {
 /// nothing here needs the filesystem — a project can be copied while its photos
 /// are on a drive that is not mounted. A path whose `..` components cancel stays
 /// correct for the same reason.
+///
+/// The kept cells are rewritten too (S28): a photo a layout change kept is still a
+/// photo the copy has to find, and it is placed again in the copy as it was in the
+/// original.
 pub(crate) fn rebase_sources(doc: &mut CollageDoc, from_dir: &Path, to_dir: &Path) -> bool {
     // Both are absolutized with `std::path::absolute` (lexical: no symlink
     // resolution, no filesystem access) because a relative answer needs a common
@@ -414,7 +449,7 @@ pub(crate) fn rebase_sources(doc: &mut CollageDoc, from_dir: &Path, to_dir: &Pat
         return false;
     };
     let mut changed = false;
-    for cell in &mut doc.cells {
+    for cell in doc.cells.iter_mut().chain(doc.kept.iter_mut()) {
         let Some(source) = cell.source.as_deref() else {
             continue;
         };

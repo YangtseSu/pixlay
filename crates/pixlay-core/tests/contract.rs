@@ -4,8 +4,8 @@
 use std::path::PathBuf;
 
 use pixlay_core::{
-    Cell, CollageDoc, CropTransform, DOC_VERSION, MAX_LONG_EDGE_PX, PixelSize, Point, Polygon,
-    Project, Rgba8, Template,
+    Cell, CollageDoc, CropTransform, DOC_VERSION, MAX_LONG_EDGE_PX, MAX_SLOTS, PixelSize, Point,
+    Polygon, Project, Rgba8, Template, templates,
 };
 
 fn temp_dir(name: &str) -> PathBuf {
@@ -72,11 +72,34 @@ fn serde_round_trip_is_field_identical() {
             a: 255,
         },
     };
+    // S28: the cells a layout change kept. They are stored like the placed ones —
+    // photo and framing — and an angle outside `(-180, 180]` is wrapped on the way in
+    // for either list, so `normalize` covers both.
+    doc.kept = vec![
+        Cell {
+            source: Some(PathBuf::from("photos/kept.png")),
+            crop: CropTransform {
+                zoom: 1.1,
+                offset: (0.0, 0.25),
+                rotation_deg: -190.0,
+            },
+        },
+        Cell::default(),
+    ];
+    doc.normalize();
+    assert_eq!(
+        doc.kept[0].crop.rotation_deg, 170.0,
+        "a kept cell's rotation is wrapped like a placed one's"
+    );
     doc.validate().expect("document is valid");
 
     let json = doc.to_json().expect("serializes");
     let back = CollageDoc::from_json(&json).expect("deserializes");
     assert_eq!(doc, back);
+    assert_eq!(
+        back.kept, doc.kept,
+        "the kept cells round-trip whole, photo and framing"
+    );
     // Fields, not just the round trip: a missing `deny_unknown_fields` or a
     // renamed field would still round-trip through this crate's own types.
     for key in [
@@ -92,9 +115,16 @@ fn serde_round_trip_is_field_identical() {
         "\"frame\"",
         "\"gapRel\"",
         "\"radiusRel\"",
+        "\"kept\"",
     ] {
         assert!(json.contains(key), "{key} missing from {json}");
     }
+    // And the key is **skipped while the list is empty** (S28): a project that never
+    // shrank is byte-identical to one written before the field existed, which is what
+    // lets a document that keeps nothing load in a build that has the field and a
+    // document that keeps a cell fail loudly in one that does not.
+    let plain = two_slot_doc().to_json().expect("serializes");
+    assert!(!plain.contains("\"kept\""), "{plain}");
     // The shape after the S12c purity cut and S12d's pixels-only cut: what the
     // document does *not* carry is as much of the contract as what it does, and a
     // field that quietly came back would fail here rather than at a user's project
@@ -242,6 +272,30 @@ fn cells_must_match_slots() {
         err.to_string(),
         "document has 1 cells but its template has 2 slots"
     );
+}
+
+#[test]
+fn a_document_may_not_hold_more_cells_than_the_ceiling() {
+    // S28's one new bound: `cells + kept` is the document's own cell total — on the
+    // sheet and off it — and `MAX_SLOTS` bounds it. Nine cells' worth is legal
+    // (nothing kept is the ordinary case, and the ceiling is the format's own slot
+    // limit); a tenth cell anywhere is not, however it got there.
+    let mut doc = two_slot_doc();
+    doc.kept = vec![Cell::default(); MAX_SLOTS - doc.cells.len()];
+    doc.validate()
+        .expect("nine cells' worth is inside the ceiling");
+    doc.kept.push(Cell::default());
+    let err = doc.validate().expect_err("a tenth cell is past it");
+    assert_eq!(
+        err.to_string(),
+        "document has 2 cells and keeps 8; a collage takes at most 9 cells"
+    );
+    // The bound is a *document* limit like the cell/slot match: nine placed cells and
+    // nothing kept is the boundary itself, and one kept cell on top of it is past it.
+    let mut nine = CollageDoc::new(templates::get("strip-9-9x1").expect("registered"));
+    nine.validate().expect("nine placed cells are legal");
+    nine.kept.push(Cell::default());
+    assert!(nine.validate().is_err(), "a tenth cell is not");
 }
 
 #[test]

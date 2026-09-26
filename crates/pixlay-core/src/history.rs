@@ -62,8 +62,9 @@ pub enum Command {
     /// S12d: the sheet's shape is the template's own aspect.
     ///
     /// Retention: the first `min(old, new)` cells keep their photos and framing —
-    /// a template with more slots appends empty ones, a smaller one drops the
-    /// tail — and the whole command is one undo step.
+    /// a template with more slots places the kept cells again and then appends
+    /// empty ones, a smaller one keeps the tail it cannot place (S28, ruling 43) —
+    /// and the whole command is one undo step.
     ///
     /// S6.5 deliberately had no such command ("choosing a template is how a
     /// document starts"); S7's template picker is what it is for, because a user
@@ -79,8 +80,14 @@ pub enum Command {
     /// cells that survive keep their photo and framing. One call is one undo step,
     /// whatever it did.
     ///
-    /// Refused past [`MAX_PHOTOS`](crate::MAX_PHOTOS): that is also the format's
-    /// slot limit, so there is no layout to grow into.
+    /// **An arrival lands in a cell of its own**: the growth appends an empty cell
+    /// rather than placing a cell a layout change kept, because the user has just
+    /// chosen that photo (S28, ruling 43 — a growth of the *layout* is the path
+    /// that gives a kept cell back).
+    ///
+    /// Refused past [`MAX_PHOTOS`](crate::MAX_PHOTOS) of what the document holds in
+    /// total — placed cells plus kept ones — because that is also the format's slot
+    /// limit, so there is no layout left to grow into.
     AddPhotos { photos: Vec<PathBuf> },
     /// Point several cells at several photos at once, in the order given (S23b).
     ///
@@ -117,26 +124,32 @@ pub enum Command {
     /// Drop the last cell, and take the layout with one slot fewer (S14b).
     ///
     /// The count control's `−`, and [`AddCell`](Self::AddCell)'s exact inverse: the
-    /// control addresses the *layout*, so `+` appends an empty cell and `−` removes
-    /// the last cell whatever it holds. A photo that was in it goes with the cell —
-    /// that is what "one cell fewer" means — and `Ctrl+Z` is what brings it back.
+    /// control addresses the *layout*, so `+` takes the layout with one cell more
+    /// and `−` takes it with one cell fewer, whatever the last cell holds.
+    ///
+    /// **The cell leaves the sheet, it is not deleted** (S28, ruling 43): it goes to
+    /// [`CollageDoc::kept`](crate::CollageDoc::kept) whole — photo, framing and the
+    /// place in the order a growth gives back — so the next growth places it again
+    /// and "three photos → two cells → three cells" is the document it was. Only an
+    /// explicit delete ([`ClearCell`](Self::ClearCell), a replace, a cut) removes a
+    /// photo, and `Ctrl+Z` is one step either way.
     ///
     /// Never below [`MIN_SLOTS`](crate::MIN_SLOTS) slots: a collage's layout has at
-    /// least two cells, and `layout_for` has no answer below that.
+    /// least one cell, and `layout_for` has no answer below that.
     RemoveLastCell,
-    /// Take the layout with one slot more, and leave the new cell empty
-    /// (S14b).
+    /// Take the layout with one slot more (S14b).
     ///
     /// The count control's `+`: the count and the layout move together, so "add a
-    /// photo" is "switch to the layout of the next count" and the new cell is
-    /// empty until a photo lands in it. Retention is
-    /// [`SetTemplate`](Self::SetTemplate)'s — every existing cell keeps its photo
-    /// and framing — and the layout is [`selection::layout_for`]'s answer for the
-    /// new count, so the GUI's `+` and the CLI's `edit --add-cell` cannot disagree
-    /// about which layout the document grows into.
+    /// photo" is "switch to the layout of the next count" and the new cell is empty
+    /// until a photo lands in it — **unless a cell is waiting**, which the growth
+    /// places first (S28, ruling 43: that is how a kept photo comes back). The
+    /// layout is [`selection::layout_for`]'s answer for the new count, so the GUI's
+    /// `+` and the CLI's `edit --add-cell` cannot disagree about which layout the
+    /// document grows into.
     ///
     /// Refused past [`MAX_PHOTOS`](crate::MAX_PHOTOS): that is also the format's
-    /// slot limit, so there is no layout to grow into.
+    /// slot limit, so there is no layout to grow into. A growth with a kept cell
+    /// waiting never reaches it — placing a cell back costs what the sheet gives up.
     AddCell,
     /// Exchange two cells whole — photo *and* framing (S14b).
     ///
@@ -209,20 +222,23 @@ impl Command {
                 cell_mut(doc, *slot)?.crop = crop.normalized();
             }
             Self::SetTemplate { template } => {
-                set_template(doc, template.clone());
+                set_template(doc, template.clone(), Kept::Returns);
             }
             Self::AddPhotos { photos } => {
                 for photo in photos {
                     match doc.cells.iter().position(|cell| cell.source.is_none()) {
                         Some(slot) => doc.cells[slot].source = Some(photo.clone()),
                         None => {
-                            let slots = doc.cells.len();
-                            if slots >= crate::MAX_PHOTOS {
+                            // The ceiling counts what the document holds in total,
+                            // placed and kept (S28): a growth that appended a cell
+                            // would take the document past it.
+                            if doc.cells.len() + doc.kept.len() >= crate::MAX_PHOTOS {
                                 return Err(CoreError::TooManyPhotos {
                                     max: crate::MAX_PHOTOS,
                                 });
                             }
-                            set_template(doc, layout_with(doc, slots + 1)?);
+                            let slots = doc.cells.len();
+                            set_template(doc, layout_with(doc, slots + 1)?, Kept::Waits);
                             let appended = doc.cells.len() - 1;
                             doc.cells[appended].source = Some(photo.clone());
                         }
@@ -255,7 +271,7 @@ impl Command {
                         min: crate::MIN_SLOTS,
                     });
                 }
-                set_template(doc, layout_with(doc, slots - 1)?);
+                set_template(doc, layout_with(doc, slots - 1)?, Kept::Returns);
             }
             Self::AddCell => {
                 let slots = doc.cells.len();
@@ -264,7 +280,7 @@ impl Command {
                         max: crate::MAX_SLOTS,
                     });
                 }
-                set_template(doc, layout_with(doc, slots + 1)?);
+                set_template(doc, layout_with(doc, slots + 1)?, Kept::Returns);
             }
             Self::SwapCells { left, right } => {
                 if left == right {
@@ -296,14 +312,51 @@ impl Command {
     }
 }
 
-/// Replaces the document's template, keeping the cells that still exist.
+/// What a layout change's *growth* does with the cells a shrink kept (S28, ruling
+/// 43).
+///
+/// The two cases are two intents, not two mechanisms. The layout's own growth —
+/// [`Command::AddCell`], a template with more slots — places a kept cell again,
+/// because "the sheet has one more cell" is what a user who pressed `+` asked for,
+/// and the cells that come back are the ones a previous change took away. An
+/// arrival ([`Command::AddPhotos`]) appends **past** them: the user has just chosen
+/// that photo, so it lands in a cell of its own and a kept cell keeps waiting.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Kept {
+    /// A growth places the kept cells again, from the front of the list.
+    Returns,
+    /// A growth appends an empty cell and leaves the kept cells waiting.
+    Waits,
+}
+
+/// Replaces the document's template, keeping the cells the layout cannot place.
 ///
 /// `SetTemplate`'s retention rule, factored out so that the batch commands and the
 /// command the layout gallery sends cannot drift: one cell per slot, in template
 /// order, with the states the surviving cells already had.
-fn set_template(doc: &mut CollageDoc, template: Template) {
+///
+/// Since S28 a shrink does not drop the tail — it **keeps** it (ruling 43: a photo
+/// leaves the collage only when it is deleted), and a growth puts those cells back
+/// in the order they wait in. `kept`'s own list is that order: `kept[0]` is the
+/// cell the next growth places at the first free index, so a tail that came off in
+/// one change is restored in its own order and `−` then `+` is the document it was.
+fn set_template(doc: &mut CollageDoc, template: Template, kept: Kept) {
     doc.template = template;
     let slots = doc.template.slots.len();
+    let placed = doc.cells.len();
+    if slots < placed {
+        // The tail comes off the sheet and goes to the front of the kept list: the
+        // cells a change takes away are the next ones a growth should place, and
+        // they keep their own order.
+        let mut queue = doc.cells.split_off(slots);
+        queue.append(&mut doc.kept);
+        doc.kept = queue;
+    } else if slots > placed && kept == Kept::Returns {
+        let returning = (slots - placed).min(doc.kept.len());
+        let waiting = doc.kept.split_off(returning);
+        let mut placed_again = std::mem::replace(&mut doc.kept, waiting);
+        doc.cells.append(&mut placed_again);
+    }
     doc.cells.resize(slots, crate::Cell::default());
 }
 

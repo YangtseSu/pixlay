@@ -191,10 +191,12 @@ fn the_main_path_can_be_walked() {
     );
 
     // The count control, on the same band (S14b): `−` takes the layout with one
-    // cell fewer and `+` gives it back, empty — the control moves the layout, so a
-    // wrong count is fixed without re-adding photos and without `+` meaning two
-    // different things depending on history.
+    // cell fewer and `+` gives it back. Since S28 the cell it takes off the sheet is
+    // **kept** — photo, framing and all (ruling 43) — so `+` places the same photo
+    // again and the one report says so.
     assert!(gallery.minus_button().is_sensitive());
+    let before_count = window.document();
+    let toasts = window.toasts();
     window.remove_photo();
     assert!(
         window.wait_for_idle(support::WAIT) && window.wait_for_gallery(support::WAIT),
@@ -205,23 +207,30 @@ fn the_main_path_can_be_walked() {
         3,
         "the layout gave up a cell"
     );
-    assert_eq!(window.photo_count(), 3, "and the photo went with it");
+    assert_eq!(
+        window.photo_count(),
+        3,
+        "and the photo is off the sheet, not gone"
+    );
+    assert_eq!(
+        window.document().kept.len(),
+        1,
+        "the document keeps it (S28, ruling 43)"
+    );
+    assert_eq!(window.toasts(), toasts + 1, "with one report");
     window.add_photo();
     assert!(
         window.wait_for_idle(support::WAIT) && window.wait_for_gallery(support::WAIT),
         "the grown layout rendered"
     );
     assert_eq!(window.document().cells.len(), 4, "four cells again");
-    assert!(
-        window.document().cells[3].source.is_none(),
-        "and the new cell is empty — it is the layout that grew"
-    );
     assert_eq!(
-        window.photo_count(),
-        3,
-        "so the photo count is one below the cell count, and the next thing the \
-         window offers is the empty cell's own `+`"
+        window.document().cells,
+        before_count.cells,
+        "and the fourth photo is back in its own cell, framing and all"
     );
+    assert!(window.document().kept.is_empty());
+    assert_eq!(window.photo_count(), 4, "so every photo is on the sheet");
 
     // ---- adjust the framing ---------------------------------------------
     // What the photos left behind, so the undo walk below has an exact target.

@@ -8,8 +8,9 @@
 //! * every candidate's drawing is `pixlay-render render --sketch` of the same
 //!   template at the same grid and with the same three parameters (RMSE 0) — the
 //!   band's sketch and the CLI's are two calls of one renderer;
-//! * a layout change and a LIFO removal keep every surviving cell's photo and
-//!   framing, and `+` adds one empty cell back — a layout edit, not a restore;
+//! * a layout change and the count control keep every cell they take off the sheet
+//!   — photo, framing and order (S28) — so `+` places a kept cell again; an
+//!   explicit delete is what loses a photo;
 //! * the whole band decodes **nothing**: a candidate is a template's geometry, so
 //!   `decoded_sources` does not move when the band is rebuilt;
 //! * the CLI's new flags land on the same document the window's own operations
@@ -326,9 +327,11 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
     }
 
     // ---- the count control moves the layout one cell at a time -------------
-    // S14b (ruled 2026-09-23): `+`/`−` address the *layout*, and neither remembers a
-    // photo. Framing on the last cell first, so "the survivors are untouched" means
-    // the contents and not only a path.
+    // S14b (ruled 2026-09-23): `+`/`−` address the *layout*. S28 (ruling 43) is the
+    // other half: a cell the control takes off the sheet is **kept** — photo, framing
+    // and all — and `+` places it again, so `−` then `+` is the document it was.
+    // Framing on the last cell first, so "kept whole" means the photograph *and* the
+    // numbers it was framed with.
     window
         .apply(pixlay_core::Command::SetCrop {
             slot: 7,
@@ -359,6 +362,34 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
         framed.cells[..7],
         "every surviving cell kept its photo and framing"
     );
+    assert_eq!(
+        removed.kept,
+        vec![framed.cells[7].clone()],
+        "and the cell that left the sheet is kept whole"
+    );
+    // One report, so a photo that left the sheet does not read as lost.
+    let report = window.last_toast().expect("the shrink reported itself");
+    assert!(
+        report.contains("kept") && report.contains('1'),
+        "the report says the photo is kept: {report:?}"
+    );
+    // The `+`'s own hint names the photo it would place back (S28), which is what
+    // makes a kept photo findable.
+    let kept_name = removed.kept[0]
+        .source
+        .as_deref()
+        .and_then(Path::file_name)
+        .expect("the kept cell holds a photo")
+        .to_string_lossy()
+        .into_owned();
+    let hint = gallery
+        .plus_button()
+        .tooltip_text()
+        .expect("the `+` carries a tooltip");
+    assert!(
+        hint.contains(&kept_name),
+        "the `+`'s hint names {kept_name:?}: {hint:?}"
+    );
     // The strip follows the layout, so the candidates are the seven-cell layouts.
     assert_eq!(
         gallery.candidates(),
@@ -367,8 +398,8 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
     );
     assert_eq!(gallery.count_label().label(), "7");
 
-    // `+` gives the layout one cell back, and the cell is **empty**: it is a layout
-    // edit, not a restore of the photo that left.
+    // `+` gives the layout one cell back **and places the kept cell again**: the
+    // document is the one it was, photo and framing, not one with an empty cell.
     window.add_photo();
     settle(&window);
     assert_eq!(window.document().cells.len(), 8, "eight cells again");
@@ -377,18 +408,40 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
         "mosaic-8-s14",
         "and the same layout the document was on"
     );
-    assert!(
-        window.document().cells[7].source.is_none(),
-        "the new cell has no photo: {:?}",
+    assert_eq!(
+        window.document().cells[7],
+        framed.cells[7],
+        "the kept cell is placed again, whole: {:?}",
         window.document().cells[7].source
     );
     assert_eq!(
         window.photo_count(),
-        7,
-        "so the photo count is one below the cell count"
+        8,
+        "so every photo is on the sheet again"
     );
+    assert!(
+        window.document().kept.is_empty(),
+        "and nothing is waiting: the hint is the plain one again"
+    );
+    let after = gallery
+        .plus_button()
+        .tooltip_text()
+        .expect("the `+` keeps its tooltip");
+    assert!(
+        !after.contains(&kept_name),
+        "the hint no longer names the photo: {after:?}"
+    );
+
     // The empty cell is what asks for a photo, and it is a real control over the
     // canvas (`CellControls`), reachable by the Tab order like any other button.
+    // A delete is how a cell is emptied (S28): `−` would keep its photo.
+    window.clear_cell(7);
+    settle(&window);
+    assert_eq!(window.photo_count(), 7, "the delete took the photo");
+    assert!(
+        window.document().kept.is_empty(),
+        "and kept nothing: this was a delete"
+    );
     let empty = window
         .cell_controls()
         .expect("the canvas has a cell-control layer");
@@ -518,13 +571,20 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
     );
 
     // ---- the `+` path appends in the order its files arrive ----------------
-    // Two photos, so the order is a claim and not a coincidence. The layout is
-    // dropped to six cells first, which is where the two have room.
-    window.remove_photo();
-    window.remove_photo();
+    // Two photos, so the order is a claim and not a coincidence. Two cells are
+    // emptied first, which is where the two have room — an *explicit delete*, because
+    // `−` would keep the two photos it took off the sheet (S28) and they would spend
+    // the ceiling this arrival needs.
+    window.clear_cell(7);
+    window.clear_cell(6);
     settle(&window);
     assert_eq!(window.photo_count(), 6);
-    assert_eq!(window.document().cells.len(), 6);
+    assert_eq!(
+        window.document().cells.len(),
+        8,
+        "a delete empties a cell; it does not move the layout"
+    );
+    assert!(window.document().kept.is_empty(), "and it keeps nothing");
     let first = support::photo("landscape.jpg");
     let second = support::photo("portrait.jpg");
     window.add_photos(vec![first.clone(), second.clone()]);

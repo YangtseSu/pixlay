@@ -74,6 +74,14 @@ The contract is **frozen at S1** and every step after it is built on top of it (
 > calls a breaking change: a version-1 or version-2 project is refused with the actionable
 > message rather than silently losing the layers and the size it names (the purity ruling
 > and ruling 17, `docs/archive/2026-09-22-STEPS.md`).
+>
+> **The shape after S28 (2026-09-26)**: `kept` is new — the cells a layout change took off
+> the sheet — declared after `frame` and **skipped while it is empty**, so a project that
+> never shrank is byte-identical to what the build before it wrote (measured: `save` of the
+> verification project byte-for-byte equal across the step). `docVersion` stays 3, which is
+> the policy below: a field that carries a default does not bump it. A document that *does*
+> keep a cell is one an earlier build refuses loudly (through `deny_unknown_fields`)
+> instead of re-laying out wrongly.
 
 **Version policy** (S1 review ruling, 2026-09-20: **breaking changes allowed, but no migrations written**).
 
@@ -101,6 +109,23 @@ Conventions:
   with the `canvas` field.
 - **Empty slot = `source: null`**, and that cell renders white. `source` is a path relative to the project file;
   an absolute path is accepted as it stands. A missing file → an explicit error, not a skip.
+- **A photo leaves the collage only when it is deleted** (S28, ruling 43, with the photo
+  count ruled 1..=9 by ruling 34). `kept` is the list of cells a layout change could not
+  place — `−`, or a template with fewer slots — and they are parked there **whole**: photo,
+  framing and order. A later growth (`+`, a template with more slots) places them again
+  from the front of the list, so `−` then `+` is the document it was; the CLI's growth of an
+  *arrival* (`--add-photo`) appends past them instead, because a photo the user has just
+  chosen lands in a cell of its own. An explicit delete — `ClearCell`, a replace (`SetSource`
+  with a path), a cut (`MovePhoto`) — writes into `cells` and never into `kept`, which is
+  what keeps "kept" and "deleted" two states. `cells.len() + kept.len()` is the document's
+  own cell total, on the sheet and off it, and `MAX_SLOTS` bounds it (§2); a cell that was
+  already empty when it left the sheet is parked like any other, so the pair is exact for a
+  document with holes in its tail too. A kept cell's `source` is resolved when a growth
+  places it, not while it waits: it is not drawn, so a file that went away behind it makes
+  no white hole — the window's decode reports it the moment the cell is on the sheet again
+  (S15h's banner), and `Project::sources` refuses the project from then on like any other.
+  The field is `#[serde(default, skip_serializing_if = "Vec::is_empty")]` and `docVersion`
+  does not move for it.
 - `crop.zoom` is **absolute zoom** (displayed width / slot width), not "a multiple of fill":
   when the photo is swapped the baseline does not move and the framing does not jump focus.
 - `rotationDeg` accepts **any finite angle** and is normalized to `(-180, 180]` — the ±45° cap was removed on
@@ -152,6 +177,7 @@ Conventions:
 |---|---|---|
 | `docVersion` | exactly `DOC_VERSION` (currently **3**); higher refused, lower refused too | see "Version policy" |
 | slot count | 1..=9 | `AGENTS.md`; nine since S12c removed the ten-slot recipe, one since S19 (ruling 34: a single photo is a legal collage, and `grid-1-1x1` is its layout) |
+| cells the document holds | `cells.len() + kept.len()` ≤ 9 (`MAX_SLOTS`) | S28 (ruling 43): a layout change keeps what it cannot place, so the ceiling counts both lists — the cells on the sheet and the ones waiting. Refused by `CollageDoc::validate` with `CellTotalOverLimit`, naming both counts |
 | long edge | 1..=30000 px (`MAX_LONG_EDGE_PX`) | a pixel count, the one size parameter: what a render renders and what an export writes |
 | canvas pixels | ≤ 200 MP | the largest grid the product has rendered measured 139.5 MP (§8, "S0"); 43% of headroom left. Checked wherever a grid is **asked for** (S15e): the grid a long edge derives, and the scaled grid `render --preview-px` and `gesture --grid` derive from it |
 | one slot's bitmap | ≤ 200 MP texels (`MAX_BITMAP_PIXELS`, the same budget at the bitmap boundary — S15e) | a bitmap is the part of the photo the slot can show: the slot's own extent in output pixels plus the axis-aligned box a rotation needs, so it is bounded by the canvas rather than by the zoom. Refused per slot with the slot named and the conversion's peak bytes reported (§8, "S15e") |
@@ -497,7 +523,7 @@ three on both commands, and the difference between them is scope:
 | what `edit` stores | **the fit** of what was asked for, not the request: a crop is a request and what is drawn is what covers it, so the written file says what it draws. A cell with no photo has no photo aspect to fit against and keeps the numbers as given |
 | idempotence | fitting a fit returns it bit for bit, so `edit` applied twice to the same project writes the same bytes — asserted on a rotation that has to be paid for *and* a pan that has to be clamped. A frame is likewise idempotent |
 | writing | through `Project::save_as`, the same call `save` makes: atomic, and relative photo paths are rebased when the copy lands in another directory. Since S15d it **returns the project it wrote** — the rebased copy — so a caller that keeps the document in memory (the window) adopts the file's own spellings rather than keeping the old ones. `--out` may be `--project` (edit in place) |
-| what `edit` reports | `template`, `version`, `cells`, `photos`, the frame's three fields, `bytes`, and — when `--slot` was given — `slot`, `occupied`, `zoom`, `offset`, `rotation_deg` |
+| what `edit` reports | `template`, `version`, `cells`, `photos`, `kept` (the cells a layout change took off the sheet, S28: `cells + kept` is the number §2's ceiling bounds), the frame's three fields, `bytes`, and — when `--slot` was given — `slot`, `occupied`, `zoom`, `offset`, `rotation_deg` |
 | no `--long-edge` | an edit changes a cell's framing, the document's frame, its layout and the photos it holds; how big an export is another command's question. `--photo` joined the framing flags in S14 (`edit --slot <i> --photo <file>`), with the rules S14 added further down |
 
 **S12 added one subcommand and no flags to the others.** `gesture` is the ruler for what one step of a live
@@ -530,11 +556,11 @@ operations the band performs:
 | Item | Rule |
 |---|---|
 | `templates --slots <n>` | only the templates with exactly `n` slots, `1..=9` (exit 1 outside, and the same bound the format's slot limit gives). This is `Selection::layouts` — the gallery's own query — seen from the outside, so a caller can list a photo count's candidates; the two filters combine with `--aspect`. The report echoes `slots` beside `aspect`. Count 1 answers with `grid-1-1x1` alone (S19) |
-| `edit --template <name>` | switches the document to another layout, keeping the surviving cells' photos and framing (`Command::SetTemplate`'s retention: a layout with fewer slots drops the tail, one with more appends empty cells). An unknown name is exit 1 with the library listed |
-| `edit --add-cell` | takes the layout with one cell more, leaving it empty (`Command::AddCell`, the window's `+`). An edit *about the layout*, so it moves the count without placing a photo: the cell the user wants filled is the one that shows a `+`, and clicking that is what asks for the file (S14b) |
-| `edit --remove-cell` | takes the layout with one cell fewer, dropping the last cell whatever it holds (`Command::RemoveLastCell`, the window's `−`). Exit 2 at one cell (`a collage's layout has at least 1 cell`) — the floor is the layout's, not the photo count's, and it is one cell since S19 (ruling 34). The mirror image of `--add-cell`, and refused together with it (exit 1): they are opposites, and one edit is one intent |
+| `edit --template <name>` | switches the document to another layout, keeping the surviving cells' photos and framing (`Command::SetTemplate`'s retention). Since S28 the count need not match at all: a layout with fewer slots **keeps** the tail it cannot place and one with more **places those cells again** (photo and framing), then appends empty ones — so a shrink and a growth are inverses on the document, not only on the layout. An unknown name is exit 1 with the library listed |
+| `edit --add-cell` | takes the layout with one cell more (`Command::AddCell`, the window's `+`). A cell a layout change kept is placed again first — that is how a kept photo comes back (S28) — otherwise the new cell is empty: an edit *about the layout*, so it moves the count without placing a photo. The cell the user wants filled is the one that shows a `+`, and clicking that is what asks for the file (S14b) |
+| `edit --remove-cell` | takes the layout with one cell fewer (`Command::RemoveLastCell`, the window's `−`). The last cell leaves the sheet **whole and kept**, not deleted (S28, ruling 43): it waits in `kept` and a later growth places it again, so a photo leaves the collage only through `--slot <i> --clear`, a replace or a cut. Exit 2 at one cell (`a collage's layout has at least 1 cell`) — the floor is the layout's, not the photo count's, and it is one cell since S19 (ruling 34). The mirror image of `--add-cell`, and refused together with it (exit 1): they are opposites, and one edit is one intent |
 | `edit --swap <i>,<j>` | exchanges two cells **whole** — photo and framing both (`Command::SwapCells`), because the framing is what makes a photo look right in *that* cell. Exit 2 for the same cell twice (`slot i cannot be swapped with itself`) and for a cell the layout does not have; a malformed pair is exit 1. The window's own paths are the four ruling 33 gave it (S23, plus S27's marked press): a `Shift`+drag from one cell onto another, a `Shift`+click on another cell, the strip's swap control plus `Return` — or plus a press on the target cell (S27) — and `Ctrl+Shift+Arrow` (S14b), which names the neighbour geometrically (`Template::neighbour`) and stays |
-| `edit --add-photo <file>` | appends a photo: the first empty cell, else the layout with one slot more (`Command::AddPhotos`). Repeated once per photo in argument order; a photo that is not there is exit 2 with the path named, and a tenth is exit 2 (`a collage takes at most 9 photos`) |
+| `edit --add-photo <file>` | appends a photo: the first empty cell, else the layout with one slot more (`Command::AddPhotos`). **An arrival lands in a cell of its own** (S28): the growth appends past the cells a layout change kept rather than placing them, because the user has just chosen that photo. Repeated once per photo in argument order; a photo that is not there is exit 2 with the path named, and a document already holding nine cells' worth — placed plus kept — is exit 2 (`a collage takes at most 9 photos`), with nothing written |
 | `edit --slot <i> --photo <file>` | the photo that cell shows instead. Needs `--slot` (exit 1 otherwise, like the framing flags), and the stored path follows `init --photo`'s rule (relative to the project when the two share a root, absolute otherwise). **An arrival that points several cells at once — a drop from the file manager, a paste (S23b, `Command::PlacePhotos`) — is the same document as one of these per cell**; the difference is the history's, not the file's: the window keeps the whole arrival as *one* undo step and reports the files that did not fit once, while a machine caller gets no history and no silent drop at all |
 | the order of one `edit` | `--template`, `--add-cell`/`--remove-cell`, `--swap`, `--add-photo`, `--slot`/`--photo`, then the framing — so the framing is fitted against the document the earlier flags produced, and `--swap 0,3 --slot 0 --rotate 10` frames the cell that ends up at index 0. `--clear` is exclusive with `--photo` as well as with the framing flags |
 | one implementation | every one of these goes through the same `pixlay_core::Command` the window sends (`crates/pixlay-cli/src/cli.rs::edit_project` applies them to a `History`), so "the CLI and the window produce the same document" is a property of the code rather than of two editors kept in step by hand — asserted in `crates/pixlay/tests/layout.rs` |
@@ -1154,6 +1180,16 @@ new — the *blend* row below was measured against the S19 binary itself, which 
 | byte-identity at `gapRel = 0` | the S1 golden image is still **RMSE 0.0** (`pixlay-render/tests/render.rs`), and the `AGENTS.md` verification render is the same **9,157,639 bytes** as S19's: the sheet's own band is zero-width at gap 0, so nothing about the identity frame moved |
 | the fit's floor with a frame | unchanged property, moved reference: the framed sweep (36,480 framings) is green, and the floor is now measured about the *slot's* centre against the visible rectangle, which since S20 can sit off-centre in its cell (the sheet's band takes a whole gap off the outer side and half off the inner ones) |
 
+### S28 (2026-09-26, `--release`, this machine)
+
+| what | number |
+|---|---|
+| a project that never shrank (`pixlay-render save` of the verification project) | **byte-identical** to the file the build before the step wrote (`cmp`): `kept` is `#[serde(default, skip_serializing_if = "Vec::is_empty")]`, so the key is absent and nothing else moved |
+| the verification render (`render --project … --long-edge 14043 --stats`, JPEG) | **byte-identical** (`cmp`) — a kept cell has no slot and is not drawn, so the step moves no pixel |
+| the retention through the CLI (a four-photo `mosaic-4-hero` → `--template mosaic-3-hero` → `--add-cell`) | `cells` 4 → 3 → 4, `photos` 4 → 3 → 4, `kept` 0 → 1 → 0, and the grown document equals the original cell for cell (`crates/pixlay-cli/tests/cli.rs`) |
+| a switch that places a kept cell again (`switch --project <three cells + 1 kept> --template mosaic-4-hero`) | `slots` 4, `occupied` **4** — the ruler's own source list follows the new document (before this step it would have built the returned cell empty) |
+| the document's cell total | `cells + kept` ≤ 9, refused by `validate` with both counts named; the sweep over the whole library (`crates/pixlay-core/tests/history.rs`) never sees it shrink under any layout change |
+
 ## 9. The window (S7), and the shell ruling 31 re-cut (S22)
 
 The GUI is the fifth consumer of the same document, and what it adds is interaction. Its
@@ -1223,15 +1259,24 @@ rely on:
   is the **cell count alone** — no noun beside it, because the control sits between two buttons and above a
   strip of the very layouts it counts, and what the number counts is the accessible name
   (`Photos in the collage`), which is where HIG `guidelines/accessibility` asks for it. `+` takes the
-  layout with one cell more and leaves the new cell **empty**; `−` takes the layout with one cell fewer,
-  dropping the last cell whatever it holds. Neither remembers a photo: `Ctrl+Z` is the way a dropped photo
-  comes back, which is what makes `+` mean one thing rather than two. Both are insensitive at their bound
-  (`MIN_PHOTOS` / `MAX_PHOTOS`, the format's own floor and ceiling, S19), with the refusal's own message if
-  a caller asks anyway, and `selection::layout_for` (same aspect → same recipe family → nearest aspect →
-  library order) is the one rule that decides *which* layout either one moves to.
+  layout with one cell more; `−` takes the layout with one cell fewer. **Since S28 (ruling 43) a photo
+  leaves the collage only when it is deleted**: the cell `−` takes off the sheet is *kept* — photo,
+  framing and order — and the next growth places it again, so `−` then `+` is the document it was. `+`
+  therefore means one thing still: it edits the layout, and a kept cell coming back is what "one more
+  cell" means while one is waiting; with nothing waiting, the new cell is empty. A kept photo has no
+  cell, so it cannot be selected, replaced or deleted — **it returns** — and the `+`'s own tooltip names
+  it (and is its accessible name) while it waits, which is what makes it findable. A growth whose
+  candidate is a kept cell never reaches the ceiling: it places a cell the sheet gave up rather than
+  appending one. Both controls are insensitive at their bound (`MIN_PHOTOS` / `MAX_PHOTOS`, the format's
+  own floor and ceiling, S19), with the refusal's own message if a caller asks anyway, and
+  `selection::layout_for` (same aspect → same recipe family → nearest aspect → library order) is the one
+  rule that decides *which* layout either one moves to — so a `−`/`+` pair restores the layout too
+  wherever the counts in between share an aspect, and the *cells* (photo and framing) in every case.
+  One report says what a shrink kept, once per change and not once per cell.
 - **A list of photos longer than the ceiling is trimmed once, with one report** (S19, ruling 34): the
   window is the surface that trims, and each of its list paths trims to what *it* can use —
-  `Add photos…` to the room the ceiling leaves (`MAX_PHOTOS - photo count`), because `Command::AddPhotos`
+  `Add photos…` to the room the ceiling leaves (`MAX_PHOTOS` less the photos on the sheet **and the kept
+  cells**, S28: a kept cell is one of the nine before it is a cell again), because `Command::AddPhotos`
   is all-or-nothing and grows the layout one cell at a time, and a **drop or a paste** to the room the
   document has, one report naming everything that did not land (below). Core never truncates:
   `Command::AddPhotos` and `Selection::new` still refuse past the cap, which is what the CLI's

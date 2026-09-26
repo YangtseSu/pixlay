@@ -338,7 +338,17 @@ impl Gallery {
     /// accessible name and the tooltips' business — a screen reader announces
     /// "Photos in the collage: 8" — which is where HIG `guidelines/accessibility`
     /// asks for it and where a two-word caption costs nothing.
-    pub fn update_control(&self, cells: usize) {
+    ///
+    /// `kept` is the file name of the photo a growth would place back first, when the
+    /// document keeps one (S28, ruling 43): `+` is then the way that photo returns,
+    /// so its own hint says so instead of promising an empty cell — and the hint is
+    /// the accessible name too, because that is what pressing the button does.
+    ///
+    /// The `+`'s sensitivity is `cells < MAX_PHOTOS`, which is exactly where
+    /// `AddCell` itself refuses: a growth with a kept cell waiting places that cell
+    /// instead of appending one, so it never takes the document past the ceiling
+    /// (and `cells` can only be `MAX_PHOTOS` with nothing kept).
+    pub fn update_control(&self, cells: usize, kept: Option<&str>) {
         self.count.set_label(&cells.to_string());
         self.minus.set_sensitive(cells > MIN_PHOTOS);
         self.plus.set_sensitive(cells < MAX_PHOTOS);
@@ -347,11 +357,13 @@ impl Gallery {
         } else {
             gettext("A collage needs at least one photo")
         }));
-        self.plus.set_tooltip_text(Some(&if cells < MAX_PHOTOS {
-            gettext("Add a cell")
-        } else {
-            fill(gettext("A collage takes at most {} photos"), &[MAX_PHOTOS])
-        }));
+        let add = match kept {
+            Some(name) => fill(gettext("Add a cell and bring back “{}”"), &[name]),
+            None if cells < MAX_PHOTOS => gettext("Add a cell"),
+            None => fill(gettext("A collage takes at most {} photos"), &[MAX_PHOTOS]),
+        };
+        self.plus.set_tooltip_text(Some(&add));
+        a11y::label(&self.plus, &add);
     }
 }
 

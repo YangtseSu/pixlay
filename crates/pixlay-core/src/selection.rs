@@ -245,7 +245,9 @@ pub fn layout_for(count: usize, aspect: f64, family: Option<Family>) -> Option<T
 ///
 /// The returned index is the one thing a batch control used to need beyond the
 /// edit (S14 kept the cell in a token so `+` could put it back); S14b's `+` switches
-/// the layout instead of restoring a photo, so the index is all that is left.
+/// the layout instead, and since S28 the *document* is what keeps a cell a layout
+/// change takes away — this function clears one and keeps nothing, which is the
+/// "delete" half of that rule.
 pub fn remove_last(doc: &mut CollageDoc) -> Option<usize> {
     let slot = last_photo(doc)?;
     doc.cells[slot] = Cell::default();

@@ -3451,8 +3451,10 @@ fn edit_switches_the_layout_and_sets_one_cell_s_photo() {
     assert_eq!(after.cells[2], Cell::default());
     assert_eq!(after.cells[3], Cell::default());
 
-    // A layout with *fewer* slots drops the tail, which is the documented rule and
-    // the one the gallery's own thumbnails show before the click.
+    // A layout with *fewer* slots keeps the tail it cannot place (S28, ruling 43):
+    // the photos that leave the sheet wait in the document, in order, until a
+    // layout with room places them again. Here the tail is the two cells that held
+    // nothing, so what is kept is two empty cells — the count is the cell count.
     let shrunk = dir.join("shrunk.pixlay");
     let output = run(&[
         "edit",
@@ -3466,6 +3468,11 @@ fn edit_switches_the_layout_and_sets_one_cell_s_photo() {
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     assert_eq!(field(&output, "cells"), "2");
     assert_eq!(field(&output, "photos"), "2");
+    assert_eq!(
+        field(&output, "kept"),
+        "2",
+        "and the tail is kept, not lost"
+    );
 
     // One cell's photo, with the framing it already had: `SetSource` never resets
     // the crop, because the zoom is absolute (docs/CONTRACT.md §1).
@@ -3548,6 +3555,203 @@ fn edit_switches_the_layout_and_sets_one_cell_s_photo() {
         "{}",
         stderr(&unknown)
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn edit_keeps_the_cells_a_layout_change_takes_away() {
+    // S28 (ruling 43): a layout change does not drop a photo. The tail leaves the
+    // sheet whole, the report's `kept` counts it, and the next growth places it
+    // again — so `--template`/`--remove-cell` and `--add-cell` are inverses on the
+    // *document*, not merely on the layout. Only an explicit delete loses a photo.
+    let dir = out_dir("edit-kept");
+    let photos = dir.join("photos");
+    std::fs::create_dir_all(&photos).expect("create photos");
+    for (name, bytes) in [
+        (
+            "a.jpg",
+            &include_bytes!("fixtures/photos/landscape.jpg")[..],
+        ),
+        ("b.jpg", &include_bytes!("fixtures/photos/portrait.jpg")[..]),
+        ("c.jpg", &include_bytes!("fixtures/photos/square.png")[..]),
+        ("d.jpg", &include_bytes!("fixtures/photos/dated.jpg")[..]),
+    ] {
+        std::fs::write(photos.join(name), bytes).expect("write photo");
+    }
+    let project = dir.join("four.pixlay");
+    // A 4:3 four-cell layout and a 4:3 three-cell one: the count rule follows the
+    // aspect, so this pair is the one where the layout itself comes back too.
+    let mut init: Vec<String> = [
+        "init",
+        "--template",
+        "mosaic-4-hero",
+        "--out",
+        project.to_str().expect("utf-8"),
+    ]
+    .iter()
+    .map(|value| value.to_string())
+    .collect();
+    for name in ["a.jpg", "b.jpg", "c.jpg", "d.jpg"] {
+        init.push("--photo".to_string());
+        init.push(photos.join(name).to_str().expect("utf-8").to_string());
+    }
+    let output = run(&init.iter().map(String::as_str).collect::<Vec<_>>());
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let before = CollageDoc::load(&project).expect("loads");
+    assert_eq!(before.cells.len(), 4);
+
+    // A template with one slot fewer: the fourth cell is kept, whole.
+    let shrunk = dir.join("shrunk.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        project.to_str().expect("utf-8"),
+        "--template",
+        "mosaic-3-hero",
+        "--out",
+        shrunk.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "cells"), "3");
+    assert_eq!(field(&output, "photos"), "3");
+    assert_eq!(field(&output, "kept"), "1");
+    let kept = CollageDoc::load(&shrunk).expect("loads");
+    assert_eq!(kept.kept, vec![before.cells[3].clone()]);
+
+    // The growth places it again: the document is the one it was, cell for cell.
+    let grown = dir.join("grown.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        shrunk.to_str().expect("utf-8"),
+        "--add-cell",
+        "--out",
+        grown.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "cells"), "4");
+    assert_eq!(field(&output, "photos"), "4");
+    assert_eq!(field(&output, "kept"), "0");
+    assert_eq!(
+        CollageDoc::load(&grown).expect("loads"),
+        before,
+        "the shrink and the growth are inverses"
+    );
+
+    // A kept cell counts against the ceiling without being placed: eight on the
+    // sheet and one kept is nine, and an arrival still lands — in a cell of its own,
+    // because the layout grew — while a tenth photo is refused.
+    let eight = dir.join("eight.pixlay");
+    let mut eight_init: Vec<String> = [
+        "init",
+        "--template",
+        "mosaic-8-s14",
+        "--out",
+        eight.to_str().expect("utf-8"),
+    ]
+    .iter()
+    .map(|value| value.to_string())
+    .collect();
+    for index in 0..8 {
+        eight_init.push("--photo".to_string());
+        eight_init.push(
+            photos
+                .join(["a.jpg", "b.jpg", "c.jpg", "d.jpg"][index % 4])
+                .to_str()
+                .expect("utf-8")
+                .to_string(),
+        );
+    }
+    let output = run(&eight_init.iter().map(String::as_str).collect::<Vec<_>>());
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let seven = dir.join("seven.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        eight.to_str().expect("utf-8"),
+        "--remove-cell",
+        "--out",
+        seven.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "cells"), "7");
+    assert_eq!(field(&output, "kept"), "1");
+    let landed = dir.join("landed.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        seven.to_str().expect("utf-8"),
+        "--add-photo",
+        photos.join("a.jpg").to_str().expect("utf-8"),
+        "--out",
+        landed.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(
+        field(&output, "cells"),
+        "8",
+        "the layout grew for the arrival"
+    );
+    assert_eq!(field(&output, "photos"), "8");
+    assert_eq!(field(&output, "kept"), "1", "and the kept cell still waits");
+    let full = CollageDoc::load(&landed).expect("loads");
+    assert_eq!(
+        full.cells[7]
+            .source
+            .as_deref()
+            .map(|source| source.ends_with("a.jpg")),
+        Some(true),
+        "the arrival is in a cell of its own: {:?}",
+        full.cells[7].source
+    );
+    assert!(
+        full.kept[0]
+            .source
+            .as_deref()
+            .is_some_and(|source| source.ends_with("d.jpg")),
+        "and the kept photo is the one the shrink took: {:?}",
+        full.kept[0].source
+    );
+    let tenth = dir.join("tenth.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        landed.to_str().expect("utf-8"),
+        "--add-photo",
+        photos.join("b.jpg").to_str().expect("utf-8"),
+        "--out",
+        tenth.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(
+        code(&output),
+        2,
+        "nine cells' worth is the ceiling: {}",
+        stderr(&output)
+    );
+    assert!(
+        stderr(&output).contains("at most 9 photos"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(!tenth.exists());
+
+    // A delete is the other half of the rule: clearing a cell loses its photo and
+    // keeps nothing.
+    let cleared = dir.join("cleared.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        project.to_str().expect("utf-8"),
+        "--slot",
+        "3",
+        "--clear",
+        "--out",
+        cleared.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "cells"), "4");
+    assert_eq!(field(&output, "photos"), "3");
+    assert_eq!(field(&output, "kept"), "0", "a delete keeps nothing");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -5362,6 +5566,92 @@ fn switch_measures_a_layout_change_at_the_canvas_box() {
     assert!(
         !stdout(&output).contains("band_ms"),
         "a run without --band measured the band"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A switch that **places kept cells again** measures the document it produces.
+///
+/// S28: a layout change keeps the cells it cannot place, and a growth places them
+/// again — so the click's document can have more occupied cells than the one it
+/// started from, and the ruler's own source list has to be the *new* document's
+/// (§8, "S28").
+#[test]
+fn switch_places_the_kept_cells_the_click_gives_back() {
+    let dir = out_dir("switch-kept");
+    let photos = dir.join("photos");
+    std::fs::create_dir_all(&photos).expect("create photos");
+    for (name, bytes) in [
+        (
+            "a.jpg",
+            &include_bytes!("fixtures/photos/landscape.jpg")[..],
+        ),
+        ("b.jpg", &include_bytes!("fixtures/photos/portrait.jpg")[..]),
+        ("c.jpg", &include_bytes!("fixtures/photos/square.png")[..]),
+        ("d.jpg", &include_bytes!("fixtures/photos/dated.jpg")[..]),
+    ] {
+        std::fs::write(photos.join(name), bytes).expect("write photo");
+    }
+    let four = dir.join("four.pixlay");
+    let mut init: Vec<String> = [
+        "init",
+        "--template",
+        "mosaic-4-hero",
+        "--out",
+        four.to_str().expect("utf-8"),
+    ]
+    .iter()
+    .map(|value| value.to_string())
+    .collect();
+    for name in ["a.jpg", "b.jpg", "c.jpg", "d.jpg"] {
+        init.push("--photo".to_string());
+        init.push(photos.join(name).to_str().expect("utf-8").to_string());
+    }
+    let output = run(&init.iter().map(String::as_str).collect::<Vec<_>>());
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+
+    // Three cells and one kept photo: the click that started here.
+    let three = dir.join("three.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        four.to_str().expect("utf-8"),
+        "--template",
+        "mosaic-3-hero",
+        "--out",
+        three.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "kept"), "1");
+
+    let output = run(&[
+        "switch",
+        "--project",
+        three.to_str().expect("utf-8"),
+        "--template",
+        "mosaic-4-hero",
+        "--canvas",
+        "400x300",
+        "--stats",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "from_template"), "mosaic-3-hero");
+    assert_eq!(field(&output, "template"), "mosaic-4-hero");
+    assert_eq!(field(&output, "slots"), "4");
+    assert_eq!(
+        field(&output, "occupied"),
+        "4",
+        "the kept photo is placed again by the growth"
+    );
+    assert_eq!(
+        field(&output, "open_decodes"),
+        "3",
+        "and the window's own open decoded the three cells it had"
+    );
+    assert_eq!(
+        field(&output, "decodes"),
+        "1",
+        "while the click decoded the photo that came back"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

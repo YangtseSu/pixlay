@@ -372,6 +372,10 @@ fn edit_project(args: EditArgs) -> Result<u8, Failure> {
             .filter(|cell| cell.source.is_some())
             .count() as i64,
     );
+    // The cells a layout change took off the sheet and keeps (S28): a machine
+    // caller can see that `--template` or `--remove-cell` kept a photo rather than
+    // losing it, and `cells + kept` is the number the format's ceiling bounds.
+    report.int("kept", doc.kept.len() as i64);
     report.float("gap", doc.frame.gap_rel);
     report.float("radius", doc.frame.radius_rel);
     let border = doc.frame.color;
@@ -1343,10 +1347,16 @@ fn switch(args: SwitchArgs) -> Result<u8, Failure> {
     let doc = history.doc().clone();
     let grid = canvas_grid(doc.template.aspect, args.canvas.0, args.canvas.1);
     let template_ms = template_step.elapsed().as_secs_f64() * 1000.0;
-    // A layout with fewer cells drops the last ones — that is how `SetTemplate`
-    // resizes a document — and the resolved sources follow the same way.
-    let mut sources = sources;
-    sources.resize(doc.cells.len(), None);
+    // The ruler draws **that click's document**, and a layout change may keep cells
+    // or place kept ones again (S28): the sources are therefore the new document's
+    // own, resolved against the same project directory — the surviving cells' paths
+    // are the same bytes as the warm list's (so the preview copies still hit), the
+    // cells a growth filled from the kept list are resolved here, and the cells that
+    // left the sheet are dropped. Sizing by the *old* list would build the returned
+    // cells as empty, which is a document the window never shows.
+    let sources = Project::new(doc.clone(), project.path())
+        .and_then(|project| project.sources())
+        .map_err(|error| Failure::Failed(error.to_string()))?;
     let occupied = sources.iter().filter(|source| source.is_some()).count();
 
     // ---- the worker's two halves ------------------------------------------

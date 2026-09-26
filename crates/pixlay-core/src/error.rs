@@ -64,6 +64,20 @@ pub enum CoreError {
     #[error("document has {cells} cells but its template has {slots} slots")]
     CellCount { cells: usize, slots: usize },
 
+    /// A document whose own cell total exceeds the format's ceiling (S28).
+    ///
+    /// Since S28 a layout change keeps the cells it takes away, so the ceiling
+    /// counts both lists: `placed + kept` is what the document holds — on the sheet
+    /// and off it — and `MAX_SLOTS` is what bounds it. A *document* limit rather
+    /// than a request one: no command builds such a document, and this is what
+    /// refuses a hand-written file that does.
+    #[error("document has {placed} cells and keeps {kept}; a collage takes at most {max} cells")]
+    CellTotalOverLimit {
+        placed: usize,
+        kept: usize,
+        max: usize,
+    },
+
     #[error("slot {slot}: {reason}")]
     InvalidSlot { slot: usize, reason: &'static str },
 

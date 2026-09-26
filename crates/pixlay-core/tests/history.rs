@@ -525,11 +525,13 @@ fn a_history_refuses_a_document_that_is_not_valid() {
 }
 
 #[test]
-fn a_template_change_keeps_the_photos_it_can_and_never_leaves_a_dangling_slot() {
+fn a_template_change_keeps_the_cells_it_cannot_place() {
     // S7's command, and the reason it exists: a user who has placed
     // photos must be able to try another layout without starting over, so the
-    // cells that still exist keep what they hold and a smaller template drops the
-    // tail — one cell per slot, so the result stays valid.
+    // cells that still exist keep what they hold. Since S28 a smaller template does
+    // not drop the tail either (ruling 43: a photo leaves the collage only when it
+    // is deleted): those cells are *kept*, whole and in their own order, and a later
+    // change with more slots places them again.
     let mut history = History::new(document()).expect("a valid document");
     for (slot, name) in [(0usize, "photos/a.jpg"), (4, "photos/b.png")] {
         history
@@ -552,6 +554,7 @@ fn a_template_change_keeps_the_photos_it_can_and_never_leaves_a_dangling_slot() 
     // A layer-free document: the retention rule that matters now is the cells'.
     // `mosaic-5-hero` is 4:3, with five slots.
     let template = templates::get("mosaic-5-hero").expect("registered");
+    let before = history.doc().clone();
     history
         .apply(Command::SetTemplate {
             template: template.clone(),
@@ -569,9 +572,14 @@ fn a_template_change_keeps_the_photos_it_can_and_never_leaves_a_dangling_slot() 
     assert_eq!(doc.cells[0].crop.zoom, 1.6, "and their framing");
     assert_eq!(doc.cells[4].source, Some(PathBuf::from("photos/b.png")));
     assert_eq!(
-        doc.cells[5..].len(),
-        0,
-        "the tail is dropped, not carried over"
+        doc.kept,
+        before.cells[5..].to_vec(),
+        "the tail is kept, whole and in its own order"
+    );
+    assert_eq!(
+        doc.cells.len() + doc.kept.len(),
+        8,
+        "the change moved no cell out of the document"
     );
     doc.validate().expect("the result is a valid document");
 
@@ -579,6 +587,18 @@ fn a_template_change_keeps_the_photos_it_can_and_never_leaves_a_dangling_slot() 
     assert_eq!(history.undo_depth(), 4);
     assert!(history.undo());
     assert_eq!(history.doc().cells.len(), 8);
+    assert!(history.doc().kept.is_empty(), "the undo took the tail back");
+
+    // A change with more slots places the kept cells again, in their own order,
+    // before it appends empty ones.
+    assert!(history.redo(), "the change is redoable");
+    history
+        .apply(Command::SetTemplate {
+            template: templates::get("mosaic-8-s14").expect("registered"),
+        })
+        .expect("applies");
+    assert_eq!(history.doc(), &before, "the document is the one it was");
+    assert!(history.doc().kept.is_empty());
 }
 
 #[test]
@@ -677,16 +697,18 @@ fn adding_photos_fills_empty_cells_before_it_grows_the_layout() {
 }
 
 #[test]
-fn the_count_control_takes_and_drops_a_cell_without_remembering_it() {
+fn the_count_control_moves_the_layout_and_keeps_what_it_takes_off() {
     // S14b, ruled 2026-09-23: the control addresses the *layout*. `+` takes the
-    // layout with one cell more and leaves it empty; `−` takes the layout with one
-    // cell fewer, whatever the last cell holds. Neither remembers a photo, and
-    // `Ctrl+Z` is what brings one back — which is the property that makes `+` mean
-    // "one more cell" rather than "undo the last removal".
+    // layout with one cell more and `−` takes the layout with one cell fewer.
+    // S28 (ruling 43) amends the other half: what `−` takes off the sheet is
+    // **kept** — photo, framing and order — so the next growth places it again,
+    // and `Ctrl+Z` is no longer the only way a photo comes back. What makes `+`
+    // mean one thing rather than two is that it still edits the layout: a cell
+    // coming back is what "one more cell" means when one is waiting.
     let mut history = History::new(occupied("mosaic-4-hero")).expect("a valid document");
     history
         .apply(Command::SetCrop {
-            slot: 0,
+            slot: 3,
             crop: CropTransform {
                 zoom: 1.9,
                 offset: (-0.2, 0.15),
@@ -696,59 +718,79 @@ fn the_count_control_takes_and_drops_a_cell_without_remembering_it() {
         .expect("applies");
     let framed = history.doc().clone();
 
-    history.apply(Command::AddCell).expect("a fifth cell fits");
-    let doc = history.doc();
-    assert_eq!(doc.cells.len(), 5, "the layout took one cell more");
-    assert_eq!(doc.template.name, "mosaic-5-hero", "4:3 stays 4:3");
-    assert_eq!(
-        doc.cells[..4],
-        framed.cells[..],
-        "every existing cell kept its photo and framing"
-    );
-    assert!(
-        doc.cells[4].source.is_none(),
-        "the new cell is empty: it is a layout edit, not a photo"
-    );
-    assert_eq!(
-        doc.cells[4].crop,
-        CropTransform::IDENTITY,
-        "and its framing is the default one"
-    );
-    doc.validate().expect("a valid document");
-
-    // `−` takes the cell away again — the empty one, here, because it is last.
-    history.apply(Command::RemoveLastCell).expect("applies");
-    assert_eq!(history.doc().cells.len(), 4);
-    assert_eq!(
-        history.doc().cells[..4],
-        framed.cells[..],
-        "the survivors are untouched"
-    );
-
-    // A removal with a photo in the cell drops the photo with the cell: that is
-    // what "one cell fewer" means, and the undo stack is the way back.
+    // `−`: the last cell leaves the sheet whole — photo, framing and all — and the
+    // document keeps it (S28). One command, one undo step.
     let depth = history.undo_depth();
     history
         .apply(Command::RemoveLastCell)
-        .expect("there is a cell to drop");
-    assert_eq!(history.doc().cells.len(), 3);
+        .expect("four cells can drop to three");
+    let doc = history.doc();
+    assert_eq!(doc.cells.len(), 3);
+    assert_eq!(doc.template.name, "mosaic-3-hero", "4:3 stays 4:3");
     assert_eq!(
-        history.doc().template.name,
-        "mosaic-3-hero",
-        "three photos of 4:3 take the three-cell 4:3 layout"
+        doc.cells[..3],
+        framed.cells[..3],
+        "the survivors are untouched"
+    );
+    assert_eq!(
+        doc.kept,
+        vec![framed.cells[3].clone()],
+        "the cell left the sheet whole, photo and framing"
+    );
+    assert_eq!(
+        doc.cells.len() + doc.kept.len(),
+        4,
+        "and nothing left the document"
     );
     assert_eq!(history.undo_depth(), depth + 1, "one call is one undo step");
-    assert!(history.undo());
+    doc.validate().expect("a valid document");
+
+    // `+` places it again: same photo, same framing, same index. That is the whole of
+    // ruling 43's "three photos → two cells → three cells is the document it was".
+    history.apply(Command::AddCell).expect("a fourth cell fits");
     assert_eq!(
-        history.doc().cells.len(),
-        4,
-        "undo is the only way a dropped photo comes back"
+        history.doc().cells,
+        framed.cells,
+        "the document is the one it was"
     );
+    assert_eq!(history.doc().template.name, framed.template.name);
+    assert!(history.doc().kept.is_empty(), "and nothing is waiting");
+
+    // Undo takes the returned cell off the sheet again, keeping it: the step is the
+    // layout change on both sides, not a restore path of its own.
+    assert!(history.undo(), "the removal is undoable");
+    assert_eq!(history.doc().cells.len(), 3);
+    assert_eq!(history.doc().kept, vec![framed.cells[3].clone()]);
+
+    // With nothing waiting, `+` appends an **empty** cell: the S14b rule the
+    // retention did not replace.
+    assert!(history.redo(), "and redoable");
+    history.apply(Command::AddCell).expect("a fifth cell fits");
     assert_eq!(
-        history.doc().cells[3].source,
-        framed.cells[3].source,
-        "and it comes back whole, photo and framing"
+        history.doc().cells[4],
+        Cell::default(),
+        "an added cell is empty when nothing waits"
     );
+
+    // An empty cell that leaves the sheet is kept like any other, so the pair
+    // round-trips there too — nothing about the rule is about photos.
+    history.apply(Command::RemoveLastCell).expect("applies");
+    assert_eq!(history.doc().kept, vec![Cell::default()]);
+    history.apply(Command::AddCell).expect("applies");
+    assert_eq!(history.doc().cells[4], Cell::default());
+    assert!(history.doc().kept.is_empty());
+
+    // A delete is the other half of the rule: `ClearCell` empties a cell and puts
+    // nothing in the kept list, because *that* is what losing a photo is.
+    history
+        .apply(Command::ClearCell { slot: 3 })
+        .expect("applies");
+    assert!(history.doc().cells[3].source.is_none(), "the photo is gone");
+    assert!(
+        history.doc().kept.is_empty(),
+        "and nothing is kept: this was a delete"
+    );
+    assert_eq!(history.doc().cells.len(), 5, "the cell itself stays");
 
     // The ceiling is the format's slot limit, and the floor is the selection's own
     // minimum: past either, the refusal changes nothing.
@@ -777,6 +819,171 @@ fn the_count_control_takes_and_drops_a_cell_without_remembering_it() {
     );
     assert_eq!(two.doc().cells.len(), 1, "the refusal changed nothing");
     assert_eq!(two.undo_depth(), 1, "only the accepted removal is a step");
+}
+
+#[test]
+fn no_layout_change_loses_a_cell_whatever_the_sequence_is() {
+    // S28's own invariant, swept over the library: whatever the layout changes do,
+    // what the document holds — the cells on the sheet plus the cells it keeps —
+    // never goes down, and `−` × k then `+` × k gives the document back for every k
+    // the floor allows. A delete is the one command that takes a photo out.
+    for name in templates::names() {
+        let mut history = History::new(occupied(name)).expect("a valid document");
+        let start = history.doc().clone();
+        let cells = start.cells.len();
+
+        // Every template in the library, each in turn: neither the cell total nor the
+        // photo total ever shrinks, and every state is a document this build accepts.
+        let mut held = cells;
+        let mut photos = cells;
+        for template in templates::all() {
+            history
+                .apply(Command::SetTemplate { template })
+                .expect("a layout change always applies");
+            let doc = history.doc();
+            assert!(
+                doc.cells.len() + doc.kept.len() >= held,
+                "{name}: the document went from {held} cells to {} placed + {} kept",
+                doc.cells.len(),
+                doc.kept.len()
+            );
+            let now = doc
+                .cells
+                .iter()
+                .filter(|cell| cell.source.is_some())
+                .count()
+                + doc.kept.iter().filter(|cell| cell.source.is_some()).count();
+            assert!(
+                now >= photos,
+                "{name}: the document went from {photos} photos to {now}"
+            );
+            held = doc.cells.len() + doc.kept.len();
+            photos = now;
+            doc.validate().expect("a valid document");
+        }
+
+        // Back to the layout it started on: the sheet is the document it was. What it
+        // gained on the way — the empty cells a bigger layout appended — stays in the
+        // document, off the sheet and waiting (S28 keeps cells, and an empty cell is
+        // what a growth appends anyway).
+        history
+            .apply(Command::SetTemplate {
+                template: start.template.clone(),
+            })
+            .expect("applies");
+        let doc = history.doc();
+        assert_eq!(
+            doc.cells, start.cells,
+            "{name}: the sheet is the one it was"
+        );
+        assert_eq!(
+            doc.cells.len() + doc.kept.len(),
+            held,
+            "{name}: and nothing left the document"
+        );
+        assert!(
+            doc.kept.iter().all(|cell| cell.source.is_none()),
+            "{name}: what waits is the empty cells the bigger layouts appended"
+        );
+
+        // The count control: `−` × k then `+` × k, for every k the floor allows.
+        for k in 1..cells {
+            let mut history = History::new(start.clone()).expect("a valid document");
+            // `layout_for` picks each intermediate layout by the aspect the walk is
+            // then carrying, and the library does not have every aspect at every
+            // count (there is no 4:3 two-cell layout, so a 4:3 three-cell document
+            // comes back on a 16:9 strip). The cells below are what the retention
+            // promises; the layout comes back exactly where the aspect survived the
+            // walk, which is the count rule's own answer (S14b) and not this step's.
+            let mut aspect_kept = true;
+            for _ in 0..k {
+                history
+                    .apply(Command::RemoveLastCell)
+                    .expect("there is a cell to take off");
+                aspect_kept &= history.doc().template.aspect == start.template.aspect;
+            }
+            assert_eq!(history.doc().cells.len(), cells - k, "{name}: k = {k}");
+            assert_eq!(history.doc().kept.len(), k, "{name}: k = {k}");
+            for _ in 0..k {
+                history
+                    .apply(Command::AddCell)
+                    .expect("there is a kept cell to place");
+            }
+            let doc = history.doc();
+            assert_eq!(
+                doc.cells, start.cells,
+                "{name}: `−` × {k} then `+` × {k} is the document's own cells"
+            );
+            assert!(doc.kept.is_empty(), "{name}: k = {k}");
+            if aspect_kept {
+                assert_eq!(
+                    doc.template.name, start.template.name,
+                    "{name}: k = {k}, with the aspect kept at every step"
+                );
+            }
+        }
+
+        // The exception the rule names: a delete takes the photo out and keeps
+        // nothing.
+        let mut history = History::new(start.clone()).expect("a valid document");
+        history
+            .apply(Command::ClearCell { slot: 0 })
+            .expect("applies");
+        assert!(history.doc().cells[0].source.is_none(), "{name}");
+        assert!(
+            history.doc().kept.is_empty(),
+            "{name}: a delete keeps nothing"
+        );
+    }
+}
+
+#[test]
+fn an_arrival_lands_in_a_cell_of_its_own_and_the_ceiling_counts_placed_and_kept() {
+    // S28: `AddPhotos` never spends a kept cell — the user has just chosen that
+    // photo, so it gets a cell of its own — and the ceiling is what the document
+    // holds in total, placed and kept together.
+    let mut history = History::new(occupied("strip-2-2x1")).expect("a valid document");
+    let placed = history.doc().cells.clone();
+    history.apply(Command::RemoveLastCell).expect("applies");
+    assert_eq!(history.doc().cells.len(), 1);
+    assert_eq!(history.doc().kept.len(), 1);
+
+    history
+        .apply(Command::AddPhotos {
+            photos: vec![PathBuf::from("photos/new.jpg")],
+        })
+        .expect("the arrival lands");
+    let doc = history.doc();
+    assert_eq!(doc.cells.len(), 2, "the layout grew for the arrival");
+    assert_eq!(
+        doc.cells[1].source,
+        Some(PathBuf::from("photos/new.jpg")),
+        "the arrival is in a cell of its own"
+    );
+    assert_eq!(
+        doc.kept,
+        vec![placed[1].clone()],
+        "and the kept cell is still waiting"
+    );
+    doc.validate().expect("a valid document");
+
+    // Nine cells' worth is the ceiling whether they are on the sheet or kept: a
+    // document with one cell kept has no room for an arrival.
+    let mut full = History::new(occupied("strip-9-9x1")).expect("a valid document");
+    full.apply(Command::RemoveLastCell).expect("applies");
+    assert_eq!(full.doc().cells.len() + full.doc().kept.len(), 9);
+    let refused = full
+        .apply(Command::AddPhotos {
+            photos: vec![PathBuf::from("photos/tenth.jpg")],
+        })
+        .expect_err("a tenth photo has nowhere to go");
+    assert!(
+        matches!(refused, CoreError::TooManyPhotos { max: 9 }),
+        "{refused}"
+    );
+    assert_eq!(full.doc().cells.len(), 8, "the refusal changed nothing");
+    assert_eq!(full.doc().kept.len(), 1);
+    assert_eq!(full.undo_depth(), 1, "only the removal was a step");
 }
 
 #[test]

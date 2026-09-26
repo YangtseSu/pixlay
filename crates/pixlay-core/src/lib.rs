@@ -7,7 +7,8 @@
 //! The v1 contract frozen by S1 (review copy: `docs/CONTRACT.md`):
 //!
 //! * [`CollageDoc`] is the whole document — frozen template geometry, one
-//!   [`Cell`] per slot, and the frame around them. It is the only shape
+//!   [`Cell`] per slot, the cells a layout change keeps off the sheet (S28), and
+//!   the frame around them. It is the only shape
 //!   ever serialized to `.pixlay`, and it embeds its template geometry so the
 //!   layout of a saved project cannot change under it. It carries no size:
 //!   the template's aspect is the sheet's shape, and a render's pixel grid is
