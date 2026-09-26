@@ -9,9 +9,10 @@
 //!
 //! HIG `reference/keyboard`: the required set for an app with files and an undo
 //! stack is `Ctrl+Q` / `Ctrl+W` / `Ctrl+O` / `Ctrl+S` / `Shift+Ctrl+S` / `Ctrl+Z` /
-//! `Shift+Ctrl+Z` / `Ctrl+?`, plus `Ctrl+N` for a new item. Everything else on
-//! that page belongs to features this product does not have (print, send,
-//! preferences, help), and the system-reserved combinations (`Alt+*`, `Super+*`,
+//! `Shift+Ctrl+Z` / `Ctrl+?`, plus `Ctrl+N` for a new item and `Ctrl+,` for the
+//! preferences — which S25 added with the surface they open (`crate::settings`).
+//! Everything else on that page belongs to features this product does not have
+//! (print, send, help), and the system-reserved combinations (`Alt+*`, `Super+*`,
 //! `Ctrl+Alt+*`) are used nowhere — a test asserts both halves.
 //!
 //! Since S22 the application is also the place where **the command line enters**:
@@ -39,6 +40,9 @@ pub const ACCELERATORS: &[(&str, &str)] = &[
     ("app.open", "<Control>o"),
     ("app.shortcuts", "<Control>question"),
     ("app.quit", "<Control>q"),
+    // HIG `reference/keyboard`, "Basic Shortcuts": Preferences is `Ctrl+,` — the one
+    // standard combination this app had no surface for until S25.
+    ("app.settings", "<Control>comma"),
     ("win.save", "<Control>s"),
     ("win.save-as", "<Control><Shift>s"),
     ("win.close", "<Control>w"),
@@ -54,7 +58,10 @@ pub const ACCELERATORS: &[(&str, &str)] = &[
 
 /// How the shortcuts dialog groups them (HIG `reference/keyboard`, "Sections").
 pub const SHORTCUT_SECTIONS: &[(&str, &[&str])] = &[
-    ("General", &["app.shortcuts", "win.close", "app.quit"]),
+    (
+        "General",
+        &["app.shortcuts", "win.close", "app.quit", "app.settings"],
+    ),
     (
         "Collage",
         &[
@@ -106,6 +113,7 @@ pub fn shortcut_title(action: &str) -> String {
         "app.open" => gettext("Open…"),
         "app.shortcuts" => gettext("Keyboard shortcuts"),
         "app.quit" => gettext("Quit Pixlay"),
+        "app.settings" => gettext("Preferences"),
         "win.save" => gettext("Save"),
         "win.save-as" => gettext("Save as…"),
         "win.close" => gettext("Close the window"),
@@ -235,6 +243,14 @@ fn install_actions(app: &adw::Application) {
     });
     add_action(app, "shortcuts", |app| {
         shortcuts_dialog().present(active_window(app).as_ref());
+    });
+    // The preferences dialog is a *secondary window* belonging to the primary one
+    // (HIG `patterns/containers/windows`), so it is presented over the window that is
+    // there rather than opening one of its own.
+    add_action(app, "settings", |app| {
+        if let Some(window) = active_window(app) {
+            window.show_settings();
+        }
     });
     add_action(app, "about", |app| {
         about_dialog().present(active_window(app).as_ref());

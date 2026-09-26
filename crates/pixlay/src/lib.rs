@@ -31,6 +31,7 @@ pub mod export;
 pub mod i18n;
 pub mod layout;
 pub mod picture;
+pub mod settings;
 pub mod state;
 pub mod window;
 pub mod workers;

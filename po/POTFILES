@@ -9,6 +9,7 @@ crates/pixlay/src/layout.rs
 crates/pixlay/src/lib.rs
 crates/pixlay/src/main.rs
 crates/pixlay/src/picture.rs
+crates/pixlay/src/settings.rs
 crates/pixlay/src/state.rs
 crates/pixlay/src/window.rs
 crates/pixlay/src/workers.rs

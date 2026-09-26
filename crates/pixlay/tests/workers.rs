@@ -122,11 +122,6 @@ fn a_worker_that_is_down_reports_and_clears_its_pending_state() {
     export_window.pump(Duration::from_millis(200));
     let out = support::artifact("s15h-down.png");
     let _ = std::fs::remove_file(&out);
-    export_window.set_export_settings(&pixlay::export::Settings {
-        long_edge: 800,
-        format: pixlay_imaging::encode::Format::Png,
-        path: out.clone(),
-    });
     export_window.start_export(out.clone());
     export_window.pump(Duration::from_millis(100));
     assert!(

@@ -1,54 +1,72 @@
-//! S15c: the export surface, and the two things it refuses to do — write over one
-//! of the document's own photos, and replace a file the user already has without
-//! asking (PIX-001, PIX-011).
+//! S15c and S25: the export surface, and the two things it refuses to do — write over
+//! one of the document's own photos, and write bytes under a name that lies about them.
 //!
-//! The alias rule itself is `pixlay_imaging::destination`'s and the CLI pins it in
-//! all four of its spellings (`pixlay-cli/tests/cli.rs`); what this test adds is the
-//! wiring: the window's own verdict, the writer's guard, and the confirmation the
-//! `Export…` dialog asks — driven by clicking what a person clicks, and read from
-//! the files on disk rather than from the widgets.
+//! The alias rule itself is `pixlay_imaging::destination`'s and the CLI pins it in all
+//! four of its spellings (`pixlay-cli/tests/cli.rs`); what this test adds is the wiring:
+//! the window's own verdict, the writer's guard, and — since S25 — the seed the
+//! platform's own save dialog opens on (ruling 36) and what the path it answers becomes.
+//!
+//! **The replace confirmation is the platform's own since ruling 36**, so it is not
+//! pressed here: a native dialog is nothing a machine can drive. What *is* asserted is
+//! the app's own half of that rule — an existing file is written without a second
+//! question of ours, because the platform asked.
 
 mod support;
 
 use std::time::Duration;
 
-use gtk4::prelude::*;
-use libadwaita::prelude::*;
-
-use pixlay::export::Settings;
-use pixlay::i18n::gettext;
+use pixlay::export::{self, Request};
+use pixlay::settings;
 use pixlay_imaging::encode::Format;
 
 #[test]
-fn the_export_refuses_a_source_image_and_confirms_a_replacement() {
+fn the_export_takes_the_settings_and_refuses_a_source_image_or_a_lying_name() {
     support::start();
     let app = support::app();
     let window = support::window(&app);
-    // The first export of a window that has never exported goes to the **pictures
-    // directory** (the 2026-09-24 ruling; S15h, PIX-010), under a name derived from the
-    // template — not to the process's own working directory, which is where a bare
-    // suggested name used to land.
-    let first = window.export_settings();
-    let expected_dir = match pixlay::export::default_folder() {
-        Some(pictures) => pictures,
-        // An account with no pictures directory keeps the bare name, which is what the
-        // product falls back to and what `parent()` reports as the empty path.
-        None => std::path::PathBuf::new(),
+
+    // ---- the seed (S25, ruling 36) ---------------------------------------
+    // A fresh account has no settings file: the save dialog opens on the pictures
+    // directory — `XDG_PICTURES_DIR` or `~/Pictures`, the same answer the platform's own
+    // chooser gives — and suggests a name carrying the settings' format's extension.
+    let expected_dir = pixlay::export::default_folder();
+    assert!(
+        !settings::Settings::path().is_some_and(|path| path.exists()),
+        "the harness gives this binary an account with no settings file"
+    );
+    let seed = window.export_seed();
+    assert_eq!(
+        seed.folder, expected_dir,
+        "the first export opens on the pictures directory"
+    );
+    assert!(
+        seed.name.ends_with(".jpg"),
+        "the suggested name carries the default format's extension, got {:?}",
+        seed.name
+    );
+
+    // A remembered folder is what the next dialog opens on; one that is no longer there
+    // falls back to the pictures directory rather than opening somewhere that is not.
+    let exports = support::out_dir().join("s25-exports");
+    std::fs::create_dir_all(&exports).expect("the export directory can be created");
+    let remembered = settings::Settings {
+        format: Format::Jpeg,
+        long_edge: 800,
+        last_export_dir: Some(exports.clone()),
     };
+    window.remember_settings(&remembered);
+    assert_eq!(window.export_seed().folder, Some(exports.clone()));
+    window.remember_settings(&settings::Settings {
+        last_export_dir: Some(exports.join("gone")),
+        ..remembered.clone()
+    });
     assert_eq!(
-        first.path.parent().map(std::path::Path::to_path_buf),
-        Some(expected_dir),
-        "the first export's directory is the pictures directory ({:?})",
-        first.path
+        window.export_seed().folder,
+        expected_dir,
+        "a remembered directory that is not there falls back to the pictures directory"
     );
-    assert_eq!(
-        first
-            .path
-            .extension()
-            .and_then(|extension| extension.to_str()),
-        Some("jpg"),
-        "and the name carries the selected format's extension"
-    );
+    window.remember_settings(&remembered);
+
     let project = support::verify_project();
     window
         .open_path(&project)
@@ -79,9 +97,9 @@ fn the_export_refuses_a_source_image_and_confirms_a_replacement() {
 
     // ---- the writer's own guard ------------------------------------------
     // The synchronous path is the same function the worker calls, so this is the
-    // export itself refusing rather than the form: no pixels are written anywhere.
+    // export itself refusing rather than the window: no pixels are written anywhere.
     let error = window
-        .export_to(&Settings {
+        .export_to(&Request {
             long_edge: 800,
             format: Format::Jpeg,
             path: photo.clone(),
@@ -98,47 +116,107 @@ fn the_export_refuses_a_source_image_and_confirms_a_replacement() {
         "the refused export changed the photo"
     );
 
-    // The verdict the form asks before it closes: a photo is an error, a free path is
-    // nothing to ask about, and a file that is there is a question.
+    // The window's own verdict, which is what the save dialog's answer meets first: a
+    // photo is an error and a free path is not.
     assert!(window.export_destination(&photo).is_err());
-    let free = support::artifact("s15c-free.png");
+    let free = support::artifact("s25-free.png");
     let _ = std::fs::remove_file(&free);
     assert!(
-        !window
-            .export_destination(&free)
-            .expect("a free path is writable"),
-        "a path with nothing at it needs no confirmation"
+        window.export_destination(&free).is_ok(),
+        "a path with nothing at it is writable"
     );
-    let existing = support::artifact("s15c-existing.jpg");
-    std::fs::write(&existing, b"an export from yesterday").expect("write");
-    let yesterday = std::fs::read(&existing).expect("read");
+
+    // ---- the name the settings' format owns (S25) ------------------------
+    // The extension is the whole interface between a file and its pixels, and since S25
+    // the settings' format is the only format an export has: a name that disagrees with
+    // it is refused rather than renamed, because the name came from the platform's own
+    // dialog and a file that lands under a name the dialog never showed would be worse
+    // than a toast. Both JPEG spellings are the JPEG format, case-insensitively
+    // (`Format::from_path`, the CLI's `--out` rule).
+    for (name, ok) in [
+        ("holiday.jpg", true),
+        ("holiday.jpeg", true),
+        ("holiday.JPEG", true),
+        ("holiday.png", false),
+        ("holiday", false),
+        ("holiday.2024", false),
+    ] {
+        assert_eq!(
+            export::extension_error(std::path::Path::new(name), Format::Jpeg).is_ok(),
+            ok,
+            "{name:?} against JPEG"
+        );
+    }
+    assert!(export::extension_error(std::path::Path::new("shot.PNG"), Format::Png).is_ok());
+    assert!(export::extension_error(std::path::Path::new("shot.jpg"), Format::Png).is_err());
+
+    // And through the flow the dialog's answer takes: one toast, no export started, and
+    // nothing written where the name pointed.
+    let mismatched = support::out_dir().join("s25-mismatch.png");
+    let _ = std::fs::remove_file(&mismatched);
+    let toasts = window.toasts();
+    window.export_to_chosen(&mismatched);
+    support::pump(Duration::from_millis(50));
+    assert_eq!(window.toasts(), toasts + 1, "the refusal is reported once");
     assert!(
         window
-            .export_destination(&existing)
-            .expect("an occupied path is writable"),
-        "a file that is already there is the user's question"
+            .last_toast()
+            .is_some_and(|toast| toast.contains("expected .jpg or .jpeg")),
+        "the toast says what the name needs, got {:?}",
+        window.last_toast()
     );
+    assert!(!window.progress_revealed(), "a refusal starts no export");
+    assert!(!mismatched.exists(), "and writes nothing");
 
-    // ---- the dialog: a refusal, then a replacement to confirm -------------
-    let dialog = window
-        .export_dialog()
-        .expect("the window has an Export dialog");
-    window.export();
+    // ---- a file that is already there -------------------------------------
+    // Since ruling 36 the *platform's* dialog confirms a replacement, so the app's own
+    // half is that it writes over the file without a second question — and remembers
+    // the folder the file landed in, which is where the next dialog opens.
+    let existing = support::artifact("s25-existing.jpg");
+    std::fs::write(&existing, b"an export from yesterday").expect("write");
+    let yesterday = std::fs::read(&existing).expect("read");
+    window.export_to_chosen(&existing);
     assert!(
-        dialog.widget().is_visible(),
-        "the Export dialog is presented"
+        window.progress_revealed(),
+        "the export starts on the worker at once"
     );
-    let toasts = window.toasts();
+    assert!(
+        support::alert(&window).is_none(),
+        "the app asks nothing of its own: the platform's dialog asked"
+    );
+    assert!(window.wait_for_idle(support::WAIT), "the export finished");
+    assert!(!window.progress_revealed(), "and the bar goes away again");
+    let written = std::fs::read(&existing).expect("read");
+    assert_ne!(written, yesterday, "the export replaced the file");
+    assert_eq!(
+        &written[..2],
+        &[0xff, 0xd8],
+        "and it is the JPEG the settings asked for"
+    );
+    assert!(
+        window
+            .last_toast()
+            .is_some_and(|toast| toast.contains("s25-existing.jpg")),
+        "the toast names the file: {:?}",
+        window.last_toast()
+    );
+    // The settings file now remembers the folder, which is the other half of ruling 36.
+    let file = settings::Settings::path().expect("this account has a settings file");
+    let stored = settings::Settings::read(&file);
+    assert_eq!(
+        stored.last_export_dir,
+        existing.parent().map(std::path::Path::to_path_buf)
+    );
+    assert_eq!(
+        window.export_seed().folder,
+        existing.parent().map(std::path::Path::to_path_buf)
+    );
 
-    // A name that is one of the document's photos: refused, reported, and the dialog
-    // stays open so the name can be fixed.
-    window.set_export_settings(&Settings {
-        long_edge: 800,
-        format: Format::Jpeg,
-        path: photo.clone(),
-    });
-    dialog.seed(&window);
-    dialog.export_button().emit_clicked();
+    // ---- a source image is refused before anything is spawned -------------
+    // The same refusal as the synchronous path above, now through the window's own
+    // pre-flight: a toast, no progress bar, and the photo untouched.
+    let toasts = window.toasts();
+    window.export_to_chosen(&photo);
     support::pump(Duration::from_millis(50));
     assert_eq!(window.toasts(), toasts + 1, "the refusal is reported once");
     assert!(
@@ -152,227 +230,24 @@ fn the_export_refuses_a_source_image_and_confirms_a_replacement() {
         !window.progress_revealed(),
         "a refused export must not start"
     );
-    assert!(
-        dialog.widget().is_visible(),
-        "the dialog stays open for the name to be fixed"
-    );
-    assert!(
-        support::alert_button(&window, &gettext("Replace")).is_none(),
-        "a refusal is not a replacement to confirm"
-    );
     assert_eq!(
         std::fs::read(&photo).expect("read the photo"),
         before,
         "the photo changed"
     );
 
-    // A file that is already there: asked about, and cancelling changes nothing.
-    window.set_export_settings(&Settings {
-        long_edge: 800,
-        format: Format::Jpeg,
-        path: existing.clone(),
-    });
-    dialog.seed(&window);
-    dialog.export_button().emit_clicked();
-    support::pump(Duration::from_millis(50));
-    // HIG `patterns/feedback/dialogs`, "Confirmation Dialogs": the cancel button comes
-    // first, before the affirmative, and the two are the whole alert.
-    assert_eq!(
-        support::alert_labels(&window),
-        vec![gettext("Cancel"), gettext("Replace")],
-        "the confirmation's buttons are not Cancel then Replace"
-    );
-
-    let cancel = support::alert_button(&window, &gettext("Cancel"))
-        .expect("replacing an existing file is confirmed before it happens");
-    cancel.emit_clicked();
-    support::pump(Duration::from_millis(50));
-    assert!(
-        !window.progress_revealed(),
-        "a cancelled export must not run"
-    );
-    assert_eq!(
-        std::fs::read(&existing).expect("read"),
-        yesterday,
-        "cancelling changed the file"
-    );
-    assert_eq!(window.toasts(), toasts + 1, "cancelling is not a failure");
-
-    // And the same click again, answered: the export runs and the file is replaced.
-    dialog.export_button().emit_clicked();
-    support::pump(Duration::from_millis(50));
-    let replace = support::alert_button(&window, &gettext("Replace"))
-        .expect("the confirmation is asked again");
-    replace.emit_clicked();
-    assert!(
-        window.progress_revealed(),
-        "the confirmed export starts on the worker"
-    );
-    assert!(window.wait_for_idle(support::WAIT), "the export finished");
-    let written = std::fs::read(&existing).expect("read");
-    assert_ne!(written, yesterday, "the export did not replace the file");
-    assert_eq!(
-        &written[..2],
-        &[0xff, 0xd8],
-        "the replacement is the JPEG that was asked for"
-    );
-    assert_eq!(
-        window.export_settings().path,
-        existing,
-        "the form remembers where the export went"
-    );
-    // A later export opens where the last one landed, which is the other half of the
-    // 2026-09-24 ruling (S15h, PIX-010): the dialog's rows are the stored path's own
-    // directory and name.
-    dialog.seed(&window);
-    assert_eq!(
-        dialog.settings().path,
-        existing,
-        "the dialog is seeded with the directory and name the last export used"
-    );
-
-    // ---- the default widget (S15h, PIX-010) ------------------------------
-    // Presented again: the replacement above ran from a click that closed the dialog,
-    // and Return's binding is a property of the presented dialog.
-    assert!(
-        gtk4::prelude::WidgetExt::activate_action(&window, "win.export", None).is_ok(),
-        "the win.export action presents the dialog"
-    );
-    assert!(
-        dialog.widget().is_visible(),
-        "the Export dialog is presented again"
-    );
-    // HIG `patterns/feedback/dialogs`: a dialog with an affirmative action binds Return
-    // to it, and the binding *is* the `default-widget` property (libadwaita's own words
-    // for it: "The default widget. It's activated when the user presses Enter").
-    let default = dialog
-        .widget()
-        .property::<Option<gtk4::Widget>>("default-widget")
-        .expect("the Export dialog has a default widget");
-    let export_button = dialog.export_button();
-    assert_eq!(
-        default,
-        export_button.clone().upcast::<gtk4::Widget>(),
-        "the dialog's default widget is its affirmative"
-    );
-    assert_eq!(
-        export_button.label().map(|label| label.to_string()),
-        Some(gettext("Export")),
-        "and the affirmative carries the verb"
-    );
-    let by_default = support::artifact("s15h-default.png");
-    let _ = std::fs::remove_file(&by_default);
-    window.set_export_settings(&Settings {
-        long_edge: 800,
-        format: Format::Png,
-        path: by_default.clone(),
-    });
-    dialog.seed(&window);
-    assert_eq!(dialog.settings().path, by_default, "the rows describe it");
-    // **The activation itself**, on the widget the property names: Enter reaches this
-    // through libadwaita's own binding ("The default widget. It's activated when the
-    // user presses Enter"). A `GtkButton` animates press-then-release before it clicks
-    // (GTK's documented activation behaviour), so the export starts a few frames after
-    // the call rather than inside it.
-    assert!(
-        default.activate(),
-        "the default widget is activatable, which is what Return does"
-    );
-    let started = support::settle_by(&window, support::WAIT, || {
-        (window.progress_revealed(), window.progress_revealed())
-    });
-    assert!(
-        started,
-        "activating the default widget started the export (toast {:?}, exporting {})",
-        window.last_toast(),
-        window.exporting()
-    );
-    support::close_dialog(&dialog.widget(), &window);
-    assert!(
-        window.wait_for_idle(support::WAIT),
-        "the export the default widget started finished"
-    );
-    assert_eq!(
-        std::fs::read(&by_default)
-            .expect("the default widget's export landed")
-            .first()
-            .copied(),
-        Some(0x89),
-        "and it is the PNG the rows asked for"
-    );
-
-    // ---- the name the format row owns (S15h, PIX-010) --------------------
-    // Both JPEG spellings are the JPEG format, case-insensitively — the CLI's own rule
-    // for `--out` (`Format::from_path`) — so a name that already means the selected
-    // format keeps the user's spelling, and one that means the other format is rewritten
-    // in the row the user is looking at.
-    dialog.name_row().set_text("holiday.JPEG");
-    dialog.format_row().set_selected(0);
-    assert_eq!(
-        dialog.name_row().text(),
-        "holiday.JPEG",
-        "a name that already means JPEG is not rewritten"
-    );
-    dialog.format_row().set_selected(1);
-    assert_eq!(
-        dialog.name_row().text(),
-        "holiday.png",
-        "switching to PNG rewrites the name, case-insensitively"
-    );
-    dialog.format_row().set_selected(0);
-    assert_eq!(
-        dialog.name_row().text(),
-        "holiday.jpg",
-        "and back to JPEG with the format's own extension"
-    );
-    // A name with no extension, one with an extension this build does not write, and no
-    // name at all are refused where the CLI refuses them: nothing is written, the dialog
-    // stays open, and the toast says what is missing.
-    for (refused, expected) in [
-        ("holiday", "needs an extension"),
-        ("holiday.2024", "this build writes"),
-        ("", "Type a name"),
-    ] {
-        dialog.name_row().set_text(refused);
-        let toasts = window.toasts();
-        dialog.export_button().emit_clicked();
-        support::pump(Duration::from_millis(50));
-        assert_eq!(
-            window.toasts(),
-            toasts + 1,
-            "{refused:?}: the refusal is reported once"
-        );
-        assert!(
-            window
-                .last_toast()
-                .is_some_and(|toast| toast.contains(expected)),
-            "{refused:?}: the refusal says what is missing ({expected}), got {:?}",
-            window.last_toast()
-        );
-        assert!(
-            !window.progress_revealed(),
-            "{refused:?}: a refused name must not start an export"
-        );
-        assert!(
-            dialog.widget().is_visible(),
-            "{refused:?}: the dialog stays open for the name to be fixed"
-        );
-    }
-
     // ---- the writer's own guard (S15h, PIX-010) --------------------------
-    // The dialog resolves the name before it starts anything, and `export::run` asks the
-    // same question again: a path that names the other format than the form does not
+    // The window resolves the name before it starts anything, and `export::run` asks the
+    // same question again: a path that names the other format than the settings do not
     // write a file that lies about itself, whoever calls it.
-    let mismatch = support::artifact("s15h-mismatch.png");
+    let mismatch = support::artifact("s25-writer.png");
     let _ = std::fs::remove_file(&mismatch);
     let error = window
-        .export_to(&Settings {
+        .export_to(&Request {
             long_edge: 800,
             format: Format::Jpeg,
             path: mismatch,
         })
-        .expect_err("a JPEG form writing to a .png name is refused");
+        .expect_err("a JPEG request writing to a .png name is refused");
     assert!(error.contains("expected .jpg or .jpeg"), "{error}");
-
-    support::close_dialog(&dialog.widget(), &window);
 }

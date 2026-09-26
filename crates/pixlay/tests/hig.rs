@@ -28,10 +28,11 @@ use pixlay::{APP_ID, app, canvas, i18n, window::EditorWindow};
 
 /// The accelerator combinations HIG `reference/keyboard` requires *for the
 /// features this product has*: quit, close, open, save, save as, undo, redo, the
-/// shortcuts dialog, and a new item. Print, send, preferences, help and the
-/// utility pane's `F9` belong to features v1 does not have — `F9` left with the
+/// shortcuts dialog, a new item, and — since S25 gave the app a preferences surface
+/// (ruling 36) — `Ctrl+,`, which is that page's own binding for it. Print, send, help
+/// and the utility pane's `F9` belong to features v1 does not have — `F9` left with the
 /// pane in S13 (ruling 18).
-const REQUIRED: [&str; 9] = [
+const REQUIRED: [&str; 10] = [
     "<Control>q",
     "<Control>w",
     "<Control>o",
@@ -41,6 +42,7 @@ const REQUIRED: [&str; 9] = [
     "<Control><Shift>z",
     "<Control>question",
     "<Control>n",
+    "<Control>comma",
 ];
 
 #[test]
@@ -503,12 +505,15 @@ fn check_compose(window: &EditorWindow, failures: &mut Vec<String>) {
     }
 
     // The two dialogs, each presented so that its own tree can be walked: a dialog
-    // that is not on screen has no allocation and no accessible tree.
+    // that is not on screen has no allocation and no accessible tree. `Preferences` is
+    // S25's settings surface (ruling 36), which replaced the export's own dialog.
     for (name, dialog) in [
         ("Frame", window.frame_dialog().map(|dialog| dialog.widget())),
         (
-            "Export",
-            window.export_dialog().map(|dialog| dialog.widget()),
+            "Preferences",
+            window
+                .settings_dialog()
+                .map(|dialog| dialog.widget().upcast::<adw::Dialog>()),
         ),
     ] {
         let Some(dialog) = dialog else {
@@ -519,8 +524,10 @@ fn check_compose(window: &EditorWindow, failures: &mut Vec<String>) {
         window.pump(Duration::from_millis(50));
         let root = dialog.clone().upcast::<gtk4::Widget>();
         check_accessible_names_in(&root, failures);
-        // The heading, and the button that carries the action's verb: an action
-        // dialog has both (HIG `patterns/feedback/dialogs`).
+        // The heading. `Frame` is an action dialog and its affirmative's verb is the
+        // action's name (HIG `patterns/feedback/dialogs`); the settings surface has no
+        // affirmative — its rows apply as they move — and its way out is the close
+        // button libadwaita's own dialog carries.
         let controls = support::descendants(&root);
         let labels: Vec<String> = controls
             .iter()
@@ -530,10 +537,8 @@ fn check_compose(window: &EditorWindow, failures: &mut Vec<String>) {
         if !labels.iter().any(|label| label == name) {
             failures.push(format!("the {name} dialog has no heading reading {name:?}"));
         }
-        if !labels.iter().any(|label| label == name || label == "Close") {
-            failures.push(format!(
-                "the {name} dialog has neither an affirmative nor a way out"
-            ));
+        if name == "Frame" && !labels.iter().any(|label| label == "Close") {
+            failures.push("the Frame dialog has no way out".into());
         }
         dialog.force_close();
     }
@@ -676,6 +681,7 @@ fn check_header_chrome(window: &EditorWindow, failures: &mut Vec<String>) {
         "win.copy",
         "win.paste",
         "win.reset-framing",
+        "app.settings",
         "app.shortcuts",
         "app.about",
     ];
@@ -759,17 +765,35 @@ fn check_colour_schemes(window: &EditorWindow, failures: &mut Vec<String>) {
     let area = window.canvas_widget();
     let canvas_widget = area.clone().upcast::<gtk4::Widget>();
     let mut painted: Vec<(String, support::Image)> = Vec::new();
+    let mut grids: Vec<pixlay_core::PixelSize> = Vec::new();
     for scheme in [adw::ColorScheme::ForceDark, adw::ColorScheme::ForceLight] {
         manager.set_color_scheme(scheme);
         // The repaint the scheme change causes is what this measures, and a snapshot
         // replays the last nodes: ask for the frame (`check_picker_theme`'s reason).
         window.queue_draw();
         window.pump(Duration::from_millis(300));
+        // **A settled canvas, not merely a painted one** (S25). A colour-scheme change
+        // moves the window's layout, and a layout asks the canvas for the grid its own
+        // allocation needs (`EditorWindow::request_grid_for`): a snapshot taken while
+        // that decode is in flight reads the *previous* window's bitmaps — measured
+        // 2026-09-26: the first read had 760x570 bitmaps and the second the canvas's own
+        // 307x230, which differ by ±1 per channel inside the sheet because the canvas
+        // scales one and blits the other. That is a resampling difference between two
+        // reads of two different decode states, and it says nothing about the theme; the
+        // wait is what makes both reads the same measurement.
+        let _ = support::canvas_bitmaps(window);
+        grids.push(window.images().0);
         painted.push((format!("{scheme:?}"), support::snapshot(window)));
     }
     // The app's own scheme, not `Default`: dark is what `app.rs` sets at startup
     // (ruling 23), so the window is left where the application put it.
     manager.set_color_scheme(adw::ColorScheme::ForceDark);
+    if grids[0] != grids[1] {
+        failures.push(format!(
+            "the canvas's bitmaps changed between the two colour schemes ({:?} then {:?})",
+            grids[0], grids[1]
+        ));
+    }
     let (dark, light) = (&painted[0].1, &painted[1].1);
 
     // The sheet's rectangle in the *window's* coordinates, which is what the two
@@ -815,9 +839,10 @@ fn check_colour_schemes(window: &EditorWindow, failures: &mut Vec<String>) {
     }
 
     // 3. **The sheet itself is content.** Sampled inside the sheet and away from its
-    //    own edge, so the selection outline — which is drawn with the widget's theme
-    //    colour *by design*, because a hard-coded grey fails in high contrast mode —
-    //    is not what this compares. The collage's pixels are the export's pixels and
+    //    own edge, so the 1-px frame the canvas strokes around the sheet — drawn in the
+    //    theme's own foreground colour *by design*, so a white collage on a dark pane
+    //    still reads as a page — and the selection outline (the theme's accent, S24)
+    //    are not what this compares. The collage's pixels are the export's pixels and
     //    must not depend on the desktop's appearance.
     let inset = 4;
     let probes = [
@@ -836,7 +861,9 @@ fn check_colour_schemes(window: &EditorWindow, failures: &mut Vec<String>) {
     }
     eprintln!(
         "the canvas frame: {dark_edge:?} in dark, {light_edge:?} in light; the sheet \
-         {sheet_w}x{sheet_h} at {sheet_x},{sheet_y}, unchanged at all three probes"
+         {sheet_w}x{sheet_h} at {sheet_x},{sheet_y}, unchanged at all three probes \
+         (bitmaps {:?} in both schemes)",
+        grids[0]
     );
 }
 

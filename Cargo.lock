@@ -1741,6 +1741,8 @@ dependencies = [
  "pixlay-core",
  "pixlay-imaging",
  "pixlay-render",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

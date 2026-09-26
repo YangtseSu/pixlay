@@ -407,6 +407,7 @@ pixlay-render save      --project <file.pixlay> --out <file.pixlay> [--json]
 | escaping (S15h, PIX-018) | every value a line carries is escaped, so a value can never add a field line: `\` → `\\`, newline / CR / TAB → `\n` / `\r` / `\t`, any other byte below 0x20 or the byte 0x7F → `\xNN` (lowercase hex), and any byte that is not part of valid UTF-8 → `\xNN` byte by byte. Bytes of valid UTF-8 pass through unchanged, so an ordinary value's line is byte-identical to what it was. `--json` carries the same escaped string (JSON-escaped on top of it, since `\xNN` is not a JSON escape), so a control byte reaches neither shape. stderr is diagnostics rather than a machine surface and keeps plain text |
 | stability | same input, same output; the results carry no timestamps and no absolute paths. `--stats`'s `ms`/`encode_ms`/`peak_rss_mb` are the **only** exception (they are the measurement), and `scan` is the other one **by subject**: a directory listing *is* a set of paths and modification times (S9), so reporting them is the result rather than contamination — two runs over an unchanged directory are still byte-identical, which is what the rule protects |
 | locale | under any value of `LANG` / `LC_ALL` / `LANGUAGE`, stdout and stderr are **byte-identical** (including the error branches) |
+| the app's settings are not an input (S25) | the GUI remembers its export's format and long edge at `~/.config/pixlay/settings.json` (ruling 39, §9), and the CLI reads **no configuration file at all**: `--long-edge`, `--out` and the rest are a function of the command line alone, whatever that file says. Asserted with the file present and asking for another format and size (`crates/pixlay/tests/settings.rs`) |
 | interaction | does not read stdin, does not wait for a prompt, works with no TTY; `--help` covers every flag and every exit code |
 | exit codes | 0 success / 1 usage error / 2 project, decode, render or write failure / 2 probe verdict not passed. An `--out` that names one of the document's own photos is a **usage error** (1): the command as written is one this build never runs, and refusing it is cheaper than deciding it after a decode |
 | usage error and "failed to produce a result" | stdout stays empty; stderr names the failing path (or the missing flag) |
@@ -1327,11 +1328,12 @@ rely on:
   decode every photo a second time and differ by up to 3.42 — that measurement is on
   `pixlay_imaging::Preview::build_at_source_edge`.
 
-**S15 landed the compose stage's own controls and the two document-level dialogs**
+**S15 landed the compose stage's own controls and one of its two document-level dialogs**
 (`crates/pixlay/src/canvas.rs`, `dialogs.rs`), which is what ruling 18 left of the utility pane: each of
 its groups already had a home, and the two that did not — the frame's three settings and the export's three
-questions — became dialogs of one shape behind header-bar buttons rather than permanent rows. What a caller
-may rely on:
+questions — became dialogs of one shape behind header-bar buttons rather than permanent rows. **S25 removed
+the export's** (ruling 36): its two parameters moved into the app's own settings surface and its one dialog
+became the platform's. What a caller may rely on:
 
 - **The selected cell carries six real GTK controls** — zoom out, zoom in, rotate, replace, swap, clear — in one
   `GtkBox` over the canvas, the same `GtkOverlay` the empty cells' `+` lives in (`canvas::CellControls`;
@@ -1390,32 +1392,41 @@ may rely on:
   from the document, so a row can never display a number the document does not hold. Nothing is left
   pending and no commit is scheduled, so the delayed commit that used to write a frame the row no longer
   showed cannot happen.
-- **`Export…` is the export's three questions as rows** — the format (JPEG/PNG), the long edge in pixels
-  (`MIN_EXPORT_PX`..`=MAX_EXPORT_PX`), and the file name with the platform's own `GtkFileDialog` as its
-  chooser — and its affirmative button starts the same background export the menu's action does
-  (`EditorWindow::start_export`), with the same progress bar in the bottom bar and the same toast. The
-  format row owns the file's extension, and the chooser's filter follows it.
-- **Where the first export goes, and what the name may be** (S15h, PIX-010, ruling of 2026-09-24). No
-  chooser step stands between `Export…` and the file: the first export of a window lands in the **pictures
-  directory** — `XDG_PICTURES_DIR` or `~/Pictures`, the same fallback `pixlay::export::default_folder`
-  reports and the save dialog opens on (S22 moved it out of the deleted picker module); an account with
-  neither keeps the bare name — and a later export in the directory the last one used, because the stored
-  form keeps the whole path. The name's extension is the format row's: a name carrying the other format's
-  extension is rewritten case-insensitively (`.jpeg` and `.JPG` are the JPEG format, `Format::from_path`'s
-  own rule), a name that already means the selected format keeps the user's spelling, and a name with no
-  extension, with an extension this build does not write, or with nothing at all is refused with a toast —
-  the same rule the CLI's `--out` meets. `export::run` asks that rule again next to the alias rule, so a
-  direct caller cannot write JPEG bytes under a `.png` name. The dialog installs its affirmative as
-  libadwaita's `default-widget`, which is the property that binds Return to it.
-- **Two questions are answered before an export starts (S15c), and the dialog stays open for both.** A
-  path that names one of the document's own photos is refused on the spot — the same rule and the same
-  message `render` and `thumb` use (`pixlay_imaging::destination`, asked through
-  `EditorWindow::export_destination`), reported as a toast, because HIG `patterns/feedback/dialogs` says
-  error dialogs are disruptive and a toast is the right shape for a non-critical error. A file that is
-  already there is **confirmed** (`AdwAlertDialog`, Cancel and Replace, Cancel first and the default and
-  the close response, the destructive one marked as such — HIG's "Confirmation Dialogs": a destructive
-  action is confirmed, and Return is not bound to a destructive affirmative). `export::run` asks the alias
-  rule again, because it is the function that reaches the file: no caller can bypass it.
+- **The export is one dialog, and it is the platform's own** (S25, ruling 36): pressing `Export…` (or
+  `Ctrl+E`, or the header bar's button — all three are `win.export`) calls `GtkFileDialog::save` with the
+  settings' format's filter and the seed `pixlay::export::seed` builds — the folder the last export used
+  (`lastExportDir`), the pictures directory (`XDG_PICTURES_DIR` or `~/Pictures`,
+  `pixlay::export::default_folder`) when there is none, and the name this document suggests — and the path
+  it answers goes through `EditorWindow::export_to_chosen`: the extension rule, the source-image rule, the
+  folder remembered in the settings, and then the same background export the menu's action has always
+  started (`EditorWindow::start_export`), with the same progress bar in the bottom bar and the same toast.
+  **The replace confirmation is the platform's own** — the dialog asks before it returns a path that names a
+  file that is there, and the app adds no second question, which is why S15c's `AdwAlertDialog` is gone.
+- **The settings are the export's two parameters, and they are remembered** (S25, rulings 36 and 39): a file
+  at `~/.config/pixlay/settings.json` under `XDG_CONFIG_HOME` (`crates/pixlay/src/settings.rs`) carrying
+  `format` (the encoder's own name: `png` / `jpeg`), `longEdge` (`MIN_EXPORT_PX`..`=MAX_EXPORT_PX`, the
+  bounds the surface's row offers) and `lastExportDir` (left out until the first export of the account). It
+  is read **once**, when a window is built; written through `pixlay_core::atomic::write_atomic` (S15c)
+  whenever a row moves or an export remembers its folder; and **never read by the CLI** — `--long-edge` and
+  `--out` stay a function of the CLI's own command line (§5). A missing file, an unreadable one and one this
+  build cannot parse are all the defaults and never an error the user sees; a field this build does not know
+  is ignored rather than refused (a settings file is not a document), and a `longEdge` outside the range is
+  clamped. The surface is `AdwPreferencesDialog` — `EditorWindow::show_settings`, the menu's *Preferences*
+  item, and `app.settings` on `Ctrl+,` (HIG `reference/keyboard`) — with one page, one group and two rows:
+  the format, and the long edge in pixels with the unit in its accessible name. A row writes as it moves;
+  there is nothing to confirm and no *Save* button.
+- **A name whose extension is not the settings' format's is refused, not renamed** (S25). The format is the
+  settings' and the name came from the platform's own dialog, so `pixlay::export::extension_error` — the rule
+  the CLI's `--out` meets, in the same words — refuses a path whose extension is not that format's (both JPEG
+  spellings and any case are the JPEG format, `Format::from_path`'s rule) with a toast, and `export::run`
+  asks the same question again next to the alias rule, so a direct caller cannot write JPEG bytes under a
+  `.png` name either.
+- **One question is answered before an export starts (S15c)**: a path that names one of the document's own
+  photos is refused on the spot — the same rule and the same message `render` and `thumb` use
+  (`pixlay_imaging::destination`, asked through `EditorWindow::export_destination`), reported as a toast,
+  because HIG `patterns/feedback/dialogs` says error dialogs are disruptive and a toast is the right shape
+  for a non-critical error. `export::run` asks that rule again, because it is the function that reaches the
+  file: no caller can bypass it.
 - **The frame is a command since S15**: `Command::SetFrame { frame }`. One edit, one undo step, validated
   like every other command — a length outside `0..=MAX_FRAME_REL`, a translucent backdrop, or a gap that
   empties a cell (the error names the slot) changes nothing — and it is the one writer both `edit`'s three
@@ -1431,14 +1442,15 @@ may rely on:
   header bar holds the document's controls at the **start** (undo, redo, a spacer, the frame's settings),
   the heading in the **centre** (`AdwWindowTitle`, the document's name with its dirty marker — the same
   string the window's own title carries) and a **primary menu** with the export button at the **end**. The
-  menu is `[New collage, Open…, Save, Save as…, Export…] · [Add photos…, Reset the framing] · [Keyboard
-  shortcuts, About Pixlay]`. **There is no Save button** (ruling 37: it sat beside Export and read as the
-  same action), which `tests/hig.rs::check_header_chrome` asserts together with the three slots and the
-  menu's items; the export button is an `AdwButtonContent` (icon plus label, one `suggested-action`), and
-  every control carries a tooltip and an accessible name.
-- **The export form's state lives in the window** (`EditorWindow::set_export_settings` /
-  `export_settings`), because ruling 18 removed the pane that used to hold it; S15's `Export…` dialog is
-  the rows over that state, and `MIN_EXPORT_PX` / `MAX_EXPORT_PX` (`export.rs`) are its bounds.
+  menu is `[New collage, Open…, Save, Save as…, Export…] · [Add photos…, Reset the framing] ·
+  [Preferences, Keyboard shortcuts, About Pixlay]` — the last group is HIG `patterns/controls/menus`'
+  "Standard Primary Menu Items", and *Preferences* is S25's addition to it. **There is no Save button**
+  (ruling 37: it sat beside Export and read as the same action), which `tests/hig.rs::check_header_chrome`
+  asserts together with the three slots and the menu's items; the export button is an `AdwButtonContent`
+  (icon plus label, one `suggested-action`), and every control carries a tooltip and an accessible name.
+- **The export's bounds are the settings' bounds**: `MIN_EXPORT_PX` / `MAX_EXPORT_PX` (`export.rs`) are what
+  the settings surface's row offers and what a value read from the file is clamped to (S25); the CLI's own
+  range is wider (`MAX_LONG_EDGE_PX`, §5), because it is a machine surface rather than a row.
 
 - **One document at a time**, edited only through `Command` (`History` in `pixlay-core`): the
   window has no second edit path, and **one gesture is one command**, committed when the

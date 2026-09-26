@@ -22,7 +22,6 @@ use std::time::{Duration, Instant};
 
 use gtk4::prelude::*;
 use pixlay::canvas::Gesture;
-use pixlay::export::Settings;
 
 use pixlay_core::{CollageDoc, Command, CropTransform, Project, Rgba8};
 use pixlay_imaging::encode::Format;
@@ -358,35 +357,31 @@ fn the_main_path_can_be_walked() {
     );
 
     // ---- export ----------------------------------------------------------
-    // The `Export…` dialog (S15) asks the three questions — the format, the one size
-    // parameter, and the file — and starts the same background export the menu's
-    // action does, with the same progress bar and the same toast.
+    // Since S25 the export is the platform's own save dialog (ruling 36) plus the two
+    // parameters the settings hold; what a machine can drive is the path the dialog
+    // answers, through the same call its callback makes, and the background export that
+    // starts there — with the same progress bar and the same toast.
     let out = support::artifact("mainpath.jpg");
-    let export_dialog = window
-        .export_dialog()
-        .expect("the window has an Export dialog");
-    window.set_export_settings(&Settings {
-        long_edge: 1500,
+    window.remember_settings(&pixlay::settings::Settings {
         format: Format::Jpeg,
-        path: out.clone(),
+        long_edge: 1500,
+        last_export_dir: None,
     });
     assert!(
         gtk4::prelude::WidgetExt::activate_action(&window, "win.export", None).is_ok(),
         "the win.export action is installed"
     );
-    assert!(export_dialog.widget().is_visible());
-    window.pump(Duration::from_millis(50));
-    assert_eq!(
-        export_dialog.quality_row().value(),
-        1500.0,
-        "the dialog opens on the form's own size"
+    // The dialog's own seed: the name this document suggests, and the folder to open in.
+    let seed = window.export_seed();
+    assert!(
+        seed.name.ends_with(".jpg"),
+        "the save dialog suggests a name in the settings' format, got {:?}",
+        seed.name
     );
-    // The background path: the call has to return while the work happens on the
-    // export thread, or the window would be frozen for the whole render.
-    // The dialog's own affirmative is clicked, which is what a person does: it reads
-    // the rows, stores them, closes and starts the export.
+    // The background path: the call has to return while the work happens on the export
+    // thread, or the window would be frozen for the whole render.
     let call = Instant::now();
-    export_dialog.export_button().emit_clicked();
+    window.export_to_chosen(&out);
     let returned = call.elapsed();
     assert!(
         returned < Duration::from_millis(500),
@@ -396,16 +391,12 @@ fn the_main_path_can_be_walked() {
         window.progress_revealed(),
         "the progress bar is raised while the export runs"
     );
-    // The click started libadwaita's own close transition; the exporter runs in the
-    // background either way, and the harness forces the dismissal so the final
-    // snapshot of the window is of the window without a dialog over it.
-    support::close_dialog(&export_dialog.widget(), &window);
-    let echoed = window.export_settings();
     assert_eq!(
-        echoed.long_edge, 1500,
-        "the form's quality option is read back"
+        window.settings().long_edge,
+        1500,
+        "the export took the settings' size"
     );
-    assert_eq!(echoed.format, Format::Jpeg, "and its format");
+    assert_eq!(window.settings().format, Format::Jpeg, "and its format");
     assert!(window.wait_for_idle(support::WAIT), "the export finished");
     assert!(!window.progress_revealed(), "and the bar goes away again");
     assert!(out.is_file(), "the export landed on disk");
@@ -414,18 +405,18 @@ fn the_main_path_can_be_walked() {
     // The one quality option is the long edge in pixels (S12d): the export is
     // the template's own aspect at that edge.
     let expected = pixlay_core::PixelSize::for_long_edge(window.document().template.aspect, 1500)
-        .expect("the grid the export asked for");
+        .expect("the grid the settings ask for");
     assert_eq!(
         (exported.width(), exported.height()),
         (expected.width as u32, expected.height as u32),
-        "the export is the template's shape at the requested edge"
+        "the export is the template's shape at the settings' long edge"
     );
 
     // The synchronous path, which is the same function, at the size the test can
     // check exactly.
     let png = support::artifact("mainpath.png");
     let report = window
-        .export_to(&Settings {
+        .export_to(&pixlay::export::Request {
             long_edge: 1500,
             format: Format::Png,
             path: png.clone(),
@@ -483,11 +474,6 @@ fn the_main_path_can_be_walked() {
     let missing_started = Instant::now();
     let gone = support::out_dir().join("gone.jpg");
     let _ = std::fs::remove_file(&gone);
-    window.set_export_settings(&Settings {
-        long_edge: 1000,
-        format: Format::Jpeg,
-        path: support::artifact("missing.jpg"),
-    });
     window
         .apply(Command::SetSource {
             slot: 2,
@@ -519,7 +505,7 @@ fn the_main_path_can_be_walked() {
     );
     assert!(
         window
-            .export_to(&Settings {
+            .export_to(&pixlay::export::Request {
                 long_edge: 1000,
                 format: Format::Jpeg,
                 path: support::artifact("missing.jpg"),
@@ -599,7 +585,7 @@ fn the_main_path_can_be_walked() {
     // document model and the one renderer, not a second path to the same screen.
     let rendered = support::artifact("mainpath-argv.png");
     let report = argv_window
-        .export_to(&Settings {
+        .export_to(&pixlay::export::Request {
             long_edge: 900,
             format: Format::Png,
             path: rendered.clone(),

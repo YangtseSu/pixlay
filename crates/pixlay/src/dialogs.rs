@@ -1,56 +1,40 @@
-//! The two document-level dialogs: `Frame…` and `Export…` (S15, ruling 18).
+//! The document-level dialog: `Frame…` (S15, ruling 18).
 //!
-//! Ruling 18 removed the utility pane, and the two groups that had no other home
-//! became dialogs of one shape rather than permanent rows: the frame's three
-//! settings, and the export's three questions. Each is an `AdwDialog` with a header
-//! bar, a heading that names the action, and rows over a shape the CLI already has —
-//! HIG `patterns/feedback/dialogs`, "Action Dialogs" (a header bar, a heading which
+//! Ruling 18 removed the utility pane, and of its groups the frame's three settings had
+//! no other home: they became an `AdwDialog` rather than permanent rows — HIG
+//! `patterns/feedback/dialogs`, "Action Dialogs" (a header bar, a heading which
 //! describes the action, and the affirmative button carrying an imperative verb).
 //!
-//! **What differs between them is when they write.** `Export…` is an action dialog in
-//! the literal sense: the rows are read once, when *Export* is pressed, and pressing
-//! it runs the export (one action, one file). `Frame…` writes as the rows move — the
-//! canvas behind it redraws, the change becomes one undo step when the value stops
-//! moving, and `Ctrl+Z` is the way back — so its only button is *Close*: a dialog that
-//! has already applied everything has nothing to confirm, and a Cancel that had to
-//! unwind a stack of live edits would be a second undo stack (`S14b · Ruling`, the
-//! same reason `+` does not remember the cell it dropped).
+//! **It writes as its rows move**: the canvas behind it redraws, the change becomes one
+//! undo step when the value stops moving, and `Ctrl+Z` is the way back — so its only
+//! button is *Close*. A dialog that has already applied everything has nothing to
+//! confirm, and a Cancel that had to unwind a stack of live edits would be a second
+//! undo stack (`S14b · Ruling`, the same reason `+` does not remember the cell it
+//! dropped).
 //!
-//! Neither dialog holds a GTK object across a thread: the export it starts runs on
-//! the window's own worker (`crate::export`), and the progress bar and the toast
-//! stay the window's.
+//! **The export's own dialog left in S25** (ruling 36): its two parameters moved into
+//! the app's settings surface (`crate::settings`), its name row and folder chooser
+//! became the platform's own save dialog (`crate::export::seed`), and the file's
+//! extension is the settings' format's rather than a row's. What is left here is the
+//! document's own dialog, which the export never was.
+//!
+//! The dialog holds no GTK object across a thread: the canvas redraws on the main
+//! thread, and nothing here starts a worker.
 
-use std::cell::{Cell, RefCell};
-use std::path::{Path, PathBuf};
+use std::cell::Cell;
 use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk4 as gtk;
-use gtk4::gio;
 use gtk4::glib;
 use gtk4::prelude::*;
 use libadwaita as adw;
 
 use pixlay_core::{Frame, Rgba8};
-use pixlay_imaging::encode::Format;
 
 use crate::a11y;
-use crate::export::{MAX_EXPORT_PX, MIN_EXPORT_PX, Settings};
 use crate::i18n::{fill, gettext};
 use crate::window::EditorWindow;
-
-/// The formats the export form offers, in the row's own order.
-///
-/// The row's index *is* the index into this table, so the two cannot drift.
-const FORMATS: [Format; 2] = [Format::Jpeg, Format::Png];
-
-/// The formats' names, which are identifiers and never translated (`AGENTS.md`,
-/// "Language conventions"): a user reads "PNG" and a file carries `.png`.
-const FORMAT_NAMES: [&str; 2] = ["JPEG", "PNG"];
-
-/// The step the size row moves in, in pixels: 100 is a round number a person can
-/// type over, and the bounds are the form's own (`MIN_EXPORT_PX` / `MAX_EXPORT_PX`).
-const SIZE_STEP: u32 = 100;
 
 /// The frame's own lengths are typed as per cent of the collage's height.
 ///
@@ -316,375 +300,6 @@ impl FrameDialog {
     }
 }
 
-/// The `Export…` dialog: the format, the one size parameter, and where the file goes.
-#[derive(Clone)]
-pub struct ExportDialog {
-    dialog: adw::Dialog,
-    format: adw::ComboRow,
-    quality: adw::SpinRow,
-    name: adw::EntryRow,
-    choose: gtk::Button,
-    export: gtk::Button,
-    /// The export's directory: the name row holds only the file name, so this is the
-    /// other half of [`Settings::path`]. `None` means "the name as it stands", which
-    /// is what an unsaved document's export has always used.
-    dir: RefCell<Option<PathBuf>>,
-    /// The format row's own previous selection, so the extension rewrite knows which
-    /// extension to replace.
-    last_format: Cell<u32>,
-    /// Set while this module writes the rows (see [`FrameDialog::seed`]).
-    updating: Rc<Cell<bool>>,
-}
-
-impl ExportDialog {
-    /// Builds the dialog, which the header bar's `Export…` button presents.
-    pub fn build(window: &EditorWindow) -> Rc<Self> {
-        let mut names = Vec::new();
-        for name in FORMAT_NAMES {
-            names.push(glib::GString::from(name));
-        }
-        let format = adw::ComboRow::builder()
-            .title(gettext("Format"))
-            .model(&string_list(names))
-            .build();
-        a11y::label(&format, &gettext("Format"));
-        let quality = adw::SpinRow::with_range(
-            f64::from(MIN_EXPORT_PX),
-            f64::from(MAX_EXPORT_PX),
-            f64::from(SIZE_STEP),
-        );
-        quality.set_digits(0);
-        quality.set_title(&gettext("Long edge"));
-        quality.set_subtitle(&gettext("In pixels"));
-        a11y::label_spin_row(&quality, &gettext("Long edge in pixels"));
-        let name = adw::EntryRow::builder().title(gettext("File name")).build();
-        let choose = gtk::Button::builder()
-            .icon_name("folder-open-symbolic")
-            .tooltip_text(gettext("Choose where the export is written"))
-            .valign(gtk::Align::Center)
-            .build();
-        choose.add_css_class("flat");
-        a11y::label(&choose, &gettext("Choose where the export is written"));
-        name.add_suffix(&choose);
-
-        let group = adw::PreferencesGroup::builder()
-            .title(gettext("Export"))
-            .description(gettext("The format, the size and the file"))
-            .build();
-        group.add(&format);
-        group.add(&quality);
-        group.add(&name);
-
-        // HIG `patterns/feedback/dialogs`: the cancel button comes first, before the
-        // affirmative, and the affirmative carries the verb the action is.
-        let cancel = gtk::Button::with_label(&gettext("Cancel"));
-        a11y::label(&cancel, &gettext("Cancel"));
-        let export = gtk::Button::with_label(&gettext("Export"));
-        export.add_css_class("suggested-action");
-        a11y::label(&export, &gettext("Export"));
-        let header = adw::HeaderBar::new();
-        header.set_title_widget(Some(&adw::WindowTitle::new(&gettext("Export"), "")));
-        header.pack_start(&cancel);
-        header.pack_end(&export);
-
-        let page = adw::PreferencesPage::new();
-        page.add(&group);
-        let view = adw::ToolbarView::new();
-        view.add_top_bar(&header);
-        view.set_content(Some(&page));
-        let dialog = adw::Dialog::builder()
-            .title(gettext("Export"))
-            .content_width(480)
-            .child(&view)
-            .build();
-        // HIG `patterns/feedback/dialogs` and `reference/keyboard`: a dialog that has
-        // an affirmative action binds Return to it. Without this the documented
-        // default does nothing (`docs/HIG-REVIEW.md` §1) — measured by S15h's test,
-        // which activates the dialog's default widget rather than the button by hand.
-        dialog.set_default_widget(Some(&export));
-
-        let export_dialog = Rc::new(Self {
-            dialog,
-            format,
-            quality,
-            name,
-            choose,
-            export: export.clone(),
-            dir: RefCell::new(None),
-            last_format: Cell::new(0),
-            updating: Rc::new(Cell::new(false)),
-        });
-        // Weak self-references, for the reason the frame dialog's handlers are weak:
-        // these closures live on widgets the dialog owns.
-        let weak = Rc::downgrade(&export_dialog);
-        cancel.connect_clicked(glib::clone!(
-            #[strong]
-            weak,
-            move |_| {
-                if let Some(dialog) = weak.upgrade() {
-                    dialog.dialog.close();
-                }
-            }
-        ));
-        let weak = Rc::downgrade(&export_dialog);
-        export.connect_clicked(glib::clone!(
-            #[weak]
-            window,
-            #[strong]
-            weak,
-            move |_| {
-                if let Some(dialog) = weak.upgrade() {
-                    dialog.export(&window);
-                }
-            }
-        ));
-        // The format row owns the file's extension: a name that carries one of the
-        // extensions this build writes has it replaced (case-insensitively, and
-        // `.jpeg` as well as `.jpg`), and one the user typed with any other extension
-        // is left alone — `resolved_name` is where it is refused.
-        let weak = Rc::downgrade(&export_dialog);
-        export_dialog.format.connect_selected_notify(glib::clone!(
-            #[strong]
-            weak,
-            move |row| {
-                let Some(dialog) = weak.upgrade() else {
-                    return;
-                };
-                if dialog.updating.get() {
-                    return;
-                }
-                dialog.last_format.replace(row.selected());
-                let Some(format) = FORMATS.get(row.selected() as usize) else {
-                    return;
-                };
-                let current = dialog.name.text().to_string();
-                let next = re_extension(&current, *format);
-                if next != current {
-                    dialog.name.set_text(&next);
-                }
-            }
-        ));
-        let weak = Rc::downgrade(&export_dialog);
-        export_dialog.choose.connect_clicked(glib::clone!(
-            #[weak]
-            window,
-            #[strong]
-            weak,
-            move |_| {
-                if let Some(dialog) = weak.upgrade() {
-                    dialog.choose_path(&window);
-                }
-            }
-        ));
-        export_dialog
-    }
-
-    /// Shows the dialog over `window`, seeded from the export form the window holds.
-    pub fn present(&self, window: &EditorWindow) {
-        self.seed(window);
-        self.dialog.present(Some(window));
-    }
-
-    /// The dialog itself, for the tests and the HIG checks.
-    pub fn widget(&self) -> adw::Dialog {
-        self.dialog.clone()
-    }
-
-    pub fn format_row(&self) -> adw::ComboRow {
-        self.format.clone()
-    }
-
-    pub fn quality_row(&self) -> adw::SpinRow {
-        self.quality.clone()
-    }
-
-    pub fn name_row(&self) -> adw::EntryRow {
-        self.name.clone()
-    }
-
-    pub fn choose_button(&self) -> gtk::Button {
-        self.choose.clone()
-    }
-
-    /// The dialog's affirmative, for the tests: clicking it is what a person does.
-    pub fn export_button(&self) -> gtk::Button {
-        self.export.clone()
-    }
-
-    /// The settings the three rows describe.
-    pub fn settings(&self) -> Settings {
-        Settings {
-            long_edge: self.quality.value().round() as u32,
-            format: FORMATS[self.format_index()],
-            path: self.path(),
-        }
-    }
-
-    /// Runs the export these rows describe, or refuses to.
-    ///
-    /// The one path an export takes from the GUI: the window stores the form's state
-    /// and starts the same background export the menu's action does, so the progress
-    /// bar, the toast and the worker thread are unchanged by the dialog that asked.
-    ///
-    /// Four answers, and the dialog stays open for the first three (S15c, S15h):
-    ///
-    /// * the name is not one this build can write — empty, or with an extension other
-    ///   than the formats it writes — refused with the same rule the CLI's `--out`
-    ///   meets, and the rows are left to fix;
-    /// * the path names one of the document's own photos — refused with the same
-    ///   message `render` and `thumb` give, and nothing is written;
-    /// * a file is already there — asked about, because replacing a file the user
-    ///   already has is their decision (ruling 2026-09-24);
-    /// * otherwise, the export starts.
-    pub fn export(&self, window: &EditorWindow) {
-        // The format row has the last word on the extension (S15h, PIX-010): a name
-        // carrying the other format's extension is corrected in the row the user is
-        // looking at, so what the dialog shows is what the file will be called.
-        let name = match resolved_name(&self.name.text(), FORMATS[self.format_index()]) {
-            Ok(name) => name,
-            Err(reason) => {
-                window.toast(&reason);
-                return;
-            }
-        };
-        if name != self.name.text() {
-            self.name.set_text(&name);
-        }
-        let settings = self.settings();
-        match window.export_destination(&settings.path) {
-            Err(reason) => {
-                window.toast(&reason);
-            }
-            Ok(false) => self.start(window, &settings),
-            Ok(true) => self.confirm_replacement(window, settings),
-        }
-    }
-
-    /// Closes the dialog and starts the export.
-    fn start(&self, window: &EditorWindow, settings: &Settings) {
-        self.dialog.close();
-        window.set_export_settings(settings);
-        window.start_export(settings.path.clone());
-    }
-
-    /// Asks before an export replaces a file that is already there.
-    ///
-    /// `AdwAlertDialog` over this dialog rather than over the window, so cancelling
-    /// leaves the rows exactly as they were — the name is still there to edit — and
-    /// only *Replace* is destructive, which is what the response's appearance says.
-    fn confirm_replacement(&self, window: &EditorWindow, settings: Settings) {
-        let alert = adw::AlertDialog::new(
-            Some(&gettext("Replace the existing file?")),
-            Some(&fill(
-                gettext("{} is already there. The export replaces it."),
-                &[settings.path.display().to_string()],
-            )),
-        );
-        alert.add_response("cancel", &gettext("Cancel"));
-        alert.add_response("replace", &gettext("Replace"));
-        alert.set_response_appearance("replace", adw::ResponseAppearance::Destructive);
-        alert.set_default_response(Some("cancel"));
-        alert.set_close_response("cancel");
-        let this = self.clone();
-        let window = window.clone();
-        alert.connect_response(
-            None,
-            glib::clone!(
-                #[strong]
-                this,
-                #[strong]
-                window,
-                move |_, response| {
-                    if response == "replace" {
-                        this.start(&window, &settings);
-                    }
-                }
-            ),
-        );
-        alert.present(Some(&self.dialog));
-    }
-
-    /// Puts the window's own export form into the rows.
-    pub fn seed(&self, window: &EditorWindow) {
-        let settings = window.export_settings();
-        let index = FORMATS
-            .iter()
-            .position(|format| *format == settings.format)
-            .unwrap_or(0) as u32;
-        self.updating.set(true);
-        self.format.set_selected(index);
-        self.last_format.set(index);
-        self.quality.set_value(f64::from(settings.long_edge));
-        self.dir.replace(
-            settings
-                .path
-                .parent()
-                .filter(|parent| !parent.as_os_str().is_empty())
-                .map(Path::to_path_buf),
-        );
-        self.name.set_text(&file_name(&settings.path));
-        self.updating.set(false);
-    }
-
-    /// The index of the selected format, clamped to the table.
-    fn format_index(&self) -> usize {
-        (self.format.selected() as usize).min(FORMATS.len() - 1)
-    }
-
-    /// The path the rows describe: the name in the directory the chooser last set.
-    fn path(&self) -> PathBuf {
-        let name = PathBuf::from(self.name.text().to_string());
-        match self.dir.borrow().as_deref() {
-            Some(dir) => dir.join(name),
-            None => name,
-        }
-    }
-
-    /// Asks where the export goes, seeded with what the rows already say.
-    ///
-    /// The platform's own `GtkFileDialog` (which takes no custom widgets, and that is
-    /// why the rest of the form is rows), and it answers *both* halves of the path:
-    /// what it returns is a directory and a name, which is what the two controls hold.
-    fn choose_path(&self, window: &EditorWindow) {
-        let filter = gtk::FileFilter::new();
-        filter.set_name(Some(&gettext("Images")));
-        // The filter follows the format row: the file this dialog is about to write
-        // is the one pattern.
-        for pattern in patterns(FORMATS[self.format_index()]) {
-            filter.add_pattern(pattern);
-        }
-        let filters = gio::ListStore::new::<gtk::FileFilter>();
-        filters.append(&filter);
-        let dialog = gtk::FileDialog::builder()
-            .title(gettext("Export the collage"))
-            .filters(&filters)
-            .default_filter(&filter)
-            .initial_name(self.name.text().to_string())
-            .build();
-        let this = self.clone();
-        dialog.save(
-            Some(window),
-            gio::Cancellable::NONE,
-            move |result: Result<gio::File, glib::Error>| {
-                let Ok(file) = result else {
-                    // A dismissed chooser is not a failure: the user changed their
-                    // mind, and the rows keep what they had.
-                    return;
-                };
-                let Some(path) = file.path() else {
-                    return;
-                };
-                this.dir.replace(
-                    path.parent()
-                        .filter(|parent| !parent.as_os_str().is_empty())
-                        .map(Path::to_path_buf),
-                );
-                this.name.set_text(&file_name(&path));
-            },
-        );
-    }
-}
-
 /// A row whose value is a share of the canvas height, in per cent.
 ///
 /// The accessible name says the unit, because the row's own number does not: a screen
@@ -696,89 +311,6 @@ fn percent_row(title: &str, subtitle: &str) -> adw::SpinRow {
     row.set_subtitle(subtitle);
     a11y::label_spin_row(&row, &fill(gettext("{} in per cent"), &[title]));
     row
-}
-
-/// A `GtkStringList` of `labels`, for a combo row's model.
-fn string_list(labels: impl IntoIterator<Item = glib::GString>) -> gtk::StringList {
-    let list = gtk::StringList::new(&[]);
-    for label in labels {
-        list.append(&label);
-    }
-    list
-}
-
-/// The file patterns a format's chooser filter takes.
-fn patterns(format: Format) -> [&'static str; 2] {
-    match format {
-        Format::Jpeg => ["*.jpg", "*.jpeg"],
-        Format::Png => ["*.png", "*.PNG"],
-    }
-}
-
-/// The extension a format's files carry when the name does not say otherwise.
-fn extension(format: Format) -> &'static str {
-    match format {
-        Format::Jpeg => "jpg",
-        Format::Png => "png",
-    }
-}
-
-/// The same name carrying `format`'s extension, when it already carries one of the
-/// extensions this build writes; unchanged otherwise.
-///
-/// The extension is compared case-insensitively and both JPEG spellings are the JPEG
-/// format (`Format::from_path`, the CLI's own rule), so `photo.JPEG` is *not* rewritten
-/// to `.jpg` — the user's spelling stands where it already means the right format — and
-/// a name with an extension this build does not write (`photo.2024`) is left to be
-/// refused rather than silently renamed.
-fn re_extension(name: &str, format: Format) -> String {
-    let Some(existing) = Path::new(name).extension().and_then(|e| e.to_str()) else {
-        return name.to_string();
-    };
-    match Format::from_path(Path::new(name)) {
-        Some(current) if current != format => {
-            let stem = &name[..name.len() - existing.len()];
-            format!("{stem}{}", extension(format))
-        }
-        // Nothing to change: the name already means this format, or it means an
-        // extension this build does not write and is left alone to be refused.
-        _ => name.to_string(),
-    }
-}
-
-/// The name the export writes, with the format row's own answer for its extension.
-///
-/// `Err` is the reason to show and the export must not start (S15h, PIX-010): an empty
-/// name, a name with no extension, and one whose extension this build does not write are
-/// all refused, which is the same rule the CLI's `--out` meets — a `.png` holding JPEG
-/// bytes is worse than a refusal. A name that carries a *known* extension is not refused
-/// but corrected to the format, so the two halves of the form always agree.
-fn resolved_name(name: &str, format: Format) -> Result<String, String> {
-    let name = name.trim();
-    if name.is_empty() {
-        return Err(gettext("Type a name for the exported file"));
-    }
-    if Path::new(name).extension().is_none() {
-        return Err(fill(
-            gettext("{}: the file name needs an extension ({})"),
-            &[name, Format::EXTENSIONS],
-        ));
-    }
-    if Format::from_path(Path::new(name)).is_none() {
-        return Err(fill(
-            gettext("{}: this build writes {}"),
-            &[name, Format::EXTENSIONS],
-        ));
-    }
-    Ok(re_extension(name, format))
-}
-
-/// A path's file name as text, or the whole path when it has none.
-fn file_name(path: &Path) -> String {
-    path.file_name().map_or_else(
-        || path.to_string_lossy().into_owned(),
-        |name| name.to_string_lossy().into_owned(),
-    )
 }
 
 /// A `Rgba8` in the float channels GTK's colour dialog uses.

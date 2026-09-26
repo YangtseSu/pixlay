@@ -60,6 +60,12 @@ pub const WAIT: Duration = Duration::from_secs(180);
 /// already has (a session, or any compositor of your own) instead of a private one.
 const CHILD: &str = "PIXLAY_TEST_CHILD";
 
+/// The re-execution's other half: set on the child together with `XDG_CONFIG_HOME`, so
+/// the child knows it *is* the child (and the test binary does not re-exec itself for
+/// ever). `XDG_CONFIG_HOME` itself cannot be set in this process: `std::env::set_var` is
+/// `unsafe` in edition 2024, and this workspace denies `unsafe_code`.
+const CONFIG: &str = "PIXLAY_TEST_CONFIG";
+
 /// Makes sure this process talks to a display that keeps drawing, re-running the whole
 /// test binary inside a private headless mutter when it does not.
 ///
@@ -78,26 +84,49 @@ const CHILD: &str = "PIXLAY_TEST_CHILD";
 /// `#[test]` its binary has — because GTK has to be initialised and used from one thread,
 /// and a second test in the same binary would be a second thread.
 pub fn start() {
-    if std::env::var_os(CHILD).is_none() {
-        // Not the re-executed child yet: become one, inside a display of our own.
+    // **A configuration directory of our own, not the session's** (S25). The app keeps
+    // its export settings at `$XDG_CONFIG_HOME/pixlay/settings.json` (ruling 39), so a
+    // GUI test that exports would otherwise write into the developer's own
+    // configuration — and a test that asks "with no settings file, is the save dialog
+    // seeded with the pictures directory?" would be reading whatever the previous run
+    // left behind. Each test binary gets its own directory under the artifact root, and
+    // the outermost process empties it, so a run never inherits a previous run's
+    // settings. The variable is handed to the child that runs the test (this process
+    // exits), because setting it here would be `unsafe` — and `unsafe_code` is denied
+    // workspace-wide.
+    if std::env::var_os(CONFIG).is_none() {
+        let config = config_dir();
+        let _ = std::fs::remove_dir_all(&config);
+        std::fs::create_dir_all(&config).expect("the test's configuration directory exists");
         let exe = std::env::current_exe().expect("the test binary's own path");
         let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
-        let status = Command::new("mutter")
+        let mut command = if std::env::var_os(CHILD).is_some() {
+            // The display is the caller's (`PIXLAY_TEST_CHILD`): the re-execution is only
+            // about the configuration directory, so the child inherits this display.
+            let mut command = Command::new(&exe);
+            command.args(&args);
+            command
+        } else {
+            let mut command = Command::new("mutter");
             // A headless compositor with no monitor never draws anything, so a window in
             // it never gets a surface (measured: the test binary hung for its whole 120 s
             // timeout with `--headless` alone). The virtual monitor is the display those
             // frames are drawn on, sized above the app's own default window (1100x760) so
             // the window is never the thing being constrained.
-            .args([
+            command.args([
                 "--wayland",
                 "--headless",
                 "--no-x11",
                 "--virtual-monitor",
                 "1920x1200@60.0",
                 "--",
-            ])
-            .arg(&exe)
-            .args(&args)
+            ]);
+            command.arg(&exe).args(&args);
+            command
+        };
+        let status = command
+            .env(CONFIG, &config)
+            .env("XDG_CONFIG_HOME", &config)
             .env(CHILD, "1")
             // Without a session there is no ibus to talk to, and GTK's `im-ibus` module
             // *recurses into itself* trying to reach one (measured: SIGSEGV on a 64 MiB
@@ -119,8 +148,8 @@ pub fn start() {
             ),
         }
     }
-    // First run or re-executed child, GTK is initialised exactly once — and inside the
-    // private compositor rather than against whatever display this process found. That
+    // The re-executed child, GTK is initialised exactly once — and inside the private
+    // compositor rather than against whatever display this process found. That
     // call is also what sets the locale the strings are looked up in (`i18n`'s module:
     // `g_gettext` answers in English before it and in the catalog's language after it), so
     // it is not skipped for a child that already has its display.
@@ -279,6 +308,22 @@ pub fn out_dir() -> PathBuf {
     let dir = base.join("pixlay-s7");
     std::fs::create_dir_all(&dir).expect("the artifact directory can be created");
     dir
+}
+
+/// The configuration directory this test binary owns: what `XDG_CONFIG_HOME` is set to
+/// before GTK starts (see [`start`]).
+///
+/// The binary's own name, so two test binaries running at once — which is what
+/// `cargo test` does — never share a settings file. The name carries libtest's build
+/// hash, which is stable for one build and different for the next; the emptying in
+/// [`start`] is what makes a *re-run* start clean.
+pub fn config_dir() -> PathBuf {
+    let exe = std::env::current_exe().expect("the test binary's own path");
+    let name = exe
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "pixlay".into());
+    out_dir().join("config").join(name)
 }
 
 pub fn artifact(name: &str) -> PathBuf {

@@ -308,7 +308,8 @@ HIG has no version number and is **not frozen**; cite URLs and section names, an
 every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
 
 - **Widgets**: use libadwaita containers and widgets by default (`AdwApplicationWindow` /
-  `AdwToolbarView` / `AdwHeaderBar` / `AdwToast` / `AdwStatusPage` / `AdwAboutDialog` and so on). S7
+  `AdwToolbarView` / `AdwHeaderBar` / `AdwToast` / `AdwStatusPage` / `AdwAboutDialog` and so on — and, since
+  S25, `AdwPreferencesDialog` for the export's settings, ruling 36). S7
   landed the shell as `AdwApplicationWindow` + `AdwToolbarView` + `AdwHeaderBar` + `AdwToastOverlay` +
   `AdwBanner`, with one custom-drawn widget — the canvas, whose stated reason is that it draws the
   document itself. A custom-drawn widget is the exception and needs a stated reason. **S13 replaced the
@@ -483,8 +484,8 @@ policy: track the latest": latest stable only, no upper pin.
 
 | Dependency | Used by | Why | Notes |
 |---|---|---|---|
-| `serde` + `serde_derive` 1.0.229 | `pixlay-core` | `.pixlay` is JSON and every `CollageDoc` field has to round-trip; hand-written serialization means reimplementing format validation | Small, no system dependencies |
-| `serde_json` 1.0.151 | `pixlay-core`, `pixlay-cli` (dev) | JSON read/write; `deny_unknown_fields` turns "misspelled field" into a load-time error | Same |
+| `serde` + `serde_derive` 1.0.229 | `pixlay-core`, `pixlay` | `.pixlay` is JSON and every `CollageDoc` field has to round-trip; hand-written serialization means reimplementing format validation. `pixlay` derives the same way for the app's own settings file (S25, ruling 39: three fields) — one dependency for both files rather than a second, hand-written reader | Small, no system dependencies |
+| `serde_json` 1.0.151 | `pixlay-core`, `pixlay`, `pixlay-cli` (dev) | JSON read/write; `deny_unknown_fields` turns "misspelled field" into a load-time error. The settings file goes through the same crate (S25) and deliberately does **not** deny unknown fields: a settings file is not a document, and refusing one over a key a later version added would silently reset the settings that are known | Same |
 | `thiserror` 2.0.20 | `pixlay-core`, `pixlay-render` | core/render errors are typed errors (part of the contract); `anyhow` is allowed only in `pixlay-cli` | Pure macro, zero runtime |
 | `cairo-rs` 0.22.9 | `pixlay-render` | The only rendering backend; GTK4 already depends on cairo, so packaging is free | System cairo 1.18.4; the `png` feature is dev-only (golden image read/write) |
 | `png` 0.18.1 | `pixlay-imaging` | The PNG writer of the one-pass encoder (S6). `image`'s PNG writer cannot embed an ICC profile in the same pass as the pixels, and Cairo's emits no `iCCP` at all — and an sRGB file whose numbers are not labelled is a file whose colour depends on who opens it | Pure Rust; it was already in the tree through `image`, so the download set did not grow |

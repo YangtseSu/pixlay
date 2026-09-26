@@ -53,9 +53,10 @@ use crate::a11y;
 use crate::canvas::{self, Gesture};
 use crate::decode::{Decoder, GalleryReply, Reply};
 use crate::dialogs;
-use crate::export::{self, Progress, Report, Settings};
+use crate::export::{self, Progress, Report, Request};
 use crate::i18n::{fill, gettext, ngettext};
 use crate::layout::Gallery;
+use crate::settings;
 use crate::state::Editor;
 use crate::workers::{Down, Kind as WorkerKind, Workers};
 
@@ -75,19 +76,19 @@ type Saved = Rc<dyn Fn(&EditorWindow, &Path)>;
 /// control's job, and `layout_for` picks the layout each count lands on.
 pub const DEFAULT_TEMPLATE: &str = "grid-1-1x1";
 
-/// The long edge a new export form starts at, in pixels: the one size
-/// parameter (S12d), shared with the CLI's own default (`render --long-edge`,
-/// `docs/CONTRACT.md` §5).
+/// The long edge an export starts at, in pixels: the one size parameter (S12d), shared
+/// with the CLI's own default (`render --long-edge`, `docs/CONTRACT.md` §5).
 ///
 /// 4000 px: a square grid of it is 16 MP, an eighth of the 200 MP pixel budget
 /// (measured 2026-09-20, `docs/CONTRACT.md` §8), so the default never touches the
-/// limit whatever the template's shape. The form has to be seeded with it: a
-/// `GtkSpinButton` starts at its adjustment's *lower* bound, so without this a
-/// new window would export at the row's minimum.
+/// limit whatever the template's shape. It is the settings' own default since S25
+/// (`crate::settings::Settings::default`), and the surface's row has to be seeded with
+/// it: a `GtkSpinButton` starts at its adjustment's *lower* bound, so without the seed
+/// a fresh account would export at the row's minimum.
 ///
-/// The row's own bounds live beside the form's state (`MIN_EXPORT_PX` /
-/// `MAX_EXPORT_PX` in `crate::export`): the maximum is 12000 because
-/// `12000² = 144 MP < 200 MP`, so every template aspect stays inside the budget.
+/// The row's own bounds live beside the export (`MIN_EXPORT_PX` / `MAX_EXPORT_PX` in
+/// `crate::export`): the maximum is 12000 because `12000² = 144 MP < 200 MP`, so every
+/// template aspect stays inside the budget.
 pub const DEFAULT_EXPORT_PX: u32 = 4000;
 
 /// The grid the window holds before its first bitmaps are in hand.
@@ -143,10 +144,13 @@ mod imp {
         /// window's (`update_title` writes the document's name here).
         pub header: OnceCell<adw::HeaderBar>,
         pub title: OnceCell<adw::WindowTitle>,
-        /// The two document-level dialogs (S15): `Frame…` and `Export…`, built once
-        /// and presented by the header bar's buttons.
+        /// The document-level dialog (S15): `Frame…`, built once and presented by the
+        /// header bar's button. The export has none since S25 — the platform's own save
+        /// dialog is the one dialog an export has (ruling 36).
         pub frame_dialog: OnceCell<Rc<dialogs::FrameDialog>>,
-        pub export_dialog: OnceCell<Rc<dialogs::ExportDialog>>,
+        /// The app's settings surface (S25, ruling 36): the export's format and long
+        /// edge, presented by the menu's *Preferences* item and `Ctrl+,`.
+        pub settings_dialog: OnceCell<Rc<settings::Dialog>>,
         /// How this window's two workers start (S15h, PIX-014): the product's own
         /// plan unless a test named another one.
         pub workers: Cell<Workers>,
@@ -180,10 +184,11 @@ mod imp {
         pub progress: OnceCell<gtk::ProgressBar>,
         pub progress_revealer: OnceCell<gtk::Revealer>,
         pub commit_timer: RefCell<Option<glib::SourceId>>,
-        /// The export form's state, since ruling 18 removed the pane that held
-        /// it: the format, the one quality option (a long edge in pixels, S12d)
-        /// and the chosen path. S15's `Export…` dialog is the rows over this.
-        pub export: RefCell<Settings>,
+        /// The app's settings as this window holds them (S25, ruling 39): the export's
+        /// format, its long edge and the folder the last export used, read once from
+        /// `~/.config/pixlay/settings.json` when the window was built and written back
+        /// whenever one of them changes.
+        pub settings: RefCell<settings::Settings>,
         pub exporting: Cell<bool>,
         pub missing: RefCell<Vec<usize>>,
         /// The last message a toast carried, for the tests: a refusal the user is
@@ -254,7 +259,7 @@ mod imp {
                 header: OnceCell::new(),
                 title: OnceCell::new(),
                 frame_dialog: OnceCell::new(),
-                export_dialog: OnceCell::new(),
+                settings_dialog: OnceCell::new(),
                 workers: Cell::new(Workers::default()),
                 decode_reported: Cell::new(false),
                 canvas_label: RefCell::new(String::new()),
@@ -267,11 +272,9 @@ mod imp {
                 progress: OnceCell::new(),
                 progress_revealer: OnceCell::new(),
                 commit_timer: RefCell::new(None),
-                export: RefCell::new(Settings {
-                    long_edge: DEFAULT_EXPORT_PX,
-                    format: pixlay_imaging::encode::Format::Jpeg,
-                    path: PathBuf::new(),
-                }),
+                // Read once, here: nothing re-reads the file while this window is open,
+                // so its rows, its export and the file cannot disagree (S25).
+                settings: RefCell::new(settings::Settings::load()),
                 exporting: Cell::new(false),
                 missing: RefCell::new(Vec::new()),
                 last_toast: RefCell::new(None),
@@ -519,9 +522,7 @@ impl EditorWindow {
         imp.header.set(header).ok();
         imp.title.set(title).ok();
         imp.frame_dialog.set(dialogs::FrameDialog::build(self)).ok();
-        imp.export_dialog
-            .set(dialogs::ExportDialog::build(self))
-            .ok();
+        imp.settings_dialog.set(settings::Dialog::build(self)).ok();
         imp.banner.set(banner.clone()).ok();
         imp.toast.set(toast).ok();
         imp.progress.set(progress).ok();
@@ -655,6 +656,13 @@ impl EditorWindow {
                 window.frame();
             }),
         );
+        add(
+            "settings",
+            true,
+            Box::new(|window| {
+                window.show_settings();
+            }),
+        );
         // The window's own way in for photos (S22, ruling 31): the multi-file
         // chooser appends what it is given and lets the layout grow
         // (`EditorWindow::choose_photos`). The per-cell paths are the canvas's own
@@ -767,9 +775,9 @@ impl EditorWindow {
         self.imp().frame_dialog.get().cloned()
     }
 
-    /// The `Export…` dialog (S15).
-    pub fn export_dialog(&self) -> Option<Rc<dialogs::ExportDialog>> {
-        self.imp().export_dialog.get().cloned()
+    /// The app's settings surface (S25, ruling 36).
+    pub fn settings_dialog(&self) -> Option<Rc<settings::Dialog>> {
+        self.imp().settings_dialog.get().cloned()
     }
 
     /// Opens `paths` the way the command line does (S22): the photos go into the
@@ -2200,15 +2208,91 @@ impl EditorWindow {
 
     // ---- export -----------------------------------------------------------
 
-    /// Presents the `Export…` dialog (S15): the format, the one size parameter and
-    /// the file, asked as rows rather than as a permanent form (ruling 18).
+    /// Presents the platform's own save dialog, and exports to what it answers (S25,
+    /// ruling 36).
     ///
     /// `Ctrl+E` and the header bar's button both land here, so the menu item, the
-    /// accelerator and the button cannot ask three different questions.
+    /// accelerator and the button cannot ask three different questions. The dialog is
+    /// `GtkFileDialog::save` — the platform's own, with its own replace confirmation —
+    /// seeded by [`EditorWindow::export_seed`]: the folder the last export used (the
+    /// pictures directory when there is none) and the name this document suggests. What
+    /// it answers is a path, and [`EditorWindow::export_to_chosen`] is what becomes of
+    /// it — which is also the half of the flow a test can drive, since a native dialog
+    /// is nothing a machine can press.
     pub fn export(&self) {
-        if let Some(dialog) = self.export_dialog() {
-            dialog.present(self);
+        let seed = self.export_seed();
+        let filter = export_filter(self.settings().format);
+        let filters = gio::ListStore::new::<gtk::FileFilter>();
+        filters.append(&filter);
+        let mut dialog = gtk::FileDialog::builder()
+            .title(gettext("Export the collage"))
+            .filters(&filters)
+            .default_filter(&filter)
+            .initial_name(seed.name);
+        if let Some(folder) = seed.folder {
+            dialog = dialog.initial_folder(&gio::File::for_path(folder));
         }
+        let dialog = dialog.build();
+        let window = self.clone();
+        dialog.save(
+            Some(self),
+            gio::Cancellable::NONE,
+            glib::clone!(
+                #[strong]
+                window,
+                move |result: Result<gio::File, glib::Error>| {
+                    let Ok(file) = result else {
+                        // A dismissed dialog is not a failure: the user changed their
+                        // mind, which is a normal thing to do.
+                        return;
+                    };
+                    if let Some(path) = file.path() {
+                        window.export_to_chosen(&path);
+                    }
+                }
+            ),
+        );
+    }
+
+    /// What the export's save dialog is seeded with (S25, ruling 36): the folder — the
+    /// last export's, the pictures directory when there is none — and the suggested
+    /// name.
+    ///
+    /// Public because it is the decision the dialog is a shell over, and the tests' own
+    /// handle on it: what a native dialog opened on is not something a machine can read
+    /// back.
+    pub fn export_seed(&self) -> export::Seed {
+        let settings = self.settings();
+        export::seed(
+            suggested_export_name(self, settings.format),
+            settings.last_export_dir.as_deref(),
+        )
+    }
+
+    /// The export a save dialog's answer becomes (S25, ruling 36).
+    ///
+    /// The settings' format owns the name's extension: a path whose extension is not
+    /// that format's is refused with the same message the CLI's `--out` meets, because
+    /// a file that lies about itself is worse than a refusal. The path may not be one
+    /// of the document's own photos ([`EditorWindow::export_destination`], the rule
+    /// `render` and `thumb` apply to the same path), and the folder it landed in is
+    /// remembered in the settings before the export starts, so the next dialog opens
+    /// there.
+    pub fn export_to_chosen(&self, path: &Path) {
+        let mut settings = self.settings();
+        if let Err(reason) = export::extension_error(path, settings.format) {
+            self.toast(&reason);
+            return;
+        }
+        if let Err(reason) = self.export_destination(path) {
+            self.toast(&reason);
+            return;
+        }
+        if let Some(dir) = path.parent() {
+            settings.last_export_dir = Some(dir.to_path_buf());
+            self.remember_settings(&settings);
+        }
+        self.start_export(path.to_path_buf());
     }
 
     /// Presents the `Frame…` dialog (S15): the document's frame as three rows.
@@ -2239,44 +2323,56 @@ impl EditorWindow {
         Ok(())
     }
 
-    /// What the export form asks for, with the path this window holds.
+    /// Presents the Settings surface (S25, ruling 36): the export's format and long
+    /// edge, over this window, with the settings the window holds in its rows.
     ///
-    /// The path is *not* asked for twice: when none has been chosen yet the
-    /// suggestion is derived from the format, which is why this builds the
-    /// settings in two steps rather than passing a placeholder into the dialog's
-    /// own suggestion (that circularity was a real defect, found by
-    /// `tests/mainpath.rs`).
-    ///
-    /// Since ruling 18 removed the utility pane, this state *is* the export form:
-    /// the format and the one quality option live here, and S15's `Export…` dialog
-    /// is the rows over them.
-    pub fn export_settings(&self) -> Settings {
-        let mut settings = self.imp().export.borrow().clone();
-        if settings.path.as_os_str().is_empty() {
-            settings.path = default_export_path(self, settings.format);
+    /// The menu's *Preferences* item and `Ctrl+,` both land here, through the
+    /// application's own `app.settings` action, so the menu item, the accelerator and
+    /// the dialog cannot ask three different questions.
+    pub fn show_settings(&self) {
+        if let Some(dialog) = self.settings_dialog() {
+            dialog.present(self);
         }
-        settings
     }
 
-    /// Sets the export form's state, which is also what a test walks the
-    /// background export with.
-    pub fn set_export_settings(&self, settings: &Settings) {
-        *self.imp().export.borrow_mut() = settings.clone();
+    /// The app's settings this window holds (S25, ruling 39): read once when the window
+    /// was built, and what its export asks for from then on.
+    pub fn settings(&self) -> settings::Settings {
+        self.imp().settings.borrow().clone()
     }
 
-    /// Whether an export to `path` may start, and whether it would replace a file
-    /// that is already there.
+    /// Stores `settings` and writes them to `~/.config/pixlay/settings.json`.
     ///
-    /// The form asks this before it closes or spawns anything (S15c): a path that is
-    /// one of the document's own photos is refused on the spot — the same rule
-    /// `render` and `thumb` apply to the same path, with the same message — and a file
-    /// that is already there is the user's question to answer, not the writer's.
-    pub fn export_destination(&self, path: &Path) -> Result<bool, String> {
+    /// The one writer (S25): the settings surface's rows and the export that remembers
+    /// its folder both go through it, so what this window holds and what the file says
+    /// cannot drift apart. A write that fails is logged rather than shown — a settings
+    /// file is not a document, and there is nothing here a user could answer.
+    pub fn remember_settings(&self, settings: &settings::Settings) {
+        let settings = settings.clone().clamped();
+        *self.imp().settings.borrow_mut() = settings.clone();
+        if let Err(reason) = settings.write() {
+            glib::g_warning!("pixlay", "the settings could not be written: {reason}");
+        }
+    }
+
+    /// Whether an export to `path` may start (S15c): a path that names one of the
+    /// document's own photos is refused on the spot — the same rule and the same
+    /// message `render` and `thumb` use, asked before anything is spawned so the
+    /// refusal is a toast rather than a failed export.
+    ///
+    /// Replacing a file that is already there is **not** asked here any more: since
+    /// ruling 36 that confirmation is the platform's own save dialog's.
+    pub fn export_destination(&self, path: &Path) -> Result<(), String> {
         let sources = self.imp().editor.borrow().sources();
         export::destination(path, &sources.paths)
     }
 
     /// Exports on a worker thread, with the progress bar in the bottom bar.
+    ///
+    /// The request is the path the platform's dialog answered plus the two parameters
+    /// the settings hold (S25): the GUI has no per-export override, which is what
+    /// ruling 36 moved into the settings surface. `--long-edge` and `--out` remain the
+    /// CLI's own.
     pub fn start_export(&self, path: PathBuf) {
         // A boundary like the others (PIX-002's ruling): the export is of the
         // document on screen, so a frame change still inside its quiet interval is
@@ -2300,9 +2396,11 @@ impl EditorWindow {
             self.select(Some(*slot));
             return;
         }
-        let settings = Settings {
+        let settings = self.settings();
+        let request = Request {
             path,
-            ..self.export_settings()
+            format: settings.format,
+            long_edge: settings.long_edge,
         };
         self.show_progress(true);
         self.set_progress(0.0, &gettext("Preparing…"));
@@ -2316,14 +2414,13 @@ impl EditorWindow {
                 }
             });
         };
-        *self.imp().export.borrow_mut() = settings.clone();
         // A thread that could not be started is not a progress bar to sit behind
         // (S15h, PIX-014): the pending flag and the bar go back to their resting
         // state and the reason is the toast.
         if let Err(down) = export::spawn(
             doc,
             sources.paths,
-            settings,
+            request,
             report,
             self.imp().workers.get().export,
         ) {
@@ -2334,7 +2431,7 @@ impl EditorWindow {
     }
 
     /// Exports synchronously; the same function the worker calls.
-    pub fn export_to(&self, settings: &Settings) -> Result<Report, String> {
+    pub fn export_to(&self, request: &Request) -> Result<Report, String> {
         self.commit();
         let sources = self.imp().editor.borrow().sources();
         if !sources.missing.is_empty() {
@@ -2348,7 +2445,7 @@ impl EditorWindow {
             ));
         }
         let doc = self.display_document();
-        export::run(&doc, &sources.paths, settings, &|_| ())
+        export::run(&doc, &sources.paths, request, &|_| ())
     }
 
     fn on_export_event(&self, event: export::Event) {
@@ -2859,11 +2956,14 @@ impl EditorWindow {
 ///
 /// The same three-section shape as the rest of the shell, which is the shape both
 /// reference apps use and ruling 24 asks for: the file items, the editor's own
-/// commands, then the help items. **Save has a menu item here** (S22, ruling 37): its
-/// header-bar button went because it sat beside Export and read as the same action,
-/// and the menu and `Ctrl+S` are what the function lives in. The clipboard joined the
-/// editor's own commands in S23b, in HIG's own order — cut, copy, paste — and the
-/// sensitivity of each is the state the window can really act in.
+/// commands, then the app's own — and **the app's own are HIG's "Standard Primary Menu
+/// Items"** (`patterns/controls/menus`: *Preferences*, *Keyboard Shortcuts*, *About
+/// App*, "in a group at the end of the menu"), which S25 completed by adding
+/// *Preferences* to the two that were already there. **Save has a menu item here**
+/// (S22, ruling 37): its header-bar button went because it sat beside Export and read
+/// as the same action, and the menu and `Ctrl+S` are what the function lives in. The
+/// clipboard joined the editor's own commands in S23b, in HIG's own order — cut, copy,
+/// paste — and the sensitivity of each is the state the window can really act in.
 fn main_menu() -> gio::Menu {
     let menu = gio::Menu::new();
 
@@ -2887,6 +2987,7 @@ fn main_menu() -> gio::Menu {
     menu.append_section(None, &edit);
 
     let help = gio::Menu::new();
+    help.append(Some(&gettext("Preferences")), Some("app.settings"));
     help.append(Some(&gettext("Keyboard shortcuts")), Some("app.shortcuts"));
     help.append(Some(&gettext("About Pixlay")), Some("app.about"));
     menu.append_section(None, &help);
@@ -2957,6 +3058,24 @@ fn photo_filter() -> gtk::FileFilter {
     filter
 }
 
+/// The export's save dialog filter: the one format the export writes (S25).
+///
+/// One filter, not a chooser between two: the format is the settings' (`crate::settings`,
+/// ruling 36), so the dialog asks for a name and a folder and nothing else — and a name
+/// whose extension disagrees with the format is refused rather than written
+/// (`export::extension_error`).
+fn export_filter(format: pixlay_imaging::encode::Format) -> gtk::FileFilter {
+    let filter = gtk::FileFilter::new();
+    filter.set_name(Some(&gettext("Images")));
+    for pattern in match format {
+        pixlay_imaging::encode::Format::Jpeg => ["*.jpg", "*.jpeg"],
+        pixlay_imaging::encode::Format::Png => ["*.png", "*.PNG"],
+    } {
+        filter.add_pattern(pattern);
+    }
+    filter
+}
+
 fn icon_button(icon: &str, label: &str) -> gtk::Button {
     let button = gtk::Button::builder()
         .icon_name(icon)
@@ -2979,32 +3098,14 @@ fn suggested_project_name(window: &EditorWindow) -> String {
     }
 }
 
-/// Where an export goes when the form has never been told (S15h, PIX-010).
+/// The name the export's save dialog opens with: the project's own name, or the
+/// template's, with the extension of the settings' format.
 ///
-/// Ruling 2026-09-24: **the first export lands in the pictures directory** —
-/// `XDG_PICTURES_DIR` or `~/Pictures` — and a later one in the directory the last
-/// export used, which is what the stored path carries from then on. No chooser step
-/// is added to the main path, and nothing is written until the export itself runs, so
-/// a project that is never exported leaves no trace anywhere.
-///
-/// An account with no pictures directory at all falls back to the bare name in the
-/// process's own directory.
-fn default_export_path(window: &EditorWindow, format: pixlay_imaging::encode::Format) -> PathBuf {
-    let name = suggested_export_name(window, format);
-    match crate::export::default_folder() {
-        Some(dir) => dir.join(name),
-        None => PathBuf::from(name),
-    }
-}
-
-/// The name the export dialog opens with: the project's own name, or the
-/// template's, with the extension of the format that is selected.
+/// The name is a *suggestion* in a dialog a person edits, and it is the one place a
+/// template's name is still read by a user: ruling 40 governs the layout band, which
+/// shows a sketch and no caption, and this step did not extend it.
 fn suggested_export_name(window: &EditorWindow, format: pixlay_imaging::encode::Format) -> String {
-    let doc = window.document();
-    let extension = match format {
-        pixlay_imaging::encode::Format::Png => "png",
-        pixlay_imaging::encode::Format::Jpeg => "jpg",
-    };
+    let extension = export::extension(format);
     match window.project_path() {
         Some(path) => {
             let stem = path
@@ -3013,6 +3114,6 @@ fn suggested_export_name(window: &EditorWindow, format: pixlay_imaging::encode::
                 .unwrap_or_else(|| gettext("collage"));
             format!("{stem}.{extension}")
         }
-        None => format!("{}.{extension}", doc.template.name),
+        None => format!("{}.{extension}", window.document().template.name),
     }
 }

@@ -12,9 +12,11 @@
 //!   canvas's own `Delete` performs;
 //! * the `Frame…` dialog's three rows round-trip into the document and the canvas
 //!   redraws with the frame's own colour;
-//! * the `Export…` dialog's three rows round-trip through one background export, with
-//!   the progress bar raised while it runs and the toast carrying the file's name;
-//! * the header bar's two buttons present the two dialogs.
+//! * the settings' two parameters round-trip through one background export, with the
+//!   progress bar raised while it runs and the toast carrying the file's name (S25:
+//!   the export's own dialog is gone, so this is the path the platform's save dialog's
+//!   answer takes);
+//! * the header bar's buttons present the dialogs.
 //!
 //! What only a person can judge — whether a strip lands where the hand expects, and
 //! whether the frame reads well at both ends of its radius range — is the human walk
@@ -25,9 +27,7 @@ mod support;
 use std::time::{Duration, Instant};
 
 use gtk4::prelude::*;
-use libadwaita::prelude::*;
 use pixlay::canvas;
-use pixlay::export::Settings;
 use pixlay_core::{PixelSize, Point, Rgba8};
 use pixlay_imaging::encode::Format;
 
@@ -469,45 +469,25 @@ fn the_compose_stage_edits_the_selected_cell_and_the_document() {
     frame_dialog.close_button().emit_clicked();
     support::close_dialog(&frame_dialog.widget(), &window);
 
-    // ---- the Export… dialog ----------------------------------------------
-    let export_dialog = window
-        .export_dialog()
-        .expect("the window has an Export dialog");
-    // Seeded from the form the window holds, including the directory: the dialog
-    // asks for the name only, and the path is the two halves together.
+    // ---- the export (S25) -------------------------------------------------
+    // Ruling 36 moved the export's two parameters into the settings and its one dialog
+    // into the platform's own save dialog. What a machine can drive is the half after
+    // that dialog — the path it answers, through the same call its own callback makes —
+    // and the background export that starts there.
     let dir = support::out_dir();
     let _ = support::artifact("compose.png");
-    window.set_export_settings(&Settings {
-        long_edge: 1500,
-        format: Format::Jpeg,
-        path: dir.join("compose.jpg"),
+    let out = dir.join("compose.png");
+    window.remember_settings(&pixlay::settings::Settings {
+        format: Format::Png,
+        long_edge: 1200,
+        last_export_dir: None,
     });
     assert!(
         gtk4::prelude::WidgetExt::activate_action(&window, "win.export", None).is_ok(),
         "the win.export action is installed"
     );
-    assert!(
-        export_dialog.widget().is_visible(),
-        "the header bar's Export button presents the dialog"
-    );
-    window.pump(Duration::from_millis(50));
-    assert_eq!(export_dialog.name_row().text(), "compose.jpg");
-    assert_eq!(export_dialog.quality_row().value(), 1500.0);
-    // The format row owns the extension, and the filter the chooser would show.
-    export_dialog.format_row().set_selected(1);
-    assert_eq!(
-        export_dialog.name_row().text(),
-        "compose.png",
-        "switching to PNG renames a name that still carried the other extension"
-    );
-    export_dialog.quality_row().set_value(1200.0);
-    export_dialog.name_row().set_text("compose.png");
-
-    let out = dir.join("compose.png");
-    // The affirmative is clicked, which is what a person does: it reads the rows,
-    // stores them, closes the dialog and starts the export.
     let call = Instant::now();
-    export_dialog.export_button().emit_clicked();
+    window.export_to_chosen(&out);
     let returned = call.elapsed();
     assert!(
         returned < Duration::from_millis(500),
@@ -517,11 +497,6 @@ fn the_compose_stage_edits_the_selected_cell_and_the_document() {
         window.progress_revealed(),
         "the export's progress bar is raised while the work runs"
     );
-    // The click started libadwaita's own close transition; the harness forces the
-    // dismissal after it, because a headless X server never finishes that transition
-    // (`support::close_dialog`) and a widget behind a presented dialog snapshots to
-    // nothing.
-    support::close_dialog(&export_dialog.widget(), &window);
     assert!(
         window.wait_for_idle(support::WAIT),
         "the background export finished"
@@ -537,27 +512,18 @@ fn the_compose_stage_edits_the_selected_cell_and_the_document() {
     );
     let exported = pixlay_imaging::Source::decode(&out).expect("the export decodes");
     let expected = PixelSize::for_long_edge(window.document().template.aspect, 1200)
-        .expect("the grid the export asked for");
+        .expect("the grid the settings ask for");
     assert_eq!(
         (exported.width(), exported.height()),
         (expected.width as u32, expected.height as u32),
-        "the export is the template's shape at the long edge the row asked for"
+        "the export is the template's shape at the settings' long edge"
     );
+    // The export's own answer to "where did it go": the settings remember the folder,
+    // which is where the next save dialog opens (ruling 36).
     assert_eq!(
-        window.export_settings().long_edge,
-        1200,
-        "the form holds what the rows said"
-    );
-    assert_eq!(window.export_settings().path, out);
-
-    // The one control the machine walk cannot press: the chooser is the platform's
-    // own dialog, and what it would answer is a directory the test cannot hand back.
-    // It is named and reachable, and the human walk presses it.
-    let choose = export_dialog.choose_button();
-    assert!(choose.is_focusable());
-    assert_eq!(
-        choose.tooltip_text().as_deref(),
-        Some(pixlay::i18n::gettext("Choose where the export is written").as_str())
+        window.settings().last_export_dir.as_deref(),
+        Some(dir.as_path()),
+        "the export remembered the folder it landed in"
     );
 
     // And the whole document is still one the library can render: the frame's rows

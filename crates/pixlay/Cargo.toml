@@ -41,6 +41,12 @@ libadwaita = { version = "0.9.2", features = ["v1_8", "gtk_v4_10"] }
 # `.po` files, `.desktop` and AppStream metainfo (S8) all go through one pipeline.
 # `gettext-system` links the system libintl rather than building a private copy.
 gettext-rs = { version = "0.8.0", features = ["gettext-system"] }
+# The settings file (S25, ruling 39): JSON that has to round-trip, read once at
+# startup and written atomically. `serde` is already in the tree through
+# `pixlay-core`, and a hand-written reader would be a second, weaker version of
+# `deny_unknown_fields`-style validation for three fields.
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 [dev-dependencies]
 pixlay-cli = { path = "../pixlay-cli" }
