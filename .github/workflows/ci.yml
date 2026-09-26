@@ -5,11 +5,12 @@
 # the rolling system libraries are, by construction, the ones this tree is built
 # against.
 #
-# **Every version here is a moving one**: `ubuntu-latest`, `archlinux:latest`,
-# `pacman -Syu` (the rolling packages, not a snapshot), and the one action by its
-# moving major tag (`actions/checkout@v7`) rather than a commit SHA — the policy
-# is "track the latest", so a pin is the thing that has to be justified, not the
-# other way round.
+# **Every version here is a moving one**, and the runner's OS is named explicitly because its
+# `-latest` lags: `ubuntu-26.04` is the newest hosted image (`ubuntu-latest` still resolves to
+# 24.04, ruled 2026-09-27), and inside it `archlinux:latest` with `pacman -Syu` is the rolling
+# packages rather than a snapshot. The one action moves with its major tag
+# (`actions/checkout@v7`) rather than a commit SHA — the policy is "track the latest", so a pin
+# is the thing that has to be justified, not the other way round.
 #
 # **The package is not built here** (ruled 2026-09-26, human): `makepkg`, the PKGBUILD
 # and its `check()` are verified on a machine, where a package can be built *and
@@ -39,7 +40,7 @@ on:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     container: archlinux:latest
     steps:
       - uses: actions/checkout@v7

@@ -225,9 +225,10 @@ versions**. Everything follows the latest stable release.
   (currently gtk4 4.24, cairo 1.18.4, libadwaita 1.10), and the bindings take the latest.
   Downgrade a binding only when it demands a newer system version than Arch ships — never downgrade
   the system.
-- **CI / packaging**: `runs-on: ubuntu-latest` and an `archlinux:latest` container, no pinned image tag
-  anywhere in `workflows/`, and the one action moves with its major tag (`actions/checkout@v7`) rather
-  than being pinned to a commit SHA — under this policy a pin is the thing that has to be justified
+- **CI / packaging**: `runs-on: ubuntu-26.04` — the newest hosted Ubuntu image, named explicitly because
+  `ubuntu-latest` still resolves to 24.04 (ruled 2026-09-27) — with an `archlinux:latest` container, and
+  the one action moving with its major tag (`actions/checkout@v7`) rather than being pinned to a commit
+  SHA: under this policy a pin is the thing that has to be justified
 - **Keeping the dependency set minimal** does not conflict with tracking the latest: few, but each
   one current.
 
