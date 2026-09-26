@@ -42,7 +42,6 @@ use gtk4::prelude::*;
 
 use pixlay::EditorWindow;
 use pixlay::canvas;
-use pixlay::window::Stage;
 
 /// One switch, as it was measured.
 struct Switch {
@@ -72,11 +71,6 @@ fn a_layout_switch_is_measured_from_the_click() {
     first
         .open_path(&support::verify_project())
         .expect("the verification project opens");
-    assert_eq!(
-        first.stage(),
-        Stage::Editor,
-        "the window opens on the editor"
-    );
     // The grid the canvas rests at, and nothing in flight: the state a click happens
     // in. (`canvas_bitmaps` also waits for the background pipeline, so the session's
     // caches hold the document's own layout by the time anything is measured.)

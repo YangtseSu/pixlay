@@ -86,7 +86,7 @@ pub const DOC_VERSION_MIN: u32 = 3;
 /// (`docs/CONTRACT.md` §8).
 pub const MAX_CANVAS_PIXELS: u64 = 200_000_000;
 
-/// Tolerance for the template-aspect picker query (`templates::of_aspect`): a
+/// Tolerance for the template-aspect query (`templates::of_aspect`): a
 /// caller names an aspect by rounding (`16:9`, `1.5`), so an exact comparison
 /// would miss a template whose aspect is computed from slot geometry.
 pub const ASPECT_TOLERANCE: f64 = 1e-6;
@@ -108,8 +108,8 @@ pub const MAX_TEMPLATE_ASPECT: f64 = 10.0;
 /// The floor was 2 until S19 and is 1 since: a single photo is a legal collage
 /// (ruling 34), the library gains the one-slot sheet `grid-1-1x1` for it, and the
 /// frame is what gives that one photo its border. The ceiling was 10 while
-/// `strip-10-10x1` shipped; S12c removed that recipe, so the format's cap and the
-/// picker's ([`MAX_PHOTOS`]) are the same number again.
+/// `strip-10-10x1` shipped; S12c removed that recipe, so the format's cap and
+/// [`MAX_PHOTOS`] are the same number again.
 pub const MIN_SLOTS: usize = 1;
 pub const MAX_SLOTS: usize = 9;
 

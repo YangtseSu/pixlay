@@ -29,7 +29,7 @@ fn the_export_refuses_a_source_image_and_confirms_a_replacement() {
     // template — not to the process's own working directory, which is where a bare
     // suggested name used to land.
     let first = window.export_settings();
-    let expected_dir = match pixlay::picker::default_folder() {
+    let expected_dir = match pixlay::export::default_folder() {
         Some(pictures) => pictures,
         // An account with no pictures directory keeps the bare name, which is what the
         // product falls back to and what `parent()` reports as the empty path.

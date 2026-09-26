@@ -3,17 +3,16 @@
 //! One test: GTK lives on one thread (see `support`). What is checked here is the
 //! part of `docs/HIG-REVIEW.md` section 1 that a machine can answer — the
 //! accelerator table against `reference/keyboard`, accessible names
-//! (`guidelines/accessibility`), the picker's selection mode
-//! (`patterns/containers/selection-mode`, which applies from S13 on), the adaptive
-//! minimum (`guidelines/adaptive`), the two colour schemes
-//! (`guidelines/ui-styling`), the about dialog's metadata — and the step's own
-//! criterion that the interface is English when the locale is missing, `C`, or
-//! unknown.
+//! (`guidelines/accessibility`), the adaptive minimum (`guidelines/adaptive`), the
+//! colour schemes (`guidelines/ui-styling`), the about dialog's metadata — and the
+//! step's own criterion that the interface is English when the locale is missing,
+//! `C`, or unknown.
 //!
-//! **Both stages are checked, in the order a user meets them**: the window opens
-//! on the picker (S13), so the picker's own criteria run first and the editor's
-//! (canvas, colour schemes) run after a project is opened, which is what puts the
-//! editor page on screen.
+//! **Since S22 there is one surface**: the window opens on the editor (ruling 31), so
+//! the checks walk that page from the first frame — the header bar's own chrome, the
+//! canvas's controls, the layout band and the two dialogs — and `selection-mode`'s
+//! row is back to "not applicable" (the app has no multi-select collection view any
+//! more, `docs/HIG-REVIEW.md` §1).
 
 mod support;
 
@@ -25,7 +24,6 @@ use gtk4::prelude::*;
 use libadwaita as adw;
 use libadwaita::prelude::*;
 
-use pixlay::window::Stage;
 use pixlay::{APP_ID, app, canvas, i18n, window::EditorWindow};
 
 /// The accelerator combinations HIG `reference/keyboard` requires *for the
@@ -60,33 +58,27 @@ fn the_interface_meets_the_machine_checkable_hig() {
     let application = support::app();
     let window = support::window(&application);
 
-    // ---- stage 1: the picker ------------------------------------------------
+    // ---- the window, from its first frame ------------------------------------
+    // Since S22 the window opens on the editor (ruling 31), so there is no second
+    // surface to check first: the header bar, the accessible names and the accelerator
+    // table are checked on the window exactly as it opens — one cell, no photo.
     check_shortcuts(&application, &window, &mut failures);
     check_accessible_names(&window, &mut failures);
-    check_picker(&window, &mut failures);
-    check_picker_input(&window, &mut failures);
     check_header_chrome(&window, &mut failures);
-    check_picker_theme(&window, &mut failures);
-    check_picker_minimum(&window, &mut failures);
 
-    // ---- stage 2: the editor ------------------------------------------------
-    // A project is what puts the editor's page on screen (and what the canvas
-    // needs to be allocated at all), so the canvas checks come after this.
+    // ---- the document --------------------------------------------------------
+    // A project is what fills the canvas and the band, so the checks that need a real
+    // document come after this one.
     let project = support::verify_project();
     window
         .open_path(&project)
         .expect("the verification project opens");
-    assert_eq!(
-        window.stage(),
-        Stage::Editor,
-        "opening a collage shows the editor's stage"
-    );
-    // The editor's page is laid out and its bitmaps are in hand before anything below is
-    // measured: a page that has just been pushed has neither, and every check that
-    // follows reads an allocation or a `Placement` (measured 2026-09-23: without this
-    // the walk read a 0x0 canvas, a band with no candidates and header controls at
-    // position 0 on some runs and was fine on others — `tests/support::canvas_bitmaps` is
-    // the harness's answer to exactly that).
+    // The canvas's bitmaps and the band's candidates are in hand before anything below
+    // is measured: a window that has just been given a document has neither, and every
+    // check that follows reads an allocation or a `Placement` (measured 2026-09-23:
+    // without this the walk read a 0x0 canvas, a band with no candidates and header
+    // controls at position 0 on some runs and was fine on others —
+    // `tests/support::canvas_bitmaps` is the harness's answer to exactly that).
     let _ = support::canvas_bitmaps(&window);
     assert!(
         window.wait_for_gallery(support::WAIT),
@@ -95,7 +87,6 @@ fn the_interface_meets_the_machine_checkable_hig() {
     check_accessible_names(&window, &mut failures);
     check_gallery(&window, &mut failures);
     check_compose(&window, &mut failures);
-    check_editor_chrome(&window, &mut failures);
     check_editor_minimum(&window, &mut failures);
     check_colour_schemes(&window, &mut failures);
     check_about(&mut failures);
@@ -121,11 +112,16 @@ fn binding(accelerator: &str) -> (Vec<String>, String) {
         }
         match part.split_once('>') {
             Some((name, rest)) => {
-                if name.is_empty() {
-                    key.push_str(rest);
-                } else {
+                if !name.is_empty() {
                     modifiers.push(name.to_ascii_lowercase());
                 }
+                // The text after the `>` is the key, and it is the key whether or not a
+                // modifier came first: `<Control>s` is *control + s*, not "control and
+                // nothing". (Until S22 this branch dropped `rest` whenever the name was
+                // non-empty, so every accelerator's key went missing and the comparison
+                // below could only ever have checked the modifier set — the duplicate
+                // check S22 added is what made the hole visible.)
+                key.push_str(rest);
             }
             None => key.push_str(part),
         }
@@ -145,6 +141,27 @@ fn check_shortcuts(
         .iter()
         .map(|(_, accelerator)| (*accelerator).to_string())
         .collect();
+    // Exactly one accelerator per action, and no accelerator bound twice (S22's
+    // criterion: the table is a bijection — a second binding for one action would be a
+    // key that means two things, which is how `Ctrl+Shift+O` and `Z` were free again
+    // once the picker's actions left).
+    let mut seen: Vec<((Vec<String>, String), String)> = Vec::new();
+    for (action, accelerator) in app::ACCELERATORS {
+        let parsed = binding(accelerator);
+        if let Some((_, other)) = seen.iter().find(|(key, _)| *key == parsed) {
+            failures.push(format!(
+                "{action} and {other} are both bound to {accelerator}"
+            ));
+        }
+        seen.push((parsed, action.to_string()));
+        let installed = application.accels_for_action(action);
+        if installed.len() != 1 {
+            failures.push(format!(
+                "{action} has {} accelerators ({installed:?}), not exactly one",
+                installed.len()
+            ));
+        }
+    }
     for required in REQUIRED {
         if !bound.iter().any(|bound| bound == required) {
             failures.push(format!("HIG requires {required}, which nothing binds"));
@@ -334,335 +351,6 @@ fn has_accessible_name(widget: &gtk4::Widget) -> bool {
         .any(|label| !label.label().is_empty())
 }
 
-/// The picker is a collection view in selection mode (S13), arranged as the
-/// 2026-09-22 ruling fixed it (S13b).
-///
-/// HIG `patterns/containers/selection-mode`, which the plan's review turned from
-/// "not applicable" into a criteria row: a grid whose model is a real
-/// multi-selection, a picked cell shown by a highlight — the one part of the page
-/// this product deviates on, recorded in `docs/HIG-REVIEW.md` §3 — and the batch
-/// action in the header, the Next button, carrying the count and insensitive below
-/// the floor of one.
-///
-/// The arrangement is `guidelines/adaptive`'s half: the preview above, the
-/// thumbnails below it, the picked list down the right edge, which is checked as
-/// geometry rather than as a widget tree.
-fn check_picker(window: &EditorWindow, failures: &mut Vec<String>) {
-    let picker = window.picker().expect("the window has a picker stage");
-    // The fixture folder, so the check does not depend on what `~/Pictures` holds
-    // on the machine running the tests.
-    picker.open_folder(window, &support::fixtures().join("photos"));
-    window.pump(Duration::from_millis(300));
-
-    let model = picker.grid().model();
-    let multi = model
-        .as_ref()
-        .and_then(|model| model.downcast_ref::<gtk4::MultiSelection>());
-    if multi.is_none() {
-        failures.push(format!(
-            "the picker's grid is not backed by a GtkMultiSelection ({:?})",
-            model.as_ref().map(|model| model.type_().name().to_string())
-        ));
-    }
-
-    // The check mark S13 used is gone, and the highlight is what replaced it
-    // (the 2026-09-22 ruling).
-    let checks: Vec<gtk4::Widget> =
-        support::descendants(picker.grid().upcast_ref::<gtk4::Widget>())
-            .into_iter()
-            .filter(|widget| {
-                widget.is::<gtk4::CheckButton>() && widget.has_css_class("selection-mode")
-            })
-            .collect();
-    if !checks.is_empty() {
-        failures.push(format!(
-            "{} cell(s) still carry a .selection-mode check button, which the ruling replaced \
-             with the highlight",
-            checks.len()
-        ));
-    }
-    let cells = support::descendants(picker.grid().upcast_ref::<gtk4::Widget>())
-        .into_iter()
-        .filter(|widget| widget.has_css_class("picker-cell"))
-        .count();
-    if cells == 0 {
-        failures.push("no grid cell carries the .picker-cell class".to_string());
-    }
-
-    // The count is the content's own label — not the button's, which would replace
-    // the `AdwButtonContent` and lose the icon (`S13c`, the defect this checks) — and
-    // the floor of the product's 1–9 rule turns it off rather than letting Next open
-    // a collage with no photo in it.
-    let next = picker.next_button();
-    let label = next_label(&picker);
-    if !label.contains('0') {
-        failures.push(format!(
-            "Next does not carry the count of picked photos (label is {label:?})"
-        ));
-    }
-    if !next
-        .child()
-        .is_some_and(|child| child.is::<adw::ButtonContent>())
-    {
-        failures.push(
-            "Next's child is not an AdwButtonContent, so its icon is gone (S13b's defect)"
-                .to_string(),
-        );
-    }
-    if next.is_sensitive() {
-        failures.push("Next is sensitive with nothing picked".to_string());
-    }
-    if picker.len() < 2 {
-        failures.push(format!(
-            "the fixture folder has {} photos, too few to check the picker with",
-            picker.len()
-        ));
-        return;
-    }
-    picker.toggle(window, 0);
-    // One photo is a legal collage since S19 (ruling 34), so the floor the walk
-    // holds Next to is "nothing picked", not "one photo picked".
-    if !next.is_sensitive() {
-        failures.push("Next is insensitive with one photo picked".to_string());
-    }
-    let picked_cell = picker
-        .cell_widget(0)
-        .map(|cell| cell.has_css_class("picked"));
-    if picked_cell != Some(true) {
-        failures.push(format!(
-            "a picked cell does not carry the highlight class ({picked_cell:?})"
-        ));
-    }
-    picker.toggle(window, 1);
-    if !next.is_sensitive() {
-        failures.push("Next is insensitive with two photos picked".to_string());
-    }
-    let label = next_label(&picker);
-    if !label.contains('2') {
-        failures.push(format!(
-            "Next does not show two picked photos (label is {label:?})"
-        ));
-    }
-    if picker.picked_list().first_child().is_none() {
-        failures.push("the picked list is empty with two photos picked".to_string());
-    }
-    picker.clear_selection(window);
-    if picker.selected_count() != 0 {
-        failures.push("Esc-equivalent clearing left photos picked".to_string());
-    }
-    if picker
-        .cell_widget(0)
-        .is_some_and(|cell| cell.has_css_class("picked"))
-    {
-        failures.push("clearing the pick left a cell highlighted".to_string());
-    }
-
-    // The pane's zoom is one control with two states, and it says which one it is in
-    // (S15j): HIG `guidelines/accessibility` asks every control be named — the walk above
-    // covers that — and this name carries the *state* for the reason the canvas's does
-    // (`docs/HIG-REVIEW.md` §2, "Screen reader"), while the tooltip says what the double
-    // click does (`patterns/feedback/tooltips`; the sentence case is the deviation that
-    // chapter records for every tooltip in this window).
-    //
-    // The tooltip is what can be read back: GTK 4.24 exposes no getter for an accessible
-    // name (only `gtk_test_accessible_has_property`, which is "it has one"), so the name
-    // and the tooltip are written by one function (`Picker::update_zoom_labels`) and the
-    // tooltip is the half a test can hold to. Both are read around a toggle rather than
-    // compared with a sentence, because the claim is "the pane says which state it is
-    // in", not "the pane says these words".
-    let pane = picker.preview_widget();
-    let fitted = pane.tooltip_text();
-    let _ = gtk4::prelude::WidgetExt::activate_action(window, "win.zoom-preview", None);
-    let actual = pane.tooltip_text();
-    let _ = gtk4::prelude::WidgetExt::activate_action(window, "win.zoom-preview", None);
-    if picker.zoom() != pixlay::picker::Zoom::Fit {
-        failures.push("two toggles left the pane away from the fit".to_string());
-    }
-    if fitted.as_deref().unwrap_or("").is_empty() {
-        failures.push("the pane's zoom has no tooltip".to_string());
-    }
-    if fitted == actual {
-        failures.push("the pane's tooltip does not follow its zoom state".to_string());
-    }
-}
-
-/// The picker's input paths, and the three defects S13c fixed while it rewrote the
-/// same code.
-///
-/// Every one of them is driven through the platform's own route: `Enter` is GTK's
-/// `list.activate-item` action (the one the key is bound to), `Ctrl+A` is
-/// `list.select-all`, and Next's label is read off the `AdwButtonContent` the button
-/// holds.
-fn check_picker_input(window: &EditorWindow, failures: &mut Vec<String>) {
-    let picker = window.picker().expect("the window has a picker stage");
-    picker.open_folder(window, &support::fixtures().join("photos"));
-    window.pump(Duration::from_millis(300));
-    let grid = picker.grid();
-    if picker.len() < 2 {
-        failures.push("the fixture folder is too small to check the picker's input with".into());
-        return;
-    }
-
-    // `Enter` toggles the focused cell: `list.activate-item` emits the grid's
-    // `activate` signal, which is what the picker answers.
-    let position = 0u32;
-    picker.clear_selection(window);
-    if grid
-        .activate_action("list.activate-item", Some(&position.to_variant()))
-        .is_err()
-    {
-        failures.push("the grid has no list.activate-item action (Enter does nothing)".into());
-    }
-    if picker.selected_count() != 1 {
-        failures.push(format!(
-            "Enter on a cell left {} photos picked, not 1",
-            picker.selected_count()
-        ));
-    }
-    let _ = grid.activate_action("list.activate-item", Some(&position.to_variant()));
-    if picker.selected_count() != 0 {
-        failures.push("Enter on a picked cell did not toggle it off".into());
-    }
-
-    // `Ctrl+A` is bound once — GTK's own `list.select-all` — and one press reports
-    // the cap exactly once. S13's second binding made the same press fire twice.
-    picker.clear_selection(window);
-    let before = window.toasts();
-    let _ = grid.activate_action("list.select-all", None);
-    if picker.selected_count() != pixlay_core::MAX_PHOTOS {
-        failures.push(format!(
-            "selecting all left {} photos picked, not the cap of {}",
-            picker.selected_count(),
-            pixlay_core::MAX_PHOTOS
-        ));
-    }
-    let reports = window.toasts() - before;
-    if reports != 1 {
-        failures.push(format!(
-            "one Ctrl+A reported the cap {reports} times, not once"
-        ));
-    }
-    if !window
-        .last_toast()
-        .is_some_and(|toast| toast.contains(&pixlay_core::MAX_PHOTOS.to_string()))
-    {
-        failures.push(format!(
-            "the refused photos are not reported by name: {:?}",
-            window.last_toast()
-        ));
-    }
-    // And the picked list is rebuilt rather than left stale: S13b cleared the model
-    // and the ordered list without rebuilding the rows, so a cleared pick left rows
-    // behind — which now would be controls that switch the pane to a photo nobody
-    // picked.
-    picker.clear_selection(window);
-    if picker.picked_list().row_at_index(0).is_some() {
-        failures.push("clearing the pick left its rows behind".into());
-    }
-    if picker.picked_list().row_at_index(0).is_none()
-        && picker
-            .picked_list()
-            .first_child()
-            .is_none_or(|child| !child.has_css_class("dim-label"))
-    {
-        failures.push(
-            "the empty picked list has no hint: the placeholder has to survive a rebuild".into(),
-        );
-    }
-}
-
-/// The picker's chrome, as HIG `patterns/containers/header-bars` and ruling 24 fix
-/// it: primary and navigation actions at the start, the heading in the centre, the
-/// menu at the end, and one primary menu of the ruled items.
-fn check_header_chrome(window: &EditorWindow, failures: &mut Vec<String>) {
-    let picker = window.picker().expect("the window has a picker stage");
-    let header = picker.header();
-    let root = picker.root().upcast::<gtk4::Widget>();
-    let title = header
-        .title_widget()
-        .expect("the header has a title widget");
-    let centre = |widget: &gtk4::Widget| {
-        widget
-            .compute_point(
-                &root,
-                &gtk4::graphene::Point::new(
-                    widget.width() as f32 / 2.0,
-                    widget.height() as f32 / 2.0,
-                ),
-            )
-            .map(|point| point.x())
-    };
-
-    // The folder button is the start slot's control: it is the first button of the
-    // header's start box, and it is to the *left* of the heading.
-    let controls = support::descendants(header.upcast_ref::<gtk4::Widget>());
-    let folder = controls.iter().find(|widget| {
-        widget.is::<gtk4::Button>()
-            && widget.tooltip_text().as_deref()
-                == Some(pixlay::i18n::gettext("Choose a folder of photos").as_str())
-    });
-    let Some(folder) = folder else {
-        failures.push("the header has no folder button".into());
-        return;
-    };
-    let menu = picker.menu_button();
-    let (folder_x, title_x, menu_x) = (
-        centre(&folder.clone()),
-        centre(&title.clone()),
-        centre(menu.upcast_ref::<gtk4::Widget>()),
-    );
-    match (folder_x, title_x, menu_x) {
-        (Some(folder_x), Some(title_x), Some(menu_x)) => {
-            if folder_x >= title_x {
-                failures.push(format!(
-                    "the folder button ({folder_x:.0}) is not left of the heading ({title_x:.0})"
-                ));
-            }
-            if menu_x <= title_x {
-                failures.push(format!(
-                    "the menu ({menu_x:.0}) is not right of the heading ({title_x:.0})"
-                ));
-            }
-        }
-        _ => failures.push("the header's controls are not allocated".into()),
-    }
-
-    // One primary menu, of the ruled items, in the ruled sections.
-    let actions = menu
-        .menu_model()
-        .map(|model| menu_actions(&model))
-        .unwrap_or_default();
-    let wanted = [
-        "app.new",
-        "app.open",
-        "win.choose-folder",
-        "app.shortcuts",
-        "app.about",
-    ];
-    if actions != wanted {
-        failures.push(format!(
-            "the picker's menu is {actions:?}, not the ruled {wanted:?}"
-        ));
-    }
-
-    // Every control *this app* puts in the header carries a tooltip (this page's own
-    // "tooltips on primary controls"); the header's own internals — the back button,
-    // the window controls — are the platform's and are checked by
-    // `check_accessible_names` instead.
-    for (name, widget) in [
-        ("the folder button", folder.clone()),
-        ("the menu", menu.clone().upcast::<gtk4::Widget>()),
-        ("Next", picker.next_button().upcast::<gtk4::Widget>()),
-    ] {
-        if widget.tooltip_text().is_none() {
-            failures.push(format!("{name} has no tooltip"));
-        }
-        if !has_accessible_name(&widget) {
-            failures.push(format!("{name} has no accessible name"));
-        }
-    }
-}
-
 /// The menu's items, in the order the model lists them, flattened over its sections.
 fn menu_actions(model: &gio::MenuModel) -> Vec<String> {
     let mut actions = Vec::new();
@@ -675,164 +363,6 @@ fn menu_actions(model: &gio::MenuModel) -> Vec<String> {
         }
     }
     actions
-}
-
-/// The media area is on the theme's own background, and the app is dark by default
-/// (rulings 22–23; HIG `guidelines/ui-styling`).
-///
-/// The ruling's own words: the media area's backdrop is `#222226` in the dark
-/// scheme, which *is* libadwaita's `--window-bg-color` — the idiom both references
-/// copy is "the theme's own background", not that literal. So the check is an
-/// equality: the pane's backdrop is the same colour as a plain widget with nothing
-/// painted on it (the status bar), under a forced light *and* a forced dark scheme;
-/// and the two schemes differ, which is what says the colour is not a literal.
-///
-/// The pixels come from the **window's** own snapshot, not from the pane's alone:
-/// `WidgetPaintable` renders a widget's own node, and a widget with no background of
-/// its own paints nothing — the colour at that point comes from the window beneath
-/// it, which is exactly what is being checked.
-fn check_picker_theme(window: &EditorWindow, failures: &mut Vec<String>) {
-    let manager = adw::StyleManager::default();
-    if manager.color_scheme() != adw::ColorScheme::ForceDark {
-        failures.push(format!(
-            "the app is not dark by default ({:?})",
-            manager.color_scheme()
-        ));
-    }
-    let picker = window.picker().expect("the window has a picker stage");
-    let pane = picker.preview_widget().upcast::<gtk4::Widget>();
-    let status_bar = picker.status_bar().upcast::<gtk4::Widget>();
-    let root = window.clone().upcast::<gtk4::Widget>();
-    // Mid-left rather than the very corner: a raised top bar (`AdwToolbarView`'s
-    // `top_bar_style`, S13c) draws its own edge over the first pixels of the content
-    // below it, and that edge is chrome, not the media area's backdrop (measured
-    // 2026-09-23: the pane's corner is one level darker than the window background).
-    let pane_point = pane
-        .compute_point(
-            &root,
-            &gtk4::graphene::Point::new(3.0, pane.height() as f32 / 2.0),
-        )
-        .map(|point| (point.x() as i32, point.y() as i32));
-    let bar_point = status_bar
-        .compute_point(
-            &root,
-            &gtk4::graphene::Point::new(3.0, status_bar.height() as f32 / 2.0),
-        )
-        .map(|point| (point.x() as i32, point.y() as i32));
-    let (Some(pane_point), Some(bar_point)) = (pane_point, bar_point) else {
-        failures.push("the media area and the status bar are not in the window".into());
-        return;
-    };
-
-    let mut backgrounds = Vec::new();
-    for scheme in [adw::ColorScheme::ForceDark, adw::ColorScheme::ForceLight] {
-        manager.set_color_scheme(scheme);
-        // A snapshot replays the widgets' current nodes, so the frame the scheme change
-        // causes has to be asked for: without this the probe can read the *previous*
-        // scheme's pixels (measured 2026-09-23: the media area read the dark colour in
-        // both schemes on one run and differed on the next).
-        window.queue_draw();
-        window.pump(Duration::from_millis(300));
-        let pixels = support::snapshot(window);
-        backgrounds.push((
-            format!("{scheme:?}"),
-            support::pixel(&pixels, pane_point.0, pane_point.1),
-            support::pixel(&pixels, bar_point.0, bar_point.1),
-        ));
-    }
-    manager.set_color_scheme(adw::ColorScheme::ForceDark);
-    for (scheme, pane_pixel, bar_pixel) in &backgrounds {
-        if pane_pixel != bar_pixel {
-            failures.push(format!(
-                "under {scheme} the media area is {pane_pixel:?} where the window's own \
-                 background is {bar_pixel:?}: the pane is not on the theme's background"
-            ));
-        }
-    }
-    if backgrounds[0].1 == backgrounds[1].1 {
-        failures.push(
-            "the media area's backdrop is the same under both colour schemes, so it is a \
-             literal colour rather than the theme's"
-                .to_string(),
-        );
-    }
-}
-
-/// The count the Next button carries, read off the `AdwButtonContent` it holds.
-fn next_label(picker: &pixlay::picker::Picker) -> String {
-    picker
-        .next_button()
-        .child()
-        .and_downcast::<adw::ButtonContent>()
-        .map(|content| content.label().to_string())
-        .unwrap_or_default()
-}
-
-/// At the minimum size the picker's own controls are all still usable
-/// (HIG `guidelines/adaptive`).
-///
-/// What the row used to assert — the utility pane — left with the pane in S13;
-/// what takes its place is the stage the window actually opens on.
-fn check_picker_minimum(window: &EditorWindow, failures: &mut Vec<String>) {
-    let minimum = window.size_request();
-    window.set_default_size(minimum.0, minimum.1);
-    window.pump(Duration::from_millis(500));
-    let picker = window.picker().expect("the window has a picker stage");
-    for (name, widget) in [
-        ("the photo grid", picker.grid().upcast::<gtk4::Widget>()),
-        (
-            "the preview pane",
-            picker.preview_widget().upcast::<gtk4::Widget>(),
-        ),
-        (
-            "the picked list",
-            picker.picked_list().upcast::<gtk4::Widget>(),
-        ),
-    ] {
-        if widget.width() <= 0 || widget.height() <= 0 {
-            failures.push(format!(
-                "at the minimum size {}x{}, {name} is not allocated ({}x{})",
-                minimum.0,
-                minimum.1,
-                widget.width(),
-                widget.height()
-            ));
-        }
-    }
-
-    // And the arrangement the 2026-09-22 ruling fixed, as geometry: the
-    // thumbnails below the preview, the picked list to the right of it.
-    let root = picker.root().upcast::<gtk4::Widget>();
-    let grid = picker.grid().upcast::<gtk4::Widget>();
-    let preview = picker.preview_widget().upcast::<gtk4::Widget>();
-    let list = picker.picked_list().upcast::<gtk4::Widget>();
-    let corner = |widget: &gtk4::Widget, x: f32, y: f32| {
-        widget
-            .compute_point(&root, &gtk4::graphene::Point::new(x, y))
-            .map(|point| (point.x(), point.y()))
-    };
-    let (grid_top, preview_bottom) = (
-        corner(&grid, 0.0, 0.0).map(|(_, y)| y),
-        corner(&preview, 0.0, preview.height() as f32).map(|(_, y)| y),
-    );
-    if let (Some(grid_top), Some(preview_bottom)) = (grid_top, preview_bottom)
-        && grid_top < preview_bottom
-    {
-        failures.push(format!(
-            "the thumbnails ({grid_top:.0}) are not below the preview ({preview_bottom:.0})"
-        ));
-    }
-    let (list_left, preview_right) = (
-        corner(&list, 0.0, 0.0).map(|(x, _)| x),
-        corner(&preview, preview.width() as f32, 0.0).map(|(x, _)| x),
-    );
-    if let (Some(list_left), Some(preview_right)) = (list_left, preview_right)
-        && list_left < preview_right
-    {
-        failures.push(format!(
-            "the picked list ({list_left:.0}) is not to the right of the pane ({preview_right:.0})"
-        ));
-    }
 }
 
 /// The layout band (S14): the count control and the candidates, against the two HIG
@@ -1041,15 +571,13 @@ fn check_compose(window: &EditorWindow, failures: &mut Vec<String>) {
     window.select(None);
 }
 
-/// The editor page's header bar, held to the same three alignment points as the
-/// picker's (HIG `patterns/containers/header-bars`, ruling 24): the document's own
-/// controls at the start, the heading in the centre, the menu at the end.
-///
-/// The picker's check is `check_header_chrome`; the editor's controls are the ones
-/// S15 added, so this is the other half of the same rule.
-fn check_editor_chrome(window: &EditorWindow, failures: &mut Vec<String>) {
-    let Some(header) = window.editor_header() else {
-        failures.push("the editor page has no header bar".into());
+/// The window's header bar, held to the three alignment points HIG
+/// `patterns/containers/header-bars` and ruling 24 fix: the document's own controls at
+/// the start, the heading in the centre, the menu at the end — and, since S22, no Save
+/// button (ruling 37), with the menu carrying the actions a button no longer does.
+fn check_header_chrome(window: &EditorWindow, failures: &mut Vec<String>) {
+    let Some(header) = window.header() else {
+        failures.push("the window has no header bar".into());
         return;
     };
     let root = header.clone().upcast::<gtk4::Widget>();
@@ -1064,16 +592,33 @@ fn check_editor_chrome(window: &EditorWindow, failures: &mut Vec<String>) {
             .find(|widget| support::action_name(widget).as_deref() == Some(action))
     };
     let (Some(frame), Some(export)) = (by_action("win.frame"), by_action("win.export")) else {
-        failures.push("the editor's header is missing the frame or the export control".into());
+        failures.push("the header is missing the frame or the export control".into());
         return;
     };
+    // Ruling 37: Save is a menu item and an accelerator, not a button beside Export —
+    // the two read as the same action.
+    if controls
+        .iter()
+        .any(|widget| support::action_name(widget).as_deref() == Some("win.save"))
+    {
+        failures.push("the header bar still carries a Save button".into());
+    }
+    // The controls the header *does* hold are all in the start slot or all in the end
+    // one, and the two actions that are one pair (undo, redo) are both at the start.
+    for action in ["win.undo", "win.redo"] {
+        if by_action(action).is_none() {
+            failures.push(format!("the header has no {action} control"));
+        }
+    }
     let Some(menu) = controls
         .iter()
         .find(|widget| widget.is::<gtk4::MenuButton>())
+        .and_then(|widget| widget.clone().downcast::<gtk4::MenuButton>().ok())
     else {
-        failures.push("the editor's header has no primary menu".into());
+        failures.push("the header has no primary menu".into());
         return;
     };
+    let menu_widget = menu.clone().upcast::<gtk4::Widget>();
     let centre = |widget: &gtk4::Widget| {
         widget
             .compute_point(
@@ -1092,7 +637,7 @@ fn check_editor_chrome(window: &EditorWindow, failures: &mut Vec<String>) {
     match (
         centre(&frame.clone()),
         title.flatten(),
-        centre(&menu.clone()),
+        centre(&menu_widget),
     ) {
         (Some(frame_x), Some(title_x), Some(menu_x)) => {
             if frame_x >= title_x {
@@ -1106,26 +651,67 @@ fn check_editor_chrome(window: &EditorWindow, failures: &mut Vec<String>) {
                 ));
             }
         }
-        _ => failures.push("the editor header's controls are not allocated".into()),
+        _ => failures.push("the header's controls are not allocated".into()),
     }
-    // Every control *this app* puts in the editor's header carries a tooltip and a
-    // name (this page's own "tooltips on primary controls").
+    // Every control *this app* puts in the header carries a tooltip and a name (this
+    // page's own "tooltips on primary controls").
     for (name, widget) in [
         ("the frame button", frame.clone()),
         ("the export button", export.clone()),
-        ("the menu", menu.clone()),
+        ("the menu", menu_widget.clone()),
     ] {
         if widget.tooltip_text().is_none() {
-            failures.push(format!("the editor header's {name} has no tooltip"));
+            failures.push(format!("the header's {name} has no tooltip"));
         }
         if !has_accessible_name(&widget) {
-            failures.push(format!("the editor header's {name} has no accessible name"));
+            failures.push(format!("the header's {name} has no accessible name"));
         }
+    }
+
+    // The heading is the document's name, dirty marker included, and the window's own
+    // title is the same string (S22: one page, so one name).
+    let heading = header
+        .title_widget()
+        .and_then(|widget| widget.downcast::<adw::WindowTitle>().ok())
+        .map(|widget| widget.title().to_string());
+    if heading.as_deref().unwrap_or("").is_empty() {
+        failures.push("the header's heading is empty".into());
+    }
+    if let Some(heading) = heading {
+        let window_title = window.title().map(|title| title.to_string());
+        if window_title.as_deref() != Some(heading.as_str()) {
+            failures.push(format!(
+                "the window is called {window_title:?} where its heading reads {heading:?}"
+            ));
+        }
+    }
+
+    // The primary menu holds the actions a button no longer carries — Save among them
+    // — and nothing the window cannot do.
+    let actions = menu
+        .menu_model()
+        .map(|model| menu_actions(&model))
+        .unwrap_or_default();
+    let wanted = [
+        "app.new",
+        "app.open",
+        "win.save",
+        "win.save-as",
+        "win.export",
+        "win.add-photos",
+        "win.reset-framing",
+        "app.shortcuts",
+        "app.about",
+    ];
+    if actions != wanted {
+        failures.push(format!(
+            "the window's menu is {actions:?}, not the ruled {wanted:?}"
+        ));
     }
 }
 
 /// At the minimum size the sheet is still drawn in full inside the canvas
-/// (HIG `guidelines/adaptive`) — the editor's stage of the same rule.
+/// (HIG `guidelines/adaptive`).
 fn check_editor_minimum(window: &EditorWindow, failures: &mut Vec<String>) {
     let minimum = window.size_request();
     window.set_default_size(minimum.0, minimum.1);
@@ -1186,6 +772,14 @@ fn check_editor_minimum(window: &EditorWindow, failures: &mut Vec<String>) {
 /// **window**: the thing the human was looking at.
 fn check_colour_schemes(window: &EditorWindow, failures: &mut Vec<String>) {
     let manager = adw::StyleManager::default();
+    // The app is dark by default (ruling 23): `app.rs` forces it at startup, and this
+    // is the state the window was built in before either probe below moves it.
+    if manager.color_scheme() != adw::ColorScheme::ForceDark {
+        failures.push(format!(
+            "the app is not dark by default ({:?})",
+            manager.color_scheme()
+        ));
+    }
     let area = window.canvas_widget();
     let canvas_widget = area.clone().upcast::<gtk4::Widget>();
     let mut painted: Vec<(String, support::Image)> = Vec::new();
@@ -1334,16 +928,16 @@ fn check_english() {
     let application = support::app();
     let window = support::window(&application);
     assert_eq!(
-        i18n::gettext("Pick photos"),
-        "Pick photos",
+        i18n::gettext("Add photos…"),
+        "Add photos…",
         "an untranslated msgid has to come back as itself"
     );
-    // The window opens on the picker's stage (S13), and its title is that stage's
-    // own source string.
+    // The window is the editor (S22), and its title is the document's own source
+    // string.
     assert_eq!(
         window.title().map(|title| title.to_string()).as_deref(),
-        Some("Pick photos"),
-        "the window title must be the picker's English source string"
+        Some("Untitled collage"),
+        "the window title must be the document's English source string"
     );
     // The copy on screen is the English source string: every visible label of the
     // window, button labels included.
@@ -1358,18 +952,12 @@ fn check_english() {
             visible.push(label.label().to_string());
         }
     }
-    // The picker's own copy, and the editor's (whose header is built whether or
-    // not its page is the visible one). `Sheet size` and `Resolution` were the
-    // export form's rows before S12c/S12d collapsed them into one quality option;
-    // `Quality` and `Format` left the window in S13, when ruling 18 removed the
-    // pane that held them — S15's `Export…` dialog is where they come back.
-    for expected in [
-        "Pick photos",
-        "Nothing picked yet",
-        "Next (0)",
-        "Export",
-        "Export…",
-    ] {
+    // The window's own copy. `Sheet size` and `Resolution` were the export form's rows
+    // before S12c/S12d collapsed them into one quality option; `Quality` and `Format`
+    // left the window in S13, when ruling 18 removed the pane that held them — S15's
+    // `Export…` dialog is where they come back; `Pick photos`, `Nothing picked yet` and
+    // `Next (0)` left with the picker in S22.
+    for expected in ["Untitled collage", "Export", "1"] {
         assert!(
             visible.iter().any(|label| label == expected),
             "the interface should read English; {expected:?} is missing from {visible:?}"

@@ -1,14 +1,13 @@
-//! The window's three background workers: how they start, and what a window does
+//! The window's two background workers: how they start, and what a window does
 //! when one of them cannot.
 //!
-//! Decoding (`decode.rs`), the picker's tiles (`thumbs.rs`) and exporting
-//! (`export.rs`) each run on a thread of their own, and each of them is one
-//! `std::thread::Builder::spawn` away from the window. That call can fail — a process
-//! at its thread limit — and a thread that has started can be gone by the time the
-//! next request arrives. Until S15h neither case ended anywhere: the spawn `expect`ed
-//! and took the window down with it, and a `send` whose failure was discarded left the
-//! request marked pending, so a cell, the canvas or the progress bar waited for a
-//! reply that could never come (PIX-014).
+//! Decoding (`decode.rs`) and exporting (`export.rs`) each run on a thread of their
+//! own, and each of them is one `std::thread::Builder::spawn` away from the window.
+//! That call can fail — a process at its thread limit — and a thread that has started
+//! can be gone by the time the next request arrives. Until S15h neither case ended
+//! anywhere: the spawn `expect`ed and took the window down with it, and a `send` whose
+//! failure was discarded left the request marked pending, so the canvas or the
+//! progress bar waited for a reply that could never come (PIX-014).
 //!
 //! **A worker that cannot start or is gone is a report, not a panic.** Starting
 //! answers [`Result`]; every request answers it too; and the caller clears the state it
@@ -17,7 +16,7 @@
 //!
 //! # What the tests name
 //!
-//! The product starts all three workers with [`WorkerPlan::Run`]. The plan's other two
+//! The product starts both workers with [`WorkerPlan::Run`]. The plan's other two
 //! arms exist so the failure branches have a test that needs no process to run out of
 //! threads: `Fail` makes the start return an error, and `Vanish` runs the body nowhere,
 //! so the request channel has no receiver and the first `send` fails — the state a
@@ -39,14 +38,13 @@ pub enum Down {
 
 /// Which worker a report is about.
 ///
-/// The three are told apart because the user's next move differs: the canvas's decoder
-/// and the picker's tiles are what the window is showing, and an export is a thing to
-/// try again. The copy lives here rather than at the three call sites so that one of
-/// them cannot end up worded differently.
+/// The two are told apart because the user's next move differs: the canvas's decoder
+/// is what the window is showing, and an export is a thing to try again. The copy
+/// lives here rather than at the two call sites so that one of them cannot end up
+/// worded differently.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Decode,
-    Thumbs,
     Export,
 }
 
@@ -56,8 +54,6 @@ impl Kind {
         match (self, down) {
             (Self::Decode, Down::Start) => gettext("The photo decoder could not be started"),
             (Self::Decode, Down::Gone) => gettext("The photo decoder stopped"),
-            (Self::Thumbs, Down::Start) => gettext("The photo worker could not be started"),
-            (Self::Thumbs, Down::Gone) => gettext("The photo worker stopped"),
             (Self::Export, Down::Start) => gettext("The export worker could not be started"),
             (Self::Export, Down::Gone) => gettext("The export worker stopped"),
         }
@@ -68,8 +64,6 @@ impl Kind {
         match (self, down) {
             (Self::Decode, Down::Start) => "the decoding thread could not be started",
             (Self::Decode, Down::Gone) => "the decoding thread is gone",
-            (Self::Thumbs, Down::Start) => "the thumbnail thread could not be started",
-            (Self::Thumbs, Down::Gone) => "the thumbnail thread is gone",
             (Self::Export, Down::Start) => "the export thread could not be started",
             (Self::Export, Down::Gone) => "the export thread is gone",
         }
@@ -88,12 +82,11 @@ pub enum WorkerPlan {
     Vanish,
 }
 
-/// One plan per worker: the three fail independently, and the tests check them one at
-/// a time.
+/// One plan per worker: the two fail independently, and the tests check them one at a
+/// time.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Workers {
     pub decode: WorkerPlan,
-    pub thumbs: WorkerPlan,
     pub export: WorkerPlan,
 }
 
@@ -130,7 +123,6 @@ impl WorkerPlan {
 fn thread_name(kind: Kind) -> &'static str {
     match kind {
         Kind::Decode => "decode",
-        Kind::Thumbs => "thumbs",
         Kind::Export => "export",
     }
 }

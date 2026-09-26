@@ -1,22 +1,23 @@
-//! The window: the two stages, their actions, and everything that connects them.
+//! The window: one document, its actions, and everything that connects them.
 //!
 //! This is the only place in the GUI that knows about the document. The canvas
-//! draws what it is asked to draw, the picker emits commands, and both go through
-//! the methods here — which is also what makes the whole main path reachable from
-//! a test without a pointer: `picker`, `open_document`, `place_photo`,
+//! draws what it is asked to draw, the controls and the dialogs emit commands, and
+//! both go through the methods here — which is also what makes the whole main path
+//! reachable from a test without a pointer: `open_document`, `add_photos`,
 //! `export_to` are the same calls the widgets make.
 //!
-//! Since S13 the window is a **sequence of stages**, which is HIG's own shape for
-//! a multi-step task (`patterns/nav`) and the 2026-09-22 ruling's answer to "no
-//! parallel modes over one document":
+//! **Since S22 the window opens on the editor** (ruling 31, 2026-09-25): there is no
+//! picker stage and no navigation stack, so the shell is one page —
 //!
 //! ```text
 //! AdwToastOverlay                      one place for every toast
-//!  └ AdwNavigationView
-//!     ├ AdwNavigationPage "picker"     the folder, the grid, the picked list (S13)
-//!     └ AdwNavigationPage "editor"     the canvas, pushed by Next or Open…
-//!        └ AdwToolbarView              header / progress / banner + canvas
+//!  └ AdwToolbarView                    header / progress / banner + canvas + band
 //! ```
+//!
+//! — and the photos enter from outside it: `Add photos…` (`Ctrl+I`), an empty cell's
+//! own `+`, the selected cell's `Replace`, a drop from the file manager, `Open…` for a
+//! `.pixlay` project, and `pixlay a.jpg b.jpg …` on the command line, which is the same
+//! `add_photos` call in argument order (`app.rs`).
 //!
 //! Two rules the whole file obeys, both from `AGENTS.md`: a GTK object never
 //! leaves the main thread (the decoding and encoding threads send plain data back
@@ -24,9 +25,8 @@
 //! hands the document to the renderer and the export hands it to
 //! `pixlay-imaging`.
 //!
-//! Theming the two stages: the window's own title follows the visible stage, so a
-//! header bar shows "Pick photos" on the picker and the document's name in the
-//! editor.
+//! The window's own title is the document's name, dirty marker included, and the
+//! header bar carries the same string as its centre widget.
 
 use std::cell::{Cell, OnceCell, RefCell};
 use std::path::{Path, PathBuf};
@@ -55,9 +55,7 @@ use crate::dialogs;
 use crate::export::{self, Progress, Report, Settings};
 use crate::i18n::{fill, gettext, ngettext};
 use crate::layout::Gallery;
-use crate::picker::Picker;
 use crate::state::Editor;
-use crate::thumbs;
 use crate::workers::{Down, Kind as WorkerKind, Workers};
 
 /// What happens once a boundary's question has been answered, or a save has a path:
@@ -104,8 +102,9 @@ pub const PLACEHOLDER_GRID: PixelSize = PixelSize {
 /// How long a test-facing wait pumps for work to *start* before concluding there is
 /// none (`EditorWindow::pump_until`).
 ///
-/// Long enough to cover a page push and the frame that lays it out, short enough that a
-/// wait about a document no edit is pending on costs a fraction of a second.
+/// Long enough to cover the frames a window needs to lay itself out and draw, short
+/// enough that a wait about a document no edit is pending on costs a fraction of a
+/// second.
 const WORK_GRACE: Duration = Duration::from_millis(1000);
 
 /// How long a live gesture waits for quiet before it becomes an undo step.
@@ -115,19 +114,6 @@ const WORK_GRACE: Duration = Duration::from_millis(1000);
 /// short enough that the undo a user reaches for next is the gesture they just
 /// finished.
 pub const COMMIT_QUIET: Duration = Duration::from_millis(250);
-
-/// Which stage of the main path the window is showing (S13).
-///
-/// The stages are a sequence, not two modes over one document: the picker is the
-/// root page and the editor is pushed on top of it, so this is simply which page
-/// the navigation view is showing.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Stage {
-    /// Stages 1–2: the folder, the grid and the picked list.
-    Picker,
-    /// Stages 3–7: the document itself.
-    Editor,
-}
 
 mod imp {
     use super::*;
@@ -152,23 +138,15 @@ mod imp {
         /// The `+` buttons over the empty cells and the selected cell's own strip
         /// (S14b, S15), stacked over the canvas.
         pub cell_controls: OnceCell<Rc<canvas::CellControls>>,
-        /// The two stages, and the picker behind the first of them (S13).
-        pub pages: OnceCell<adw::NavigationView>,
-        pub picker_page: OnceCell<adw::NavigationPage>,
-        pub editor_page: OnceCell<adw::NavigationPage>,
-        /// The editor page's header bar, for the HIG checks: the same three
-        /// alignment points the picker's is held to (S15).
-        pub editor_header: OnceCell<adw::HeaderBar>,
+        /// The header bar and the title widget in it: one page, so the bar is the
+        /// window's (`update_title` writes the document's name here).
+        pub header: OnceCell<adw::HeaderBar>,
+        pub title: OnceCell<adw::WindowTitle>,
         /// The two document-level dialogs (S15): `Frame…` and `Export…`, built once
         /// and presented by the header bar's buttons.
         pub frame_dialog: OnceCell<Rc<dialogs::FrameDialog>>,
         pub export_dialog: OnceCell<Rc<dialogs::ExportDialog>>,
-        pub picker: OnceCell<Rc<Picker>>,
-        /// The picker's tile worker: one thread, many small pictures. `None` is a
-        /// thread that could not be started (S15h, PIX-014), and the picker then
-        /// reports it in the cell that asked instead of waiting for a reply.
-        pub thumbs: OnceCell<Option<Rc<thumbs::Thumbs>>>,
-        /// How this window's three workers start (S15h, PIX-014): the product's own
+        /// How this window's two workers start (S15h, PIX-014): the product's own
         /// plan unless a test named another one.
         pub workers: Cell<Workers>,
         /// Whether the decoding worker's failure has already been reported: the
@@ -242,14 +220,10 @@ mod imp {
                 guides: Cell::new(false),
                 canvas: OnceCell::new(),
                 cell_controls: OnceCell::new(),
-                pages: OnceCell::new(),
-                picker_page: OnceCell::new(),
-                editor_page: OnceCell::new(),
-                editor_header: OnceCell::new(),
+                header: OnceCell::new(),
+                title: OnceCell::new(),
                 frame_dialog: OnceCell::new(),
                 export_dialog: OnceCell::new(),
-                picker: OnceCell::new(),
-                thumbs: OnceCell::new(),
                 workers: Cell::new(Workers::default()),
                 decode_reported: Cell::new(false),
                 canvas_label: RefCell::new(String::new()),
@@ -331,14 +305,12 @@ impl EditorWindow {
         window
     }
 
-    /// Starts the two workers the window holds for its lifetime, under `workers`, and
-    /// remembers the plan the third one (an export's own thread) starts under.
+    /// Starts the workers the window holds for its lifetime, under `workers`, and
+    /// remembers the plan the other one (an export's own thread) starts under.
     ///
     /// A start that fails is not a panic (S15h, PIX-014): the handle stays `None`,
     /// and the request path that needed it reports the reason where the user can see
-    /// it. The picker's tile worker is a second thread with a different question —
-    /// many independent "what does this file look like" requests rather than one
-    /// document's bitmaps for one grid.
+    /// it.
     fn start_workers(&self, workers: Workers) {
         let imp = self.imp();
         imp.workers.set(workers);
@@ -358,46 +330,27 @@ impl EditorWindow {
             workers.decode,
         );
         *imp.decoder.borrow_mut() = decoder.ok();
-
-        // ---- the picker's tiles ---------------------------------------------
-        let sender = glib::SendWeakRef::from(self.downgrade());
-        let thumbs = thumbs::Thumbs::spawn_with(
-            move |reply| {
-                let sender = sender.clone();
-                glib::MainContext::default().invoke(move || {
-                    if let Some(window) = sender.upgrade() {
-                        window.on_thumb(reply);
-                    }
-                });
-            },
-            workers.thumbs,
-        );
-        imp.thumbs.set(thumbs.ok().map(Rc::new)).ok();
     }
 
     fn build(&self) {
         let imp = self.imp();
 
-        // The default size and the size request are set **before** the pages are
-        // built, because the picker derives its divider's position from the default
-        // width (the media area takes everything but the picked list's 260 px), and
-        // a widget cannot ask a question about a size that has not been given yet.
-        self.set_default_size(1100, 760);
         // The minimum the layout is designed for (HIG `guidelines/adaptive`): the
-        // picker's grid needs its column and the editor's canvas its own space,
-        // and below this the window would be showing neither.
+        // canvas needs its own space, and below this the window would be showing a
+        // strip of sheet.
+        self.set_default_size(1100, 760);
         self.set_size_request(560, 420);
 
-        // ---- the editor page ------------------------------------------------
-        // The header of the stage the document lives in: history, saving and the
-        // export. `AdwNavigationView` adds the back button by itself, because this
-        // page is pushed on top of the picker (S13).
+        // ---- the header bar -------------------------------------------------
+        // One page, so this is the window's own bar: history and the document's
+        // settings, the heading, the menu and the export. The title widget is the
+        // document's name, dirty marker included (`update_title`); since S22 there is
+        // **no Save button** — it sat beside Export and read as the same action
+        // (ruling 37) — and the function lives in the menu and on `Ctrl+S`.
         let undo = icon_button("edit-undo-symbolic", &gettext("Undo"));
         undo.set_action_name(Some("win.undo"));
         let redo = icon_button("edit-redo-symbolic", &gettext("Redo"));
         redo.set_action_name(Some("win.redo"));
-        let save = icon_button("document-save-symbolic", &gettext("Save"));
-        save.set_action_name(Some("win.save"));
         // Icon plus label: `AdwButtonContent` is how libadwaita puts both in one
         // button (setting `label` and `icon-name` together keeps only the icon).
         let export_content = adw::ButtonContent::new();
@@ -434,13 +387,14 @@ impl EditorWindow {
         let spacer = gtk::Separator::new(gtk::Orientation::Vertical);
         spacer.add_css_class("spacer");
         let header = adw::HeaderBar::new();
+        let title = adw::WindowTitle::new(&gettext("Untitled collage"), "");
+        header.set_title_widget(Some(&title));
         header.pack_start(&undo);
         header.pack_start(&redo);
         header.pack_start(&spacer);
         header.pack_start(&frame);
         header.pack_end(&menu);
         header.pack_end(&export);
-        header.pack_end(&save);
 
         // ---- progress ------------------------------------------------------
         let progress = gtk::ProgressBar::builder()
@@ -458,7 +412,7 @@ impl EditorWindow {
             .child(&progress)
             .build();
 
-        // ---- the editor page's content --------------------------------------
+        // ---- the content -----------------------------------------------------
         // The canvas is wrapped in an overlay (S14b, S15): the empty cells' `+` and
         // the selected cell's own strip are real GTK controls over it (ruling 9), and
         // only the controls claim a press — the canvas keeps every drag and click
@@ -474,35 +428,31 @@ impl EditorWindow {
         // announce (`docs/HIG-REVIEW.md`, section 1).
         let banner = adw::Banner::new("");
         banner.set_button_label(Some(&gettext("Find it…")));
-        let editor_body = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        editor_body.append(&banner);
-        editor_body.append(&controls.root());
-        editor_body.append(&gallery.root());
-        let editor_view = adw::ToolbarView::new();
-        editor_view.add_top_bar(&header);
-        editor_view.add_bottom_bar(&progress_revealer);
-        editor_view.set_content(Some(&editor_body));
-        // The same idiom as the picker's page (S13c, from loupe's
-        // `src/widgets/image_window.rs:986-998`): content starts below the bar, so
-        // the bar is raised rather than flat.
-        editor_view.set_top_bar_style(adw::ToolbarStyle::Raised);
-        let editor_page =
-            adw::NavigationPage::with_tag(&editor_view, &gettext("Collage"), "editor");
+        let body = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        body.append(&banner);
+        body.append(&controls.root());
+        body.append(&gallery.root());
+        let view = adw::ToolbarView::new();
+        view.add_top_bar(&header);
+        view.add_bottom_bar(&progress_revealer);
+        view.set_content(Some(&body));
+        // Content starts below the bar, so the bar is raised rather than flat (S13c,
+        // from loupe's `src/widgets/image_window.rs:986-998`).
+        view.set_top_bar_style(adw::ToolbarStyle::Raised);
 
         // **The canvas's size is read where the surface reports it, not only from a
         // draw.** GTK4 has no `size-allocate` and no `width` property, so a window
         // resize is visible only at the surface (`GdkSurface::layout`) — the hook the
-        // picker's own pane uses (S13c) — and the editor needs the same one: a page
-        // that has just been pushed is allocated before it is painted, and a window
+        // picker's own pane used (S13c; the pane is gone, the hook is what the canvas
+        // still needs): a window is allocated before it is painted, and a window
         // resized while it is not being painted must still decode for its new size.
         // The canvas's own draw asks for its grid too, and this is the half that does
         // not depend on a paint.
-        let window = self.clone();
-        editor_page.connect_realize(glib::clone!(
-            #[weak]
-            window,
-            move |page| {
-                let Some(surface) = page.native().and_then(|native| native.surface()) else {
+        self.connect_realize(glib::clone!(
+            #[weak(rename_to = window)]
+            self,
+            move |_| {
+                let Some(surface) = window.surface() else {
                     return;
                 };
                 surface.connect_layout(glib::clone!(
@@ -519,42 +469,28 @@ impl EditorWindow {
             }
         ));
 
-        // ---- the picker page ------------------------------------------------
-        let picker = Picker::build(self);
-        let picker_page =
-            adw::NavigationPage::with_tag(&picker.root(), &gettext("Pick photos"), "picker");
-
-        // ---- the shell ------------------------------------------------------
-        // A sequence of stages rather than two modes over one document (the
-        // 2026-09-22 ruling): the picker is the root, the editor is pushed on
-        // Next, and Back is how a user returns to the photos.
-        let pages = adw::NavigationView::new();
-        pages.add(&picker_page);
-        pages.add(&editor_page);
-        // One toast surface for both stages: the picker reports a refused pick
-        // and the editor reports a save or an export, and neither outlives the
-        // other.
+        // ---- the shell -------------------------------------------------------
+        // One page (S22): the toast overlay is the window's content and the toolbar
+        // view is its only child, so every toast — a save, an export, a refused
+        // decode — has one surface and the header bar belongs to the window itself.
         let toast = adw::ToastOverlay::new();
-        toast.set_child(Some(&pages));
+        toast.set_child(Some(&view));
 
         self.set_content(Some(&toast));
         self.set_title(Some(&gettext("Untitled collage")));
 
         imp.canvas.set(canvas).ok();
         imp.cell_controls.set(controls).ok();
-        imp.editor_header.set(header).ok();
+        imp.header.set(header).ok();
+        imp.title.set(title).ok();
         imp.frame_dialog.set(dialogs::FrameDialog::build(self)).ok();
         imp.export_dialog
             .set(dialogs::ExportDialog::build(self))
             .ok();
-        imp.pages.set(pages).ok();
-        imp.picker_page.set(picker_page).ok();
-        imp.editor_page.set(editor_page).ok();
         imp.banner.set(banner.clone()).ok();
         imp.toast.set(toast).ok();
         imp.progress.set(progress).ok();
         imp.progress_revealer.set(progress_revealer).ok();
-        imp.picker.set(picker).ok();
         imp.gallery.set(gallery).ok();
 
         let banner_weak = self.downgrade();
@@ -645,27 +581,6 @@ impl EditorWindow {
             }),
         );
         add(
-            "choose-folder",
-            false,
-            Box::new(|window| {
-                if let Some(picker) = window.picker() {
-                    picker.choose_folder(window);
-                }
-            }),
-        );
-        // The picker's zoom toggle (S15j): the keyboard's way to the pane's two states,
-        // which is the path HIG `guidelines/pointer-touch` asks every pointer action to
-        // have. The anchor is the pane's centre — there is no pointer to be "at".
-        add(
-            "zoom-preview",
-            true,
-            Box::new(|window| {
-                if let Some(picker) = window.picker() {
-                    picker.toggle_zoom(window, None);
-                }
-            }),
-        );
-        add(
             "close",
             true,
             Box::new(|window| {
@@ -686,13 +601,16 @@ impl EditorWindow {
                 window.frame();
             }),
         );
+        // The window's own way in for photos (S22, ruling 31): the multi-file
+        // chooser appends what it is given and lets the layout grow
+        // (`EditorWindow::choose_photos`). The per-cell paths are the canvas's own
+        // controls — an empty cell's `+`, the strip's `Replace`, `Return` — which is
+        // why there is no second, selection-scoped menu item beside this one.
         add(
-            "add-photo",
-            false,
+            "add-photos",
+            true,
             Box::new(|window| {
-                if let Some(slot) = window.selection() {
-                    window.choose_photo(slot);
-                }
+                window.choose_photos();
             }),
         );
         add(
@@ -730,9 +648,25 @@ impl EditorWindow {
         self.imp().cell_controls.get().cloned()
     }
 
-    /// The editor page's header bar, for the HIG checks.
-    pub fn editor_header(&self) -> Option<adw::HeaderBar> {
-        self.imp().editor_header.get().cloned()
+    /// The window's header bar, for the HIG checks.
+    pub fn header(&self) -> Option<adw::HeaderBar> {
+        self.imp().header.get().cloned()
+    }
+
+    /// Whether the window has an action by this name, and whether it is enabled:
+    /// `None` is an action this window does not install.
+    ///
+    /// The tests' handle on the action table, which `update_actions` rewrites on every
+    /// refresh — a widget carrying an action can be walked, but a menu item exists only
+    /// inside the popover's model, so "the window can do this at all" has to be a
+    /// question about the table rather than about the tree.
+    pub fn action_enabled(&self, name: &str) -> Option<bool> {
+        self.imp()
+            .actions
+            .borrow()
+            .iter()
+            .find(|action| action.name() == name)
+            .map(|action| action.is_enabled())
     }
 
     /// The `Frame…` dialog (S15).
@@ -745,61 +679,28 @@ impl EditorWindow {
         self.imp().export_dialog.get().cloned()
     }
 
-    /// The picker, for the tests and for the widgets that call into it.
-    pub fn picker(&self) -> Option<Rc<Picker>> {
-        self.imp().picker.get().cloned()
+    /// Opens `paths` the way the command line does (S22): the photos go into the
+    /// document in argument order, through the same `Command::AddPhotos` the
+    /// `Add photos…` chooser sends, so a list longer than the ceiling is trimmed once
+    /// with one report and the whole arrival is one undo step.
+    ///
+    /// `app.rs`'s `open` handler is the caller: `pixlay a.jpg b.jpg …` reaches this
+    /// with the shell's own arguments, in order.
+    pub fn open_paths(&self, paths: Vec<PathBuf>) {
+        self.add_photos(paths);
     }
 
-    /// The picker's tile worker, if the window has one — `None` when the thread
-    /// could not be started (S15h, PIX-014), which is what the picker reports in the
-    /// cell that asked.
-    pub fn thumbs(&self) -> Option<Rc<thumbs::Thumbs>> {
-        self.imp().thumbs.get().cloned().flatten()
-    }
-
-    /// One tile or preview arrived from the picker's worker.
-    pub fn on_thumb(&self, reply: thumbs::Reply) {
-        if let Some(picker) = self.imp().picker.get() {
-            picker.on_reply(self, reply);
-        }
-    }
-
-    /// Whether the picker's stage is the one on screen.
-    pub fn stage(&self) -> Stage {
-        match self.imp().pages.get() {
-            Some(pages) if pages.visible_page_tag().as_deref() == Some("editor") => Stage::Editor,
-            _ => Stage::Picker,
-        }
-    }
-
-    /// Shows the picker: the flow's first stage, and where Back returns to.
-    pub fn show_picker(&self) {
-        let imp = self.imp();
-        if let (Some(pages), Some(page)) = (imp.pages.get(), imp.picker_page.get()) {
-            pages.pop_to_page(page);
-        }
-        self.refresh();
-    }
-
-    /// Pushes the editor's stage (the picker stays below it).
-    fn show_editor(&self) {
-        let imp = self.imp();
-        if let (Some(pages), Some(page)) = (imp.pages.get(), imp.editor_page.get())
-            && pages.visible_page() != Some(page.clone())
-        {
-            pages.push(page);
-        }
-    }
-
-    /// Opens `doc` in the editor's stage: what Next and opening a project both do.
+    /// Opens `doc`: what loading a project and the tests' own setup do.
+    ///
+    /// The title is not written here: `refresh_document` runs `update_title`, which
+    /// derives the window's name and the header's from the editor, and one writer is
+    /// what keeps them equal.
     pub fn open_document(&self, doc: CollageDoc) {
         match Editor::new(doc) {
             Ok(editor) => {
                 *self.imp().editor.borrow_mut() = editor;
                 self.select(None);
                 self.requested_grid_reset();
-                self.set_title(Some(&gettext("Untitled collage")));
-                self.show_editor();
                 self.refresh_document();
             }
             Err(error) => self.toast(&error.to_string()),
@@ -1557,14 +1458,13 @@ impl EditorWindow {
         self.select(None);
     }
 
-    /// A new collage, which is the flow's first stage again.
+    /// A new collage: the default document, one empty cell, and the unsaved-work
+    /// question first (PIX-002, 2026-09-24).
     ///
-    /// `Ctrl+N` used to hand the user an empty sheet of the default template; on
-    /// the re-routed path (ruling 12) a new collage starts by picking photos, so
-    /// this resets the document and shows the picker — after the unsaved-work
-    /// question the window's own close asks (PIX-002, 2026-09-24). New used to
-    /// replace the document outright, which meant `Ctrl+N` destroyed work that
-    /// closing the window would have offered to save.
+    /// `Ctrl+N` used to replace the document outright, which meant it destroyed work
+    /// that closing the window would have offered to save; since S15d it asks the
+    /// same Cancel / Discard / Save question the window's own close asks. Since S22
+    /// the new document is what the window opens on, so this is also "start over".
     pub fn new_document(&self) {
         self.commit();
         if self.ask_to_save(Rc::new(|window: &EditorWindow| window.reset_document())) {
@@ -1584,12 +1484,8 @@ impl EditorWindow {
         match Editor::new(default_document()) {
             Ok(editor) => {
                 *self.imp().editor.borrow_mut() = editor;
-                if let Some(picker) = self.picker() {
-                    picker.clear_selection(self);
-                }
                 self.select(None);
-                self.set_title(Some(&gettext("Untitled collage")));
-                self.show_picker();
+                self.requested_grid_reset();
                 self.refresh_document();
             }
             Err(error) => self.toast(&error.to_string()),
@@ -1648,8 +1544,8 @@ impl EditorWindow {
 
     pub fn open_path(&self, path: &Path) -> Result<(), CoreError> {
         // The boundary's commit at the innermost level, so no caller — a test, the
-        // picker's own Next, the chooser above — can replace the document and drop
-        // the edit the user was in the middle of making.
+        // chooser above — can replace the document and drop the edit the user was in
+        // the middle of making.
         self.commit();
         let project = Project::load(path)?;
         match Editor::from_project(project) {
@@ -1657,9 +1553,9 @@ impl EditorWindow {
                 *self.imp().editor.borrow_mut() = editor;
                 self.select(None);
                 self.requested_grid_reset();
-                self.show_editor();
+                // `refresh_document` names the window after the file (S22: the header's
+                // own title is the same string, so it is written in one place).
                 self.refresh_document();
-                self.set_title(Some(&path.display().to_string()));
                 Ok(())
             }
             Err(error) => {
@@ -1790,9 +1686,11 @@ impl EditorWindow {
 
     /// Saves without a dialog, which is also what the tests and the main path
     /// walk use.
+    ///
+    /// The name is not written here: `refresh` runs `update_title`, and the window and
+    /// the header take the same string from it (S22).
     pub fn save_to(&self, path: &Path) -> Result<PathBuf, CoreError> {
         let written = self.imp().editor.borrow_mut().save(Some(path))?;
-        self.set_title(Some(&written.display().to_string()));
         self.refresh();
         Ok(written)
     }
@@ -1801,7 +1699,6 @@ impl EditorWindow {
         let written = self.imp().editor.borrow_mut().save(path.as_deref());
         match written {
             Ok(written) => {
-                self.set_title(Some(&written.display().to_string()));
                 self.refresh();
                 self.toast(&fill(gettext("Saved {}"), &[file_name(&written)]));
             }
@@ -2100,16 +1997,6 @@ impl EditorWindow {
     /// The two colours come from the band's own widgets ([`Gallery::sketch_style`]),
     /// read here on the main thread and sent as plain data.
     fn request_gallery(&self) {
-        // The band is the *editor* stage's surface: while the picker is on screen a
-        // build would be work nobody can see — and it is not cheap in a debug build,
-        // where the picker's own tests share this one main thread with it (the
-        // highlight check in `tests/picker.rs` needs a frame inside 200 ms, and a
-        // band rebuild competing for that frame is exactly what it cannot afford).
-        // Every path that shows the editor rebuilds the document afterwards, so
-        // nothing is skipped that would be seen.
-        if self.stage() != Stage::Editor {
-            return;
-        }
         let Some(gallery) = self.imp().gallery.get() else {
             return;
         };
@@ -2250,13 +2137,8 @@ impl EditorWindow {
         // and the window's other sync sites — a layout, an edit, a selection — are not
         // guaranteed to follow this reply (measured 2026-09-24: a window that had just
         // opened could leave its strip at the `1x1` placement until something else
-        // asked for a sync). **The editor's stage only**: while the picker is on screen the
-        // editor's own controls are work nobody can see — the same boundary and the same
-        // reason `request_gallery` has — and a page that is not showing has no placement to
-        // keep: `refresh` syncs it again when the editor is pushed.
-        if self.stage() == Stage::Editor
-            && let Some(controls) = self.cell_controls()
-        {
+        // asked for a sync).
+        if let Some(controls) = self.cell_controls() {
             controls.sync(self);
         }
         if !reply.failed.is_empty() {
@@ -2318,59 +2200,6 @@ impl EditorWindow {
         }
     }
 
-    /// Waits until the grid has asked for its tiles and they have all arrived.
-    ///
-    /// The picker's counterpart of [`wait_for_idle`](Self::wait_for_idle), and the
-    /// same shape: pump the context the worker delivers into, and stop when there
-    /// is nothing left to arrive. What it waits for is the *bound* cells' tiles,
-    /// not a folder's: S13b asks for a tile when a cell is bound (the ruling's
-    /// visible-first policy), so "nothing in flight" is the whole of what there is
-    /// to wait for — and at least one tile has to be in hand, or the wait would
-    /// return before the grid had laid itself out at all.
-    pub fn wait_for_tiles(&self, timeout: Duration) -> bool {
-        let context = glib::MainContext::default();
-        let deadline = Instant::now() + timeout;
-        loop {
-            while context.pending() {
-                context.iteration(false);
-            }
-            match self.picker() {
-                Some(picker) if picker.pending_tiles() == 0 && picker.tiles_built() > 0 => {
-                    return true;
-                }
-                None => return false,
-                _ => {}
-            }
-            if Instant::now() >= deadline {
-                return false;
-            }
-            std::thread::sleep(Duration::from_millis(4));
-        }
-    }
-
-    /// Waits until the preview pane is showing the focused photo's own preview.
-    ///
-    /// Not "until it has pixels": the pane is decoded at its own size (S13b), and
-    /// the size it is at decides whether the photo in hand is the right one.
-    pub fn wait_for_preview(&self, timeout: Duration) -> bool {
-        let context = glib::MainContext::default();
-        let deadline = Instant::now() + timeout;
-        loop {
-            while context.pending() {
-                context.iteration(false);
-            }
-            match self.picker() {
-                Some(picker) if picker.preview_current() => return true,
-                None => return false,
-                _ => {}
-            }
-            if Instant::now() >= deadline {
-                return false;
-            }
-            std::thread::sleep(Duration::from_millis(4));
-        }
-    }
-
     // ---- presentation -----------------------------------------------------
 
     /// Rebuilds the title and the buttons from the document and the stage.
@@ -2391,7 +2220,7 @@ impl EditorWindow {
     }
 
     /// Writes the count control: the document's own cell count and the two bounds
-    /// it acts on (`MIN_PHOTOS` / `MAX_PHOTOS`, the picker's own).
+    /// it acts on (`MIN_PHOTOS` / `MAX_PHOTOS`).
     ///
     /// The number is the **cell** count, because that is the number the two buttons
     /// move (S14b): `+` takes the layout with one cell more, `−` the layout with one
@@ -2416,9 +2245,9 @@ impl EditorWindow {
         // answers an unallocated widget with 1x1: a decode of every photo into a
         // single pixel, plus a preview-grade copy of each at that size (measured
         // 2026-09-23: seven decodes on every open, 21 for eight photos instead of
-        // 14). Opening a document from the picker is exactly that state — the
-        // editor's page is not laid out yet — and the first draw asks with a real
-        // size (`request_grid_for`), so nothing is lost by not asking now.
+        // 14). A window that has just been created and given its photos before its
+        // first frame is exactly that state, and the first draw asks with a real size
+        // (`request_grid_for`), so nothing is lost by not asking now.
         if !self.canvas_allocated() {
             return;
         }
@@ -2447,23 +2276,13 @@ impl EditorWindow {
             )
         };
         let (undo, redo, selected, has_any_photo) = state;
-        // The document's own actions belong to the stage that shows the document:
-        // Save with the picker on screen would save a collage the user has not
-        // finished choosing (`AGENTS.md`: a document edit only happens through the
-        // editor's own page). The picker's own folder action is the mirror image:
-        // it belongs to the stage with the folder on it.
-        let editing = self.stage() == Stage::Editor;
         for action in self.imp().actions.borrow().iter() {
             let enabled = match action.name().as_str() {
                 "undo" => undo,
                 "redo" => redo,
-                // The frame edits the document, so it belongs to the stage that
-                // shows one, like Save (S15).
-                "save" | "save-as" | "frame" => editing,
-                "export" => editing && has_any_photo,
-                // The pane's zoom is the picker's, like the folder it lists.
-                "choose-folder" | "zoom-preview" => !editing,
-                "add-photo" | "clear-cell" | "reset-framing" => editing && selected,
+                "save" | "save-as" | "frame" => true,
+                "export" => has_any_photo,
+                "clear-cell" | "reset-framing" => selected,
                 _ => action.is_enabled(),
             };
             action.set_enabled(enabled);
@@ -2482,22 +2301,12 @@ impl EditorWindow {
             name
         };
         drop(editor);
-        // The visible page decides what the header bar and the window are called:
-        // the picker is a titled page of its own, and the editor's page shows the
-        // document's name (S13).
-        match self
-            .imp()
-            .pages
-            .get()
-            .and_then(|pages| pages.visible_page_tag())
-        {
-            Some(tag) if tag.as_str() == "editor" => {
-                if let Some(page) = self.imp().editor_page.get() {
-                    page.set_title(&title);
-                }
-                self.set_title(Some(&title));
-            }
-            _ => self.set_title(Some(&gettext("Pick photos"))),
+        // One page (S22): the window and the header bar's title widget carry the same
+        // string, so what the shell calls the document and what the bar shows cannot
+        // drift apart.
+        self.set_title(Some(&title));
+        if let Some(widget) = self.imp().title.get() {
+            widget.set_title(&title);
         }
     }
 
@@ -2575,23 +2384,26 @@ impl EditorWindow {
     }
 }
 
-/// The editor's primary menu: the actions that do not deserve a button.
+/// The window's primary menu: the actions that do not deserve a button.
 ///
-/// The same three-section shape as the picker's (`picker_menu`), which is the shape
-/// both reference apps use and ruling 24 asks for: the file items, the stage's own
-/// view options, then the help items.
+/// The same three-section shape as the rest of the shell, which is the shape both
+/// reference apps use and ruling 24 asks for: the file items, the editor's own
+/// commands, then the help items. **Save has a menu item here** (S22, ruling 37): its
+/// header-bar button went because it sat beside Export and read as the same action,
+/// and the menu and `Ctrl+S` are what the function lives in.
 fn main_menu() -> gio::Menu {
     let menu = gio::Menu::new();
 
     let collage = gio::Menu::new();
     collage.append(Some(&gettext("New collage")), Some("app.new"));
     collage.append(Some(&gettext("Open…")), Some("app.open"));
+    collage.append(Some(&gettext("Save")), Some("win.save"));
     collage.append(Some(&gettext("Save as…")), Some("win.save-as"));
     collage.append(Some(&gettext("Export…")), Some("win.export"));
     menu.append_section(None, &collage);
 
     let edit = gio::Menu::new();
-    edit.append(Some(&gettext("Insert a photo")), Some("win.add-photo"));
+    edit.append(Some(&gettext("Add photos…")), Some("win.add-photos"));
     edit.append(
         Some(&gettext("Reset the framing")),
         Some("win.reset-framing"),
@@ -2641,17 +2453,17 @@ fn suggested_project_name(window: &EditorWindow) -> String {
 
 /// Where an export goes when the form has never been told (S15h, PIX-010).
 ///
-/// Ruling 2026-09-24: **the first export lands in the pictures directory** — the same
-/// folder the picker opens on, `XDG_PICTURES_DIR` or `~/Pictures` — and a later one in
-/// the directory the last export used, which is what the stored path carries from then
-/// on. No chooser step is added to the main path, and nothing is written until the
-/// export itself runs, so a project that is never exported leaves no trace anywhere.
+/// Ruling 2026-09-24: **the first export lands in the pictures directory** —
+/// `XDG_PICTURES_DIR` or `~/Pictures` — and a later one in the directory the last
+/// export used, which is what the stored path carries from then on. No chooser step
+/// is added to the main path, and nothing is written until the export itself runs, so
+/// a project that is never exported leaves no trace anywhere.
 ///
 /// An account with no pictures directory at all falls back to the bare name in the
-/// process's own directory, which is where the form used to put every first export.
+/// process's own directory.
 fn default_export_path(window: &EditorWindow, format: pixlay_imaging::encode::Format) -> PathBuf {
     let name = suggested_export_name(window, format);
-    match crate::picker::default_folder() {
+    match crate::export::default_folder() {
         Some(dir) => dir.join(name),
         None => PathBuf::from(name),
     }

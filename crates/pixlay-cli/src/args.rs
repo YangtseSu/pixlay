@@ -24,7 +24,7 @@ pub const MAX_PREVIEW_PX: i32 = 20000;
 
 /// Largest long edge `thumb` produces, in pixels.
 ///
-/// A picker's preview is bounded by the window, not by this: the largest picture
+/// A preview is bounded by the window, not by this: the largest picture
 /// the shell draws is a full-window photo (a 4K window is 3840 px, and a HiDPI
 /// one 7680, S13). 8192 therefore leaves room over the biggest preview the
 /// product has and still keeps one preview's buffer trivially small; past it the
@@ -173,9 +173,9 @@ SCAN OPTIONS:
                         byte or is not UTF-8 is escaped (`\\\\`, `\\n`, `\\r`,
                         `\\t`, `\\xNN`), so a filename's newline cannot add a
                         field line.
-    --recursive         Descend into subdirectories. Off by default: a picker
-                        opens one folder, and a whole home directory is not a
-                        listing anybody reads.
+    --recursive         Descend into subdirectories. Off by default: one folder
+                        is what a caller asks for, and a whole home directory is
+                        not a listing anybody reads.
 
 THUMB OPTIONS:
     --photo <file>      Photo to preview. Required.
@@ -510,8 +510,8 @@ pub struct ScanArgs {
     pub json: bool,
 }
 
-/// `thumb`: one photo (or one rectangle of it), resampled to a preview. The picker's
-/// costly half (S9), and since S15j the same call the pane's 1:1 view makes.
+/// `thumb`: one photo (or one rectangle of it), resampled to a preview. A preview's
+/// costly half (S9), and since S15j the same call a 1:1 preview makes.
 pub struct ThumbArgs {
     pub photo: PathBuf,
     /// Long edge of the preview, 1..=`MAX_THUMB_PX`.

@@ -50,7 +50,7 @@ pub enum ImagingError {
     EmptyThumbnail,
 
     /// A rectangle of a photo that the photo does not contain (`thumb --region`,
-    /// and the picker's 1:1 view). The resampler clamps its taps into the source,
+    /// and a 1:1 preview). The resampler clamps its taps into the source,
     /// so a rectangle that hung off the edge would not fail — it would smear the
     /// last row into a picture of the wrong size.
     #[error(

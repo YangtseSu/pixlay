@@ -38,7 +38,7 @@
 //!   the same formulas: the same file reduced twice is the same bytes.
 //!
 //! The destination size comes from [`crate::thumb::thumb_size`], the same rule a
-//! picker thumbnail's long edge follows, so "a preview-sized copy" means one thing
+//! preview's long edge follows, so "a preview-sized copy" means one thing
 //! in this crate.
 //!
 //! # The buffer ladder

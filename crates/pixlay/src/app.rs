@@ -14,9 +14,11 @@
 //! preferences, help), and the system-reserved combinations (`Alt+*`, `Super+*`,
 //! `Ctrl+Alt+*`) are used nowhere — a test asserts both halves.
 //!
-//! `F9` left with the utility pane in S13 (ruling 18): the shell is a sequence of
-//! stages, each with its own controls, so there is no permanent panel for a key to
-//! toggle.
+//! Since S22 the application is also the place where **the command line enters**:
+//! `HANDLES_OPEN` and the `open` handler below turn `pixlay a.jpg b.jpg …` into the
+//! window's own `add_photos`, in argument order (ruling 31). `F9` left with the
+//! utility pane in S13 (ruling 18) and the picker's own keys left with the picker in
+//! S22: one page has no second surface for them to toggle.
 
 use adw::prelude::*;
 use gtk4 as gtk;
@@ -41,9 +43,7 @@ pub const ACCELERATORS: &[(&str, &str)] = &[
     ("win.save-as", "<Control><Shift>s"),
     ("win.close", "<Control>w"),
     ("win.export", "<Control>e"),
-    ("win.choose-folder", "<Control><Shift>o"),
-    ("win.zoom-preview", "z"),
-    ("win.add-photo", "<Control>i"),
+    ("win.add-photos", "<Control>i"),
     ("win.undo", "<Control>z"),
     ("win.redo", "<Control><Shift>z"),
     ("win.reset-framing", "<Control>0"),
@@ -60,10 +60,9 @@ pub const SHORTCUT_SECTIONS: &[(&str, &[&str])] = &[
             "win.save",
             "win.save-as",
             "win.export",
-            "win.add-photo",
+            "win.add-photos",
         ],
     ),
-    ("Photos", &["win.choose-folder", "win.zoom-preview"]),
     ("Editing", &["win.undo", "win.redo", "win.reset-framing"]),
 ];
 
@@ -77,7 +76,6 @@ pub fn shortcut_section_title(section: &str) -> String {
     match section {
         "General" => gettext("General"),
         "Collage" => gettext("Collage"),
-        "Photos" => gettext("Photos"),
         "Editing" => gettext("Editing"),
         _ => String::new(),
     }
@@ -99,9 +97,7 @@ pub fn shortcut_title(action: &str) -> String {
         "win.save-as" => gettext("Save as…"),
         "win.close" => gettext("Close the window"),
         "win.export" => gettext("Export the collage"),
-        "win.choose-folder" => gettext("Choose a folder of photos"),
-        "win.zoom-preview" => gettext("Zoom the preview"),
-        "win.add-photo" => gettext("Insert a photo"),
+        "win.add-photos" => gettext("Add photos…"),
         "win.undo" => gettext("Undo"),
         "win.redo" => gettext("Redo"),
         "win.reset-framing" => gettext("Reset the framing"),
@@ -113,9 +109,16 @@ pub fn shortcut_title(action: &str) -> String {
 ///
 /// The tests use this to get an application whose accelerator table they can read
 /// and whose window they can build without an event loop of its own.
+///
+/// **`HANDLES_OPEN` is what makes `pixlay a.jpg b.jpg …` work** (S22): with
+/// arguments the platform emits `open` with the files instead of `activate`, and the
+/// handler below puts them in the window in the order it received them. Without
+/// arguments nothing changes — `activate` builds the one window on the default
+/// document.
 pub fn build() -> adw::Application {
     let app = adw::Application::builder()
         .application_id(crate::APP_ID)
+        .flags(gio::ApplicationFlags::HANDLES_OPEN)
         .build();
     install_actions(&app);
     for (action, accel) in ACCELERATORS {
@@ -128,7 +131,7 @@ pub fn build() -> adw::Application {
         install_style();
         // **The app is dark by default** (ruled 2026-09-22, ruling 23). HIG
         // `guidelines/ui-styling` recommends the dark style for "apps which display
-        // rich visual content like images or video", which is what a photo picker is,
+        // rich visual content like images or video", which is what a photo collage is,
         // and both reference apps do the same thing unconditionally (gthumb
         // `src/Application.vala:676`, loupe `src/application.rs:76-79`). There is no
         // per-app switch: neither reference app has one, and a stored preference
@@ -137,22 +140,47 @@ pub fn build() -> adw::Application {
         adw::StyleManager::default().set_color_scheme(adw::ColorScheme::ForceDark);
     });
     app.connect_activate(|app| {
-        if let Some(window) = active_window(app) {
-            window.present();
-            return;
-        }
-        let window = EditorWindow::new(app);
-        window.present();
+        show_window(app).present();
+    });
+    app.connect_open(|app, files, _hint| {
+        open_files(app, files);
     });
     app
 }
 
-/// The app's own stylesheet, which is the picker's picked-cell highlight and
-/// nothing else (`style.css`, S13b).
+/// The command line's own entry (S22, ruling 31): the arguments are photos, in the
+/// order given, and they take the same `Command::AddPhotos` the `Add photos…` chooser
+/// sends — which is what makes "the order is the argument order" one rule with one
+/// implementation.
+///
+/// It is public because it *is* what `pixlay a.jpg b.jpg …` does: `connect_open` above
+/// is the signal `HANDLES_OPEN` routes those arguments to, and the machine walk drives
+/// this function with the same files a command line would pass (`tests/mainpath.rs`).
+pub fn open_files(app: &adw::Application, files: &[gio::File]) {
+    let paths: Vec<std::path::PathBuf> = files.iter().filter_map(|file| file.path()).collect();
+    let window = show_window(app);
+    window.present();
+    window.open_paths(paths);
+}
+
+/// The application's one window, built if it does not exist yet.
+///
+/// `activate` and `open` both need it: the product is a single-window application, so
+/// a second entry into the same process — a second `pixlay` invocation, which reaches
+/// the running instance's `open` — adds to the window that is already there.
+fn show_window(app: &adw::Application) -> EditorWindow {
+    match active_window(app) {
+        Some(window) => window,
+        None => EditorWindow::new(app),
+    }
+}
+
+/// The app's own stylesheet: the layout band's cell and sketch colours, and the
+/// status bar's padding (`style.css`).
 ///
 /// It is loaded from a string baked into the binary (`include_str!`) rather than
-/// from a file on disk: the shell has no runtime data directory, and one rule pair
-/// does not need one. The provider goes on the display at the application's own
+/// from a file on disk: the shell has no runtime data directory, and a handful of
+/// rules does not need one. The provider goes on the display at the application's own
 /// priority, so it can use the theme's variables but cannot restyle the platform.
 fn install_style() {
     let Some(display) = gtk::gdk::Display::default() else {
@@ -244,7 +272,7 @@ pub fn about_dialog() -> adw::AboutDialog {
     dialog.set_issue_url("https://github.com/YangtseSu/pixlay/issues");
     dialog.set_license_type(gtk::License::Gpl30);
     dialog.set_comments(&gettext(
-        "Make a collage out of two to nine photos and export it for printing.",
+        "Make a collage out of one to nine photos and export it for printing.",
     ));
     dialog
 }

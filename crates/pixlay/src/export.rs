@@ -20,6 +20,8 @@
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use gtk4::glib;
+
 use pixlay_core::{CollageDoc, PixelSize};
 use pixlay_imaging::destination::refuse_source_alias;
 use pixlay_imaging::encode::{Export, Format, write};
@@ -30,9 +32,9 @@ use crate::workers::{Down, Kind, WorkerPlan};
 
 /// Smallest long edge the export form offers, in pixels.
 ///
-/// A floor for the form, not a limit of the format: any positive grid is valid,
-/// and a minimum below the picker's own preview grid would let an export come out
-/// smaller than the picture the user approved.
+/// A floor for the form, not a limit of the format: any positive grid is valid, and a
+/// minimum below the canvas's own preview grid would let an export come out smaller
+/// than the picture the user approved.
 pub const MIN_EXPORT_PX: u32 = 256;
 
 /// Largest long edge the export form offers, in pixels.
@@ -105,6 +107,26 @@ pub struct Report {
 pub fn destination(path: &Path, sources: &[Option<PathBuf>]) -> Result<bool, String> {
     refuse_source_alias(path, sources).map_err(|alias| alias.to_string())?;
     Ok(path.exists())
+}
+
+/// The folder an export with no remembered one goes to: the pictures directory,
+/// `XDG_PICTURES_DIR` or `~/Pictures`.
+///
+/// `GTK`'s `GtkFileDialog` and this function read the same `XDG_PICTURES_DIR` through
+/// GLib, so the folder the save dialog opens on and the one a path is suggested in
+/// cannot disagree. `None` is an account with no pictures directory at all, which the
+/// caller answers with the bare file name.
+///
+/// It lived in the picker until S22, which deleted that stage; the export is what
+/// still asks the question (ruling 2026-09-24, PIX-010).
+pub fn default_folder() -> Option<PathBuf> {
+    if let Some(dir) = glib::user_special_dir(glib::UserDirectory::Pictures)
+        && dir.is_dir()
+    {
+        return Some(dir);
+    }
+    let fallback = glib::home_dir().join("Pictures");
+    fallback.is_dir().then_some(fallback)
 }
 
 /// Renders and writes one export. Synchronous: the background and the test paths

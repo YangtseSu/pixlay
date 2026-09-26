@@ -1,11 +1,11 @@
 //! The selection policy: order, the 1–9 clamp, the count filter and the count rule.
 //!
-//! These are the rules the picker (S13), the layout stage (S14) and the CLI's
+//! These are the rules the window, the layout stage (S14) and the CLI's
 //! `init --photo` share, so they are asserted where they live — in `pixlay-core`,
 //! with no window and no decoder. The CLI side of the same policy is asserted
-//! from the outside in `pixlay-cli/tests/cli.rs`: "the picked list's order is what
-//! `init --photo` produces" is a statement about both callers, and each one is
-//! checked against this one implementation.
+//! from the outside in `pixlay-cli/tests/cli.rs`: "the selection's order is what
+//! `init --photo` produces" is a statement about the window and the CLI, and each
+//! one is checked against this one implementation.
 //!
 //! S14's LIFO rule left this module in S14b (the 2026-09-23 ruling made `+` a
 //! layout switch): what remains of it is [`remove_last`], which clears a cell and
@@ -320,7 +320,7 @@ fn the_count_rule_picks_the_layout_that_follows_the_document() {
         named(5, 16.0 / 9.0, Some(Family::Mosaic)),
         Some("strip-5-5x1".to_string())
     );
-    // The aspect comparison is the picker's own tolerance, so a ratio that only
+    // The aspect comparison is the library's own tolerance, so a ratio that only
     // prints approximately still matches.
     assert_eq!(
         named(5, 1.3333333333333333, Some(Family::Mosaic)),

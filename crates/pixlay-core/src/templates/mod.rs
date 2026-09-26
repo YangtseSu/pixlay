@@ -1,8 +1,8 @@
 //! The template library: name to frozen geometry.
 //!
 //! Templates are document data, so the library lives in `pixlay-core` next to the
-//! types it produces (`AGENTS.md`, module boundaries): the GUI needs it to offer a
-//! template picker, the CLI needs it for the photo-free smoke render and for
+//! types it produces (`AGENTS.md`, module boundaries): the GUI needs it to offer the
+//! layout gallery, the CLI needs it for the photo-free smoke render and for
 //! `templates` / `init`.
 //!
 //! Three parts, in the order a change to the library flows through them:
@@ -21,8 +21,8 @@
 //! The matrix is grouped by aspect ratio: a template's aspect *is* the sheet's
 //! shape (S12d removed the canvas it used to have to agree with; the normalized
 //! geometry is stretched onto the render grid, whose long edge is the one
-//! parameter a caller gives), and the picker offers the matching group
-//! ([`of_aspect`]). The families, by how the geometry is laid out:
+//! parameter a caller gives), and the matching group is [`of_aspect`]'s. The
+//! families, by how the geometry is laid out:
 //!
 //! * `strip-<slots>-<cols>x<rows>` — one band: a single row or a single column.
 //! * `grid-<slots>-<cols>x<rows>` — a rectangular tiling that repeats the same
@@ -145,9 +145,9 @@ pub fn get(name: &str) -> Option<Template> {
 }
 
 /// Templates whose declared aspect ratio matches `aspect` within
-/// [`ASPECT_TOLERANCE`], the tolerance the picker's query uses.
+/// [`ASPECT_TOLERANCE`], the tolerance this query uses.
 ///
-/// This is the picker's query (`docs/CONTRACT.md` §3): the sheet's shape is the
+/// This is the aspect query (`docs/CONTRACT.md` §3): the sheet's shape is the
 /// template's, so the aspect a caller names *is* the layout family it wants.
 pub fn of_aspect(aspect: f64) -> Vec<Template> {
     frozen::TEMPLATES

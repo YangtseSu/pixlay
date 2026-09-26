@@ -96,7 +96,7 @@ const R_2_3: f64 = 2.0 / 3.0;
 /// exactly one member since S19: `grid-1-1x1`, the whole sheet, because three
 /// one-photo layouts would be three names for one geometry (ruling 34 — a single
 /// photo is a legal collage). Since S12c the library stops at nine slots:
-/// `strip-10-10x1` was the only member above the picker's cap, and it left with
+/// `strip-10-10x1` was the only member above the format's cap, and it left with
 /// the purity ruling, so `MAX_SLOTS` and `MAX_PHOTOS` are one number.
 static RECIPES: &[Recipe] = &[
     // The whole sheet, as one cell. The library's first member since S19, when
@@ -114,8 +114,8 @@ static RECIPES: &[Recipe] = &[
         slots: &[rect(0, 0, 16, 16)],
     },
     // Two rows on a portrait canvas. The simplest layout there is, and the
-    // portrait counterpart of `strip-2-2x1`: the picker offers one or the other
-    // depending on the canvas shape.
+    // portrait counterpart of `strip-2-2x1`: the aspect query returns one or the
+    // other depending on the canvas shape.
     Recipe {
         name: "strip-2-1x2",
         version: 1,

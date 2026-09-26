@@ -2,7 +2,7 @@
 //!
 //! It was written for S5's `{date}` text layer, which S12c removed; what is left
 //! is the machine surface — `scan` and `image` report the date next to a photo's
-//! size and mime type, so a picker can show it and a caller can sort by it. The
+//! size and mime type, so a folder browser can show it and a caller can sort by it. The
 //! contract fixes the semantics anyway: the value of EXIF `DateTimeOriginal`
 //! **verbatim, with no timezone conversion** (`docs/CONTRACT.md` §5, "`image`").
 //! That is why this module returns a `String` and not a date type: parsing it

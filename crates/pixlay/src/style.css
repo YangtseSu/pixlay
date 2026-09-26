@@ -1,10 +1,5 @@
-/* The app's only stylesheet: what a picker cell looks like, and the status bar's
- * padding (S13c).
- *
- * A picked cell is shown by a highlight, not by the platform's
- * `.selection-mode` check box: S13's ruling chose the highlight, and the
- * deviation from HIG `patterns/containers/selection-mode` is recorded in
- * `docs/HIG-REVIEW.md` §3.
+/* The app's only stylesheet: the layout band's cells and the sketch's two colours
+ * (S14, S21).
  *
  * Colours come from the theme's own variables and never from a literal:
  * `--accent-bg-color` is what libadwaita defines for both colour schemes and for
@@ -15,41 +10,14 @@
  * dimmed outline (`color-mix(in srgb, currentColor var(--border-opacity),
  * transparent)`), which follows the theme's foreground and the cell's state.
  *
- * The geometry is the reference's *measured* one, not its stylesheet's: gthumb's
- * `data/css/style.css` asks for `padding: 10px` on the grid and `margin: 10px` on
- * every child, but its own window shows cells at a **250 device = 125 logical**
- * pitch (S13c), i.e. touching. The margins are therefore zero and the outline is
- * drawn *on* the cell: with gthumb's 10 px margins plus its 10 px padding a 128 px
- * cell would make the strip 170 logical px tall, which puts the media area at 75 %
- * of the band above the status bar — below the ruling's own measured 88 % and
- * below S13c's own criterion of 80 %.
+ * The picker's own rules (`.picker-cell`, its `.picked` border and the
+ * `.thumbnail-grid` padding the reference's strip measured) left with the stage in
+ * S22; the canvas's overlays are drawn, not styled, and the controls over a cell are
+ * stock libadwaita widgets.
  */
 
-.picker-cell {
-  margin: 0;
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-}
-
-/* The strip's own item padding, which the theme sets to 3 px a side (`gridview >
- * child { padding: 3px }` in GTK 4.24's base stylesheet, measured 2026-09-23: it is
- * what makes the item 136 px tall where its cell is 130). Zeroing it is what the
- * ruling's proportions need — 136 px of strip is 79.6 % of the band above the status
- * bar and 130 is 80.9 % — and styling this node is what the reference does too:
- * gthumb's own stylesheet carries `.thumbnail-grid { padding: 10px }` and
- * `.thumbnail-grid > child { margin: 10px; border-radius: 10px; border: 1px solid
- * …}` (`data/css/style.css:26-42`), i.e. the cell's geometry is the app's business
- * and not the theme's. */
-.thumbnail-grid > child {
-  padding: 0;
-}
-
-.picker-cell.picked {
-  border-color: var(--accent-bg-color);
-}
-
-/* The layout band's cells (S14). The same shape as a picker cell and, for the
- * layout the document is on, the same accent border — the app has one way of
+/* The layout band's cells (S14). A layout cell is a chosen-once set of candidates:
+ * the one the document is on carries the accent border — the app has one way of
  * saying "this is the one that is chosen", and it is not the platform's check box
  * (the deviation recorded in `docs/HIG-REVIEW.md` §3). The cell's own toggle state
  * is the platform's, so a checked cell also carries the theme's pressed look; the
@@ -81,14 +49,4 @@
 
 .sketch-ink {
   color: @view_bg_color;
-}
-
-/* gthumb's `.statusbar { padding: 4px }` (`data/css/style.css`), with the horizontal
- * margin a window's edge wants and the band's own height: 24 px of content plus the
- * padding is the reference's measured 32 px status band (S13c), and it keeps the bar
- * a band even while its fields have nothing to say (an empty label has no height at
- * all). */
-.statusbar {
-  padding: 4px 12px;
-  min-height: 24px;
 }

@@ -1757,8 +1757,8 @@ fn templates_lists_the_library_and_filters_by_aspect() {
         field(&run(&["templates", "--aspect", "4:3"]), "count")
     );
 
-    // A shape nothing was authored for is an empty list, not an error: the
-    // picker asks with whatever the canvas is.
+    // A shape nothing was authored for is an empty list, not an error: a caller
+    // asks with whatever the canvas is.
     let none = run(&["templates", "--aspect", "7:5"]);
     assert_eq!(code(&none), 0, "{}", stderr(&none));
     assert_eq!(field(&none, "count"), "0");
@@ -1823,7 +1823,7 @@ fn templates_filters_by_slot_count_which_is_the_gallery_s_query() {
             })
             .collect();
         // The order is the library's, and the set is `Selection::layouts`'s: the
-        // picker's own query and this report cannot drift.
+        // layout stage's own query and this report cannot drift.
         let expected: Vec<String> = Selection::new(
             (0..slots)
                 .map(|index| PathBuf::from(format!("/photos/{index}.jpg")))
@@ -3961,7 +3961,7 @@ fn edit_keeps_the_usage_and_locale_rules() {
 // S9: the library, the preview and the selection
 // ---------------------------------------------------------------------------
 
-/// The folder `scan` is pointed at: one file per case a picker has to survive.
+/// The folder `scan` is pointed at: one file per case a folder browser has to survive.
 ///
 /// Built from the committed photos rather than committed again — the fixtures
 /// already are the decodable files this step needs — plus the three things no
@@ -4196,7 +4196,7 @@ fn scan_lists_a_folder_of_photos_one_row_per_file() {
     let again = run(&["scan", "--dir", path]);
     assert_eq!(stdout(&listed), stdout(&again), "scan is not stable");
 
-    // The facts a grid tile is laid out against, per file.
+    // The facts a preview is laid out against, per file.
     let square = row(&rows, "square.png");
     assert_eq!(square["status"], "ok");
     assert_eq!(square["mime"], "image/png");
@@ -4247,7 +4247,7 @@ fn scan_reports_a_file_it_cannot_decode_as_a_row() {
 
     let output = run(&["scan", "--dir", library.to_str().unwrap()]);
     // The listing is the result, so a file this build cannot read does not fail
-    // the command — the row says which file and why, and the grid can show it.
+    // the command — the row says which file and why, and a caller can show it.
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     let rows = scan_rows(&output);
 
@@ -4326,7 +4326,7 @@ fn thumb_writes_a_preview_at_the_requested_long_edge() {
         }
     }
 
-    // The size a preview reports is the size after EXIF rotation, so a tile and a
+    // The size a preview reports is the size after EXIF rotation, so `scan` and a
     // preview agree about a photo that a camera stored sideways.
     let rotated = dir.join("rotated.png");
     let output = run(&[
@@ -4350,7 +4350,7 @@ fn thumb_writes_a_preview_at_the_requested_long_edge() {
         "a preview of the 600x1200 file is laid out the way it displays"
     );
 
-    // This is the picker's budget number (`AGENTS.md`: a visual conclusion has to
+    // This is the preview's budget number (`AGENTS.md`: a visual conclusion has to
     // become a number), so `--stats` is part of the surface rather than a bonus.
     let measured = run(&[
         "thumb",
@@ -4603,7 +4603,7 @@ fn init_refuses_a_photo_count_outside_the_range_or_a_wrong_slot_count() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// `thumb --region` is the window's 1:1 view (S15j): the rectangle's own pixels.
+/// `thumb --region` is a 1:1 preview (S15j): the rectangle's own pixels.
 ///
 /// The comparison is the CLI against itself, which is what makes it a statement about
 /// *identity* rather than about a resampler: a whole photo at its own long edge is the
@@ -4846,8 +4846,8 @@ fn scan_and_thumb_keep_the_usage_and_locale_rules() {
 
     // `--help` documents the extensions `scan` actually accepts: the two lists
     // are the user's only way to find out why a folder came back empty. The list
-    // itself lives in `pixlay-imaging` since S13, because the picker's library
-    // grid walks the same folder and the two surfaces must agree.
+    // itself lives in `pixlay-imaging` since S13, beside the decoders that decide
+    // it, so `scan` and `--help` cannot drift.
     let help = run(&["--help"]);
     assert_eq!(code(&help), 0);
     for extension in pixlay_imaging::PHOTO_EXTENSIONS {

@@ -1,11 +1,12 @@
 //! S15h: a background worker that cannot start, or that is gone, is a report and a
 //! cleared pending state — not a panic and not a wait that never ends (PIX-014).
 //!
-//! The three workers are the decoding thread, the picker's tile thread and an
-//! export's own thread. Each one used to end in a state nobody could leave: a `spawn`
-//! that `expect`ed and took the window down with it, or a `send` whose failure was
-//! discarded while the request stayed marked pending, so a cell, the canvas or the
-//! progress bar waited for a reply that could not come.
+//! The window's two workers are the decoding thread and an export's own thread. Each
+//! one used to end in a state nobody could leave: a `spawn` that `expect`ed and took
+//! the window down with it, or a `send` whose failure was discarded while the request
+//! stayed marked pending, so the canvas or the progress bar waited for a reply that
+//! could not come. (The picker's tile thread was the third until S22 deleted the
+//! stage and its worker with it.)
 //!
 //! `EditorWindow::with_workers` is the way in: the same window, with a plan per worker
 //! (`WorkerPlan::Fail` — the thread cannot be started; `WorkerPlan::Vanish` — it starts
@@ -70,6 +71,18 @@ fn a_worker_that_is_down_reports_and_clears_its_pending_state() {
     // working, they just cannot see the collage's pixels.
     assert_eq!(window.document().cells.len(), 8, "the project is open");
     assert!(window.selection().is_none());
+    // The band's own build goes to the same worker, so it is refused the same way:
+    // no build lands, and nothing is left marked in flight for a wait to hang on.
+    assert_eq!(
+        window.gallery_builds(),
+        0,
+        "the band's build counts what landed, and nothing can land while the worker is down"
+    );
+    assert!(
+        window.wait_for_idle(support::WAIT),
+        "the idle wait returns: nothing is pending for a worker that never ran (grid {:?})",
+        window.requested_grid()
+    );
 
     // ---- the decoding thread is gone after starting ----------------------
     let vanished = support::window_with_workers(
@@ -93,44 +106,6 @@ fn a_worker_that_is_down_reports_and_clears_its_pending_state() {
             .is_some_and(|toast| toast.contains("photo decoder stopped")),
         "the window says the decoder stopped, got {:?}",
         vanished.last_toast()
-    );
-
-    // ---- the picker's tile thread is gone --------------------------------
-    let picker_window = support::window_with_workers(
-        &app,
-        Workers {
-            thumbs: WorkerPlan::Vanish,
-            ..Workers::default()
-        },
-    );
-    let picker = picker_window
-        .picker()
-        .expect("the window opens on the picker");
-    picker.open_folder(&picker_window, &support::fixtures().join("photos"));
-    picker_window.pump(Duration::from_millis(400));
-    assert_eq!(
-        picker.pending_tiles(),
-        0,
-        "a tile request whose send failed is not left in flight"
-    );
-    let failures = picker.failures();
-    assert!(
-        !failures.is_empty(),
-        "the cells that asked report the worker instead of spinning"
-    );
-    assert!(
-        failures
-            .iter()
-            .all(|(_, reason)| reason.contains("photo worker stopped")),
-        "the reason is the worker's, got {failures:?}"
-    );
-    // The harness's tile wait wants a tile in hand (`wait_for_tiles`), which a worker
-    // that is gone can never produce; what matters here is the half a stuck request
-    // would break — nothing is left marked in flight, so no wait can hang on it.
-    assert_eq!(
-        picker.tiles_built(),
-        0,
-        "nothing was built, and nothing pretends to have been"
     );
 
     // ---- the export thread cannot be started -----------------------------

@@ -155,7 +155,7 @@ Conventions:
 | framing rotation | ~~±45°~~ **any finite angle, normalized to `(-180, 180]`** (the cap was removed on 2026-09-22; S11 widens the validation). Clockwise is positive, sheet y points down | the 2026-09-22 ruling, `AGENTS.md` |
 | framing zoom | `0 < zoom ≤ 1000` | the upper bound is necessary: zoom determines the size of the decoded bitmap, and without an upper bound it overflows. S4's decoder sets a limit **separately by memory budget**; the two layers each mind their own. The fit raises the drawn zoom to the covering value and never lowers a larger request |
 | crop offset | every component \|offset\| ≤ 1 (slot widths / heights) | beyond half a slot the photo centre leaves the slot, and no clamp can cover it again. The fit reduces it further whenever the requested pan would uncover the slot |
-| template aspect query | `templates::of_aspect` matches within ≤ 1e-6 (`ASPECT_TOLERANCE`) | the picker's grouping: layouts whose declared ratio agrees with the named one |
+| template aspect query | `templates::of_aspect` matches within ≤ 1e-6 (`ASPECT_TOLERANCE`) | the library's own grouping: layouts whose declared ratio agrees with the named one |
 | frame gap / radius | both finite, `0 ≤ value ≤ 1.0` (`MAX_FRAME_REL`, fraction of canvas height) | the bound is a typo bound, not a design one: a length past the whole canvas height is not a frame around anything. A gap *inside* the range can still leave a cell with nothing visible, and that is refused per slot by `CollageDoc::validate`, naming the slot. Since S20 a gap of **0.5 or more** leaves *every* cell invisible (the sheet's own band has no interior left), and the bound stays 1.0 because it governs the radius as well — a radius past the cell's half-side is a stadium, not a typo |
 | frame colour alpha | exactly `255` | the backdrop is painted, not blended: a translucent one would make the exported pixel depend on the surface behind it, which is exactly what "preview and export are the same picture" and "an export is never transparent" forbid |
 | `--preview-px` | 1..=20000 (long edge, in pixels) | a preview larger than this cannot be reviewed by eye anyway. The flag bounds the *request*; the grid it scales the base canvas to still has to fit the canvas pixel budget, so `--preview-px 20000` on a square template is 400 MP and is refused with `CanvasTooLarge` (exit 2) before a byte is decoded (S15e, PIX-003) |
@@ -206,7 +206,7 @@ limit that is not in this table is a contract gap.
   sheet as one cell, 4:3.
 - **Geometry version and document version are separate**: `template.version` follows the template family, `docVersion` follows the format.
 - **The library covers every slot count from 1 to 9**: counts 2..=9 carry at least three layouts each in at least two aspect families (S10), and count 1 carries exactly one — `grid-1-1x1`, the whole sheet (S19, ruling 34), because one photo is a legal collage and a second one-slot layout would be the same geometry under another name. The CLI's `templates` reports the matrix and filters it by aspect ratio. `strip-10-10x1` was the only member above nine and left with S12c.
-- **The picker's range is deeper than one layout** (S10, ruling 10): every count from 2 to 9 carries **at least three
+- **The library's range is deeper than one layout** (S10, ruling 10): every count from 2 to 9 carries **at least three
   layouts, in at least two aspect families** — 27 templates and 143 slots in all since S19 added the one-slot
   sheet, which `pixlay-render templates` reports
   and `crates/pixlay-core/tests/templates.rs` asserts as a histogram over `2..=MAX_PHOTOS` plus the
@@ -446,24 +446,24 @@ comparable, and `--quality` was deliberately not added — a knob nobody tests b
 | Item | `templates` | `init` |
 |---|---|---|
 | shape | `template.<i>.{name,slots,aspect,version}` plus `count` (and `aspect`, when filtering) | `template`, `version`, `aspect`, `cells`, `bytes` |
-| `--aspect` / `--slots` | the only flags it takes (S14 added the second): `--aspect` accepts `W:H` (`4:3`) or a decimal, matched against the template's declared ratio within `ASPECT_TOLERANCE` (the picker's own `templates::of_aspect` query), and `--slots` filters by slot count (`Selection::layouts`, the gallery's query). A ratio or a count nothing was authored for is `count = 0` and exit 0 | — |
+| `--aspect` / `--slots` | the only flags it takes (S14 added the second): `--aspect` accepts `W:H` (`4:3`) or a decimal, matched against the template's declared ratio within `ASPECT_TOLERANCE` (the same `templates::of_aspect` query the window's band uses), and `--slots` filters by slot count (`Selection::layouts`, the gallery's query). A ratio or a count nothing was authored for is `count = 0` and exit 0 | — |
 | `--template` / `--out` | — | both required; `--out` must end in `.pixlay` |
 | refusal | any other flag (`--long-edge`, `--project`, …) is a usage error (exit 1) | same; and an existing `--out` path is a **failure** (exit 2) because `init` never overwrites a project. The refusal is the creation itself (`create_new`), not a check followed by a write: two `init`s that race leave exactly one winner, and a symbolic link at the path — dangling or not — is a file that is already there rather than a name to write through (S15c, PIX-015) |
 | unknown template | — | usage error (exit 1), stderr lists the names this build knows |
 | content | the whole library in library order (by slot count) | a photo-free project at the template's aspect, written by `CollageDoc::to_json` and loadable by `Project::load`; **with `--photo` the arguments fill the cells in order** (below) |
 
-**S9's two subcommands are the library's machine surface** — stages 1–2 of the main path, "browse a folder" and "show me this photo" — plus the extension of `init` that turns a selection into a document. The picker's grid and its `Contain`-fitted preview call the same two pieces of code, so what the GUI shows has a number behind it.
+**S9's two subcommands are the library's machine surface** — "browse a folder" and "show me this photo" — plus the extension of `init` that turns a selection into a document. They were built for the picker stage, which S22 deleted (ruling 31); what keeps them is that a folder listing and a photo preview are questions a *user* asks too (`Add photos…` lists the same folder, and the canvas draws the same resampled photo), so both have a number behind them on the machine surface.
 
 | Item | `scan` | `thumb` |
 |---|---|---|
 | shape | `dir`, `recursive`, `count`, `failed`, and one `file.<i>` row per photo: `path`, `status`, and either `mime` / `width` / `height` / `date` / `mtime`, or `reason`. `dir` and every `file.<i>.path` are **byte paths** — the path's own OS bytes, escaped by the rule above — so a filename with a newline cannot forge a line and a name that is not UTF-8 survives instead of becoming U+FFFD (S15h, PIX-018) | `format`, `mime`, `src_w`, `src_h`, `region`, `px`, `out_w`, `out_h`, `bytes` |
-| what it is for | what a picker needs from a folder, and the key S12's decode cache invalidates on: `mtime`, whole seconds since the Unix epoch | the picker's expensive half — decode plus resample to a tile's size — as a CLI number; `--stats` is the budget number S12's decisions are measured against |
+| what it is for | what a caller needs from a folder, and the key S12's decode cache invalidates on: `mtime`, whole seconds since the Unix epoch | decode plus resample to a preview's size as a CLI number; `--stats` is the budget number S12's decisions were measured against |
 | size | `height`/`width` are the size **after EXIF rotation** (`ImageDetails`' early dimensions are a hint and are *not* post-rotation, which is why a full decode happens), so `image` and `scan` cannot disagree about a file | `--px n` is the exact long edge, 1..=**8192**; the other edge keeps the source's ratio (`round`, at least 1 px) — the photo's, or the `--region` rectangle's when one is given. The bound is the product's largest preview with room: a full-window 4K photo preview is 3840 px and a HiDPI one 7680, so past 8192 the caller wants `render --preview-px` |
 | candidates | files whose extension is in `PHOTO_EXTENSIONS` (`.jpg .jpeg .png .heic .heif .avif .jxl .webp .tif .tiff` — TIFF is still read even though it is no longer written), case-insensitively; **no recursion unless `--recursive`**, and only real directories are descended into (a symlink to a parent would never terminate). A non-photo extension is neither a row nor an error — the alternative is a folder's README becoming an error row | `--out`'s extension, the same two formats `render` writes (`.png` / `.jpg` / `.jpeg` — S12c removed TIFF) |
 | refusal | a file with a photo extension that does not decode **is** a row (`status = failed`) with the decoder's own reason, and the command still exits **0**: the listing is the result. A `--dir` that is not a directory is exit **2** with the path named | a photo that does not decode, or an `--out` this build cannot write, is exit **2**; `--px` outside the range is exit **1**, and an `--out` that *is* `--photo` is exit **1** (the destination row above, asked before the decode). A `--region` is refused in two halves, and which one is which is the point: a malformed one (fewer or more than four numbers, a negative, a fractional, a width or height of 0) is a **usage** error (exit **1**) because the command as written is one this build never runs, while a well-formed rectangle the **photo does not contain** is exit **2** and names the file's own size (`the region 900,700 800x600 is not inside the 1600x1200 photo`) — only the decode knows that, so it cannot be a usage error |
 | pixels | — | the whole photo — or, with `--region x,y,w,h`, that rectangle of it, in the photo's own pixels (`pixlay_imaging::Rect`) — resampled once at the preview's own grid: the same `resample` (Lanczos3, linear light, kernel widened by the downscale ratio) and the same `over_white` + quantize as a slot, so a preview is not a second picture of the same file. **A region whose long edge is `--px` is a 1:1 resample** (S15j): the taps degenerate to the identity (`lanczos(0)` is 1, every other tap 0), so the output is that rectangle of the photo pixel for pixel — measured: `thumb --px 1600 --region 200,100,800,600` of the 1600x1200 fixture is byte-identical to the same crop of `thumb --px 1600`. The window's preview pane at 1:1 is this call, which is what makes the pane's pixels a number the CLI can reproduce |
 
-**`init --photo` is where a selection becomes a document** (S9), and it goes through `pixlay_core::Selection` — the same policy the picker uses (S13), so "the third photo the user picked is the third cell" has one implementation:
+**`init --photo` is where a list of photos becomes a document** (S9), and it goes through `pixlay_core::Selection` — the same policy the window's own entries use (`Add photos…`, an empty cell's `+`, a drop, `pixlay a.jpg b.jpg …`), so "the third photo given is the third cell" has one implementation:
 
 | Item | Rule |
 |---|---|
@@ -683,7 +683,7 @@ eight photos and one `{date}` layer on a 14043x10532 A0 sheet, per format:
 | `thumb --px 1024` of the same photos plus the 1600x1200 PNG and the HEIC | ms 70–155, `encode_ms` 33–179, `peak_rss_mb` 26.6–35.5 |
 | the whole preview path against ImageMagick (`magick compare -metric RMSE`, `thumb --px 200` of `resample-source.png` vs the committed `resample-lanczos-200.png`) | **1.51/255** — the same reduction the resample test measures at 1.41/255 through the decoder, so the CLI's decode → resample → flatten → quantize → write path is one implementation of the reference rather than a second one |
 
-That is the picker's budget number S12 is decided against: a 256 px preview of a 1 MP photo costs
+That is the budget number S12 was decided against: a 256 px preview of a 1 MP photo costs
 ~50 ms and 20 MB in this build, which is the cost a gesture step must not pay per frame.
 
 ### S10 (2026-09-22, `--release`, this machine)
@@ -695,7 +695,7 @@ The gallery's raw material: 15 new layouts, and not one shipped layout moved. Th
 |---|---|
 | the library | **27 templates, 152 slots** (S9: 12 and 64), `count = 27`, exit 0 |
 | the histogram, 2..=9 | 2 → **3**/3 · 3 → **3**/3 · 4 → **4**/3 · 5 → **3**/3 · 6 → **4**/4 · 7 → **3**/3 · 8 → **3**/3 · 9 → **3**/3 — no count below three layouts, none in a single aspect family |
-| ten | `strip-10-10x1` alone, unchanged and never offered: the picker's ceiling is 9 (ruling 3) |
+| ten | `strip-10-10x1` alone, unchanged and never offered: the library's ceiling is 9 (ruling 3) |
 | the S2 invariants over the grown library | 262,144 samples per template: **0 overlapping pairs**; **0 uncovered samples** in the 25 cut templates; the two guttered ones (`grid-4-2x2g`, `strip-2-2x1g`) leave an uncovered region a flood fill from the border reaches (**0 sealed samples**); every cut template's declared areas sum to **exactly 1.0** |
 | the shipped geometry | `frozen.rs` **16,795 bytes**; the regeneration diff is **193 insertions, 0 deletions**, so every byte a project built before S10 embeds is still there |
 | the same fact as a test | `templates_that_shipped_before_s10_keep_their_geometry`: FNV-1a against the emitted source of all 12 pre-S10 templates; verified to fail by moving `strip-2-1x2`'s split by one lattice cell and regenerating |
@@ -712,7 +712,7 @@ plan's next step is S11.
 never be edited again):
 
 - **The histogram is asserted over `MIN_PHOTOS..=MAX_PHOTOS`, not over a literal 2..=9.** The range is the
-  selection's own pair of constants, so a change to the picker's cap moves the assertion with it instead of
+  selection's own pair of constants, so a change to the ceiling moves the assertion with it instead of
   leaving a gap behind. Ten keeps the one template it had: it is the library's `MAX_SLOTS`, not a count the
   product offers, and its coverage is S2's criterion, which still holds it.
 - **The shipped geometry is pinned by a fingerprint, not by the regeneration diff alone.** The determinism
@@ -938,7 +938,7 @@ at these sizes is up to 50% between runs, which is why every cell carries both);
   all on synthetic hard edges — which is why the two committed tests, one on smooth content and one on the
   bands at a 1.2x factor, both stay two to three times inside S7's threshold of 6. **The ladder is also a
   hazard the later stages have to respect**: a picture whose fidelity is compared against the export (a
-  picker tile, a gallery candidate — S13, S14) must come from the photo, as `thumb` does, not from a
+  gallery candidate — S14) must come from the photo, as `thumb` does, not from a
   reduction at a large factor.
 - **The reduction is a pure function**, and it is pinned as one: the same file reduced twice is byte-identical;
   a file that changed is reduced again (the `mtime` rule, asserted through the cache); the fit of a given
@@ -1068,11 +1068,12 @@ timed.
 ### S15f (2026-09-24, `--release`, this machine)
 
 The preview-identity numbers: what a cached bitmap is keyed on now, what a 16-bit reduction costs the source
-cache, what the picker does when a listed file is another file, and the defect the step's own test found on
-the way. The identity rows are the committed tests' own assertions; the memory rows are
+cache, what the picker's own pane did when a listed file was another file, and the defect the step's own test
+found on the way. The identity rows are the committed tests' own assertions; the memory rows are
 `pixlay-render gesture --project nine.pixlay --grid 780|1600 --steps 6 --stats` on nine **6000x4000** photos
-(`strip-9-9x1`, the same shape S12b's criterion names), and the picker's rows are the GUI test's
-`eprintln`s.
+(`strip-9-9x1`, the same shape S12b's criterion names), and the last two rows measured the picker's pane — the
+stage S22 deleted; the rule they measured (a file's own stamp is its identity) is `pixlay-imaging`'s and
+survives in `thumb` and the CLI.
 
 | what | number |
 |---|---|
@@ -1081,8 +1082,8 @@ the way. The identity rows are the committed tests' own assertions; the memory r
 | a preview-grade copy at **16 bits** | the S12b dimensions doubled in bytes: **5.07 MB** for a 24 MP photo at the editor's grid (975x650) and **21.3 MB** at 1600 (2000x1333), against 2.5 / 10.7 MB as 8-bit. Nine of them are 45.6 MB and 192 MB — both inside `MAX_SOURCE_BYTES` (512 MB), so the two targets stay cached together |
 | the source cache's peak, nine 24 MP photos, two grids | **`peak_rss_mb` 241.3** at grid 780 and **419.8** at 1600 — the same quantity S12b measured on its own probe (217.2 / 316.5). It is not a controlled before/after: this document is the step's own nine 6000x4000 JPEGs on `strip-9-9x1`, and what moved is the copies' second byte |
 | the warm step on that document | **1.92 ms** median at grid 780 and **7.35 ms** at 1600 (`--release`, 6 steps, `warm_max_ms` 2.33 / 9.41), both inside the 16.667 ms budget; `refine_decodes` 0 |
-| a file **replaced in place**, in the picker (square.png → landscape.jpg, same name) | the pane re-decodes at the new photo's fitted size — **512x512 → 512x288** — and matches `pixlay-render thumb` of the new file at **RMSE 0.0000**; the cell's tile snapshot moves by **RMSE 111.43**; a second `refresh_pane` with the file untouched costs **0 further requests** |
-| the **stale unbind** the step's test found (before the fix) | after a folder change: `bind_tile(0)` then the *previous* binding's `unbind_tile(0)` left **1 request, 0 built, 0 in flight, no failure and no bound cell**, and **2831 frames** of pumping changed nothing. The guard — only the row that is the position's current binding may take its entry away — is 3 lines |
+| a file **replaced in place**, in the picker's pane (square.png → landscape.jpg, same name) | the pane re-decodes at the new photo's fitted size — **512x512 → 512x288** — and matches `pixlay-render thumb` of the new file at **RMSE 0.0000**; the cell's tile snapshot moves by **RMSE 111.43**; a second `refresh_pane` with the file untouched costs **0 further requests** |
+| the **stale unbind** the step's test found (before the fix, in the picker's strip) | after a folder change: `bind_tile(0)` then the *previous* binding's `unbind_tile(0)` left **1 request, 0 built, 0 in flight, no failure and no bound cell**, and **2831 frames** of pumping changed nothing. The guard — only the row that is the position's current binding may take its entry away — is 3 lines |
 | the verification render (`verify.pixlay`, `--long-edge 14043`) | 14043x10532, **ms 8150.6** + **encode_ms 2343.9**, **`peak_rss_mb` 1629.6**, 9,157,639 bytes; `probe` on the same document reports `passed = true` with 8/8 slot colours exact and 0 foreign pixels on all 12 seams |
 
 ### S18 (2026-09-25, `--release`, this machine)
@@ -1145,24 +1146,38 @@ new — the *blend* row below was measured against the S19 binary itself, which 
 | byte-identity at `gapRel = 0` | the S1 golden image is still **RMSE 0.0** (`pixlay-render/tests/render.rs`), and the `AGENTS.md` verification render is the same **9,157,639 bytes** as S19's: the sheet's own band is zero-width at gap 0, so nothing about the identity frame moved |
 | the fit's floor with a frame | unchanged property, moved reference: the framed sweep (36,480 framings) is green, and the floor is now measured about the *slot's* centre against the visible rectangle, which since S20 can sit off-centre in its cell (the sheet's band takes a whole gap off the outer side and half off the inner ones) |
 
-## 9. The window (S7), and the stages added after it
+## 9. The window (S7), and the shell ruling 31 re-cut (S22)
 
 The GUI is the fifth consumer of the same document, and what it adds is interaction. Its
 contract is what a caller can rely on without looking at a widget:
 
-**Since the 2026-09-22 ruling the window is a sequence of stages** (`docs/archive/2026-09-22-STEPS.md`,
-S13–S15), and **S13 landed the first of them**: the picker is the `AdwNavigationView`'s root page and
-the editor of S7 is pushed on top of it, so a new window opens on photos rather than on an empty sheet.
-**S14 landed the layout stage, and it is a band on the document's page rather than a third page** — a
-second `AdwNavigationPage` would have to own a second canvas, and S15's compose controls attach to the
-canvas the band sits under. The stage is a moment in the *flow*, not a place in the navigation stack; the
-sentences above that said it "will sit between them" meant the flow and are rewritten here. The invariants
-above are unchanged by the sequence: still one document, one renderer, one gesture per command. The
-library and the gallery are **not** renderers of the document — **since S21 a candidate is a sketch of its
+**Since S22 the window is one page** (ruling 31 of 2026-09-25, re-cutting the main path): the editor is the
+application, there is no picker stage and no `AdwNavigationView`, and the shell is
+`AdwToastOverlay → AdwToolbarView` — the header bar and the progress bar as the view's bars, and
+`banner · canvas · layout band` as its content (the band is a box under the canvas, S14's design). The
+window opens on the default document — `grid-1-1x1`, one empty cell (S19, ruling 34) — and **photos enter
+from outside it**:
+
+- `Add photos…` (`Ctrl+I`, `win.add-photos`) opens the platform's multi-file chooser and sends one
+  `Command::AddPhotos`, so a longer list is trimmed once with one report (below) and the whole arrival is
+  one undo step;
+- an empty cell's own `+`, and `Return` on the selected empty cell, ask for that cell's photo
+  (`GtkFileDialog::open`); the selected cell's `Replace` does the same for an occupied one;
+- a **drop** from the file manager (`GtkDropTarget`, the canvas's own) hands the paths to
+  `EditorWindow::drop_files`, which places from the slot under the pointer onward (S23b refines where a
+  drop lands; the rule today is in `window.rs`);
+- `Open…` (`Ctrl+O`) reads a `.pixlay` project;
+- **`pixlay a.jpg b.jpg …`** — the application carries `HANDLES_OPEN`, so a command line's arguments arrive
+  as the `open` signal and `pixlay::app::open_files` adds them in argument order through the same
+  `add_photos` the chooser's callback calls. (A `.pixlay` on the command line is not special: the argument
+  list is photos, which is what `AGENTS.md`'s entry sentence says.)
+
+The invariants are unchanged by the re-cut: one document, one renderer, one gesture per command. The
+library and the band are **not** renderers of the document — **since S21 a candidate is a sketch of its
 template's geometry**, drawn by `pixlay_render::sketch_rgb8`, which the CLI's `render --sketch` is the
 machine surface of and which §8's "S21" measures.
 
-What the layout stage is, as of S14b (`crates/pixlay/src/layout.rs`, `canvas.rs`), and what a caller may
+What the layout band is, as of S14b (`crates/pixlay/src/layout.rs`, `canvas.rs`), and what a caller may
 rely on:
 
 - **The candidates are the layouts with the document's cell count, and only those** (ruling 25, 2026-09-23;
@@ -1200,8 +1215,8 @@ rely on:
   layout with one cell more and leaves the new cell **empty**; `−` takes the layout with one cell fewer,
   dropping the last cell whatever it holds. Neither remembers a photo: `Ctrl+Z` is the way a dropped photo
   comes back, which is what makes `+` mean one thing rather than two. Both are insensitive at their bound
-  (`MIN_PHOTOS` / `MAX_PHOTOS`, the picker's own floor and ceiling), with the picker's own message if a
-  caller asks anyway, and `selection::layout_for` (same aspect → same recipe family → nearest aspect →
+  (`MIN_PHOTOS` / `MAX_PHOTOS`, the format's own floor and ceiling, S19), with the refusal's own message if
+  a caller asks anyway, and `selection::layout_for` (same aspect → same recipe family → nearest aspect →
   library order) is the one rule that decides *which* layout either one moves to.
 - **A list of photos longer than the ceiling is trimmed once, with one report** (S19, ruling 34): the
   window is the surface that trims, and each of its two list paths trims to what *it* can use —
@@ -1301,7 +1316,8 @@ may rely on:
   format row owns the file's extension, and the chooser's filter follows it.
 - **Where the first export goes, and what the name may be** (S15h, PIX-010, ruling of 2026-09-24). No
   chooser step stands between `Export…` and the file: the first export of a window lands in the **pictures
-  directory** — the folder the picker opens on, `XDG_PICTURES_DIR` or `~/Pictures`; an account with
+  directory** — `XDG_PICTURES_DIR` or `~/Pictures`, the same fallback `pixlay::export::default_folder`
+  reports and the save dialog opens on (S22 moved it out of the deleted picker module); an account with
   neither keeps the bare name — and a later export in the directory the last one used, because the stored
   form keeps the whole path. The name's extension is the format row's: a name carrying the other format's
   extension is rewritten case-insensitively (`.jpeg` and `.JPG` are the JPEG format, `Format::from_path`'s
@@ -1324,133 +1340,21 @@ may rely on:
   empties a cell (the error names the slot) changes nothing — and it is the one writer both `edit`'s three
   flags and the dialog use, so "the CLI and the window produce the same document" holds for the frame too.
 
-What the picker stage is, as of S13c (`crates/pixlay/src/picker.rs`), and what a caller may rely on
-without looking at a widget:
-
-- **It lists the session's folder and nothing else.** `XDG_PICTURES_DIR` (or `~/Pictures`) on the first
-  map, then whatever the folder chooser last picked — kept for the session, never written to a
-  configuration file (ruling 8). The listing is `pixlay_imaging::list_folder`, the same function the
-  CLI's `scan` walks with, so the grid and a listing of the same folder cannot disagree about which
-  files are photos or in what order.
-- **Its shape is the 2026-09-22 ruling's, and S13c built it** (`docs/archive/2026-09-22-STEPS.md`, "the picker, as
-  gthumb has it"): three bands, measured off the reference's own window and off this build.
-  **(1) The media area takes the vast majority** — the preview pane with the picked list down its right
-  edge, both inside one horizontal `GtkPaned`, so the list's height *is* the pane's. **(2) One row of
-  thumbnails spans the page's width** below it: a `GtkGridView` that reflows **horizontally** (`GtkListBase`'s
-  orientation decides which axis the items flow along) with `min_columns = max_columns = 1`, which makes
-  the row single at any height (GTK takes the items per vertical slice to be `height / cell` clamped to
-  `[min_columns, max_columns]`) and keeps GTK's own live-cell bound small (`30 x max_columns`). **(3) A
-  status bar closes the window** with gthumb's four fields, in its order: `picked / total`, the focused
-  photo's own pixels, its file's size (`GLib.format_size`) and the zoom
-  (`round(100 x drawn / photo long edge)`, where drawn is the `Contain` fit — 100 % is one image pixel per
-  device pixel, as in both references). Measured (this build, 1100x760, 2x screen): the content band above
-  the status bar is **686 logical px**, the media area is **552** of them — **80.5 %**, against the
-  reference's own 88 % of its band (`860 / 974`) — the strip is **130**, the status bar **24**, and the
-  picked list's height and top edge are the pane's to the pixel.
-- **A cell is 128 logical px**, the reference's own size (gthumb's `thumbnail-size` default of 256 is
-  *device* px — measured off the reference: 250 device = 125 logical on a 2× display), and it is shown as
-  picked by a **highlight**, not by the platform's check box: `.picker-cell` / `.picked` in
-  `crates/pixlay/src/style.css`, the app's only stylesheet, installed on the display at startup and using
-  the theme's `--accent-bg-color` and nothing literal. That is a deliberate deviation from HIG
-  `patterns/containers/selection-mode`, recorded in `docs/HIG-REVIEW.md` §3. The cell's own outline is
-  `--border-color`, and the theme's per-item padding (`gridview > child { padding: 3px }`, GTK 4.24's base
-  stylesheet) is zeroed for this grid alone (`.thumbnail-grid > child`), because it is the difference
-  between the strip being 136 px (79.6 % of the band) and 130 (80.5 %) — styling the grid's children is
-  what the reference's own stylesheet does too (`gthumb/data/css/style.css:26-42`). **A scrolled list
-  inside a `GtkPaned` needs `shrink-end-child`** — with the default the paned's minimum becomes the list's
-  *content* width, and the pane beside it loses the space the ruling gives it.
-- **The pick is ordered, and the order is the click order.** A `GtkMultiSelection` is a set, so the
-  ordered list is the picker's own (`pixlay_core::Selection`, the policy `init --photo` shares): the
-  picked list is where that order is visible, re-orderable and truncatable — **and clicking a row switches
-  the pane to that photo** (ruling 21) — and `Picker::document` is the one place the pick becomes a
-  document. The cell's click *toggles* — the picker claims the gesture, because GTK's own row handling
-  replaces a multi-selection on a plain click (`gtklistfactorywidget.c`: `modify = Ctrl held`) — and a pick
-  past the cap is refused with a visible report rather than truncated (ruling 3). `Enter` goes through
-  GTK's own `list.activate-item` (the grid's `activate` signal) and `Space` through the list item's
-  `listitem.select`, both ending in the same toggle; `Ctrl+A` is GTK's `list.select-all` **only** — S13
-  bound it a second time, so one press fired twice. Order changes by dragging a row onto another position
-  (`GtkDragSource` on the row, `GtkDropTarget` on the list) and by `Ctrl+Up`/`Ctrl+Down` on the focused
-  row — a `GtkShortcutController` on the list rather than an application accelerator, because the action
-  belongs to the focused row and a global binding would fire it in the editor too. The row's only button is
-  the remove at its right end. A rebuild removes the rows one at a time and never calls `remove_all`: the
-  list's placeholder is a child of the box, and `remove_all` takes it and forgets it (`gtklistbox.c`), so
-  the empty hint would never come back.
-- **A tile and the preview are `pixlay_imaging::thumbnail` (or, at 1:1, `thumbnail_region`) pixels** — the
-  same two calls the CLI's `thumb` writes to a file. Both are built at the size the widget *is*: a tile at
-  `TILE_SIZE` times the screen's scale factor (256 device px on this 2× machine, so a HiDPI screen is sharp
-  without a hard-coded 2x), and the pane's photo at **the size it draws** — the `Contain` fit of the pane's
-  device size against the photo's own pixels, rounded up to 128 px and capped at `PREVIEW_MAX_PX` = 2048 (2048 because a
-  pane-sized decode costs 229 ms at 1024, 593 ms at 2048 and 1112 ms at 3840 on the 3840x2160 display this
-  machine has, measured 2026-09-22, `S13 · Ruling`); a **1:1** rectangle is instead its own long edge,
-  unrounded and uncapped (S15j), because a step up from it would enlarge the photo — the one thing 1:1 must
-  not do — and the rectangle is the pane's own size by construction. The photo's own size comes from the reply itself:
-  `Thumbnail` carries the decoded `Source`'s width and height, so a photo whose tile is on screen — which
-  is every photo the strip can show — is decoded at its fitted size on the first request, and a photo whose
-  size is not known yet is decoded at the pane's long edge and re-asked for once the answer arrives (one
-  extra decode, once per photo). Measured (S13c, debug profile, 840x552 pane = 1680x1104 device px):
-  portrait **1152** px decoded for **1104** drawn, landscape **1792** for **1680**, square **1152** for
-  **1104** — against S13b's 1.5× the long edge (2.25× the pixels) whatever the aspect — and the pane's
-  pixels against `pixlay-render thumb` at the same size differ by **RMSE 0.0235** over 1536x1152 pixels
-  (threshold 6), the 8-bit PNG round trip rather than a second resampler.
-- **The pane never paints a tile.** It shows the focused photo's preview at the size it draws, or a
-  spinner while that decodes; S13 painted the cell tile and could stay on it, because a repeated
-  `(index, preview)` request was dropped as already seen. The request identity is
-  `(folder generation, index, view)` — the view being the fit's long edge or the 1:1 rectangle (S15j) — so a
-  resize asks for the size the pane now is, a pan asks for the place it moved to and cancels the views
-  nobody will look at, a re-focus is served from a bounded per-photo cache, and a folder change invalidates
-  all of it. **A file
-  replaced in place is a different photo** (S15f, PIX-012): the tile and the pane's caches are keyed by
-  the position and the size, and a position is not an identity, so the file's own stamp — the
-  modification time and the byte count the filesystem reports — is re-read (one `stat`, ~1 µs) wherever a
-  cached picture would be answered, and a file whose stamp moved drops everything cached about that
-  position: its tiles at every size, its previews, the photo's own pixel size (the status bar's pixels and
-  zoom are ratios against it) and the decoder's refusal. Two contents the filesystem describes identically
-  are one identity to any cache that cannot hash the bytes, and that is the boundary this rule has. The stack
-  that holds the pane's three states swaps them **without a transition**: measured 2026-09-23, a
-  `Crossfade` in flight paints both children at a partial opacity, and a window snapshot showed the strip
-  and the list drawn while the pane — holding the right texture — was empty.
-- **Tiles are built on one worker thread** (`thumbs.rs`) and cross back as plain bytes through
-  `MainContext::invoke`; a folder listing therefore returns before any decode happens. **What is asked for
-  is what is on screen**: `bind_tile` and the strip's own horizontal adjustment both end in
-  `refresh_visible`, `unbind_tile` drops the request again, and the test for "on screen" is the cell's own
-  allocation against the scroller's — because GTK's item manager keeps many more items alive than it shows
-  (measured: 257 for a 1000-photo model in a 536x396 viewport; the strip's own bound is `30 x
-  max_columns` = 30). Measured (S13c, debug profile): the 14-photo fixture folder asks for **9** tiles and
-  a 300-photo folder opens with **9** requests — 9 ms, no decode — with a scroll to its 200th photo costing
-  **17** more; the bound the test holds this to is `TILE_REQUEST_MAX` = 64. Decoded tiles and previews are
-  cached in memory (64 MB each, LRU, keyed by size as well as by file), which is what makes a
-  scrolled-back row instant.
-- **The pane has two zoom states and no others** (S15j, ruled 2026-09-24, PIX-028): the `Contain` **fit**
-  — the whole photo scaled into the pane, which is what it opens on — and **1:1**, one image pixel per
-  device pixel. A double click toggles them, anchored **at the pointer** (the photo pixel under it stays
-  under it), and `Z` (`win.zoom-preview`) toggles them from the keyboard with the pane's centre as the
-  anchor; the state is the pane's and survives a focus change, so comparing two photos at 1:1 is one toggle
-  and then a click. At 1:1 the pane shows a **rectangle of the photo**: its size is the pane's own device
-  size clamped to the photo (a photo smaller than the pane is shown whole, at its own size, centred — the
-  picture's margins are its box, because `GtkPicture` would otherwise scale a smaller content *up* into the
-  pane), and it pans by drag with the content following the hand, bounded by the photo's own edges. The
-  decode follows the view, which is S13b's rule rather than a second one: at the fit it is the whole photo
-  at the fitted long edge, at 1:1 it is that rectangle at its own size (`pixlay_imaging::thumbnail_region`,
-  the call `thumb --region` makes), and a pan asks for the new rectangle with the requests that are no
-  longer the view cancelled, so the worker holds at most one in flight. The status bar's zoom percentage
-  follows the view — 100 % at 1:1 — and is still a readout rather than a control. **Not doing**, all ruled:
-  no free or continuous zoom, no view rotation (EXIF orientation is applied at decode; a cell's rotation is
-  the editor's, where the slot exists), no fullscreen.
 - **The app is dark by default** (ruling 23): `app.rs` sets `Adw.ColorScheme.FORCE_DARK` at startup, as HIG
   `guidelines/ui-styling` recommends for an app that displays rich visual content and as both reference apps
-  do. There is no per-app switch (ruling 8 forbids the settings file it would need), and the canvas and the
-  export are unaffected — they are document content, not styling. The media area sits on the theme's own
-  background: the check is that its backdrop equals a plain widget's (the status bar's) under a forced light
-  *and* a forced dark scheme, and that the two differ — the idiom both references copy, not their literal
-  `#111`.
-- **The chrome follows HIG `patterns/containers/header-bars`** (ruling 24): the folder button in the header's
-  **start** slot, the heading (`AdwWindowTitle`, with the folder as its subtitle) in the centre, and a
-  **primary menu** plus Next at the end — `[New collage, Open…] · [Choose folder…] · [Keyboard shortcuts,
-  About Pixlay]`, the shape both reference apps use. Next is an `AdwButtonContent` (icon plus count, no
-  `suggested-action`: this page asks header bars to avoid it), and its label is set on the *content* — S13b
-  called `GtkButton::set_label`, which replaces the button's child and destroyed the icon on the first
-  update. The editor's header moves Undo/Redo to its start slot for the same reason. `win.choose-folder`
-  (the menu's view option) is the picker's action and is enabled only while the picker's stage is on screen.
+  do. There is no per-app switch (ruling 8 forbids the settings file it would need; ruling 39 of 2026-09-25
+  allows one for the export's settings and not for this), and the canvas and the export are unaffected —
+  they are document content, not styling. The sheet's frame is the theme's and the sheet's own pixels are
+  not: `tests/hig.rs::check_colour_schemes` asserts both under a forced light *and* a forced dark scheme.
+- **The chrome follows HIG `patterns/containers/header-bars`** (ruling 24, re-cut by S22): the window's one
+  header bar holds the document's controls at the **start** (undo, redo, a spacer, the frame's settings),
+  the heading in the **centre** (`AdwWindowTitle`, the document's name with its dirty marker — the same
+  string the window's own title carries) and a **primary menu** with the export button at the **end**. The
+  menu is `[New collage, Open…, Save, Save as…, Export…] · [Add photos…, Reset the framing] · [Keyboard
+  shortcuts, About Pixlay]`. **There is no Save button** (ruling 37: it sat beside Export and read as the
+  same action), which `tests/hig.rs::check_header_chrome` asserts together with the three slots and the
+  menu's items; the export button is an `AdwButtonContent` (icon plus label, one `suggested-action`), and
+  every control carries a tooltip and an accessible name.
 - **The export form's state lives in the window** (`EditorWindow::set_export_settings` /
   `export_settings`), because ruling 18 removed the pane that used to hold it; S15's `Export…` dialog is
   the rows over that state, and `MIN_EXPORT_PX` / `MAX_EXPORT_PX` (`export.rs`) are its bounds.
@@ -1518,8 +1422,8 @@ without looking at a widget:
   `PREVIEW_SOURCE_SCALE` (1.25) times the grid's long edge — the largest value that keeps the measured
   step inside the frame budget — or the photo itself when that is smaller; §4.1 has the shape and §8
   ("S12b") the numbers, including what it costs in fidelity.
-- **Background work, one thread each.** Decoding (`decode.rs`), the picker's tiles (`thumbs.rs`) and
-  exporting (`export.rs`) run on their own threads and hand plain data back through
+- **Background work, one thread each.** Decoding (`decode.rs`) and exporting (`export.rs`) run on their own
+  threads and hand plain data back through
   `MainContext::invoke`, because a GTK object may not leave the main thread. Decode requests are coalesced (latest wins) so a drag
   costs one build at a time, and the re-use of what a gesture does not change is
   `pixlay_imaging::Preview`'s (S12, above). An export reports progress, which
@@ -1527,17 +1431,18 @@ without looking at a widget:
 - **A worker that cannot start, or that is gone, is a report and not a wait** (S15h, PIX-014). Starting a
   worker answers `Result` (`pixlay::workers::WorkerPlan`, whose product value is `Run`), every request
   answers whether it was queued, and the failing request clears the state it would have marked pending
-  before it says anything: the canvas's grid, the gallery's build, a tile's in-flight entry and the export
-  progress bar all go back to resting, because a request nobody will answer must not be waited on. The
-  canvas reports once per window (`decode_reported`) — an edit asks again and is not a second failure — the
-  picker shows the refusal in the cell that asked, and an export that could not be started says so as a
-  toast. A thread that has started and died takes the same branch: its request channel answers `Err`.
-  `EditorWindow::with_workers` is the tests' way in (`Workers { decode, thumbs, export }`), and
+  before it says anything: the canvas's grid, the band's build and the export progress bar all go back to
+  resting, because a request nobody will answer must not be waited on. The canvas reports once per window
+  (`decode_reported`) — an edit asks again and is not a second failure — and an export that could not be
+  started says so as a toast. A thread that has started and died takes the same branch: its request channel
+  answers `Err`. `EditorWindow::with_workers` is the tests' way in (`Workers { decode, export }`), and
   `EditorWindow::new` is the product's.
 - **The accelerator table is data** (`crates/pixlay/src/app.rs::ACCELERATORS`): the bindings, the
   shortcuts dialog and the HIG test all read it, so they cannot drift. No binding uses
-  `Alt+*`, `Super+*` or `Ctrl+Alt+*`, and `F9` left the table with the utility pane (S13);
-  `Ctrl+Shift+O` for "Choose a folder of photos" joined it in S13c, when the picker gained its primary menu.
+  `Alt+*`, `Super+*` or `Ctrl+Alt+*`; `F9` left the table with the utility pane (S13) and the picker's two
+  keys left with the stage (S22) — `Ctrl+I` is now `Add photos…` (`win.add-photos`), and `Ctrl+Shift+O`
+  (the folder chooser) and `Z` (the preview zoom) exist nowhere. Every action in the table has exactly one
+  binding, and every other action is reachable from a control the Tab order reaches.
 - **Everything user-visible goes through gettext**, domain `pixlay`, source language English
   (`i18n.rs`); `po/POTFILES` lists this crate's sources, `po/pixlay.pot` is committed, and with
   no catalog — a missing, `C` or unknown locale — the msgs come back as the English source

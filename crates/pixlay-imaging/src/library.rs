@@ -1,16 +1,15 @@
 //! Which files in a folder are photos: the one list, and the one walk.
 //!
-//! Two surfaces ask this question — the CLI's `scan` (S9) and the picker's
-//! library grid (S13) — and they have to answer it the same way, or a folder
-//! would show one set of files in the grid and another in a listing of the same
-//! folder. So the extension list and the walk live here, once, instead of beside
-//! each caller.
+//! One answer, not one per surface: the CLI's `scan` (S9) walks a folder with
+//! these, and `--help` documents only these extensions
+//! (`crates/pixlay-cli/tests/cli.rs` fails when the two drift). So the extension
+//! list and the walk live here, once, instead of beside the caller.
 //!
 //! This module is about *decoding capability* rather than about pixels: the list
 //! is the photo formats this build's loaders actually read, which is a fact
 //! `pixlay-imaging` owns (`decode.rs`'s limits, `thumb.rs`'s previews).
 //!
-//! Two rules the walk obeys, and both are load-bearing for a picker:
+//! Two rules the walk obeys, and both are load-bearing for a folder browser:
 //!
 //! * **Lexical by path, and nothing else.** A folder's order must not depend on
 //!   the filesystem's iteration order (which is arbitrary and differs between
@@ -18,8 +17,8 @@
 //!   and a listing could not be diffed (`scan`'s S9 criterion).
 //! * **A refusal is not a skip, but it is also not an error.** The walk reports
 //!   only files whose *extension* says photo; whether the decoder can then read
-//!   one is the caller's business (`scan` reports it as a row with a reason, the
-//!   grid as a tile that could not be shown). Deciding by extension is what keeps
+//!   one is the caller's business (`scan` reports it as a row with a reason rather
+//!   than dropping it). Deciding by extension is what keeps
 //!   a folder's README from becoming an error row.
 
 use std::path::{Path, PathBuf};
@@ -56,7 +55,7 @@ pub fn is_photo(path: &Path) -> bool {
 /// The photo files in `dir`, lexically sorted.
 ///
 /// `recursive` descends into subdirectories; without it only the folder itself is
-/// read, which is what a picker opens. Only real directories are descended into:
+/// read, which is what a folder browser opens. Only real directories are descended into:
 /// a symlink that points at its own parent would otherwise make a recursive walk
 /// run forever, and following links is not what "the photos in this folder"
 /// means.

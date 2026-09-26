@@ -96,7 +96,7 @@ pub enum CoreError {
 
     /// A photo was added to a document that already holds `max` of them (S14).
     ///
-    /// The ceiling is a *request* limit, exactly like the picker's own refusal
+    /// The ceiling is a *request* limit, exactly like `Selection`'s own refusal
     /// (`crate::selection::SelectionError::PhotoCount`): it fires where a photo is
     /// added, and it names the same number. The format's slot limit
     /// ([`MAX_SLOTS`](crate::MAX_SLOTS)) is that number too, so there is no layout

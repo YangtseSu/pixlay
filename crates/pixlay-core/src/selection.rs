@@ -1,9 +1,9 @@
 //! The selection policy: which photos a collage holds, and in which order.
 //!
 //! The list of photos in the order the user gave them is a mapping onto cells, and
-//! **order is cell order**: the picker's picked list is where that mapping is
+//! **order is cell order**: the document's own order is where that mapping is
 //! visible and re-orderable, not decoration. This module is the mapping itself,
-//! and it is pure — no cairo, no GTK, no filesystem — so the picker (S13), the
+//! and it is pure — no cairo, no GTK, no filesystem — so the window, the
 //! layout stage (S14) and the CLI's `init --photo` share one implementation
 //! instead of three that agree by luck.
 //!
@@ -18,10 +18,10 @@
 //!   truncated — the *caller* may trim a longer list, and the window does, but core
 //!   never drops input on its own.
 //! * **the count filter.** The layouts a selection can use are the library's
-//!   templates with exactly that many slots ([`Selection::layouts`]) — the picker
-//!   offers a layout exactly when it has as many slots as the user picked photos,
-//!   and since S12c the library itself stops at nine, so no layout exists that the
-//!   picker could not offer.
+//!   templates with exactly that many slots ([`Selection::layouts`]) — the layout
+//!   stage offers a layout exactly when it has as many slots as the user picked
+//!   photos, and since S12c the library itself stops at nine, so every layout is
+//!   offered for some count.
 //! * **the count rule.** When the photo count changes, the layout changes with it:
 //!   [`layout_for`] is the one answer to "which layout, when the choice is not
 //!   obvious" (same aspect, then same recipe family, then the nearest aspect, then
@@ -109,7 +109,7 @@ impl Selection {
         self.photos.is_empty()
     }
 
-    /// Whether another photo fits under the ceiling. The picker's "add" control
+    /// Whether another photo fits under the ceiling. The count control's `+`
     /// reads this; below the floor is not this question.
     pub fn accepts_more(&self) -> bool {
         self.photos.len() < MAX_PHOTOS
@@ -128,7 +128,7 @@ impl Selection {
         Ok(self.photos.len() - 1)
     }
 
-    /// Drops the photo at `index` (the picker's per-cell clear). `None` past the
+    /// Drops the photo at `index` (the window's per-cell clear). `None` past the
     /// end, so a stale index is a no-op rather than a panic.
     pub fn remove(&mut self, index: usize) -> Option<PathBuf> {
         (index < self.photos.len()).then(|| self.photos.remove(index))
@@ -149,9 +149,9 @@ impl Selection {
 
     /// The document these photos make on `template`, in cell order.
     ///
-    /// This is the one place the picker's list becomes a document, so the CLI's
-    /// `init --photo` and the GUI's Next cannot disagree about what "the third
-    /// photo" means. Paths are stored exactly as given: making them relative to
+    /// This is the one place a selection's photos become a document, so the CLI's
+    /// `init --photo` and the window cannot disagree about what "the third photo"
+    /// means. Paths are stored exactly as given: making them relative to
     /// the project file is a *writing* concern (`Project::save_as`), not a
     /// selection one, and this module has no filesystem.
     pub fn document(&self, template: &Template) -> Result<CollageDoc, SelectionError> {

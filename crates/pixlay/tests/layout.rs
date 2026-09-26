@@ -22,7 +22,6 @@ use std::time::Duration;
 
 use gtk4::prelude::*;
 use pixlay::canvas;
-use pixlay::window::Stage;
 use pixlay_core::{CropTransform, Project, Rgba8, templates};
 use pixlay_imaging::Source;
 
@@ -54,7 +53,6 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
             .unwrap_or(-1),
     );
     settle(&window);
-    assert_eq!(window.stage(), Stage::Editor, "the band is the editor's");
     let gallery = window.gallery().expect("the editor has a layout band");
     // The band's height is the claim below, and a widget is measured on the frame after
     // the one that laid it out: wait for the allocation rather than assume it

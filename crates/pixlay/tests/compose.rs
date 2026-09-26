@@ -28,7 +28,6 @@ use gtk4::prelude::*;
 use libadwaita::prelude::*;
 use pixlay::canvas;
 use pixlay::export::Settings;
-use pixlay::window::Stage;
 use pixlay_core::{PixelSize, Point, Rgba8};
 use pixlay_imaging::encode::Format;
 
@@ -44,12 +43,6 @@ fn the_compose_stage_edits_the_selected_cell_and_the_document() {
     window
         .open_path(&support::verify_project())
         .expect("the verification project opens");
-    assert_eq!(
-        window.stage(),
-        Stage::Editor,
-        "the editor's stage is showing"
-    );
-
     let controls = window
         .cell_controls()
         .expect("the canvas has a cell-control layer");

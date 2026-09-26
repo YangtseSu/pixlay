@@ -582,7 +582,7 @@ fn the_matrix_is_grouped_by_aspect_ratio() {
     );
     assert!(aspects.contains(&1.0), "no square template");
 
-    // The query S7's picker runs: a canvas ratio returns exactly the templates
+    // The query S7's picker ran: a canvas ratio returns exactly the templates
     // authored for it, and every one of them is a fit (`CollageDoc::validate`
     // makes a mismatch a hard error, so an approximate match would be a bug).
     for &aspect in &aspects {

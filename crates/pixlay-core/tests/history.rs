@@ -516,7 +516,7 @@ fn a_history_refuses_a_document_that_is_not_valid() {
 
 #[test]
 fn a_template_change_keeps_the_photos_it_can_and_never_leaves_a_dangling_slot() {
-    // S7's command. The template picker is why it exists: a user who has placed
+    // S7's command, and the reason it exists: a user who has placed
     // photos must be able to try another layout without starting over, so the
     // cells that still exist keep what they hold and a smaller template drops the
     // tail — one cell per slot, so the result stays valid.
@@ -648,7 +648,7 @@ fn adding_photos_fills_empty_cells_before_it_grows_the_layout() {
     assert_eq!(doc.cells[6].source, Some(PathBuf::from("photos/seven.jpg")));
     assert_eq!(history.undo_depth(), depth + 1, "one call is one undo step");
 
-    // The ceiling is the picker's own: nine is also the format's slot limit, so
+    // The ceiling is the format's own: nine is the slot limit, so
     // there is no layout left to grow into.
     let full = History::new(occupied("strip-9-9x1")).expect("a valid document");
     let mut full = full;
@@ -740,7 +740,7 @@ fn the_count_control_takes_and_drops_a_cell_without_remembering_it() {
         "and it comes back whole, photo and framing"
     );
 
-    // The ceiling is the format's slot limit, and the floor is the picker's own
+    // The ceiling is the format's slot limit, and the floor is the selection's own
     // minimum: past either, the refusal changes nothing.
     let mut full = History::new(occupied("strip-9-9x1")).expect("a valid document");
     let refused = full.apply(Command::AddCell).expect_err("no tenth cell");

@@ -237,7 +237,7 @@ pub fn window_with_workers(
 /// never mapped has none of those. The frame count cannot make this claim — the clock
 /// ticks on its own timer while `watch`'s callback is installed, hidden or not (the
 /// module doc) — so a check on it would be a check that can never fail.
-fn present(window: &EditorWindow) {
+pub fn present(window: &EditorWindow) {
     window.present();
     let deadline = Instant::now() + FRAME_PROBE;
     while !window.is_mapped() && Instant::now() < deadline {

@@ -313,16 +313,17 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
   `AdwBanner`, with one custom-drawn widget — the canvas, whose stated reason is that it draws the
   document itself. A custom-drawn widget is the exception and needs a stated reason. **S13 replaced the
   utility pane** (`AdwOverlaySplitView` + `AdwPreferencesPage` + `F9`, ruling 18) with a sequence of
-  stages, and **ruling 31 of 2026-09-25 removed the first of them**: the window opens on the editor — one
-  page, nothing to push — because the picker judged nothing the file manager cannot and cost a stage to do
-  it. Its ordered list, its preview and its zoom, the folder scan and the tile cache went with it; a
-  photo's order is the order it was added, and re-ordering is the swap of the new plan's S23
-  (`docs/2026-09-25-STEPS.md`). **The layout band draws sketches**: each candidate is the template's
+  stages; **ruling 31 of 2026-09-25 removed the first of them and S22 landed it**: the window opens on the
+  editor — one page, nothing to push, and `AdwNavigationView` went with the stage it held — because the
+  picker judged nothing the file manager cannot and cost a stage to do it. Its ordered list, its preview
+  and its zoom, the folder scan and the tile cache went with it; a photo's order is the order it was
+  added, and re-ordering is the swap of the new plan's S23 (`docs/2026-09-25-STEPS.md`). **The layout band draws sketches**: each candidate is the template's
   geometry as stroked outlines rather than a render of the user's photos (ruling 32), because a template
   carries geometry and no style, so a sketch is a complete account of it — and the band decodes nothing.
-  **The header bar's controls follow HIG
-  `patterns/containers/header-bars` and the two references**: primary and navigation actions at the *start*,
-  the heading in the centre, a primary menu at the *end*. The editor's
+  **The window's one header bar follows HIG
+  `patterns/containers/header-bars` and the two references**: primary actions at the *start*, the heading
+  (the document's name) in the centre, a primary menu at the *end* — and no Save button, which ruling 37 of
+  2026-09-25 removed because it sat beside Export. The editor's
   per-cell buttons arrived in S15 as children of the canvas's own `GtkOverlay`, placed by their own
   margins — a `GtkFixed` was rejected because it measures only its children, so a document whose empty
   cells come and go would leave the container 0x0 (`crates/pixlay/src/canvas.rs`). None of those is
@@ -491,7 +492,7 @@ policy: track the latest": latest stable only, no upper pin.
 | `image` 0.25.10 | `pixlay-cli` (**dev only** since S6) | It was S1's encoder stand-in and S6 replaced it (`pixlay_imaging::encode` writes the ICC profile and the JPEG sampling factors that this crate's writers leave at their defaults; the resolutions left with S12d). What it is still for: the CLI's **tests** read renders back with `image::open` (PNG/JPEG) and write flat photos to render against, and `pixlay-cli/tests/fixtures/generate.py` produced the fixtures | Not a production dependency any more, so the shipped binary no longer links it |
 | `glycin` 4.0.0 | `pixlay-imaging` | The decoding backend, measured against the in-process alternative (S4): the sandboxed loader is the only one of the two that decodes HEIC and AVIF, and it works with an empty environment | Pulls `glib`/`gio` and, through `cfg(target_os = "linux")`, `libseccomp` / `bubblewrap` / `fontconfig` / the distro's loader packages — this is what S8's `depends` must name |
 | `glib` 0.22 / `gio` 0.22 | `pixlay-imaging` | The decode is driven on a private `MainContext`: a glycin frame request only completes while one is iterated (measured: every frame hung under a plain executor until glycin's own 60 s limit). `glib`'s `futures` feature provides `MainContext::block_on`; `gio::File` is glycin's own input type | Already in the tree with `glycin`; named here because the API is used directly |
-|`gtk4` 0.11.5 + `libadwaita` 0.9.2|`pixlay`|The shell: the window, the two stages, the rows and the dialogs. `v4_12` is the level the window needs: `GtkListBox::remove_all` and `GtkCssProvider::load_from_string` (S13b rebuilds the picked list and installs the app's one stylesheet) and `GdkSurface::layout` — GTK4's only "the window was resized" signal, which is what the preview pane's own decode size follows, so below it the build would compile and never resize the pane. Below that, `v4_10` carries `GtkFileDialog` and `GtkColorDialogButton` (4.10 dropped the deprecated chooser dialogs) and libadwaita's `v1_8` carries `AdwDialog` / `AdwToastOverlay` / `AdwShortcutsDialog`|System gtk4 4.24 / libadwaita 1.10 through pkg-config; GTK already depends on cairo, pango and gdk-pixbuf, so the download set grows by the bindings alone. Linked by `pixlay` only — the other four crates must not name it|
+|`gtk4` 0.11.5 + `libadwaita` 0.9.2|`pixlay`|The shell: the window, the header bar and its menu, the canvas's controls and the dialogs. `v4_12` is the level the window needs: `GtkCssProvider::load_from_string` (the app's one stylesheet, whose remaining rules are the layout band's) and `GdkSurface::layout` — GTK4's only "the window was resized" signal, which is what the canvas's own decode grid follows, so below it the build would compile and never resize the preview. Below that, `v4_10` carries `GtkFileDialog` and `GtkColorDialogButton` (4.10 dropped the deprecated chooser dialogs) and libadwaita's `v1_8` carries `AdwDialog` / `AdwToastOverlay` / `AdwShortcutsDialog`|System gtk4 4.24 / libadwaita 1.10 through pkg-config; GTK already depends on cairo, pango and gdk-pixbuf, so the download set grows by the bindings alone. Linked by `pixlay` only — the other four crates must not name it|
 |`gettext-rs` 0.8.0 (`gettext-system`)|`pixlay`|i18n, as the plan of 2026-09-20 decided before S7 (`docs/archive/2026-09-20-STEPS.md`): the same gettext toolchain GTK and libadwaita use for their own copy, so `.po`, the `.desktop` file and AppStream metainfo (S16) all go through one pipeline. `po/POTFILES` and `po/pixlay.pot` are committed|Tiny; `gettext-sys` links the system `libintl` rather than building a private copy. Only `pixlay` depends on it, which is what the language conventions require|
 
 `pangocairo` was a temporary S0 spike dependency, came back in S5 for the canvas text layers, and left

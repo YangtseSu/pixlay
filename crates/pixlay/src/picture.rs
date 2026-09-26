@@ -1,9 +1,8 @@
 //! A decoded picture, held once: the texture a widget paints and the bytes it was
 //! built from.
 //!
-//! The picker's tiles and its preview pane (S13c) and the layout gallery's
-//! candidates (S14) are all "straight RGB bytes that a widget shows", so the
-//! wrapper is one type rather than three: a `gdk::MemoryTexture` **holds a
+//! The layout band's candidates (S14) are "straight RGB bytes that a widget shows",
+//! which is what the wrapper is: a `gdk::MemoryTexture` **holds a
 //! reference to the `glib::Bytes` it was built from**, so a picture costs one copy
 //! of its pixels rather than two, and [`Picture::texture`] is a refcount bump where
 //! a copy on every paint would be a whole image.

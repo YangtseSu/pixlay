@@ -1,13 +1,11 @@
-//! Photo previews: a photo (or a rectangle of one) resampled to a size a picker can
-//! hold.
+//! Photo previews: a photo (or a rectangle of one) resampled to a preview size.
 //!
-//! The picker's grid (S13) and its preview pane both show *the photo*: the pane is a
-//! `Contain` fit at rest and the photo's own pixels at 1:1 (`S15j`, ruling 2's "a large
-//! preview that can zoom and pan" in the bounded form the 2026-09-24 ruling fixed), and
-//! `AGENTS.md`'s rule for a visual claim applies to both: the pixels the GUI puts on
-//! screen have to be a machine-checkable number somewhere, so this is the CLI's `thumb`
-//! as well as the widget's texture (`pixlay-render thumb`, whose `--region` is the same
-//! call the pane's 1:1 view makes, and S13 asserts the two are the same picture).
+//! A preview shows *the photo*: a `Contain` fit at rest and the photo's own pixels at
+//! 1:1 (`S15j`, ruling 2's "a large preview that can zoom and pan" in the bounded form
+//! the 2026-09-24 ruling fixed). `AGENTS.md`'s rule for a visual claim applies: the
+//! pixels shown have to be a machine-checkable number somewhere, so this is the CLI's
+//! `thumb` (`pixlay-render thumb`, whose `--region` is the same call a 1:1 preview
+//! makes); S13 held the widget's texture to exactly these pixels.
 //!
 //! Two decisions worth stating, because they are what make the result *the
 //! pipeline's* picture rather than a second one:
@@ -23,8 +21,8 @@
 //!   transparent.
 //!
 //! The long edge is *exact*: the caller asks for a grid, and the other edge keeps
-//! the photo's ratio (rounded half away from zero, at least 1 px), which is what
-//! makes a row of tiles line up.
+//! the photo's ratio (rounded half away from zero, at least 1 px), so every preview
+//! of a photo has the same shape.
 
 use crate::decode::Sampler;
 use crate::error::ImagingError;
@@ -33,9 +31,9 @@ use crate::resample::{Region, check_bitmap, resample};
 /// A rectangle of a photo, in the photo's own pixels.
 ///
 /// The part of a photo a viewer shows, before any scaling: [`thumbnail_region`]
-/// resamples one, the CLI's `--region` is one, and the picker's 1:1 view is one. It is
-/// also a request's identity where one is made (the picker's worker dedups and cancels
-/// by it), so it is `Eq + Hash` and `Copy`.
+/// resamples one, the CLI's `--region` is one, and a 1:1 preview is one. It is
+/// also a request's identity where one is made, so it is `Eq + Hash` and `Copy`
+/// (S13's preview worker deduped and cancelled by it).
 ///
 /// The grid is the one a decode reports — the photo's own pixels with EXIF orientation
 /// already applied ([`Thumbnail::source_width`]) — and a rectangle the photo does not
@@ -83,8 +81,8 @@ pub struct Thumbnail {
     /// The photo's own pixel size, before the resample.
     ///
     /// Carried because a caller that shows a *scaled* copy still has to be able to
-    /// say how big the photo is, and the decode has already read it: the picker's
-    /// status line reports these (S13c), and the zoom it shows is a ratio against
+    /// say how big the photo is, and the decode has already read it: `thumb`
+    /// reports these as `src_w` / `src_h` (S13c), and a zoom is a ratio against
     /// them. Free here — the sampled source is in hand — and one decode cheaper
     /// than asking the file a second time.
     pub source_width: u32,
@@ -107,7 +105,7 @@ pub fn thumbnail(source: &impl Sampler, long_edge: u32) -> Result<Thumbnail, Ima
 /// `long_edge` is the destination's long edge and the destination's *aspect* is the
 /// rectangle's, so a `long_edge` equal to the rectangle's own long edge is a **1:1**
 /// resample: the Lanczos taps degenerate to the identity at exactly 1:1 (`lanczos(0)`
-/// is 1 and every other tap is 0), which is what makes the picker's 1:1 view the
+/// is 1 and every other tap is 0), which is what makes a 1:1 preview the
 /// photo's own pixels rather than a scaled copy of them. A smaller `long_edge` is a fit
 /// of that rectangle, through the same `resample` and the same colour path as a
 /// whole-photo preview — there is one preview pipeline, not two.

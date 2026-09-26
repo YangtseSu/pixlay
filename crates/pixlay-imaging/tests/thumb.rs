@@ -114,9 +114,9 @@ fn the_long_edge_is_exact_and_the_ratio_is_kept() {
         ((640, 640), 100, (100, 100)),
         // A pillarbox: the short edge must not round to zero.
         ((10000, 1), 100, (100, 1)),
-        // An upscale asks for more pixels than the source has — the picker's
-        // preview does that whenever a small photo is focused, because its `Contain`
-        // fit is the pane — and the ratio still holds.
+        // An upscale asks for more pixels than the source has — a preview does that
+        // when a small photo is shown larger than its own pixels, because the fit
+        // scales it up — and the ratio still holds.
         ((100, 75), 400, (400, 300)),
         // Half away from zero, and at least one pixel.
         ((400, 200), 3, (3, 2)),
@@ -177,7 +177,7 @@ fn a_flat_photo_comes_out_flat() {
 
 #[test]
 fn alpha_is_flattened_onto_white_like_a_slot() {
-    // A fully transparent photo is not a hole in the picker: it is white, the same
+    // A fully transparent photo is not a hole in a preview: it is white, the same
     // rule the slots follow (`AGENTS.md`: an export is never transparent, and the
     // preview shows what the slot will show).
     let source = Flat {
@@ -241,14 +241,14 @@ fn a_preview_past_the_bitmap_budget_is_refused() {
         "{message}"
     );
 
-    // And the same photo at a size a picker uses still comes back.
+    // And the same photo at a preview size still comes back.
     let thumb = thumbnail(&source, 256).expect("a 256 px preview");
     assert_eq!((thumb.width, thumb.height), (256, 192));
 }
 
 /// A rectangle of a photo at its own size is the photo's own pixels (S15j).
 ///
-/// This is the picker's 1:1 view, and the claim is exactness rather than closeness: the
+/// This is a 1:1 preview, and the claim is exactness rather than closeness: the
 /// taps of a 1:1 resample are the identity (`lanczos(0)` is 1 and every other tap is 0),
 /// so the rectangle is a *crop* of the photo, pixel for pixel. A single kernel tap out of
 /// place, a half-texel origin, or a destination that rounded differently would all show

@@ -1,10 +1,12 @@
-//! The layout stage: every candidate layout of the current photo count, drawn as a
+//! The layout band: every candidate layout of the current photo count, drawn as a
 //! sketch of its geometry, plus the count control that decides what that count is.
 //!
-//! Stage 3 of the main path (`AGENTS.md`: `open → add photos → pick a layout →
-//! adjust → export`), and **a band on the document's page rather than a third
-//! page** (S14): a second `AdwNavigationPage` would have to own a second canvas, and
-//! S15's compose controls attach to the canvas this band sits under.
+//! The layout step of the main path (`AGENTS.md`: `open → add photos → pick a
+//! layout → adjust → export`), and **a band on the document's page rather than a
+//! page of its own** (S14): a separate page would have to own a second canvas, and
+//! S15's compose controls attach to the canvas this band sits under. (The
+//! `AdwNavigationView` that once held those pages left with the picker in S22; the
+//! band is a box at the bottom of the one page that remains.)
 //!
 //! # The candidates are sketches
 //!
@@ -94,7 +96,7 @@ pub struct Gallery {
     /// The strip's order, which is the library's.
     order: RefCell<Vec<String>>,
     /// Set while this module writes the buttons' own state, so that a highlight
-    /// does not read back as a user choosing a layout (the picker's own idiom).
+    /// does not read back as a user choosing a layout.
     syncing: Rc<Cell<bool>>,
     /// The two widgets that carry the sketch's colours, which `style.css` gives
     /// them: `GtkWidget::color()` is the one public way to read a theme colour
@@ -325,9 +327,9 @@ impl Gallery {
         self.syncing.set(false);
     }
 
-    /// Writes the count and the two controls: the floor and the ceiling are the
-    /// picker's own (`MIN_PHOTOS` / `MAX_PHOTOS`), so the control is insensitive
-    /// exactly where the refusal would be.
+    /// Writes the count and the two controls: the floor and the ceiling are
+    /// `MIN_PHOTOS` / `MAX_PHOTOS`, so the control is insensitive exactly where the
+    /// refusal would be.
     ///
     /// **The label is the number alone** (ruled 2026-09-23): the control sits beside
     /// a strip of layout thumbnails and under a canvas, so "8" between `−` and `+`

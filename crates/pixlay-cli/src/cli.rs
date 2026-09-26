@@ -410,14 +410,14 @@ fn apply(history: &mut History, command: Edit) -> Result<(), Failure> {
 /// `templates`: the library, optionally filtered to one layout shape or one slot
 /// count.
 ///
-/// This is the query S7's picker runs and the one a caller needs before it can
+/// This is the query S7's picker ran and the one a caller needs before it can
 /// name a template. `--slots` is the layout gallery's own query (S14): the
 /// candidates for a collage of n photos are exactly the templates with n slots, and
 /// this is that list from the outside. The list stays in library order (by slot
 /// count), so the output is stable.
 fn list_templates(args: TemplatesArgs) -> Result<u8, Failure> {
     // The filters are the library's own queries, so `templates --aspect 4:3`,
-    // `templates --slots 5` and the picker cannot disagree about what "the same
+    // `templates --slots 5` and the layout stage cannot disagree about what "the same
     // aspect" or "the layouts with that count" mean.
     let mut listed = match args.aspect {
         Some(aspect) => pixlay_core::templates::of_aspect(aspect),
@@ -456,7 +456,7 @@ fn list_templates(args: TemplatesArgs) -> Result<u8, Failure> {
 ///
 /// With `--photo`, **argument order is cell order** and the mapping goes through
 /// the selection policy (`pixlay_core::Selection`), which is the same function the
-/// picker and the layout stage use — so "the third photo the user picked is the
+/// window and the layout stage use — so "the third photo the user picked is the
 /// third cell" is one rule with one implementation, and the 1..=9 clamp and the
 /// slot-count check are applied here exactly as they are in the GUI.
 fn init_project(args: InitArgs) -> Result<u8, Failure> {
@@ -882,21 +882,21 @@ fn image(args: ImageArgs) -> Result<u8, Failure> {
     Ok(EXIT_SUCCESS)
 }
 
-/// `scan`: the photos in a directory, as the picker's grid sees them (S9).
+/// `scan`: the photos in a directory, as a folder browser sees them (S9).
 ///
 /// Stage 1 of the flow — "open a folder and browse" — has to be measurable
 /// without a window (`AGENTS.md`: nothing may be possible only in the GUI), and
-/// what a grid needs from a folder is a list: the path, what the decoder says the
-/// file is, the size **after** EXIF rotation (a tile and a preview lay out
+/// what a folder browser needs from a folder is a list: the path, what the decoder
+/// says the file is, the size **after** EXIF rotation (a preview lays out
 /// against the size a person sees, not the size the file stores), the date a
 /// caption can use, and `mtime`, which is the key S12's decode cache invalidates
 /// on.
 ///
-/// Two properties the picker depends on:
+/// Two properties the folder browser depends on:
 ///
 /// * **a refusal is a row, not a skip.** A corrupt file, an image past the decode
 ///   cap or a dangling symlink is `status = failed` with the decoder's own reason,
-///   so the grid can show a broken tile and the user can act on it. Omitting the
+///   so the caller can report it and the user can act on it. Omitting the
 ///   file silently would make "the folder has nothing" and "the folder has
 ///   something this build cannot read" the same answer.
 /// * **the order is lexical and stable.** Two runs over an unchanged directory are
@@ -950,7 +950,7 @@ fn scan(args: ScanArgs) -> Result<u8, Failure> {
     Ok(EXIT_SUCCESS)
 }
 
-/// What one file is, as far as the grid is concerned.
+/// What one file is, as far as the listing is concerned.
 struct Facts {
     mime: String,
     width: u32,
@@ -963,7 +963,7 @@ struct Facts {
 ///
 /// The whole frame, not the loader's early dimensions: `ImageDetails` is a hint
 /// ("often correct … for an early rendering estimate", glycin's own words) and it
-/// is not the size after rotation, which is the size the grid is laid out
+/// is not the size after rotation, which is the size a preview is laid out
 /// against. `image` makes the same call, so the two commands cannot disagree
 /// about a file's size.
 fn facts(path: &Path) -> Result<Facts, String> {
@@ -995,13 +995,13 @@ fn mtime_seconds(path: &Path) -> i64 {
 
 /// `thumb`: one photo's preview pixels as a file (S9).
 ///
-/// The picker's expensive half is the decode plus the resample to the size the pane
-/// shows, and this is that half with a number attached: S13 holds the widget's
-/// texture to these pixels, and `--stats` reports what one preview costs, which is the
-/// budget S12's cache and coarse-grid decisions are made against. **`--region` is the
-/// window's 1:1 view** (S15j): the pane's own picture is a rectangle of the photo
-/// resampled so that its long edge is the rectangle's (`thumbnail_region`, the same
-/// call), and with `--px` equal to that edge this command writes exactly those pixels.
+/// A preview's expensive half is the decode plus the resample to the size it is
+/// shown at, and this is that half with a number attached: S13 held the widget's
+/// texture to these pixels, and `--stats` reports what one preview costs, which is
+/// the budget S12's cache and coarse-grid decisions are made against. **`--region`
+/// is a 1:1 preview** (S15j): the picture is a rectangle of the photo resampled so
+/// that its long edge is the rectangle's (`thumbnail_region`, the same call), and
+/// with `--px` equal to that edge this command writes exactly those pixels.
 fn thumb(args: ThumbArgs) -> Result<u8, Failure> {
     let format = Format::from_path(&args.out).ok_or_else(|| {
         Failure::Usage(format!(
