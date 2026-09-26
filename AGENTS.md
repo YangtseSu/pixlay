@@ -68,7 +68,12 @@ use the display the process already has — `PIXLAY_TEST_CHILD=1`, e.g. `PIXLAY_
 test` — and its own failure message says so; **an Xvfb is not mutter's equal**: with no window manager GTK
 frames the window inside its own surface, so every window geometry the suite reads comes out 10 px smaller in
 each direction (measured 1090x584 against 1100x594), and a run on it is a fallback run whose numbers are that
-display's. So the entry works on a build box and on a machine that is in use.
+display's. So the entry works on a build box and on a machine that is in use. **On GitHub's runners mutter
+does not survive** (measured 2026-09-27: with no GPU node it dies of its own GL setup — `Mutter terminated
+with a failure: The command exited with a nonzero status: 139`), so `ci.yml` gives the job a headless
+**Weston** on llvmpipe and runs the suite with `PIXLAY_TEST_CHILD=1`: Weston is a real compositor, so the
+box the suite reads is a session's, but the numbers recorded in this file stay mutter's and a Weston run's
+are that compositor's.
 
 
 Measurement rules that go with it:
@@ -229,11 +234,12 @@ versions**. Everything follows the latest stable release.
   `ubuntu-latest` still resolves to 24.04 — and **no container** (both ruled 2026-09-27, human): the
   `archlinux:latest` container this ran in could not present a frame from its headless mutter
   (`the widget never produced a render node … waited 180.0s, 0 frames arrived`), so the GUI suite never
-  went green there, and the suite now runs on the runner's own display stack with the distribution's
-  libraries. CI therefore answers "does the program run" on Ubuntu's stack — the Arch build is the
-  machine's, through `makepkg` (below). The one action moves with its major tag
-  (`actions/checkout@v7`) rather than being pinned to a commit SHA: under this policy a pin is the thing
-  that has to be justified
+  went green there, and the suite now runs on the runner's own stack with the distribution's libraries —
+  inside a headless **Weston** on llvmpipe, because the runner's mutter dies of its own GL setup (the
+  entry above has both measurements). CI therefore answers "does the program run" on Ubuntu's stack — the
+  Arch build is the machine's, through `makepkg` (below). The actions move with their major tags
+  (`actions/checkout@v7`, `pyvista/setup-headless-display-action@v3`) rather than being pinned to a commit
+  SHA: under this policy a pin is the thing that has to be justified
 - **Keeping the dependency set minimal** does not conflict with tracking the latest: few, but each
   one current.
 

@@ -6,7 +6,19 @@
 # the GUI suite never went green there: the container's headless mutter mapped the window
 # and then never presented a frame — `the widget never produced a render node … waited
 # 180.0s, 0 frames arrived` (`crates/pixlay/tests/mainpath.rs`). So the suite runs on the
-# runner's own display stack, and the libraries come from the distribution.
+# runner's own stack, with the libraries from the distribution.
+#
+# **The display is a headless Weston, not the suite's own mutter** (same ruling). mutter is
+# the compositor this app is developed against and the one whose window behaviour the
+# recorded numbers are (`AGENTS.md`, the entry), and the harness starts a private one by
+# default — but on a runner with no GPU node mutter dies of its own GL setup
+# (`Mutter terminated with a failure: The command exited with a nonzero status: 139`,
+# measured 2026-09-27), and mutter cannot be run *inside* another compositor. So the job
+# sets up a headless Wayland compositor with `pyvista/setup-headless-display-action`, and
+# the suite is told to use the display it already has (`PIXLAY_TEST_CHILD=1`, the harness's
+# own escape hatch in `tests/support/mod.rs`) — the same path a bare Xvfb exercises. Weston
+# is a real compositor on mesa's llvmpipe, so the window is a managed one and the box the
+# suite reads is a session's, not a frameless surface's.
 #
 # The floors `meson.build` declares are below what 26.04 ships (gtk4 ≥ 4.12,
 # libadwaita-1 ≥ 1.8 — 26.04 has 1.9.0, and `libglycin-2-dev` is the 2.x package this tree
@@ -16,11 +28,6 @@
 # **The package is not built here** (ruled 2026-09-26, human): `makepkg`, the PKGBUILD and
 # its `check()` are verified on a machine, where a package can be built *and installed*,
 # and what this job answers is "does the program run".
-#
-# **The display is mutter, not an Xvfb** (same ruling; `AGENTS.md`'s entry): mutter is the
-# compositor this app is developed against and the one whose window behaviour the tests
-# measure, and it needs no GPU node. It does need a **session bus** (`dbus-run-session`,
-# which the Test step provides) and a machine-id for `dbus-daemon`, which the runner has.
 name: CI
 
 on:
@@ -39,35 +46,33 @@ jobs:
         # `libheif-plugin-dav1d` (measured 2026-09-27: without them a GUI test reports
         # "1 photo could not be read" and its export lands nowhere); `gettext` is
         # `tests/i18n.rs` (it runs `po/extract-pot`), `shared-mime-info` the MIME database
-        # a packaging test reads, `mutter` and `dbus` the display the tests run on and the
-        # bus it needs, and mesa's software rasterizers the GL the runner has no GPU for.
+        # a packaging test reads, `meson`/`ninja-build`/`pkg-config` the project's own build,
+        # `dbus` the session bus the tests run under, and the icon theme and one font family
+        # are what a window draws with.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libgtk-4-dev libadwaita-1-dev libglycin-2-dev glycin-loaders bubblewrap \
             libheif1 libheif-plugin-libde265 libheif-plugin-dav1d \
             libseccomp-dev gettext shared-mime-info meson ninja-build pkg-config \
-            adwaita-icon-theme fonts-dejavu-core \
-            mutter dbus libgl1-mesa-dri libglx-mesa0 libegl-mesa0 mesa-vulkan-drivers
+            adwaita-icon-theme fonts-dejavu-core dbus
       - name: Format
         run: cargo fmt --check
       - name: Lint
         run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Set up a headless display
+        # A headless Weston on llvmpipe: the action starts it, pins both ends to the
+        # software rasterizer, and exports `WAYLAND_DISPLAY` and `XDG_RUNTIME_DIR`.
+        uses: pyvista/setup-headless-display-action@v3
+        with:
+          wm: weston
+          pyvista: false
       - name: Test
-        # The harness starts its own headless mutter, on a virtual monitor of 1920x1200
-        # (above the app's own 1100x760 default window). What it cannot make for itself is
-        # `XDG_RUNTIME_DIR`, where mutter puts its Wayland socket. The GL is the runner's
-        # software rasterizer, named rather than discovered: with no GPU node, mesa's Zink
-        # cannot choose a device and EGL fails to make a screen, and mutter dies of it
-        # (`Mutter terminated with a failure: The command exited with a nonzero status: 139`,
-        # measured 2026-09-27). `GTK_A11Y=none` is the runner's missing accessibility bus,
-        # which GTK warns about on every window.
+        # `PIXLAY_TEST_CHILD=1` is the harness's own escape hatch: use the display the
+        # process already has instead of starting a private mutter. `GTK_A11Y=none` is the
+        # accessibility bus a runner does not have, which GTK warns about on every window.
         run: |
-          install -d -m 700 /var/tmp/pixlay-runtime
-          XDG_RUNTIME_DIR=/var/tmp/pixlay-runtime \
-          LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe MESA_LOADER_DRIVER_OVERRIDE=llvmpipe \
-          GTK_A11Y=none \
-            dbus-run-session -- cargo test --workspace
+          PIXLAY_TEST_CHILD=1 GTK_A11Y=none dbus-run-session -- cargo test --workspace
       # The entry's own render, on the repository's own project: eight photos on
       # `mosaic-8-s14`, which exercises decode, resample, the clamp, `draw` and the encoder
       # in one run. `--stats` makes it machine-readable; the image itself is looked at by a
