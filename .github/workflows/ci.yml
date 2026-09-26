@@ -34,15 +34,18 @@ jobs:
       - uses: actions/checkout@v7
       - name: Install the libraries
         # `libglycin-2-dev` is the decoding backend's 2.x package and `glycin-loaders` the
-        # sandboxed loaders the fixtures need (HEIC and AVIF come from `libheif1`);
-        # `gettext` is `tests/i18n.rs` (it runs `po/extract-pot`), `shared-mime-info` the
-        # MIME database a packaging test reads, `mutter` and `dbus` the display the tests
-        # run on and the bus it needs, and mesa's software rasterizers the GL the runner
-        # has no GPU for.
+        # sandboxed loaders the fixtures need — and Ubuntu splits libheif's decoders into
+        # plugins, so the HEIC fixture needs `libheif-plugin-libde265` and the AVIF one
+        # `libheif-plugin-dav1d` (measured 2026-09-27: without them a GUI test reports
+        # "1 photo could not be read" and its export lands nowhere); `gettext` is
+        # `tests/i18n.rs` (it runs `po/extract-pot`), `shared-mime-info` the MIME database
+        # a packaging test reads, `mutter` and `dbus` the display the tests run on and the
+        # bus it needs, and mesa's software rasterizers the GL the runner has no GPU for.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libgtk-4-dev libadwaita-1-dev libglycin-2-dev glycin-loaders libheif1 bubblewrap \
+            libgtk-4-dev libadwaita-1-dev libglycin-2-dev glycin-loaders bubblewrap \
+            libheif1 libheif-plugin-libde265 libheif-plugin-dav1d \
             libseccomp-dev gettext shared-mime-info meson ninja-build pkg-config \
             adwaita-icon-theme fonts-dejavu-core \
             mutter dbus libgl1-mesa-dri libglx-mesa0 libegl-mesa0 mesa-vulkan-drivers
