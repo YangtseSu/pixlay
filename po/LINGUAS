@@ -1,0 +1,9 @@
+# The languages this project ships translations for, one per line, as
+# `po/<language>.po` and `<language>` in a locale directory (the convention
+# `msgfmt --desktop -d po` and `msgfmt --xml -d po` read too, so the desktop
+# file and the metainfo can be generated with the languages merged).
+#
+# It is empty on purpose: English is the source language, and a language pack
+# is added (this file plus `po/<language>.po`) rather than shipped by S16.
+# Nothing depends on a language being listed — with none, the install has the
+# templates' own English text.

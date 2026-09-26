@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Pixlay
+GenericName=Photo Collage
+Comment=Make a collage out of one to nine photos
+Exec=pixlay %F
+Icon=org.yangtse.Pixlay
+Terminal=false
+Categories=Graphics;Photography;
+Keywords=collage;photo;grid;layout;mosaic;
+StartupNotify=true
+MimeType=application/x-pixlay;

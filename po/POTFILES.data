@@ -1,0 +1,11 @@
+# The data files whose strings are translated: the desktop entry and the
+# AppStream metainfo. Their templates are installed (the desktop file and the
+# metainfo are generated from them by `msgfmt`, see `packaging/`), so the
+# strings live in the `.in` files and not in the installed ones.
+#
+# `extract-pot` extracts these by extension — the desktop entry with
+# `--language=Desktop`, the metainfo through gettext's ITS rules — and
+# `tests/i18n.rs` checks this list against the tree, the way it checks
+# `po/POTFILES` against this crate's sources.
+data/org.yangtse.Pixlay.desktop.in
+data/org.yangtse.Pixlay.metainfo.xml.in

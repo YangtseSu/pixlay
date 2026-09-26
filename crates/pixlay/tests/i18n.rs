@@ -3,7 +3,10 @@
 //!
 //! The step's criteria are machine-checkable here, and this is where they live:
 //! "the set of files listed in `po/POTFILES` == `crates/pixlay/src/**/*.rs`", "the
-//! `.pot` is committed with the repository", and "the interface is English when
+//! set in `po/POTFILES.data` == the translatable data files" (S16: the desktop
+//! entry and the AppStream metainfo), "the `.pot` is committed with the
+//! repository" — as `po/extract-pot` extracts it, which is the one implementation
+//! of the three xgettext passes that build it — and "the interface is English when
 //! the locale is missing, `C` or unknown". The last one is the child half of this
 //! test: the locale is a process property, so a process that wants another one has
 //! to be a different process.
@@ -54,14 +57,48 @@ fn source_files() -> BTreeSet<String> {
     found
 }
 
-fn potfiles() -> BTreeSet<String> {
-    std::fs::read_to_string(root().join("po/POTFILES"))
-        .expect("po/POTFILES is committed")
+/// One of the two lists `po/extract-pot` extracts from, as it spells its files.
+fn listed(list: &str) -> BTreeSet<String> {
+    let path = root().join("po").join(list);
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("{} is committed: {error}", path.display()))
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
         .map(str::to_string)
         .collect()
+}
+
+/// The data files that carry translatable strings: the templates `msgfmt`
+/// generates the installed desktop entry and metainfo from. Their extension is
+/// what `po/extract-pot` reads them by (`--language=Desktop` for the first, the
+/// AppStream ITS rules for the second), so it is also what this walk looks for —
+/// a template with a name neither pass would pick up is a template whose strings
+/// no translator sees, and the set comparison below is what catches it.
+fn data_files() -> BTreeSet<String> {
+    fn translatable(path: &Path) -> bool {
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        name.ends_with(".desktop.in") || name.ends_with(".metainfo.xml.in")
+    }
+    let root = root();
+    let mut found = BTreeSet::new();
+    let mut stack = vec![root.join("data")];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).expect("data is readable") {
+            let path = entry.expect("a directory entry").path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if translatable(&path) {
+                found.insert(
+                    path.strip_prefix(&root)
+                        .expect("the path is inside the repository")
+                        .to_string_lossy()
+                        .into_owned(),
+                );
+            }
+        }
+    }
+    found
 }
 
 /// One message of a `.pot`: its id, and the source files its references name.
@@ -172,20 +209,31 @@ fn the_strings_are_extractable_and_the_fallback_is_english() {
     }
     // `po/POTFILES` lists every source file of this crate, and nothing else.
     let sources = source_files();
-    let listed = potfiles();
+    let listed_sources = listed("POTFILES");
     assert_eq!(
-        listed,
+        listed_sources,
         sources,
         "po/POTFILES and crates/pixlay/src disagree:\n  only in POTFILES: {:?}\n  only in the tree: {:?}",
-        listed.difference(&sources).collect::<Vec<_>>(),
-        sources.difference(&listed).collect::<Vec<_>>(),
+        listed_sources.difference(&sources).collect::<Vec<_>>(),
+        sources.difference(&listed_sources).collect::<Vec<_>>(),
+    );
+    // And `po/POTFILES.data` is the same statement about the translated data
+    // files: the desktop entry and the metainfo (S16).
+    let data = data_files();
+    let listed_data = listed("POTFILES.data");
+    assert_eq!(
+        listed_data,
+        data,
+        "po/POTFILES.data and data/ disagree:\n  only in POTFILES.data: {:?}\n  only in the tree: {:?}",
+        listed_data.difference(&data).collect::<Vec<_>>(),
+        data.difference(&listed_data).collect::<Vec<_>>(),
     );
 
     // The committed `.pot` carries every string a fresh extraction finds, and the
     // entry for each one names the files it really comes from. The comparison is on
     // the messages, not on bytes: the file's header holds a creation date, and a
     // byte comparison would fail for a reason that says nothing about the strings.
-    let extracted = run_xgettext();
+    let extracted = run_extract_pot(&support::out_dir().join("pixlay.pot"));
     let committed =
         std::fs::read_to_string(root().join("po/pixlay.pot")).expect("po/pixlay.pot is committed");
     let fresh = messages(&extracted);
@@ -202,8 +250,7 @@ fn the_strings_are_extractable_and_the_fallback_is_english() {
         saved_ids,
         fresh_ids,
         "po/pixlay.pot is out of date:\n  missing: {:?}\n  stale: {:?}\n\
-         regenerate it with:\n  xgettext --language=Rust --from-code=UTF-8 --package-name=pixlay \
-         -f po/POTFILES -o po/pixlay.pot",
+         regenerate it with:\n  po/extract-pot",
         fresh_ids.difference(&saved_ids).collect::<Vec<_>>(),
         saved_ids.difference(&fresh_ids).collect::<Vec<_>>(),
     );
@@ -309,26 +356,29 @@ fn check_translation() {
     );
 }
 
-fn run_xgettext() -> String {
-    let output = Command::new("xgettext")
-        .current_dir(root())
-        .args([
-            "--language=Rust",
-            "--from-code=UTF-8",
-            "--package-name=pixlay",
-            "-o",
-            "-",
-            "-f",
-            "po/POTFILES",
-        ])
+/// A fresh extraction of the template, by the one implementation of it the
+/// repository has: `po/extract-pot` writes `out` and this reads it back.
+///
+/// The script rather than three `xgettext` calls here, so the check cannot drift
+/// from what a translator's `msgmerge` is handed: the passes, their languages and
+/// their `--join-existing` are the script's, and this only compares its output
+/// with the committed file.
+fn run_extract_pot(out: &Path) -> String {
+    let root = root();
+    let script = root.join("po/extract-pot");
+    let output = Command::new("sh")
+        .current_dir(&root)
+        .arg(&script)
+        .arg(out)
         .output()
-        .expect("xgettext (gettext-tools) is needed to check the catalog");
+        .unwrap_or_else(|error| panic!("{} runs: {error}", script.display()));
     assert!(
         output.status.success(),
-        "xgettext failed:\n{}",
+        "{} failed:\n{}",
+        script.display(),
         String::from_utf8_lossy(&output.stderr)
     );
-    String::from_utf8(output.stdout).expect("xgettext writes UTF-8")
+    std::fs::read_to_string(out).expect("the extraction wrote its template")
 }
 
 /// A minimal `.mo` writer: the format is small and writing it here keeps the test

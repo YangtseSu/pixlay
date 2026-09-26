@@ -30,7 +30,7 @@ two-cell swap (`docs/2026-09-25-STEPS.md`, ruling 31). That supersedes the photo
 | Config / project | `~/.config/pixlay/` · `.pixlay` |
 | Toolchain | edition 2024 · resolver 3 · `rust-version` follows Arch's installed rustc (currently `1.98`); every baseline number is measured `--release` |
 | app-id | `org.yangtse.Pixlay` (own domain `yangtse.org`, reversed; not a borrowed `io.github.*` namespace) |
-| i18n | gettext, domain `pixlay` (source language English; `.pot`/`po/` at the repository root; extraction only via `xgettext --language=Rust`) |
+| i18n | gettext, domain `pixlay` (source language English; `.pot`/`po/` at the repository root; extraction via `xgettext` — the shell's Rust strings, the desktop template with `--language=Desktop`, and the metainfo through gettext's AppStream ITS rules, all joined into the one `po/pixlay.pot` by `po/extract-pot`, since S16) |
 
 ## Verification entry (must run after every change)
 
@@ -343,6 +343,13 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
   canvas and the export stay style-independent because they are document content, not styling. The canvas and the export are **always opaque and independent of the UI theme** — the
   backdrop is document content (white unless the document's own frame says otherwise), not styling
   (see "Hard constraints").
+- **Icons and the app's own files** (S16): the app icon and its symbolic variant are drawn on the HIG's
+  own grids (`guidelines/app-icons`, `guidelines/ui-icons`, `reference/palette` — the app-id is their file
+  name, and the desktop file's `Icon=` is the same string), and the desktop entry, the AppStream metainfo
+  and the `.pixlay` MIME registration live as templates under `data/`, generated with `msgfmt` at build
+  time. `crates/pixlay/tests/packaging.rs` holds the names, the version and the license to
+  `pixlay::APP_ID` and the manifests; what only the tools can judge is the PKGBUILD's `check()`
+  (`desktop-file-validate`, `appstreamcli validate`).
 - **Keyboard**: standard shortcuts per HIG `reference/keyboard`; `Alt+*`, `Super+*` and
   system-reserved combinations are forbidden; the main path must be walkable with the keyboard
   alone, and every action needs a keyboard path. Since S7 the table is data —
@@ -478,7 +485,16 @@ not a criterion — a visual conclusion must become a number (a probe) in the CL
 ## AUR discipline
 
 - Commit `Cargo.lock`; keep dependencies minimal; `cargo vendor` must pass
-- The PKGBUILD uses `--frozen --offline`, `depends=('gtk4' 'libadwaita')`
+- The PKGBUILD uses `--frozen --offline`, `depends=('gtk4' 'libadwaita' 'glycin')` (the decoding
+  backend of "Open / to be proven" is a linked library, so it is a runtime dependency) and installs
+  both binaries, the app icon with its symbolic variant, the generated desktop entry and metainfo, the
+  `.pixlay` MIME type and the catalogs `po/LINGUAS` lists (`docs/CONTRACT.md` §10)
+- `source=` is the release tag's tarball built from `pkgver`; a release pushes `vX.Y.Z`, fills
+  `sha256sums` with `updpkgsums` and writes `.SRCINFO`
+- `check()` validates the generated artifacts (`desktop-file-validate`, `appstreamcli validate
+  --no-net`), checks every catalog with `msgfmt`, and runs the workspace's tests offline on a display it
+  provides (`PIXLAY_TEST_CHILD=1` plus Xvfb, because a chroot has no GPU node for the harness' own
+  mutter) — every fixture is in the repository
 - SPDX is `GPL-3.0-or-later` throughout (not `-only`)
 
 ## Dependency registry

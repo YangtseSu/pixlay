@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The `.pixlay` project type (S16): the document `Save as…` writes and `Open…`
+     reads is JSON (docs/CONTRACT.md §1), so the type is a private one
+     subclassing application/json, with the app's own icon on it. Installed as
+     /usr/share/mime/packages/org.yangtse.Pixlay.xml; `update-mime-database`
+     (the shared-mime-info hook) picks it up, which is what makes the desktop
+     file's MimeType=application/x-pixlay line a real handler. -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-pixlay">
+    <comment>Pixlay collage</comment>
+    <icon name="org.yangtse.Pixlay"/>
+    <glob pattern="*.pixlay"/>
+    <sub-class-of type="application/json"/>
+  </mime-type>
+</mime-info>

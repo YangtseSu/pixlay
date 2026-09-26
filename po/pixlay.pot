@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: pixlay\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-26 17:35+0800\n"
+"POT-Creation-Date: 2026-09-26 20:25+0800\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -206,41 +206,41 @@ msgstr ""
 msgid "{} in per cent"
 msgstr ""
 
-#: crates/pixlay/src/layout.rs:111 crates/pixlay/src/layout.rs:356
+#: crates/pixlay/src/layout.rs:112 crates/pixlay/src/layout.rs:357
 msgid "Remove the last cell"
 msgstr ""
 
-#: crates/pixlay/src/layout.rs:112 crates/pixlay/src/layout.rs:362
+#: crates/pixlay/src/layout.rs:113 crates/pixlay/src/layout.rs:363
 msgid "Add a cell"
 msgstr ""
 
-#: crates/pixlay/src/layout.rs:119
+#: crates/pixlay/src/layout.rs:120
 msgid "Photos in the collage"
 msgstr ""
 
-#: crates/pixlay/src/layout.rs:145
+#: crates/pixlay/src/layout.rs:146
 msgid "Layouts"
 msgstr ""
 
-#: crates/pixlay/src/layout.rs:358 crates/pixlay/src/window.rs:1712
+#: crates/pixlay/src/layout.rs:359 crates/pixlay/src/window.rs:1712
 msgid "A collage needs at least one photo"
 msgstr ""
 
-#: crates/pixlay/src/layout.rs:361
+#: crates/pixlay/src/layout.rs:362
 #, rust-format
 msgid "Add a cell and bring back “{}”"
 msgstr ""
 
-#: crates/pixlay/src/layout.rs:363 crates/pixlay/src/window.rs:1738
+#: crates/pixlay/src/layout.rs:364 crates/pixlay/src/window.rs:1738
 #, rust-format
 msgid "A collage takes at most {} photos"
 msgstr ""
 
-#: crates/pixlay/src/layout.rs:391 crates/pixlay/src/layout.rs:392
+#: crates/pixlay/src/layout.rs:392 crates/pixlay/src/layout.rs:393
 msgid "No layout has this many photos"
 msgstr ""
 
-#: crates/pixlay/src/layout.rs:429
+#: crates/pixlay/src/layout.rs:430
 #, rust-format
 msgid "Layout {} of {}"
 msgstr ""
@@ -453,4 +453,53 @@ msgstr ""
 
 #: crates/pixlay/src/workers.rs:58
 msgid "The export worker stopped"
+msgstr ""
+
+#: data/org.yangtse.Pixlay.desktop.in:3
+#: data/org.yangtse.Pixlay.metainfo.xml.in:12
+msgid "Pixlay"
+msgstr ""
+
+#: data/org.yangtse.Pixlay.desktop.in:4
+msgid "Photo Collage"
+msgstr ""
+
+#: data/org.yangtse.Pixlay.desktop.in:5
+#: data/org.yangtse.Pixlay.metainfo.xml.in:13
+msgid "Make a collage out of one to nine photos"
+msgstr ""
+
+#: data/org.yangtse.Pixlay.desktop.in:10
+msgid "collage;photo;grid;layout;mosaic;"
+msgstr ""
+
+#: data/org.yangtse.Pixlay.metainfo.xml.in:15
+msgid ""
+"Pixlay lays photos out on a sheet: add one to nine of them, pick a layout, "
+"frame each photo in its cell, give the collage a frame of its own and export "
+"the finished image for printing."
+msgstr ""
+
+#: data/org.yangtse.Pixlay.metainfo.xml.in:20
+msgid "Features:"
+msgstr ""
+
+#: data/org.yangtse.Pixlay.metainfo.xml.in:22
+msgid "Regular and irregular layouts for one to nine photos"
+msgstr ""
+
+#: data/org.yangtse.Pixlay.metainfo.xml.in:23
+msgid "Pan, zoom and arbitrary rotation for the photo in each cell"
+msgstr ""
+
+#: data/org.yangtse.Pixlay.metainfo.xml.in:24
+msgid "A frame with its own gap, corner radius and colour"
+msgstr ""
+
+#: data/org.yangtse.Pixlay.metainfo.xml.in:25
+msgid "Export to PNG or JPEG at a long edge of your choice"
+msgstr ""
+
+#: data/org.yangtse.Pixlay.metainfo.xml.in:32
+msgid "Yangtse Su"
 msgstr ""

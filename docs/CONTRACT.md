@@ -1218,6 +1218,24 @@ from a snapshot with the guttered document open.
 | the candidates measured before 35% | `@view_bg_color` 29,29,32 (the defect) · `@headerbar_bg_color` 46,46,50 · `@dialog_bg_color` 54,54,58 — surfaces of other parts of the window, all still darker than the band's own tile — and a 50% mix 142,142,144, lighter than both tile states and too light for the outlines |
 | `color-mix()` in this toolkit | resolved by GTK 4.24 in both schemes (the theme's own `--border-color` is one), so the ink is derived from two theme variables and no literal is named |
 
+### S16 (2026-09-26, this machine)
+
+The package, measured where it can be measured without root (the step's own record is
+`docs/2026-09-25-STEPS.md`, `S16 · Result`):
+
+| | |
+|---|---|
+| `makepkg` on this machine (CachyOS, Arch-compatible) | **1 m 30 s** wall (14 m 40 s CPU) from a `git archive` tarball in `SRCDEST`; the release build inside it is the profile every other number on this page is measured in |
+| the package | `pixlay-0.1.0-1-x86_64.pkg.tar.zst` **3,727,778 bytes**, 26 entries, and makepkg's packaging check is silent — the `references to $srcdir` warning the `debug = 1` release profile earns is remapped away in `prepare()` |
+| the payload, run from an extracted copy (`pacman -U` is root) | the installed `pixlay-render render` on the verification project at a 2000 px long edge: **478,359 bytes**, `peak_rss_mb` **62.9**; the installed `pixlay`, given a photo on its command line, stays up for ten seconds on a private headless `mutter` |
+| the `.pixlay` type | `xdg-mime query filetype x.pixlay` answers **`application/x-pixlay`**; GIO's `standard::icon` for it is **`org.yangtse.Pixlay`** plus the `-symbolic` variants, so the registration's `<icon name>` is honoured |
+| the translation template | `po/extract-pot` writes **111** messages: the shell's Rust strings plus the desktop entry's and the metainfo's, in one `po/pixlay.pot` |
+| the entry's render (unchanged by this step) | 14043x10532, **ms 5133.1 + encode_ms 1217.5**, `peak_rss_mb` **1633.4**, **9,157,670 bytes**, `cmp`-identical to the S30 render — packaging moves no pixel of a document |
+
+**Not measured here**: the clean-chroot `makepkg` and `check()` inside it (both root), and `check()`'s Xvfb
+display on this machine (Xvfb is not installed, and installing it is root). The rootless container that was
+tried instead is recorded in the step's Result, including the one finding it left open.
+
 ## 9. The window (S7), and the shell ruling 31 re-cut (S22)
 
 The GUI is the fifth consumer of the same document, and what it adds is interaction. Its
@@ -1664,4 +1682,53 @@ What the window does *not* do, by decision: no second renderer, no second docume
 **parallel** modes over one document (a sequential creation flow is not a mode — 2026-09-22's ruling),
 no utility pane (ruling 18: the shell has one custom-drawn widget, the canvas, and every other control
 is a stock or libadwaita widget), no per-window state that a saved project does not carry, and no
-translation files (S16 adds the language packs).
+translation shipped **in the repository** — the pipeline that installs one is §10's (S16); what
+ships today is the English source strings and the machinery that would carry a language pack.
+
+## 10. The package (S16)
+
+The AUR package is not a second product: it installs the two binaries this repository builds, the data
+files the identity is spelled in, and the pipeline that would carry a language pack. What a caller can
+rely on without reading the PKGBUILD:
+
+- **One identity, spelled once per surface.** `org.yangtse.Pixlay` is the app-id at the same time in
+  `pixlay::APP_ID` (`lib.rs`), the desktop file's own name and its `Icon=`, the icon files
+  (`hicolor/scalable/apps/org.yangtse.Pixlay.svg` and `hicolor/symbolic/apps/org.yangtse.Pixlay-symbolic.svg`),
+  the metainfo's file name and its `<id>`, its `<launchable>` (`org.yangtse.Pixlay.desktop`) and the MIME
+  registration's `<icon>`. `crates/pixlay/tests/packaging.rs` is what fails when one of them moves
+  without the others.
+- **Paths.** `/usr/bin/pixlay` and `/usr/bin/pixlay-render` — the window and the machine surface
+  (`AGENTS.md`, "the CLI is the only machine-operable surface"; a caller with no display uses the
+  second); `/usr/share/applications/org.yangtse.Pixlay.desktop` with `Exec=pixlay %F`, so a double click
+  is the app's own `open` handler (§9) and a `.pixlay` really opens a project;
+  `/usr/share/metainfo/org.yangtse.Pixlay.metainfo.xml`; the two icons;
+  `/usr/share/mime/packages/org.yangtse.Pixlay.xml`, the `application/x-pixlay` type — a `*.pixlay`
+  glob with `sub-class-of application/json` (a project is JSON, §1) and the app's own icon;
+  `/usr/share/locale/<language>/LC_MESSAGES/pixlay.mo`, one per language `po/LINGUAS` lists, in the
+  domain the shell binds; and `/usr/share/licenses/pixlay/LICENSE`.
+- **Two of those files are generated and never edited.** The desktop entry and the metainfo come from
+  `data/org.yangtse.Pixlay.desktop.in` and `data/org.yangtse.Pixlay.metainfo.xml.in` plus the catalogs,
+  through `msgfmt --desktop` and `msgfmt --xml` with `-d po` — one call each, because `po/LINGUAS` is
+  what tells gettext which languages to merge in (`Name[de]`, `<summary xml:lang="de">`). The two
+  templates' strings are extracted into the one `po/pixlay.pot` together with the shell's Rust strings:
+  three `xgettext` passes — Rust, Desktop, and AppStream through gettext's own ITS rules — joined into
+  one template by `po/extract-pot`, which `tests/i18n.rs` runs and compares with the committed file.
+  `po/POTFILES` (this crate's sources) and `po/POTFILES.data` (the two templates) are held to the tree
+  by the same test.
+- **The language fallback is gettext's** and §9 states it: no catalog for the locale, and every string
+  is the English source string. `po/LINGUAS` is empty in this repository, so the package installs no
+  catalog at all today and the two generated files are their templates verbatim; a language pack is a
+  `.po` file plus a line in `LINGUAS`, and nothing else changes.
+- **The build.** `source=` is the release tag's tarball, built from `pkgver`; a release pushes `vX.Y.Z`,
+  fills `sha256sums` (`updpkgsums`) and writes `.SRCINFO`. The build calls `cargo vendor` once and every
+  `cargo` call after it is `--frozen --offline` against the committed `Cargo.lock`. `depends` is
+  `gtk4`, `libadwaita` and `glycin` — the decoding backend S4 measured is a linked library, so it is a
+  runtime dependency — with `libheif` an optdepend for HEIC and AVIF (as it is for `glycin` itself).
+- **`check()`** validates the generated artifacts as installed files (`desktop-file-validate` wants the
+  `.desktop` name), runs `appstreamcli validate --no-net` and `msgfmt --check` on every catalog, and
+  then runs the whole test suite — on a display the build gives it, because a chroot has none:
+  `PIXLAY_TEST_CHILD=1` tells the test harness to use the display this process has
+  (`crates/pixlay/tests/support/mod.rs`), and Xvfb with mesa's software GL is that display, since the
+  harness' own headless mutter wants a GPU node a chroot built without `/dev/dri` has not. Nothing in
+  `check()` reaches the network: the registry is vendored and every fixture is in the repository.
+- **Not doing** (the plan's own list): Flatpak, Snap, any other distribution.

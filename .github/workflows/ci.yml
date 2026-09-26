@@ -1,0 +1,127 @@
+# CI (S16). The verification entry `AGENTS.md` names, plus the package's own
+# gates, on `archlinux:latest` — the version policy's decision ("CI / packaging:
+# an `archlinux:latest` container, no pinned image tag"), so the rolling
+# toolchain and the rolling system libraries are, by construction, the ones the
+# AUR package builds against.
+#
+# **A display, because a runner has none.** The GUI half of `cargo test` needs
+# one, and `PIXLAY_TEST_CHILD=1` tells the harness to use the display the job
+# provides instead of starting its own headless mutter (`tests/support/mod.rs`);
+# Xvfb with mesa's software GL is that display. The PKGBUILD's `check()` does
+# exactly the same thing for the same reason — neither a container nor a chroot
+# has a GPU node.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  PIXLAY_TEST_CHILD: '1'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the toolchain
+        run: >-
+          pacman -Syu --noconfirm --needed base-devel rust cargo gtk4 libadwaita
+          gettext desktop-file-utils appstream shared-mime-info libheif
+          xorg-server-xvfb mesa
+      - name: Format
+        run: cargo fmt --check
+      - name: Lint
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        # The screen size is the harness' own virtual monitor's (1200 p tall at
+        # depth 24): Xvfb's defaults leave the window too small for
+        # `tests/compose.rs`'s geometry, measured in a chroot (the PKGBUILD's
+        # `check()` says the same).
+        run: xvfb-run -a -s "-screen 0 1920x1200x24" cargo test --workspace
+      # The entry's own render, on the repository's own project: eight photos on
+      # `mosaic-8-s14`, which exercises decode, resample, the clamp, `draw` and
+      # the encoder in one run. `--stats` makes it machine-readable; the image
+      # itself is looked at by a person, not by this job.
+      - name: Render the verification project
+        run: >-
+          cargo run --release -p pixlay-cli -- render
+          --project crates/pixlay-cli/tests/fixtures/verify.pixlay
+          --long-edge 14043 --stats --out /var/tmp/a.jpg
+
+  package:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the toolchain
+        run: >-
+          pacman -Syu --noconfirm --needed base-devel rust cargo gtk4 libadwaita
+          gettext desktop-file-utils appstream shared-mime-info libheif
+          xorg-server-xvfb mesa
+      - name: Make the tarball the PKGBUILD's source names
+        run: |
+          # `source=` names the release tag's tarball, and the tag is pushed at
+          # a release. This job builds the same PKGBUILD against the commit it
+          # is running on, so it hands makepkg a tarball of this tree under the
+          # name `source=` asks for — `git archive`'s prefix is what makes the
+          # extracted directory `pixlay-$pkgver`.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git archive --format=tar.gz --prefix=pixlay-0.1.0/ \
+            -o /var/tmp/pixlay-0.1.0.tar.gz HEAD
+      - name: Build the package
+        run: |
+          # makepkg refuses to run as root and the container is root, so the
+          # build happens as a user of its own with the PKGBUILD in its own
+          # directory. `--skipchecksums` is this job's and not the release's:
+          # the tarball above is this commit's, while the checksum the AUR
+          # carries is the tag tarball's (the PKGBUILD says what the release
+          # does about that). `check()` is not skipped — it is the point of
+          # this job, and it runs the whole test suite on the display this job
+          # has.
+          #
+          # **An open finding is recorded for this environment** (the plan's
+          # `S16 · Result`): in the rootless-container run of S16, a *full-suite*
+          # run on a WM-less Xvfb failed `tests/compose.rs`'s "the strip is
+          # inside its cell" on a window far smaller than its default, while the
+          # same test passed on its own. If this job fails there, that is the
+          # lead, not a new defect.
+          useradd -m builder
+          install -d -o builder /home/builder/pkg
+          install -o builder PKGBUILD /home/builder/pkg/PKGBUILD
+          su builder -c 'cd ~/pkg && SRCDEST=/var/tmp makepkg --skipchecksums \
+            --noconfirm'
+      - name: The package carries what it says it does
+        run: |
+          package=$(su builder -c 'cd ~/pkg && makepkg --packagelist')
+          bsdtar -tf "$package" > /var/tmp/files
+          for path in \
+            usr/bin/pixlay \
+            usr/bin/pixlay-render \
+            usr/share/applications/org.yangtse.Pixlay.desktop \
+            usr/share/metainfo/org.yangtse.Pixlay.metainfo.xml \
+            usr/share/icons/hicolor/scalable/apps/org.yangtse.Pixlay.svg \
+            usr/share/icons/hicolor/symbolic/apps/org.yangtse.Pixlay-symbolic.svg \
+            usr/share/mime/packages/org.yangtse.Pixlay.xml
+          do
+            grep -qx "$path" /var/tmp/files || {
+              echo "the package does not install $path" >&2
+              exit 1
+            }
+          done
+          pacman -U --noconfirm "$package"
+      # The installed package doing real work: the CLI's machine surface reads
+      # the project the entry names and renders it, with the decoding and the
+      # encoding the package links; and the window is started on a photo and has
+      # to stay up on a display of its own. What a person judges — the picture,
+      # and the main path walked by hand — is the gate after S16.
+      - name: The installed package starts and renders
+        run: |
+          pixlay-render templates | head -3
+          pixlay-render render \
+            --project "$GITHUB_WORKSPACE/crates/pixlay-cli/tests/fixtures/verify.pixlay" \
+            --long-edge 2000 --stats --out /var/tmp/installed.jpg
+          xvfb-run -a bash -c 'pixlay \
+            "$GITHUB_WORKSPACE/crates/pixlay-cli/tests/fixtures/photos/landscape.jpg" & \
+            window=$!; sleep 10; kill -0 "$window"; kill "$window"'

@@ -1,0 +1,38 @@
+#!/bin/sh
+# Regenerates the translation template, `po/pixlay.pot`, from its three sources —
+# or writes it to the path given as the first argument (which is how
+# `tests/i18n.rs` compares the committed template with a fresh extraction).
+#
+# Three passes, because `xgettext` reads one language per run:
+#
+#   1. the shell's Rust strings (`--language=Rust`, the list in `po/POTFILES`);
+#   2. the desktop entry (`--language=Desktop`, `po/POTFILES.data`);
+#   3. the AppStream metainfo (gettext's own ITS rules for AppStream, which is
+#      how `msgfmt --xml` reads the entries back).
+#
+# `--join-existing` appends each pass to the same file, so one domain keeps one
+# template: a translator merges it once and gets the UI strings, the desktop
+# entry's `Name`/`Comment` and the metainfo's `summary`/`description` together.
+#
+# English is the source language (`AGENTS.md`, "Language conventions"), and the
+# two lists are checked against the tree by `tests/i18n.rs`: a string in a file
+# no list names is a string no translator will ever see.
+set -eu
+
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+out=${1:-po/pixlay.pot}
+its=${GETTEXT_ITS:-/usr/share/gettext/its}/metainfo.its
+
+cd "$root"
+
+# The desktop entry and the metainfo come from the one list, split by extension:
+# each needs its own xgettext language mode.
+desktop=$(grep '\.desktop\.in$' po/POTFILES.data)
+metainfo=$(grep '\.metainfo\.xml\.in$' po/POTFILES.data)
+
+xgettext --language=Rust --from-code=UTF-8 --package-name=pixlay \
+    -f po/POTFILES -o "$out"
+xgettext --language=Desktop --from-code=UTF-8 --package-name=pixlay \
+    --join-existing -o "$out" $desktop
+xgettext --its="$its" --from-code=UTF-8 --package-name=pixlay \
+    --join-existing -o "$out" $metainfo

@@ -861,8 +861,14 @@ fn check_colour_schemes(window: &EditorWindow, failures: &mut Vec<String>) {
     }
     let area = window.canvas_widget();
     let canvas_widget = area.clone().upcast::<gtk4::Widget>();
+    // **Nothing selected, so nothing is drawn over the sheet.** The strip and the
+    // selection outline are interface over content — themed by design — and a probe that
+    // landed on one would measure the theme twice over (the mark is the accent, the
+    // strip's buttons are libadwaita's) instead of measuring the collage. The state is
+    // the window's own: `open_document` clears the selection the same way.
+    window.select(None);
     let mut painted: Vec<(String, support::Image)> = Vec::new();
-    let mut grids: Vec<pixlay_core::PixelSize> = Vec::new();
+    let mut geometry: Vec<(i32, i32, pixlay_core::PixelSize)> = Vec::new();
     for scheme in [adw::ColorScheme::ForceDark, adw::ColorScheme::ForceLight] {
         manager.set_color_scheme(scheme);
         // The repaint the scheme change causes is what this measures, and a snapshot
@@ -878,25 +884,44 @@ fn check_colour_schemes(window: &EditorWindow, failures: &mut Vec<String>) {
         // scales one and blits the other. That is a resampling difference between two
         // reads of two different decode states, and it says nothing about the theme; the
         // wait is what makes both reads the same measurement.
-        let _ = support::canvas_bitmaps(window);
-        grids.push(window.images().0);
+        //
+        // **And the geometry each read was drawn at is part of the measurement.** The
+        // canvas draws through the *widget's* size — `canvas::placement(grid, width,
+        // height)` — while a snapshot replays the widgets' cached render nodes, which can
+        // be a frame older than the allocation: measured in a chroot, the frame's canvas
+        // was 236 px tall where the widget read 244, so the sheet came out 283x212 against
+        // the 293x220 the placement promises. The reads' own geometry is therefore
+        // recorded per scheme and compared below, and the probes are placed in the pair
+        // both agreed on.
+        let (width, height) = support::canvas_bitmaps(window);
+        geometry.push((width, height, window.images().0));
         painted.push((format!("{scheme:?}"), support::snapshot(window)));
     }
     // The app's own scheme, not `Default`: dark is what `app.rs` sets at startup
     // (ruling 23), so the window is left where the application put it.
     manager.set_color_scheme(adw::ColorScheme::ForceDark);
-    if grids[0] != grids[1] {
+    if geometry[0] != geometry[1] {
         failures.push(format!(
-            "the canvas's bitmaps changed between the two colour schemes ({:?} then {:?})",
-            grids[0], grids[1]
+            "the canvas moved between the two colour schemes ({}x{} at {:?}, then {}x{} at \
+             {:?}); the two reads are not one measurement",
+            geometry[0].0,
+            geometry[0].1,
+            geometry[0].2,
+            geometry[1].0,
+            geometry[1].1,
+            geometry[1].2,
         ));
     }
     let (dark, light) = (&painted[0].1, &painted[1].1);
 
+    // The canvas the probes below are placed in: the settled pair above — the two reads
+    // agree, or the failure just pushed says they are not one measurement.
+    let (canvas_w, canvas_h, grid) = geometry[1];
+
     // The sheet's rectangle in the *window's* coordinates, which is what the two
-    // snapshots are in: the sheet is where the canvas's own placement puts it.
-    let (grid, _) = window.images();
-    let placement = canvas::placement(grid, area.width(), area.height());
+    // snapshots are in: the sheet is where the canvas's own placement puts it, on the
+    // canvas both reads agreed on.
+    let placement = canvas::placement(grid, canvas_w, canvas_h);
     let origin = canvas_widget
         .compute_point(
             window.upcast_ref::<gtk4::Widget>(),
@@ -941,11 +966,18 @@ fn check_colour_schemes(window: &EditorWindow, failures: &mut Vec<String>) {
     //    still reads as a page — and the selection outline (the theme's accent, S24)
     //    are not what this compares. The collage's pixels are the export's pixels and
     //    must not depend on the desktop's appearance.
-    let inset = 4;
+    // **The inset is a fraction of the sheet, not four pixels.** Four pixels was the
+    // old value, and it assumed the snapped frame's sheet is exactly the placement's
+    // rectangle: a frame drawn a moment before the window's last resize is a few pixels
+    // narrower (measured in a chroot: 283x212 against 293x220, because the frame was
+    // drawn at the previous allocation), which put the probe on the sheet's antialiased
+    // edge — where the theme shows through *by design*, since the sheet is clipped to
+    // its own rectangle. An eighth of the sheet is far from every edge and still content.
+    let (inset_x, inset_y) = (sheet_w / 8, sheet_h / 8);
     let probes = [
-        (sheet_x + inset, sheet_y + inset),
+        (sheet_x + inset_x, sheet_y + inset_y),
         (sheet_x + sheet_w / 2, sheet_y + sheet_h / 2),
-        (sheet_x + sheet_w - inset, sheet_y + sheet_h - inset),
+        (sheet_x + sheet_w - inset_x, sheet_y + sheet_h - inset_y),
     ];
     for (x, y) in probes {
         let (dark_pixel, light_pixel) = (support::pixel(dark, x, y), support::pixel(light, x, y));
@@ -958,9 +990,8 @@ fn check_colour_schemes(window: &EditorWindow, failures: &mut Vec<String>) {
     }
     eprintln!(
         "the canvas frame: {dark_edge:?} in dark, {light_edge:?} in light; the sheet \
-         {sheet_w}x{sheet_h} at {sheet_x},{sheet_y}, unchanged at all three probes \
-         (bitmaps {:?} in both schemes)",
-        grids[0]
+         {sheet_w}x{sheet_h} at {sheet_x},{sheet_y} on a {canvas_w}x{canvas_h} canvas, \
+         unchanged at all three probes (bitmaps {grid:?} in both schemes)",
     );
 }
 
