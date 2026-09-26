@@ -1415,12 +1415,16 @@ became the platform's. What a caller may rely on:
   item, and `app.settings` on `Ctrl+,` (HIG `reference/keyboard`) — with one page, one group and two rows:
   the format, and the long edge in pixels with the unit in its accessible name. A row writes as it moves;
   there is nothing to confirm and no *Save* button.
-- **A name whose extension is not the settings' format's is refused, not renamed** (S25). The format is the
-  settings' and the name came from the platform's own dialog, so `pixlay::export::extension_error` — the rule
-  the CLI's `--out` meets, in the same words — refuses a path whose extension is not that format's (both JPEG
-  spellings and any case are the JPEG format, `Format::from_path`'s rule) with a toast, and `export::run`
-  asks the same question again next to the alias rule, so a direct caller cannot write JPEG bytes under a
-  `.png` name either.
+- **The name's extension decides the format** (S25c, the human's ruling of 2026-09-26; the CLI's `--out`
+  rule, applied to the GUI). The settings' format is the *default*: it is what the save dialog's filter
+  offers and what the suggested name carries. A name the dialog returns with any other extension this build
+  writes is written in **that** format instead — `export::format_for` is the one function
+  (`Format::from_path`'s rule: both JPEG spellings, any case) — so with JPEG in the settings a `.png` name
+  is a PNG at the settings' long edge, and the export does not rewrite the settings' row. A name with no
+  extension, or with one this build does not write, is refused with a toast carrying the CLI's own message
+  (`<path>: expected .png, .jpg or .jpeg`), and `export::run` asks the same question again because it is the
+  function that reaches the file. `export::Request` therefore has no `format` field: a request cannot name a
+  format its file would lie about.
 - **One question is answered before an export starts (S15c)**: a path that names one of the document's own
   photos is refused on the spot — the same rule and the same message `render` and `thumb` use
   (`pixlay_imaging::destination`, asked through `EditorWindow::export_destination`), reported as a toast,

@@ -13,12 +13,13 @@
 //! **Since S25 the export is one dialog: the platform's own** (ruling 36). Pressing
 //! Export opens `GtkFileDialog::save` seeded by [`seed`] — the folder the last export
 //! used, the pictures directory when there is none, and the name the document
-//! suggests — and the path it answers becomes a [`Request`]: the format and the long
-//! edge come from the app's own settings (`crate::settings`, ruling 39), not from a
-//! form. A name whose extension is not the settings' format's is refused with the same
-//! message the CLI's `--out` meets ([`extension_error`]); replacing a file that is
-//! already there is the platform's own confirmation, which is why this module no
-//! longer asks about it.
+//! suggests — and the path it answers becomes a [`Request`]: the long edge comes from
+//! the app's own settings (`crate::settings`, ruling 39) and **the name's extension
+//! decides the format** ([`format_for`], S25c — the CLI's own `--out` rule, so a `.png`
+//! name is a PNG whether or not the settings' format row says JPEG). A name with an
+//! extension this build does not write is refused with the message the CLI gives;
+//! replacing a file that is already there is the platform's own confirmation, which is
+//! why this module does not ask about it.
 //!
 //! **The source-image rule is still asked twice** (S15c): the window asks it before it
 //! starts anything, so a refusal does not have to travel through a worker, and [`run`]
@@ -52,18 +53,18 @@ pub const MIN_EXPORT_PX: u32 = 256;
 /// `MAX_LONG_EDGE_PX`) because it is a machine surface, not a form.
 pub const MAX_EXPORT_PX: u32 = 12000;
 
-/// What one export asks for: the two parameters the settings hold, and the file the
+/// What one export asks for: the long edge the settings hold, and the file the
 /// platform's save dialog answered (S25, ruling 36).
 ///
-/// It was `Settings` until S25, when the word went to the app's own remembered
-/// settings (`crate::settings::Settings`): what this type carries is a *request* —
-/// where to write, at which format and which long edge — and the two parameters come
-/// from the settings rather than from a form.
+/// It was `Settings` until S25, when the word went to the app's own remembered settings
+/// (`crate::settings::Settings`): what this type carries is a *request* — where to write,
+/// and how big. **The format is not one of its fields** (S25c): it is the path's own
+/// extension ([`format_for`]), so a request cannot name a format its file would lie
+/// about, and the GUI and the CLI decide a format the same way.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Request {
     /// The long edge the export is rendered at, in pixels.
     pub long_edge: u32,
-    pub format: Format,
     pub path: PathBuf,
 }
 
@@ -129,27 +130,23 @@ pub fn extension(format: Format) -> &'static str {
     }
 }
 
-/// The refusal a path's own extension earns when it is not the format's.
+/// The format a path's own extension means (S25c), or the refusal an extension this
+/// build does not write earns.
 ///
-/// The extension is the whole interface between a file and its pixels (S15h, PIX-010):
-/// a `.png` holding JPEG bytes is worse than a refusal, and this is the rule the CLI's
-/// `--out` meets, in the same words. Both JPEG spellings are the JPEG format and the
-/// comparison is case-insensitive (`Format::from_path`), so `photo.JPEG` is a JPEG.
+/// **The extension is the whole interface between a file and its pixels** (S15h,
+/// PIX-010), and it is the only thing that decides a format here: the CLI's `--out` has
+/// always worked this way, and since S25c the GUI's export does too, so a `.png` name is
+/// a PNG whatever the settings' format row says. Both JPEG spellings are the JPEG format
+/// and the comparison is case-insensitive (`Format::from_path`), so `photo.JPEG` is a
+/// JPEG; a name with no extension, or with one this build does not write, is refused
+/// with the message the CLI gives for the same mistake.
 ///
-/// Since S25 the settings' format is the only format an export has, so a name that
-/// disagrees with it is refused rather than renamed: the name came from the platform's
-/// own save dialog, and a file that lands under a name the dialog never showed would be
-/// a worse answer than a toast. [`run`] asks the same question again, so a direct
-/// caller cannot write bytes under a name that lies about them.
-pub fn extension_error(path: &Path, format: Format) -> Result<(), String> {
-    if Format::from_path(path) == Some(format) {
-        return Ok(());
-    }
-    let expected = match format {
-        Format::Png => ".png",
-        Format::Jpeg => ".jpg or .jpeg",
-    };
-    Err(format!("{}: expected {expected}", path.display()))
+/// The window asks this before it starts a worker, so a refusal is a plain toast, and
+/// [`run`] asks it again because it is the function that reaches the file — which is also
+/// what makes the format a property of the path rather than a caller's field.
+pub fn format_for(path: &Path) -> Result<Format, String> {
+    Format::from_path(path)
+        .ok_or_else(|| format!("{}: expected {}", path.display(), Format::EXTENSIONS))
 }
 
 /// What the export's own save dialog opens on (S25, ruling 36).
@@ -210,10 +207,10 @@ pub fn run(
     // of the document's photos is lost, and this is the function that reaches the file
     // (S15c, PIX-001).
     destination(&settings.path, sources)?;
-    // The extension is the whole interface between a file and its pixels, and the
-    // window resolves the name through this same rule before it calls here (S15h,
-    // PIX-010): refusing again is what makes it true for a direct caller too.
-    extension_error(&settings.path, settings.format)?;
+    // The format is the name's own (S25c), asked here as well as by the window: refusing
+    // an extension this build does not write is what keeps a direct caller from writing
+    // bytes under a name that lies about them.
+    let format = format_for(&settings.path)?;
     let started = Instant::now();
     let canvas_px = grid(doc, settings)?;
 
@@ -255,7 +252,7 @@ pub fn run(
     let bytes = write(
         &settings.path,
         &Export {
-            format: settings.format,
+            format,
             image: Rgb8View {
                 width: image.width,
                 height: image.height,

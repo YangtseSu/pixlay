@@ -101,7 +101,7 @@ fn the_export_takes_the_settings_and_refuses_a_source_image_or_a_lying_name() {
     let error = window
         .export_to(&Request {
             long_edge: 800,
-            format: Format::Jpeg,
+
             path: photo.clone(),
         })
         .expect_err("an export over one of the document's photos is refused");
@@ -126,33 +126,32 @@ fn the_export_takes_the_settings_and_refuses_a_source_image_or_a_lying_name() {
         "a path with nothing at it is writable"
     );
 
-    // ---- the name the settings' format owns (S25) ------------------------
-    // The extension is the whole interface between a file and its pixels, and since S25
-    // the settings' format is the only format an export has: a name that disagrees with
-    // it is refused rather than renamed, because the name came from the platform's own
-    // dialog and a file that lands under a name the dialog never showed would be worse
-    // than a toast. Both JPEG spellings are the JPEG format, case-insensitively
-    // (`Format::from_path`, the CLI's `--out` rule).
-    for (name, ok) in [
-        ("holiday.jpg", true),
-        ("holiday.jpeg", true),
-        ("holiday.JPEG", true),
-        ("holiday.png", false),
-        ("holiday", false),
-        ("holiday.2024", false),
+    // ---- the name's extension decides the format (S25c) -------------------
+    // The extension is the whole interface between a file and its pixels, so it is what
+    // decides the format — the CLI's `--out` rule, and the human's ruling of 2026-09-26
+    // for the GUI: changing the extension in the platform's own dialog changes the format
+    // written, rather than being refused. Both JPEG spellings are the JPEG format,
+    // case-insensitively (`Format::from_path`), and an extension this build does not
+    // write is still refused, with the CLI's own message.
+    for (name, expected) in [
+        ("holiday.jpg", Some(Format::Jpeg)),
+        ("holiday.jpeg", Some(Format::Jpeg)),
+        ("holiday.JPEG", Some(Format::Jpeg)),
+        ("holiday.png", Some(Format::Png)),
+        ("holiday.PNG", Some(Format::Png)),
+        ("holiday", None),
+        ("holiday.2024", None),
     ] {
         assert_eq!(
-            export::extension_error(std::path::Path::new(name), Format::Jpeg).is_ok(),
-            ok,
-            "{name:?} against JPEG"
+            export::format_for(std::path::Path::new(name)).ok(),
+            expected,
+            "{name:?}"
         );
     }
-    assert!(export::extension_error(std::path::Path::new("shot.PNG"), Format::Png).is_ok());
-    assert!(export::extension_error(std::path::Path::new("shot.jpg"), Format::Png).is_err());
 
     // And through the flow the dialog's answer takes: one toast, no export started, and
     // nothing written where the name pointed.
-    let mismatched = support::out_dir().join("s25-mismatch.png");
+    let mismatched = support::out_dir().join("s25-mismatch.2024");
     let _ = std::fs::remove_file(&mismatched);
     let toasts = window.toasts();
     window.export_to_chosen(&mismatched);
@@ -161,12 +160,41 @@ fn the_export_takes_the_settings_and_refuses_a_source_image_or_a_lying_name() {
     assert!(
         window
             .last_toast()
-            .is_some_and(|toast| toast.contains("expected .jpg or .jpeg")),
-        "the toast says what the name needs, got {:?}",
+            .is_some_and(|toast| toast.contains("expected .png, .jpg or .jpeg")),
+        "the toast says what this build writes, got {:?}",
         window.last_toast()
     );
     assert!(!window.progress_revealed(), "a refusal starts no export");
     assert!(!mismatched.exists(), "and writes nothing");
+
+    // **The extension wins over the settings' format row**, which is what S25c is: with
+    // JPEG in the settings, a `.png` name writes a PNG — at the settings' long edge.
+    let switched = support::out_dir().join("s25-switched.png");
+    let _ = std::fs::remove_file(&switched);
+    assert_eq!(
+        window.settings().format,
+        Format::Jpeg,
+        "the row still says JPEG"
+    );
+    window.export_to_chosen(&switched);
+    assert!(window.wait_for_idle(support::WAIT), "the export finished");
+    let bytes = std::fs::read(&switched).expect("the export landed");
+    assert_eq!(
+        &bytes[..4],
+        b"\x89PNG",
+        "the name's extension decided the format, not the settings' row"
+    );
+    let decoded = pixlay_imaging::Source::decode(&switched).expect("the export decodes");
+    assert_eq!(
+        decoded.width(),
+        800,
+        "and the size is still the settings' long edge"
+    );
+    assert_eq!(
+        window.settings().format,
+        Format::Jpeg,
+        "the export did not rewrite the settings' format row"
+    );
 
     // ---- a file that is already there -------------------------------------
     // Since ruling 36 the *platform's* dialog confirms a replacement, so the app's own
@@ -191,7 +219,7 @@ fn the_export_takes_the_settings_and_refuses_a_source_image_or_a_lying_name() {
     assert_eq!(
         &written[..2],
         &[0xff, 0xd8],
-        "and it is the JPEG the settings asked for"
+        "and it is the JPEG its own .jpg name means (S25c)"
     );
     assert!(
         window
@@ -238,16 +266,15 @@ fn the_export_takes_the_settings_and_refuses_a_source_image_or_a_lying_name() {
 
     // ---- the writer's own guard (S15h, PIX-010) --------------------------
     // The window resolves the name before it starts anything, and `export::run` asks the
-    // same question again: a path that names the other format than the settings do not
-    // write a file that lies about itself, whoever calls it.
-    let mismatch = support::artifact("s25-writer.png");
-    let _ = std::fs::remove_file(&mismatch);
+    // same question again: a name this build cannot write is refused by the function that
+    // reaches the file, whoever calls it.
+    let unwritable = support::artifact("s25-writer.2024");
+    let _ = std::fs::remove_file(&unwritable);
     let error = window
         .export_to(&Request {
             long_edge: 800,
-            format: Format::Jpeg,
-            path: mismatch,
+            path: unwritable,
         })
-        .expect_err("a JPEG request writing to a .png name is refused");
-    assert!(error.contains("expected .jpg or .jpeg"), "{error}");
+        .expect_err("a request writing to a name this build cannot write is refused");
+    assert!(error.contains("expected .png, .jpg or .jpeg"), "{error}");
 }

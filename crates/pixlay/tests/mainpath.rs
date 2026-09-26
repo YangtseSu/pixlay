@@ -421,7 +421,7 @@ fn the_main_path_can_be_walked() {
     let report = window
         .export_to(&pixlay::export::Request {
             long_edge: 1500,
-            format: Format::Png,
+
             path: png.clone(),
         })
         .expect("the export runs");
@@ -510,7 +510,7 @@ fn the_main_path_can_be_walked() {
         window
             .export_to(&pixlay::export::Request {
                 long_edge: 1000,
-                format: Format::Jpeg,
+
                 path: support::artifact("missing.jpg"),
             })
             .is_err(),
@@ -590,7 +590,7 @@ fn the_main_path_can_be_walked() {
     let report = argv_window
         .export_to(&pixlay::export::Request {
             long_edge: 900,
-            format: Format::Png,
+
             path: rendered.clone(),
         })
         .expect("the command line's own document exports");

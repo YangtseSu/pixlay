@@ -2273,7 +2273,9 @@ impl EditorWindow {
     /// there.
     pub fn export_to_chosen(&self, path: &Path) {
         let mut settings = self.settings();
-        if let Err(reason) = export::extension_error(path, settings.format) {
+        // The name's extension decides the format (S25c), so a name this build cannot
+        // write is refused here — before a worker starts — with the CLI's own message.
+        if let Err(reason) = export::format_for(path) {
             self.toast(&reason);
             return;
         }
@@ -2391,7 +2393,6 @@ impl EditorWindow {
         let settings = self.settings();
         let request = Request {
             path,
-            format: settings.format,
             long_edge: settings.long_edge,
         };
         self.show_progress(true);
@@ -3050,12 +3051,12 @@ fn photo_filter() -> gtk::FileFilter {
     filter
 }
 
-/// The export's save dialog filter: the one format the export writes (S25).
+/// The export's save dialog filter: the settings' format (S25), which is the *default*
+/// the dialog offers (S25c).
 ///
-/// One filter, not a chooser between two: the format is the settings' (`crate::settings`,
-/// ruling 36), so the dialog asks for a name and a folder and nothing else — and a name
-/// whose extension disagrees with the format is refused rather than written
-/// (`export::extension_error`).
+/// One filter, not a chooser between two: the dialog asks for a name and a folder, and
+/// the name's own extension decides what is written (`export::format_for`), so typing
+/// another extension this build writes is a format change rather than a refusal.
 fn export_filter(format: pixlay_imaging::encode::Format) -> gtk::FileFilter {
     let filter = gtk::FileFilter::new();
     filter.set_name(Some(&gettext("Images")));

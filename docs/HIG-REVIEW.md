@@ -222,8 +222,10 @@ the canvas is **content** and the interface is **styling**, and the two must not
      only feedback while it runs, and does the toast name the file and its size?
    - **the platform's replace confirmation**: choosing a name that is already there — does *its* question
      come up (the app asks nothing of its own), and does cancelling leave the file alone?
-   - **a name the settings' format cannot write**: with PNG selected, type a `.jpg` name — the export is
-     refused with a toast and nothing is written. Is the message enough to know what to do next?
+   - **the name's extension against the settings' row** (S25c): with PNG selected, type a `.jpg` name —
+     the file that lands is a JPEG at the settings' long edge, and the settings' row still says PNG. Is that
+     understandable, or does the row now look like it lies? (The other half: a name with an extension this
+     build does not write, e.g. `.tiff`, is refused with a toast and nothing is written.)
    - **the remembered folder across runs**: export once, quit, start again — does the next save dialog open
      where the last export landed?
 
