@@ -56,10 +56,18 @@ jobs:
       - name: Test
         # The harness starts its own headless mutter, on a virtual monitor of 1920x1200
         # (above the app's own 1100x760 default window). What it cannot make for itself is
-        # `XDG_RUNTIME_DIR`, where mutter puts its Wayland socket.
+        # `XDG_RUNTIME_DIR`, where mutter puts its Wayland socket. The GL is the runner's
+        # software rasterizer, named rather than discovered: with no GPU node, mesa's Zink
+        # cannot choose a device and EGL fails to make a screen, and mutter dies of it
+        # (`Mutter terminated with a failure: The command exited with a nonzero status: 139`,
+        # measured 2026-09-27). `GTK_A11Y=none` is the runner's missing accessibility bus,
+        # which GTK warns about on every window.
         run: |
           install -d -m 700 /var/tmp/pixlay-runtime
-          XDG_RUNTIME_DIR=/var/tmp/pixlay-runtime dbus-run-session -- cargo test --workspace
+          XDG_RUNTIME_DIR=/var/tmp/pixlay-runtime \
+          LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe MESA_LOADER_DRIVER_OVERRIDE=llvmpipe \
+          GTK_A11Y=none \
+            dbus-run-session -- cargo test --workspace
       # The entry's own render, on the repository's own project: eight photos on
       # `mosaic-8-s14`, which exercises decode, resample, the clamp, `draw` and the encoder
       # in one run. `--stats` makes it machine-readable; the image itself is looked at by a
