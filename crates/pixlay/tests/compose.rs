@@ -505,7 +505,12 @@ fn the_compose_stage_edits_the_selected_cell_and_the_document() {
         "the background export finished"
     );
     assert!(!window.progress_revealed(), "and the bar goes away again");
-    assert!(out.is_file(), "the export landed at {out:?}");
+    assert!(
+        out.is_file(),
+        "the export landed at {out:?} (its directory exists: {}); the window's last toast was {:?}",
+        out.parent().is_some_and(|dir| dir.is_dir()),
+        window.last_toast()
+    );
     assert!(
         window
             .last_toast()
