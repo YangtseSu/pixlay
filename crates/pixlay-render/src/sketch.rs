@@ -8,27 +8,35 @@
 //! photos with — [`outline_path`], the one place normalized coordinates become
 //! canvas pixels — so a sketch and a render cannot disagree about where a cell is.
 //!
+//! **The ink is everything a cell is not**: the outlines, and the sheet's ground
+//! wherever no cell covers it — so a layout whose cells leave a gutter between
+//! them draws that gutter as the gap it is rather than as one more cell (S29, the
+//! human's finding of 2026-09-26 on `grid-4-2x2g`, whose paper-coloured gutter
+//! read as a cell at the band's 128x96). The paper is the cells.
+//!
 //! Two things this deliberately does not draw: the document's frame (`gapRel` /
 //! `radiusRel` / the backdrop colour are the *document's*, not the template's, and
 //! a sketch is the template's geometry) and anything about a photo.
 
-use cairo::{Context, Format, ImageSurface, LineJoin, Operator};
+use cairo::{Context, FillRule, Format, ImageSurface, LineJoin, Operator};
 use pixlay_core::{PixelSize, Polygon, Rgba8, Template};
 
 use crate::Rgb8Image;
-use crate::draw::{outline_path, rgb8};
+use crate::draw::{outline_path, outline_subpath, rgb8};
 use crate::error::RenderError;
 
-/// The sketch's parameters: the sheet's ground, the ink its cell outlines are
-/// stroked in, and the stroke's width in canvas pixels.
+/// The sketch's parameters: the sheet, the ink drawn over it, and the ink's width
+/// in canvas pixels.
 ///
 /// The two colours' alpha is ignored: a sketch is an opaque drawing — its paper
 /// fills the surface — so it can be written as a JPEG as well as a PNG.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sketch {
-    /// The sheet's ground: the colour of everything a cell's outline is not on.
+    /// The colour a cell is filled with: the sheet's paper.
     pub paper: Rgba8,
-    /// The colour the cell outlines are stroked in.
+    /// The colour of everything a cell is not — every cell's outline, and the
+    /// sheet's ground wherever no cell covers it, so a layout whose cells leave a
+    /// gutter draws the gutter as a gap rather than as one more cell (S29).
     pub ink: Rgba8,
     /// Stroke width in canvas pixels, finite and positive.
     pub stroke_px: f64,
@@ -73,6 +81,30 @@ pub fn sketch_rgb8(
     // paper-coloured line must stay ink, not vanish into it.
     ctx.set_operator(Operator::Over);
     set_source(&ctx, sketch.ink);
+
+    // **The sheet's ground a cell does not cover is ink** (S29). One path — the
+    // sheet's own rectangle with every cell's outline appended — filled even-odd
+    // is exactly the sheet minus the cells' union: a cell's outline is a simple
+    // polygon, concave or not, so the rule and its interior agree. So a template
+    // whose cells leave a gutter between them draws the gutter as the gap it is,
+    // where paper would read as one more cell at the band's 128x96; and a template
+    // whose cells tile the sheet has nothing under the rule, which is every one of
+    // the library's but its two guttered templates — `grid-4-2x2g` and
+    // `strip-2-2x1g` (measured 2026-09-26: all 27 templates' sketches at four
+    // grids are byte-identical to S21's except those two, at every grid).
+    let (width, height) = (f64::from(canvas_px.width), f64::from(canvas_px.height));
+    ctx.new_path();
+    ctx.rectangle(0.0, 0.0, width, height);
+    for (index, slot) in template.slots.iter().enumerate() {
+        if slot.outline.points.len() < Polygon::MIN_VERTICES {
+            return Err(RenderError::DegenerateSlot { slot: index });
+        }
+        outline_subpath(&ctx, &slot.outline, canvas_px);
+    }
+    ctx.set_fill_rule(FillRule::EvenOdd);
+    ctx.fill()?;
+    ctx.set_fill_rule(FillRule::Winding);
+
     ctx.set_line_width(sketch.stroke_px);
     // A sketch's corners are geometry, not typography: the default miter join
     // keeps a right angle square.
@@ -84,7 +116,6 @@ pub fn sketch_rgb8(
     // the surface and leave the sheet's right and bottom edges blank. A template
     // whose cells keep a margin inside the sheet shows both rectangles, which is
     // its geometry.
-    let (width, height) = (f64::from(canvas_px.width), f64::from(canvas_px.height));
     let inset = sketch.stroke_px / 2.0;
     ctx.rectangle(
         inset,

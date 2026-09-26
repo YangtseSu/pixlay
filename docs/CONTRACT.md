@@ -453,7 +453,7 @@ pixlay-render save      --project <file.pixlay> --out <file.pixlay> [--json]
 | JPEG quality | **90, fixed** (not a flag): it is the S0–S6 baseline, so every measurement in §8 stays
 comparable, and `--quality` was deliberately not added — a knob nobody tests breaks quietly |
 | `--preview-px n` | n pixels on the long edge; the same `draw`, only `scale` changes. The **bitmaps are sized for the preview too** (S4): decoding and resampling a full A0 and letting Cairo shrink it would cost the export's time and memory for a thumbnail, and would do the shrinking with Cairo's filter instead of the pipeline's. The scaled grid is checked against the canvas pixel budget before the first decode (S15e, PIX-003). The report's `long_edge` is the edge the file was written at, not the export base the preview's grid was scaled from (S15h, PIX-019) |
-| `--sketch` (S21) | draws the **template's geometry** instead of a document: every cell's outline stroked in ink over the sheet's ground (`pixlay_render::sketch_rgb8`, the same normalized→pixel path `draw` places photos with). This is what the window's layout band shows for every candidate, so `render --template <n> --sketch` at the band's grid and with the band's own three parameters reproduces a candidate's pixels exactly — `crates/pixlay/tests/layout.rs` holds the two to **RMSE 0**. `--template` is required (`--project`, `--preview-px`, `--gap`/`--radius`/`--border-color` are refused, exit 1: a sketch has no document, no preview and no frame), `--long-edge` sizes it as it sizes a render (the sheet's aspect is the template's, and a sketch's grid has its shape), and `--paper`/`--ink` are `r,g,b` 0..=255 with defaults 255,255,255 / 0,0,0 while `--stroke` is a positive finite width in pixels defaulting to 1. A JPEG export is legal and shows the same two colours: the paper fills the surface, so a sketch is opaque everywhere. Its report is a *sketch* shape: `sketch = true`, `paper`, `ink`, `stroke`, `slots`, `long_edge`, `out_w`, `out_h`, `bytes` — and no `cells` / `occupied` / `gap` / `radius` / `border`, which are a document's |
+| `--sketch` (S21, S29) | draws the **template's geometry** instead of a document: its cells in paper, and every cell's outline plus the sheet's ground no cell covers in ink (S29: a layout whose cells leave a gutter between them draws the gutter as the gap it is, where paper read as one more cell) — `pixlay_render::sketch_rgb8`, the same normalized→pixel path `draw` places photos with. This is what the window's layout band shows for every candidate, so `render --template <n> --sketch` at the band's grid and with the band's own three parameters reproduces a candidate's pixels exactly — `crates/pixlay/tests/layout.rs` holds the two to **RMSE 0**. `--template` is required (`--project`, `--preview-px`, `--gap`/`--radius`/`--border-color` are refused, exit 1: a sketch has no document, no preview and no frame), `--long-edge` sizes it as it sizes a render (the sheet's aspect is the template's, and a sketch's grid has its shape), and `--paper`/`--ink` are `r,g,b` 0..=255 with defaults 255,255,255 / 0,0,0 while `--stroke` is a positive finite width in pixels defaulting to 1. A JPEG export is legal and shows the same two colours: the paper fills the surface, so a sketch is opaque everywhere. Its report is a *sketch* shape: `sketch = true`, `paper`, `ink`, `stroke`, `slots`, `long_edge`, `out_w`, `out_h`, `bytes` — and no `cells` / `occupied` / `gap` / `radius` / `border`, which are a document's |
 | `render`'s report | carries `long_edge` — the integer the output was **actually rendered at**, `max(out_w, out_h)` of the written file (S15h, PIX-019), so a preview render reports the preview's edge while `preview_px` stays the request — `cells` and `occupied`, next to the written file's facts |
 | `probe`'s report | carries `long_edge` (the integer grid it sampled) instead of a resolution for the same reason |
 | `--stats` | appends `{ms, encode_ms, peak_rss_mb, icc}`; `render` emits all four, `probe` emits no `encode_ms` (it does not encode). `icc` is the description of the profile the written file carries (`sRGB IEC61966-2.1`); a command that writes no file reports `none`. The measurement rules are below |
@@ -1190,6 +1190,19 @@ new — the *blend* row below was measured against the S19 binary itself, which 
 | a switch that places a kept cell again (`switch --project <three cells + 1 kept> --template mosaic-4-hero`) | `slots` 4, `occupied` **4** — the ruler's own source list follows the new document (before this step it would have built the returned cell empty) |
 | the document's cell total | `cells + kept` ≤ 9, refused by `validate` with both counts named; the sweep over the whole library (`crates/pixlay-core/tests/history.rs`) never sees it shrink under any layout change |
 
+### S29 (2026-09-26, `--release`, this machine)
+
+The sketch's ground: what the rule "the ink is everything a cell is not" moved, measured against the build
+before the step (both binaries at HEAD of their own commit, `cmp` over every template at four long edges).
+
+| what | number |
+|---|---|
+| every template's sketch, before vs after | **25 of 27 byte-identical** at 96, 128, 512 and 1000 px — every layout whose cells tile the sheet; the two that changed are its two guttered ones, `grid-4-2x2g` and `strip-2-2x1g`, at all four grids |
+| `grid-4-2x2g` at the band's 128-px grid, probe `(64,64)` the gutter's crossing / `(30,30)` a cell's middle | before **255,255,255 · 255,255,255** (the gutter read as a cell: the human's finding); after **0,0,0 · 255,255,255**. The sheet's own edge stays ink in both |
+| row 20 of `grid-4-2x2g` vs its tiling twin `grid-4-2x2`, the ink outside the sheet's own border (*test*) | **9** px — the 1/16-canvas gutter's ground plus the cell's own 1-px line — against **1**: the line alone |
+| a sketch's own cost (`render --sketch --stats`, a 128-px sheet, five runs) | **0.115–0.159 ms** (S21: 0.12–0.14) — the extra fill is one more pass over the same path; `peak_rss_mb` **10.0–10.4** |
+| the band as the window draws it (`crates/pixlay/tests/layout.rs`) | `/var/tmp/pixlay-s7/layout-band-gutter.png` — the four 4-cell candidates, `grid-4-2x2g`'s gutter visibly wider than `grid-4-2x2`'s line |
+
 ## 9. The window (S7), and the shell ruling 31 re-cut (S22)
 
 The GUI is the fifth consumer of the same document, and what it adds is interaction. Its
@@ -1230,8 +1243,9 @@ rely on:
 - **The candidates are the layouts with the document's cell count, and only those** (ruling 25, 2026-09-23;
   S14b moved the count from the *photo* count to the *cell* count): `templates::with_slots()`, the one
   function the CLI's `templates --slots` and `Selection::layouts()` are expressed in. Each candidate is a
-  **sketch of that template's geometry** (S21, ruling 32): every cell's outline stroked over the sheet's
-  ground, drawn by `pixlay_render::sketch_rgb8` at the largest grid inside the band's own `CANDIDATE_BOX`
+  **sketch of that template's geometry** (S21, ruling 32): its cells in paper, every cell's outline and the
+  sheet's ground no cell covers in ink (S29, so a layout whose cells leave a gutter between them draws it as
+  the gap it is), drawn by `pixlay_render::sketch_rgb8` at the largest grid inside the band's own `CANDIDATE_BOX`
   — so a candidate of another aspect is drawn at its own shape and the sheet's shape changes with the
   click, and a candidate is a complete account of a template, which carries geometry and no style. The
   strip follows the layout rather than the photo count because `+` can leave a cell empty: a three-cell

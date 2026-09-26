@@ -320,8 +320,10 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
   picker judged nothing the file manager cannot and cost a stage to do it. Its ordered list, its preview
   and its zoom, the folder scan and the tile cache went with it; a photo's order is the order it was
   added, and re-ordering is the swap of the new plan's S23 (`docs/2026-09-25-STEPS.md`). **The layout band draws sketches**: each candidate is the template's
-  geometry as stroked outlines rather than a render of the user's photos (ruling 32), because a template
-  carries geometry and no style, so a sketch is a complete account of it — and the band decodes nothing.
+  geometry drawn in ink — its cells in paper, every cell's outline and the sheet's ground no cell covers in
+  ink, so a layout whose cells leave a gutter shows it as a gap (S29) — rather than a render of the user's
+  photos (ruling 32), because a template carries geometry and no style, so a sketch is a complete account of
+  it — and the band decodes nothing.
   **The window's one header bar follows HIG
   `patterns/containers/header-bars` and the two references**: primary actions at the *start* — **the way in
   first**, `Add photos…` as the leftmost control ahead of undo and redo (S26, ruling 42 of 2026-09-26: the

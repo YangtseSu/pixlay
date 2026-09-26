@@ -7,7 +7,9 @@
 //! * the strip lists every layout with the cell count, and only those;
 //! * every candidate's drawing is `pixlay-render render --sketch` of the same
 //!   template at the same grid and with the same three parameters (RMSE 0) — the
-//!   band's sketch and the CLI's are two calls of one renderer;
+//!   band's sketch and the CLI's are two calls of one renderer, checked on the
+//!   eight-cell document and again on the four-cell one, whose candidates include
+//!   the library's own guttered layout (S29);
 //! * a layout change and the count control keep every cell they take off the sheet
 //!   — photo, framing and order (S28) — so `+` places a kept cell again; an
 //!   explicit delete is what loses a photo;
@@ -294,6 +296,38 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
         "the band's rebuild decoded files: a sketch names no file"
     );
     let band_decodes = window.decoded_sources() - before_band;
+
+    // The same parity on the unusual geometry: this document's candidates are the
+    // library's four 4-cell layouts, and `grid-4-2x2g` is the one whose cells leave
+    // a gap — the case S29's rule draws, and the case the eight-cell loop above
+    // cannot reach (none of the eight-cell layouts has a gutter).
+    let four = gallery.candidates();
+    assert!(
+        four.iter().any(|name| name == "grid-4-2x2g"),
+        "the guttered layout is one of the four-cell candidates: {four:?}"
+    );
+    for name in &four {
+        let (width, height, pixels) = gallery
+            .sketch(name)
+            .unwrap_or_else(|| panic!("{name} has no sketch"));
+        let cli = cli_sketch(name, style);
+        let difference = support::rmse(&(width, height, pixels), &cli);
+        assert_eq!(
+            difference, 0.0,
+            "{name} diverged from the CLI: RMSE {difference}"
+        );
+    }
+
+    // The guttered candidate as the window itself draws it, for S29's finding
+    // (2026-09-26: `grid-4-2x2g`'s gutter read as one more cell at the band's
+    // 128x96): the picture the Human line has to judge is the band's own pixels,
+    // written through the product's encoder like the band's picture above.
+    let gutter_picture = support::artifact("layout-band-gutter.png");
+    support::save_png(&gutter_picture, &support::snapshot(&gallery.root()));
+    eprintln!(
+        "the guttered band: its own pixels in {}",
+        gutter_picture.display()
+    );
 
     eprintln!(
         "decodes: {decoded} on open, {} layout + resize (canvas only), {band_decodes} band, {photos} photos",

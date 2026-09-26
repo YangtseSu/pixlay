@@ -10,11 +10,11 @@
 //! * **the canvas** wants the whole document at the grid it draws at, and it is
 //!   what the thread is for;
 //! * **the layout band** (S14) wants every candidate of the document's cell count
-//!   — and since S21 a candidate is a **sketch**: its template's cell outlines
-//!   stroked over the sheet's ground, drawn by `pixlay_render::sketch_rgb8`. The
-//!   job carries no document and no photo paths, so the band costs no decode at
-//!   all (it used to share the canvas's preview-grade copies, S14's design; the
-//!   sketch removed the need).
+//!   — and since S21 a candidate is a **sketch**: its template's cells in paper,
+//!   every cell's outline and the ground between them inked, drawn by
+//!   `pixlay_render::sketch_rgb8`. The job carries no document and no photo
+//!   paths, so the band costs no decode at all (it used to share the canvas's
+//!   preview-grade copies, S14's design; the sketch removed the need).
 //!
 //! Three decisions shape this file:
 //!

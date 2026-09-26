@@ -130,16 +130,17 @@ FRAME OPTIONS (render, edit):
                         never transparent and a preview is the same picture.
 
 SKETCH OPTIONS (render --sketch):
-    Draws a template's *geometry*: every cell's outline stroked in ink over the
-    sheet's ground. This is what the window's layout band shows for each
-    candidate, so the same grid and the same three parameters reproduce a
-    candidate's pixels exactly. The sheet's aspect is the template's declared
-    one, so --long-edge sizes the image as it does for a render; a sketch has no
-    frame, no photos and no --preview-px.
-    --paper <r,g,b>     The sheet's ground, 0..=255 per channel. Default
-                        255,255,255: a document-like sheet, where the window
-                        passes its theme's own colours.
-    --ink <r,g,b>       The colour the cell outlines are stroked in, 0..=255 per
+    Draws a template's *geometry*: its cells in paper, every cell's outline and
+    every part of the sheet no cell covers in ink. This is what the window's
+    layout band shows for each candidate, so the same grid and the same three
+    parameters reproduce a candidate's pixels exactly. The sheet's aspect is the
+    template's declared one, so --long-edge sizes the image as it does for a
+    render; a sketch has no frame, no photos and no --preview-px.
+    --paper <r,g,b>     The colour a cell is filled with, 0..=255 per channel.
+                        Default 255,255,255: a document-like sheet, where the
+                        window passes its theme's own colours.
+    --ink <r,g,b>       The colour of everything a cell is not — the outlines and
+                        the sheet's ground between the cells — 0..=255 per
                         channel. Default 0,0,0.
     --stroke <px>       Stroke width, positive and finite. Default 1. The sheet's
                         own edge is stroked inside the image, so the border is a

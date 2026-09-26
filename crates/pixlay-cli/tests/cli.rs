@@ -352,6 +352,80 @@ fn a_sketch_draws_a_templates_geometry_in_the_callers_colours() {
 }
 
 #[test]
+fn a_sketch_draws_a_layouts_gutter_as_a_gap() {
+    // `grid-4-2x2g`'s four cells stop a 1/16 canvas short of each other on both
+    // axes — its tiling twin is `grid-4-2x2` — and the sheet's ground that no cell
+    // covers is ink (S29, the human's finding of 2026-09-26), so the gutter reads
+    // as a gap instead of as one more cell at the band's own grid.
+    let dir = out_dir("sketch-gutter");
+    let out = dir.join("gutter.png");
+    let output = run(&[
+        "render",
+        "--template",
+        "grid-4-2x2g",
+        "--sketch",
+        "--long-edge",
+        "128",
+        "--out",
+        out.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let image = image::open(&out).expect("readable").to_rgb8();
+
+    // 128 px on a 1:1 sheet: the cells span 0..60 and 68..128 on both axes, so the
+    // gutter is the 8 px cross they leave — crossed at (64,64), with an arm along
+    // the middle of each side — and the cells are paper at their middles.
+    for (x, y) in [(64, 64), (64, 20), (20, 64), (108, 64), (64, 108)] {
+        assert_eq!(
+            image.get_pixel(x, y).0,
+            [0, 0, 0],
+            "the gutter at ({x},{y}) is not ink: a gap has to read as one"
+        );
+    }
+    for (x, y) in [(30, 30), (92, 30), (30, 92), (92, 92)] {
+        assert_eq!(
+            image.get_pixel(x, y).0,
+            [255, 255, 255],
+            "a cell's paper at ({x},{y})"
+        );
+    }
+
+    // The pair as a number: row 20 runs through the two top cells, so the ink in it
+    // is the gutter plus the cell's own one-pixel line in the guttered layout and
+    // that line alone in the tiling one. The sheet's own edge is left out of both
+    // counts — it is ink in every sketch.
+    let tiled = dir.join("tiled.png");
+    let output = run(&[
+        "render",
+        "--template",
+        "grid-4-2x2",
+        "--sketch",
+        "--long-edge",
+        "128",
+        "--out",
+        tiled.to_str().unwrap(),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let tiled = image::open(&tiled).expect("readable").to_rgb8();
+    let ink_run = |image: &image::RgbImage, y: u32| {
+        (1..image.width() - 1)
+            .filter(|&x| image.get_pixel(x, y).0 == [0, 0, 0])
+            .count()
+    };
+    assert_eq!(
+        ink_run(&image, 20),
+        9,
+        "the gutter is 8 px of ground plus the cell's own line"
+    );
+    assert_eq!(
+        ink_run(&tiled, 20),
+        1,
+        "the tiling twin's middle row is one line"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn the_sketch_refuses_what_it_cannot_draw() {
     let dir = out_dir("sketch-refusals");
     let project = write_project(&dir, "sketch.pixlay", true);
@@ -5538,7 +5612,7 @@ fn switch_measures_a_layout_change_at_the_canvas_box() {
 
     // The band's own rebuild, when it is asked for: every candidate of the new cell
     // count, at the grid the window draws a candidate at. Since S21 a candidate is
-    // a *sketch* — its cells' outlines over the sheet's ground — so the band's loop
+    // a *sketch* — its cells in paper, inked where no cell is — so the band's loop
     // names no photo and decodes nothing; what the row above says about `decodes`
     // is therefore the canvas's own, and this run's `decodes` is the same number
     // with the band's rebuild included.

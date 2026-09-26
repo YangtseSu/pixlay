@@ -12,11 +12,12 @@
 //!
 //! The list is [`crate::window::EditorWindow::candidate_templates`] — every template
 //! with exactly the document's cell count, in library order — and each candidate is
-//! drawn by `pixlay_render::sketch_rgb8`: its cells' outlines stroked over the
-//! sheet's ground (ruling 32 of the plan of 2026-09-25; S21). A template carries
-//! geometry and nothing else, so a sketch is a complete account of it — and the band
-//! therefore **decodes nothing**: no photo enters the strip, so the strip's cost is
-//! a few hundred microseconds however many candidates it lists (measured 2026-09-26:
+//! drawn by `pixlay_render::sketch_rgb8`: its cells in paper, every cell's outline
+//! and the sheet's ground between the cells in ink (ruling 32 of the plan of
+//! 2026-09-25; S21, S29). A template carries geometry and nothing else, so a sketch
+//! is a complete account of it — and the band therefore **decodes nothing**: no
+//! photo enters the strip, so the strip's cost is a few hundred microseconds however
+//! many candidates it lists (measured 2026-09-26:
 //! 0.12–0.14 ms per candidate at the band's grid, `--release`).
 //!
 //! # The two colours come from the theme

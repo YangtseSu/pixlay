@@ -797,8 +797,9 @@ fn render_sketch(args: &RenderArgs, sketch: &SketchArgs, format: Format) -> Resu
     );
     report.text("ink", rgb([sketch.ink.r, sketch.ink.g, sketch.ink.b]));
     report.float("stroke", sketch.stroke_px);
-    // One outline per slot, which is the whole drawing: a sketch has no cells
-    // with photos, no occupancy and no frame, so those fields do not exist here.
+    // One outline per slot over the inked ground between them, which is the whole
+    // drawing: a sketch has no cells with photos, no occupancy and no frame, so
+    // those fields do not exist here.
     report.int("slots", template.slots.len() as i64);
     report.int("long_edge", i64::from(image.width.max(image.height)));
     report.int("out_w", i64::from(image.width));
