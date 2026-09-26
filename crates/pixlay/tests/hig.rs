@@ -244,7 +244,7 @@ fn check_accessible_names_in(root: &gtk4::Widget, failures: &mut Vec<String>) {
         if !widget.is_visible() {
             continue;
         }
-        if !has_accessible_name(&widget) {
+        if !support::has_accessible_name(&widget) {
             failures.push(format!(
                 "{} has no accessible name (inside {}); its own text is {:?}",
                 widget.type_().name(),
@@ -324,33 +324,6 @@ fn ancestors(widget: &gtk4::Widget) -> String {
     names.join(" < ")
 }
 
-/// An accessible name: either set explicitly — on the control or on the compound
-/// widget that owns it, since a `GtkSpinButton`'s inner entry is announced by the
-/// spin button — or derived by GTK from the control's own text, which is how a
-/// `GtkButton` carrying a `GtkLabel` gets its name.
-///
-/// Both halves matter. The first is what this app is responsible for and what most
-/// controls here satisfy; the second is the platform behaviour HIG `guidelines/
-/// accessibility` leans on ("GTK provides default accessible descriptions for many
-/// UI elements"), without which the check would fail on GTK's own internals, such
-/// as the button `AdwBanner` creates from its label.
-fn has_accessible_name(widget: &gtk4::Widget) -> bool {
-    let mut current = Some(widget.clone());
-    for _ in 0..3 {
-        let Some(candidate) = current else {
-            break;
-        };
-        if gtk4::test_accessible_has_property(&candidate, gtk4::AccessibleProperty::Label) {
-            return true;
-        }
-        current = candidate.parent();
-    }
-    support::descendants(widget)
-        .iter()
-        .filter_map(|child| child.downcast_ref::<gtk4::Label>())
-        .any(|label| !label.label().is_empty())
-}
-
 /// The menu's items, in the order the model lists them, flattened over its sections.
 fn menu_actions(model: &gio::MenuModel) -> Vec<String> {
     let mut actions = Vec::new();
@@ -413,7 +386,7 @@ fn check_gallery(window: &EditorWindow, failures: &mut Vec<String>) {
                 cell.height()
             ));
         }
-        if !has_accessible_name(&widget) {
+        if !support::has_accessible_name(&widget) {
             failures.push(format!("{name}'s cell has no accessible name"));
         }
         // The keyboard path (`guidelines/keyboard`): a candidate is reachable and
@@ -505,7 +478,7 @@ fn check_compose(window: &EditorWindow, failures: &mut Vec<String>) {
     }
     for (index, button) in controls.strip_buttons().into_iter().enumerate() {
         let widget = button.clone().upcast::<gtk4::Widget>();
-        if !has_accessible_name(&widget) {
+        if !support::has_accessible_name(&widget) {
             failures.push(format!(
                 "the strip's control {index} has no accessible name"
             ));
@@ -663,7 +636,7 @@ fn check_header_chrome(window: &EditorWindow, failures: &mut Vec<String>) {
         if widget.tooltip_text().is_none() {
             failures.push(format!("the header's {name} has no tooltip"));
         }
-        if !has_accessible_name(&widget) {
+        if !support::has_accessible_name(&widget) {
             failures.push(format!("the header's {name} has no accessible name"));
         }
     }

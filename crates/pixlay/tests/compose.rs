@@ -50,7 +50,7 @@ fn the_compose_stage_edits_the_selected_cell_and_the_document() {
 
     // ---- the strip is the selected cell's own controls ---------------------
     // Cell 0 is the verification template's largest cell (3/8 x 3/8), so the strip
-    // has room for all five controls inside it.
+    // has room for all six controls inside it.
     //
     // **Selected before the first frame is pumped, on purpose.** The bitmaps are not in
     // hand until the decoder answers, so this is the order in which the window has only
@@ -131,7 +131,7 @@ fn the_compose_stage_edits_the_selected_cell_and_the_document() {
 
     // ---- a cell too narrow for the row gets the column ---------------------
     // The library's narrow panes are 61-122 device px wide at the default window, and
-    // five 32-px controls cannot fit in one: the strip turns into a column inside the
+    // six 32-px controls cannot fit in one: the strip turns into a column inside the
     // cell instead of covering its neighbour (`strip-9-9x1`, the 16:9 strip, is the
     // layout the test uses; its panes measure 122x551 here).
     window.select_layout("strip-9-9x1");
@@ -230,7 +230,7 @@ fn the_compose_stage_edits_the_selected_cell_and_the_document() {
     // ---- the buttons edit the cell ----------------------------------------
     window.select(Some(0));
     settle(&window);
-    let [zoom_out, zoom_in, rotate, _replace, clear] = controls.strip_buttons();
+    let [zoom_out, zoom_in, rotate, _replace, _swap, clear] = controls.strip_buttons();
     let before = window.document().cells[0].crop;
     zoom_in.emit_clicked();
     settle(&window);
@@ -568,7 +568,7 @@ fn the_compose_stage_edits_the_selected_cell_and_the_document() {
 /// Waits until the strip has been laid out **in the shape it now has**.
 ///
 /// `support::allocated` answers "it has an allocation", and after a re-orientation the
-/// *old* one is still there: the column was measured as the row's own 186x34 in one run
+/// *old* one is still there: the column was measured as the row's own 224x34 in one run
 /// (measured 2026-09-23), which is a measurement of the previous frame's layout rather
 /// than of this one. A control is 32 px across, so a row is 34 tall and a column 34 wide,
 /// and waiting for the shape is waiting for the frame that made it.

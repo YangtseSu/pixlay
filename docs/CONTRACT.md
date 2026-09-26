@@ -526,7 +526,7 @@ operations the band performs:
 | `edit --template <name>` | switches the document to another layout, keeping the surviving cells' photos and framing (`Command::SetTemplate`'s retention: a layout with fewer slots drops the tail, one with more appends empty cells). An unknown name is exit 1 with the library listed |
 | `edit --add-cell` | takes the layout with one cell more, leaving it empty (`Command::AddCell`, the window's `+`). An edit *about the layout*, so it moves the count without placing a photo: the cell the user wants filled is the one that shows a `+`, and clicking that is what asks for the file (S14b) |
 | `edit --remove-cell` | takes the layout with one cell fewer, dropping the last cell whatever it holds (`Command::RemoveLastCell`, the window's `−`). Exit 2 at one cell (`a collage's layout has at least 1 cell`) — the floor is the layout's, not the photo count's, and it is one cell since S19 (ruling 34). The mirror image of `--add-cell`, and refused together with it (exit 1): they are opposites, and one edit is one intent |
-| `edit --swap <i>,<j>` | exchanges two cells **whole** — photo and framing both (`Command::SwapCells`), because the framing is what makes a photo look right in *that* cell. Exit 2 for the same cell twice (`slot i cannot be swapped with itself`) and for a cell the layout does not have; a malformed pair is exit 1. The window's own path is `Ctrl+Shift+Arrow`, which names the neighbour geometrically (`Template::neighbour`, S14b) |
+| `edit --swap <i>,<j>` | exchanges two cells **whole** — photo and framing both (`Command::SwapCells`), because the framing is what makes a photo look right in *that* cell. Exit 2 for the same cell twice (`slot i cannot be swapped with itself`) and for a cell the layout does not have; a malformed pair is exit 1. The window's own paths are the three ruling 33 gave it (S23): a `Shift`+drag from one cell onto another, a `Shift`+click on another cell, and the strip's swap control plus `Return`; `Ctrl+Shift+Arrow` (S14b) names the neighbour geometrically (`Template::neighbour`) and stays |
 | `edit --add-photo <file>` | appends a photo: the first empty cell, else the layout with one slot more (`Command::AddPhotos`). Repeated once per photo in argument order; a photo that is not there is exit 2 with the path named, and a tenth is exit 2 (`a collage takes at most 9 photos`) |
 | `edit --slot <i> --photo <file>` | the photo that cell shows instead. Needs `--slot` (exit 1 otherwise, like the framing flags), and the stored path follows `init --photo`'s rule (relative to the project when the two share a root, absolute otherwise) |
 | the order of one `edit` | `--template`, `--add-cell`/`--remove-cell`, `--swap`, `--add-photo`, `--slot`/`--photo`, then the framing — so the framing is fitted against the document the earlier flags produced, and `--swap 0,3 --slot 0 --rotate 10` frames the cell that ends up at index 0. `--clear` is exclusive with `--photo` as well as with the framing flags |
@@ -1235,13 +1235,36 @@ rely on:
   draw: showing a widget inside GTK's own traversal leaves it snapshotted before it is allocated (measured
   2026-09-23, "Trying to snapshot GtkButton … without a current allocation"). An occupied cell has no
   button over it, so a drag or a click on a photo is still the framing gesture.
-- **Two cells can be exchanged whole** (ruled 2026-09-23): `Command::SwapCells { left, right }` moves the
-  [`Cell`], so the photo keeps the framing that made it look right where it was; the keyboard's path is
-  `Ctrl+Shift+Left/Right/Up/Down`, which names the neighbour geometrically — `Template::neighbour` is in
-  `pixlay-core`, so the canvas and the CLI cannot disagree about which cell is "to the right" — and the
-  edge of the sheet answers `None` rather than clamping. The same cell twice and a cell the layout does not
-  have are refused by the command itself (`CoreError::SameSlot` / `NoSuchSlot`), so the window and the CLI
-  report them the same way.
+- **Two cells can be exchanged whole** (ruled 2026-09-23; the pointer and keyboard paths landed in S23,
+  ruling 33 of 2026-09-25): `Command::SwapCells { left, right }` moves the [`Cell`], so the photo keeps the
+  framing that made it look right where it was — and a cell the photo arrives in for the first time re-fits
+  *at draw*, because `draw` asks `doc.fitted_crop` per slot; the stored crop stays the fit it was. One
+  command, so one undo step from every path. **The paths are**:
+
+  - **`Shift`+drag from one cell onto another** — the cell under the press is the swap's source, the cell
+    under the release is its target, and the target is **filled** while the pointer is over it: a highlight
+    under the pointer is the promise that this is where the release lands. A release outside every cell, or
+    on the source itself, changes nothing. `Esc` cancels a drag in flight. The plain drag inside a cell is
+    still the framing's pan (S7), which is why the swap drag takes the modifier: one gesture with two
+    branches, so "a plain drag still pans" is a property of the code rather than of GTK's arbitration.
+  - **`Shift`+click on another cell** — the one-press form. The source is the marked cell, or the selection
+    with none marked; the click's own cell is what gets selected, because that is where the photo the user
+    moved now is. A press that becomes a drag is the drag instead: the swap happens on the release, never
+    on the press.
+  - **The strip's swap control plus `Return`** — the keyboard's path. The control is a **toggle**: checking
+    it marks the selected cell (drawn as a *dashed* outline around it, the same mark the drag sets), the
+    arrows move the selection to the other cell, and `Return` exchanges them; `Esc` takes the mark off and
+    touches nothing. The canvas's accessible name carries the state while the mark is up
+    (`Collage canvas, cell 3 of 8, swapping with cell 1`), so the sequence is audible.
+  - **`Ctrl+Shift+Arrow`** (S14b) names the neighbour geometrically — `Template::neighbour` is in
+    `pixlay-core`, so the canvas and the CLI cannot disagree about which cell is "to the right" — and the
+    edge of the sheet answers `None` rather than clamping.
+
+  The same cell twice and a cell the layout does not have are refused by the command itself
+  (`CoreError::SameSlot` / `NoSuchSlot`), so the window and the CLI report them the same way, and the mark
+  is spent by every swap the window applies (a refusal included), so no stale source survives a layout
+  change. `tests/swap.rs` is the machine walk: the three paths, the document, the pixels (the swapped
+  document's own render, RMSE 0) and one undo step each.
 - **A candidate cell is a `GtkToggleButton`** with an explicit accessible name, so HIG
   `guidelines/accessibility` and `guidelines/pointer-touch` cover it for free (focusable, named, `Space`
   activates it), and the layout the document is on is shown by the app's own highlight — the accent border
@@ -1261,22 +1284,28 @@ its groups already had a home, and the two that did not — the frame's three se
 questions — became dialogs of one shape behind header-bar buttons rather than permanent rows. What a caller
 may rely on:
 
-- **The selected cell carries five real GTK controls** — zoom out, zoom in, rotate, replace, clear — in one
+- **The selected cell carries six real GTK controls** — zoom out, zoom in, rotate, replace, swap, clear — in one
   `GtkBox` over the canvas, the same `GtkOverlay` the empty cells' `+` lives in (`canvas::CellControls`;
   ruling 9, so the accessible-name and keyboard checks see them). One family per cell, by construction: a
   cell that holds a photo **and** is selected shows the strip, an empty cell shows its `+`, and a cell that
-  is neither shows nothing. The strip is one widget moved to the selection, not nine copies of it.
+  is neither shows nothing. The strip is one widget moved to the selection, not nine copies of it. The swap
+  control is the strip's only `GtkToggleButton` (S23): its checked state is the swap's mark, written from
+  the window rather than held by the button, so `Esc`, a `Shift`+click and a swap that happened cannot leave
+  it checked with nothing marked.
 - **The strip is placed from the cell's own rectangle** through `Placement::to_widget`, the same arithmetic
-  that drew the cell, and **it is a row when the cell can hold one and a column when it cannot**: five 32-px
-  controls are 176 px long, and the library's narrow panes are 61–122 device px wide at the default window
+  that drew the cell, and **it is a row when the cell can hold one and a column when it cannot**: six 32-px
+  controls are 212 px long, and the library's narrow panes are 61–122 device px wide at the default window
   (a 1/16 column of the 16:9 sheet measures 61, `strip-9-9x1`'s panes 122 — measured 2026-09-23), so a row
   there would start at the cell's left edge and cover the neighbouring photo, taking its clicks. The
-  same five controls stacked need 32 px across and 176 down, which those panes have, so the strip turns.
+  same six controls stacked need 32 px across and 212 down, which those panes have, so the strip turns.
   A row sits `CONTROL_INSET` (6 px) above the cell's bottom edge and is centred in the cell; a column sits
   at its right edge, 6 px inside. A control is 32x32, past HIG `guidelines/pointer-touch`'s 24x24 floor;
-  measured 2026-09-23 in the canvas's own coordinates: the row is **186x34** inside a 3/8 x 3/8 cell
-  (182,12–458,219) and the column is **34x186** inside one of `strip-9-9x1`'s panes (60,12–182,563) — both
-  inside on every side, which is what the criterion asks of the buttons.
+  measured 2026-09-26 with the swap control in place (S23, six controls instead of five) in the canvas's own
+  coordinates: the row is **224x34** inside a 3/8 x 3/8 cell (170,12–455,226) and the column is **34x224**
+  inside one of `strip-9-9x1`'s panes (44,12–170,582) — both inside on every side, which is what the
+  criterion asks of the buttons. (S15's five-control measurements were 186x34 inside 182,12–458,219 and
+  34x186 inside 60,12–182,563: the strip is one control longer now, and this run's sheet is a little larger
+  than that one's.)
 - **Each control is one finished step** (`Gesture::Step`, so it is committed and drawn at the resting grid):
   the zoom pair multiplies the *fitted* zoom — what the user is looking at — by `ZOOM_STEP` = 1.06, the same
   notch the wheel and the `+`/`-` keys use; rotate adds `ROTATE_STEP_DEG` = 15° to the free angle (S11: never
@@ -1284,7 +1313,10 @@ may rely on:
   the window's own `win.clear-cell` — the cell empties, photo *and* framing, which is what `Delete` on the
   canvas does and what `edit --clear` writes (one command, `Command::ClearCell`, since S15: one press is
   one undo step). Every one of those edits has a keyboard path on the same cell (`+`/`-`, `Ctrl`+scroll,
-  `Delete`, `Return`), and each is its own undo step.
+  `Delete`, `Return`), and each is its own undo step. **The swap control is not one of those** (S23): it
+  edits nothing — it marks the cell, and the edit is the `Command::SwapCells` the `Return` on the target
+  applies. That is why the interaction has a state at all, and why the mark is a toggle rather than a
+  fourth one-press button.
 - **The arrow keys choose a cell, and the selection follows** (S15h, PIX-017's ruling of 2026-09-24). The
   focus *is* the selection — the one cell every other control acts on — and it is visible (the canvas
   outlines it) and announced: the canvas's accessible name is `Collage canvas, cell <n> of <cells>`, and a

@@ -34,6 +34,14 @@
 //! refines it (S12); a control that produces a single finished step sends
 //! [`Gesture::Step`] instead, and is drawn at the resting grid, because one frame
 //! the user is meant to look at is worth the pixels.
+//!
+//! **Two cells swap with `Shift` held** (S23, ruling 33) and that is the same press:
+//! the cell it starts on travels to the cell the pointer is released on, one undo step,
+//! while a plain drag keeps panning the photo. One gesture with a branch in it, because a
+//! second drag gesture would have to be arbitrated against this one by GTK — and "a plain
+//! drag inside a cell still pans" would then be a question about the toolkit rather than a
+//! fact about this file. The marks the swap draws are overlays like the selection's: no
+//! photo's pixels are touched (`render`'s `swap_source` / `swap_target`).
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -135,6 +143,12 @@ pub struct View<'a> {
     /// The grid `images` were decoded for.
     pub grid: PixelSize,
     pub selection: Option<usize>,
+    /// The cell a swap is marked from, if one is (S23): outlined with a dashed line,
+    /// so the cell being moved is visible while the other half of the swap is chosen.
+    pub swap_source: Option<usize>,
+    /// The cell a swap drag is over right now: filled, because a highlight under the
+    /// pointer is the promise that this is where the release lands (S23).
+    pub swap_target: Option<usize>,
     /// Draw the straightening guides (true while a rotation is being edited).
     pub guides: bool,
     /// The theme's text colour, which is what the overlays are drawn with: a
@@ -155,6 +169,8 @@ pub fn render(
         images,
         grid,
         selection,
+        swap_source,
+        swap_target,
         guides,
         foreground,
     } = *view;
@@ -213,6 +229,18 @@ pub fn render(
     if let Some(slot) = selection.and_then(|slot| doc.template.slots.get(slot)) {
         draw_outline(ctx, &placement, slot, foreground)?;
     }
+    // The swap's own two marks (S23): the filled target under the drag, and the dashed
+    // source outline. Drawn over the selection outline, because a swap in flight is what
+    // the next release acts on.
+    if let Some(slot) = swap_target
+        .filter(|target| Some(*target) != swap_source)
+        .and_then(|slot| doc.template.slots.get(slot))
+    {
+        draw_swap_target(ctx, &placement, slot, foreground)?;
+    }
+    if let Some(slot) = swap_source.and_then(|slot| doc.template.slots.get(slot)) {
+        draw_swap_source(ctx, &placement, slot, foreground)?;
+    }
 
     Ok(())
 }
@@ -249,6 +277,54 @@ fn draw_outline(
     ctx.save()?;
     ctx.set_source_rgba(foreground.0, foreground.1, foreground.2, 0.9);
     ctx.set_line_width(2.0);
+    slot_path(ctx, placement, slot)?;
+    ctx.stroke()?;
+    ctx.restore()?;
+    Ok(())
+}
+
+/// The cell a swap is coming from (S23): the selection's own outline, dashed.
+///
+/// Dashed rather than filled because the two swap marks are different promises: this
+/// one says "this cell is being moved", and the filled one below says "release here
+/// and the two change places".
+fn draw_swap_source(
+    ctx: &cairo::Context,
+    placement: &Placement,
+    slot: &Slot,
+    foreground: (f64, f64, f64),
+) -> Result<(), cairo::Error> {
+    ctx.save()?;
+    ctx.set_source_rgba(foreground.0, foreground.1, foreground.2, 0.9);
+    ctx.set_line_width(2.0);
+    ctx.set_dash(&[6.0, 4.0], 0.0);
+    slot_path(ctx, placement, slot)?;
+    ctx.stroke()?;
+    ctx.restore()?;
+    Ok(())
+}
+
+/// The cell a swap drag is over (S23): filled with the theme's foreground at low
+/// alpha and outlined, the same promise a file drop's highlight makes.
+fn draw_swap_target(
+    ctx: &cairo::Context,
+    placement: &Placement,
+    slot: &Slot,
+    foreground: (f64, f64, f64),
+) -> Result<(), cairo::Error> {
+    ctx.save()?;
+    slot_path(ctx, placement, slot)?;
+    ctx.set_source_rgba(foreground.0, foreground.1, foreground.2, 0.18);
+    ctx.fill_preserve()?;
+    ctx.set_source_rgba(foreground.0, foreground.1, foreground.2, 0.9);
+    ctx.set_line_width(2.0);
+    ctx.stroke()?;
+    ctx.restore()?;
+    Ok(())
+}
+
+/// One cell's outline as a cairo path in device space — the shape every overlay marks.
+fn slot_path(ctx: &cairo::Context, placement: &Placement, slot: &Slot) -> Result<(), cairo::Error> {
     for (index, point) in slot.outline.points.iter().enumerate() {
         let (x, y) = placement.to_widget(*point);
         if index == 0 {
@@ -258,8 +334,6 @@ fn draw_outline(
         }
     }
     ctx.close_path();
-    ctx.stroke()?;
-    ctx.restore()?;
     Ok(())
 }
 
@@ -311,7 +385,8 @@ pub fn build(window: &EditorWindow) -> gtk::DrawingArea {
     a11y::label(&area, &gettext("Collage canvas"));
     area.set_tooltip_text(Some(&gettext(
         "Arrow keys choose a cell; Shift+arrow moves the photo and Ctrl+arrow moves it \
-         further; scroll zooms; Ctrl+scroll rotates; Ctrl+Shift+arrow swaps two cells",
+         further; scroll zooms; Ctrl+scroll rotates; Ctrl+Shift+arrow or Shift+drag \
+         swaps two cells",
     )));
 
     area.set_draw_func(glib::clone!(
@@ -331,6 +406,8 @@ pub fn build(window: &EditorWindow) -> gtk::DrawingArea {
                 images: &images,
                 grid,
                 selection: window.selection(),
+                swap_source: window.swap_source(),
+                swap_target: window.swap_target(),
                 guides: window.guides(),
                 foreground,
             };
@@ -348,16 +425,24 @@ pub fn build(window: &EditorWindow) -> gtk::DrawingArea {
         }
     ));
 
-    add_click(&area, window);
-    add_drag(&area, window);
+    let swap_click: Rc<Cell<Option<usize>>> = Rc::new(Cell::new(None));
+    add_click(&area, window, &swap_click);
+    add_drag(&area, window, &swap_click);
     add_scroll(&area, window);
     add_keys(&area, window);
     add_drop(&area, window);
     area
 }
 
-/// Press selects; a second press acts on the slot (photo chooser or reframing).
-fn add_click(area: &gtk::DrawingArea, window: &EditorWindow) {
+/// Press selects; a second press acts on the slot (photo chooser or reframing);
+/// `Shift`+press is the swap's one-press form (S23).
+///
+/// A `Shift`+press is **deferred to the release**, and that is the whole of why the
+/// clicked slot is remembered here rather than swapped on the press: the same press can
+/// become a drag ([`add_drag`]'s `Shift` branch), and a swap that had already happened on
+/// the press could not be taken back. A press that ends as a click swaps once; a press
+/// that becomes a drag clears the memory first and swaps from the cell it started on.
+fn add_click(area: &gtk::DrawingArea, window: &EditorWindow, swap_click: &Rc<Cell<Option<usize>>>) {
     let click = gtk::GestureClick::new();
     click.set_button(gdk::BUTTON_PRIMARY);
     click.connect_pressed(glib::clone!(
@@ -365,12 +450,27 @@ fn add_click(area: &gtk::DrawingArea, window: &EditorWindow) {
         window,
         #[weak]
         area,
+        #[strong]
+        swap_click,
         move |gesture: &gtk::GestureClick, presses: i32, x: f64, y: f64| {
-            let slot = window.slot_at_widget(x, y);
-            window.select(slot);
-            let Some(slot) = slot else {
+            // The press is the swap's half of the interaction, so what it remembers is the
+            // cell it landed on — not the click the gesture may never become.
+            let Some(slot) = window.slot_at_widget(x, y) else {
+                swap_click.set(None);
+                window.select(None);
                 return;
             };
+            if presses == 1
+                && gesture
+                    .current_event_state()
+                    .contains(gdk::ModifierType::SHIFT_MASK)
+            {
+                swap_click.set(Some(slot));
+                area.grab_focus();
+                return;
+            }
+            swap_click.set(None);
+            window.select(Some(slot));
             if presses == 2 {
                 // The gesture a photo editor has always had: an empty slot asks
                 // for a photo, an occupied one goes back to its whole photo.
@@ -385,26 +485,70 @@ fn add_click(area: &gtk::DrawingArea, window: &EditorWindow) {
             area.grab_focus();
         }
     ));
+    click.connect_released(glib::clone!(
+        #[weak]
+        window,
+        #[strong]
+        swap_click,
+        move |_gesture: &gtk::GestureClick, _presses: i32, _x: f64, _y: f64| {
+            // The press that is still remembered became a click: `Shift`+click, the swap's
+            // one-press form (S23, ruling 33). A press that became a drag cleared it.
+            if let Some(slot) = swap_click.take() {
+                window.swap_click(slot);
+            }
+        }
+    ));
     area.add_controller(click);
 }
 
-/// Dragging inside the selected slot pans the photo.
-fn add_drag(area: &gtk::DrawingArea, window: &EditorWindow) {
+/// What one press on the canvas is doing, for as long as it lasts (S23).
+enum Drag {
+    /// Dragging inside the selected slot pans the photo.
+    Pan { slot: usize, crop: CropTransform },
+    /// `Shift` held: the cell under the press travels to the cell the pointer is released
+    /// on — the swap's drag form (S23, ruling 33).
+    Swap { start: (f64, f64) },
+}
+
+/// Dragging inside the selected slot pans the photo; `Shift`+dragging exchanges two cells.
+///
+/// **One gesture with two branches, not two gestures.** The two are the same press, and
+/// GTK would have to arbitrate a second drag gesture against this one — a `GtkDragSource`
+/// would compete with the pan for the same sequence, and which of them won would decide
+/// whether a plain drag still pans. Reading the modifier where the press happens makes
+/// that arbitration a branch instead, and "a plain drag inside a cell still pans" is true
+/// by construction rather than by luck.
+fn add_drag(area: &gtk::DrawingArea, window: &EditorWindow, swap_click: &Rc<Cell<Option<usize>>>) {
     let drag = gtk::GestureDrag::new();
     drag.set_button(gdk::BUTTON_PRIMARY);
-    let base: Rc<RefCell<Option<(usize, CropTransform)>>> = Rc::new(RefCell::new(None));
+    let base: Rc<RefCell<Option<Drag>>> = Rc::new(RefCell::new(None));
 
     drag.connect_drag_begin(glib::clone!(
         #[weak]
         window,
         #[strong]
         base,
-        move |_gesture: &gtk::GestureDrag, x: f64, y: f64| {
+        #[strong]
+        swap_click,
+        move |gesture: &gtk::GestureDrag, x: f64, y: f64| {
+            if gesture
+                .current_event_state()
+                .contains(gdk::ModifierType::SHIFT_MASK)
+                && window.swap_drag_begin(x, y)
+            {
+                // The press is a drag now, so the click's own half is off: what this
+                // release does is the swap the drag lands (or nothing).
+                swap_click.set(None);
+                *base.borrow_mut() = Some(Drag::Swap { start: (x, y) });
+                return;
+            }
             let Some(slot) = window.slot_at_widget(x, y) else {
                 return;
             };
             window.select(Some(slot));
-            *base.borrow_mut() = window.fitted_crop(slot).map(|crop| (slot, crop));
+            *base.borrow_mut() = window
+                .fitted_crop(slot)
+                .map(|crop| Drag::Pan { slot, crop });
         }
     ));
 
@@ -414,25 +558,29 @@ fn add_drag(area: &gtk::DrawingArea, window: &EditorWindow) {
         #[strong]
         base,
         move |_gesture: &gtk::GestureDrag, offset_x: f64, offset_y: f64| {
-            let borrowed = base.borrow();
-            let Some((slot, crop)) = *borrowed else {
-                return;
-            };
-            let Some((step_x, step_y)) = window.slot_extent(slot) else {
-                return;
-            };
-            // Offsets are in slot widths and heights (the document's unit), and a
-            // drag is in device pixels, so the conversion is through the slot's own
-            // size on screen.
-            let (width, height) = window.sheet_size();
-            let next = CropTransform {
-                offset: (
-                    crop.offset.0 + offset_x / (step_x * width),
-                    crop.offset.1 + offset_y / (step_y * height),
-                ),
-                ..crop
-            };
-            window.gesture(Gesture::Crop { slot, crop: next });
+            match *base.borrow() {
+                Some(Drag::Pan { slot, crop }) => {
+                    let Some((step_x, step_y)) = window.slot_extent(slot) else {
+                        return;
+                    };
+                    // Offsets are in slot widths and heights (the document's unit), and a
+                    // drag is in device pixels, so the conversion is through the slot's own
+                    // size on screen.
+                    let (width, height) = window.sheet_size();
+                    let next = CropTransform {
+                        offset: (
+                            crop.offset.0 + offset_x / (step_x * width),
+                            crop.offset.1 + offset_y / (step_y * height),
+                        ),
+                        ..crop
+                    };
+                    window.gesture(Gesture::Crop { slot, crop: next });
+                }
+                Some(Drag::Swap { start }) => {
+                    window.swap_drag_update(start.0 + offset_x, start.1 + offset_y);
+                }
+                None => {}
+            }
         }
     ));
 
@@ -441,9 +589,14 @@ fn add_drag(area: &gtk::DrawingArea, window: &EditorWindow) {
         window,
         #[strong]
         base,
-        move |_gesture: &gtk::GestureDrag, _offset_x: f64, _offset_y: f64| {
-            base.borrow_mut().take();
-            window.gesture(Gesture::End);
+        move |_gesture: &gtk::GestureDrag, offset_x: f64, offset_y: f64| {
+            match base.borrow_mut().take() {
+                Some(Drag::Pan { .. }) => window.gesture(Gesture::End),
+                Some(Drag::Swap { start }) => {
+                    window.swap_drag_end(start.0 + offset_x, start.1 + offset_y);
+                }
+                None => {}
+            }
         }
     ));
 
@@ -520,6 +673,11 @@ fn add_scroll(area: &gtk::DrawingArea, window: &EditorWindow) {
 /// is lost: `Shift`+arrow pans by a fine step, `Ctrl`+arrow by a coarse one, and
 /// `Ctrl+Shift`+arrow swaps the selected cell with its neighbour in that direction —
 /// the three the tooltip lists.
+///
+/// The swap's own keyboard path is a sequence rather than a chord (S23, ruling 33): the
+/// strip's swap control marks a cell, the arrows choose the other one, and `Return`
+/// exchanges them — `Esc` takes the mark back and touches nothing. `Return` keeps its
+/// S14b meaning when nothing is marked, and `Esc` is the window's when no swap is.
 fn add_keys(area: &gtk::DrawingArea, window: &EditorWindow) {
     let keys = gtk::EventControllerKey::new();
     keys.connect_key_pressed(glib::clone!(
@@ -534,6 +692,25 @@ fn add_keys(area: &gtk::DrawingArea, window: &EditorWindow) {
               -> glib::Propagation {
             let shift = state.contains(gdk::ModifierType::SHIFT_MASK);
             let control = state.contains(gdk::ModifierType::CONTROL_MASK);
+            // `Esc` takes a marked swap back, and the release that follows a cancelled
+            // drag is not an edit either (`swap_drag_end`). Claimed only when there is a
+            // mark: with none, `Esc` is the window's, not the canvas's.
+            if key == gdk::Key::Escape {
+                if window.swap_source().is_some() {
+                    window.cancel_swap();
+                    return glib::Propagation::Stop;
+                }
+                return glib::Propagation::Proceed;
+            }
+            // `Return` with a swap marked is the keyboard path's other half (S23, ruling
+            // 33): the strip's swap control marked a cell, the arrows chose this one, and
+            // this exchanges them. Without a mark it keeps its S14b job below.
+            if matches!(key, gdk::Key::Return | gdk::Key::KP_Enter)
+                && window.swap_source().is_some()
+            {
+                window.swap_selected();
+                return glib::Propagation::Stop;
+            }
             let direction = match key {
                 gdk::Key::Left => (-1, 0),
                 gdk::Key::Right => (1, 0),
@@ -626,9 +803,9 @@ fn add_keys(area: &gtk::DrawingArea, window: &EditorWindow) {
 ///
 /// * a `+` for a cell that holds **no photo** (S14b, ruling 27) — the cell itself is
 ///   how a pointer gives it one;
-/// * the **selected** cell's strip of five controls (S15) when that cell *does* hold
-///   a photo: zoom out, zoom in, rotate, replace, clear. A photo's controls and
-///   "give me a photo" are never both on screen for one cell.
+/// * the **selected** cell's strip of six controls (S15, S23) when that cell *does*
+///   hold a photo: zoom out, zoom in, rotate, replace, swap, clear. A photo's controls
+///   and "give me a photo" are never both on screen for one cell.
 ///
 /// **Each widget is a child of the canvas's own `GtkOverlay`**, placed by its own
 /// margins. That is deliberate: a `GtkFixed` holding them measures only its
@@ -645,7 +822,7 @@ pub struct CellControls {
     overlay: gtk::Overlay,
     /// One `+` per slot index, built at construction and never replaced.
     buttons: Vec<gtk::Button>,
-    /// The selected cell's own controls, moved as one widget: five buttons in a
+    /// The selected cell's own controls, moved as one widget: six buttons in a
     /// row — or a column, on a cell too narrow for the row — and the strip's own
     /// margins are what place it inside the cell.
     strip: gtk::Box,
@@ -657,6 +834,10 @@ pub struct CellControls {
     zoom_in: gtk::Button,
     rotate: gtk::Button,
     replace: gtk::Button,
+    /// The swap's keyboard half (S23, ruling 33): a **toggle**, because pressing it
+    /// marks the selected cell as the cell a swap comes from, and the checked state is
+    /// what says so — beside the dashed outline the canvas draws around the same cell.
+    swap: gtk::ToggleButton,
     clear: gtk::Button,
 }
 
@@ -671,13 +852,13 @@ const CONTROL_SPACING: i32 = 4;
 /// How far the strip's own edges are kept from the cell's, in device pixels.
 const CONTROL_INSET: f64 = 6.0;
 
-/// The strip's long side in device pixels: five buttons and the gaps between them.
+/// The strip's long side in device pixels: six buttons and the gaps between them.
 ///
 /// **Written down rather than measured**, because it is what places the strip
 /// inside its cell before GTK has allocated anything: `sync` runs from the window's
 /// `refresh`, which is not a layout pass, so the arithmetic has to be a constant of
-/// the five controls rather than a question about them.
-const STRIP_LENGTH: f64 = 5.0 * CONTROL_SIZE + 4.0 * CONTROL_SPACING as f64;
+/// the six controls rather than a question about them.
+const STRIP_LENGTH: f64 = 6.0 * CONTROL_SIZE + 5.0 * CONTROL_SPACING as f64;
 
 impl CellControls {
     /// Builds the controls over `canvas`: nine hidden `+`s and one hidden strip.
@@ -695,17 +876,30 @@ impl CellControls {
         let zoom_in = strip_button("zoom-in-symbolic", &gettext("Zoom in"));
         let rotate = strip_button("object-rotate-right-symbolic", &gettext("Rotate right"));
         let replace = strip_button("document-open-symbolic", &gettext("Replace the photo"));
+        // The swap's own glyph: two arrows passing each other, the same picture the word
+        // means (S23). `mail-send-receive-symbolic` is the theme's only icon of that shape.
+        let swap = strip_toggle(
+            "mail-send-receive-symbolic",
+            &gettext("Swap with another cell"),
+        );
         let clear = strip_button("edit-clear-symbolic", &gettext("Clear the cell"));
         let strip = gtk::Box::new(gtk::Orientation::Horizontal, CONTROL_SPACING);
-        for button in [&zoom_out, &zoom_in, &rotate, &replace, &clear] {
-            strip.append(button);
+        for button in [
+            zoom_out.clone(),
+            zoom_in.clone(),
+            rotate.clone(),
+            replace.clone(),
+            swap.clone().upcast::<gtk::Button>(),
+            clear.clone(),
+        ] {
+            strip.append(&button);
         }
         strip.set_halign(gtk::Align::Start);
         strip.set_valign(gtk::Align::Start);
         strip.set_visible(false);
         overlay.add_overlay(&strip);
 
-        // The five edits, all of them about the *selected* cell: the strip is one
+        // The edits, all of them about the *selected* cell: the strip is one
         // widget that follows the selection, so each handler asks the window which
         // cell that is rather than remembering one.
         zoom_out.connect_clicked(glib::clone!(
@@ -732,6 +926,13 @@ impl CellControls {
                 }
             }
         ));
+        // The toggle's own checked state is written back from the window's mark by
+        // `sync`, so the handler only has to ask for the flip (S23).
+        swap.connect_clicked(glib::clone!(
+            #[weak]
+            window,
+            move |_| window.toggle_swap()
+        ));
         clear.connect_clicked(glib::clone!(
             #[weak]
             window,
@@ -751,6 +952,7 @@ impl CellControls {
             zoom_in,
             rotate,
             replace,
+            swap,
             clear,
         }
     }
@@ -780,15 +982,22 @@ impl CellControls {
         self.strip.clone()
     }
 
-    /// The strip's five controls, in the order they are laid out.
-    pub fn strip_buttons(&self) -> [gtk::Button; 5] {
+    /// The strip's six controls, in the order they are laid out.
+    pub fn strip_buttons(&self) -> [gtk::Button; 6] {
         [
             self.zoom_out.clone(),
             self.zoom_in.clone(),
             self.rotate.clone(),
             self.replace.clone(),
+            self.swap.clone().upcast::<gtk::Button>(),
             self.clear.clone(),
         ]
+    }
+
+    /// The strip's swap control (S23), which is a **toggle** rather than a button:
+    /// its checked state is the mark.
+    pub fn swap_button(&self) -> gtk::ToggleButton {
+        self.swap.clone()
     }
 
     /// Puts every `+` over its own empty cell, and the strip over the selected
@@ -876,9 +1085,9 @@ impl CellControls {
         let (left, top) = placement.to_widget(Point::new(box_.x0, box_.y0));
         let (right, bottom) = placement.to_widget(Point::new(box_.x1, box_.y1));
         // **A row when the cell can hold one, a column when it cannot.** The library's
-        // narrow panes are narrower than five 32-px controls: a row would have to start
+        // narrow panes are narrower than the six 32-px controls: a row would have to start
         // at the cell's left edge and cover the neighbouring photo, taking its clicks.
-        // The same five controls stacked need 32 px across and 176 down, which those
+        // The same six controls stacked need 32 px across and 212 down, which those
         // panes have, so the strip turns (measured 2026-09-23: `strip-9-9x1`'s panes are
         // 122x551 device px at the default window, and the library's narrowest, a 1/16
         // column of the 16:9 sheet, is 61). A cell too small for *both* keeps the row and
@@ -911,6 +1120,11 @@ impl CellControls {
             self.strip
                 .set_margin_top((top + CONTROL_INSET).round() as i32);
         }
+        // The mark's own control reads the window rather than holding a copy of it (S23):
+        // an `Esc`, a `Shift`+click and a swap that happened all clear the mark, and a
+        // toggle left checked with nothing marked would be a control that lies. Writing it
+        // here — and not from the click — is what keeps the two in one direction.
+        self.swap.set_active(window.swap_source() == Some(slot));
         self.strip.set_visible(true);
     }
 
@@ -950,7 +1164,7 @@ fn empty_cell_button(window: &EditorWindow, slot: usize) -> gtk::Button {
     button
 }
 
-/// One of the selected cell's five controls: the same `osd circular` button as the
+/// One of the selected cell's controls: the same `osd circular` button as the
 /// empty cell's `+`, which is what HIG `patterns/controls/buttons` asks for where
 /// "a number of smaller buttons are positioned in close proximity".
 fn strip_button(icon: &str, label: &str) -> gtk::Button {
@@ -967,6 +1181,30 @@ fn strip_button(icon: &str, label: &str) -> gtk::Button {
     a11y::label(&button, label);
     button.set_can_focus(true);
     button
+}
+
+/// The strip's swap control: [`strip_button`]'s own shape as a `GtkToggleButton` (S23).
+///
+/// A toggle rather than a button because the interaction has a state to show — this cell
+/// is the one a swap is coming from — and the platform's checked look is that state
+/// (`button.circular` styles the toggle the same way as its five siblings, and `:checked`
+/// is the same pressed look the band's candidate cells use). Nothing else about the
+/// control differs: the icon, the tooltip, the accessible name and the 32x32 target are
+/// the strip's.
+fn strip_toggle(icon: &str, label: &str) -> gtk::ToggleButton {
+    let toggle = gtk::ToggleButton::builder()
+        .icon_name(icon)
+        .tooltip_text(label)
+        .halign(gtk::Align::Start)
+        .valign(gtk::Align::Start)
+        .width_request(CONTROL_SIZE as i32)
+        .height_request(CONTROL_SIZE as i32)
+        .build();
+    toggle.add_css_class("osd");
+    toggle.add_css_class("circular");
+    a11y::label(&toggle, label);
+    toggle.set_can_focus(true);
+    toggle
 }
 
 /// Dropping image files places them, starting at the slot under the pointer.

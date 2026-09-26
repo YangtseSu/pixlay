@@ -274,7 +274,7 @@ fn the_main_path_can_be_walked() {
     let controls = window
         .cell_controls()
         .expect("the canvas has a cell-control layer");
-    let [zoom_out, zoom_in, rotate, _replace, clear] = controls.strip_buttons();
+    let [zoom_out, zoom_in, rotate, _replace, _swap, clear] = controls.strip_buttons();
     let before = window.document().cells[1].crop;
     zoom_in.emit_clicked();
     assert!(

@@ -762,7 +762,7 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
     let gui = Project::load(&from_gui).expect("the window's project loads");
     let cli = Project::load(&from_cli).expect("the CLI's project loads");
     assert!(
-        same_document(&gui, &cli),
+        support::same_document(&gui, &cli),
         "the window and the CLI produced different documents:\n{gui:?}\n{cli:?}"
     );
     eprintln!(
@@ -884,34 +884,6 @@ fn two_photo_document() -> pixlay_core::CollageDoc {
 /// The largest: nine photos, nine slots.
 fn nine_photo_document() -> pixlay_core::CollageDoc {
     document_on("strip-9-9x1")
-}
-
-/// Two projects compared as what they mean.
-///
-/// The template, the frame, each cell's framing, and each cell's **resolved**
-/// photo: a written `source` may be relative or absolute — the window stores the
-/// path the file chooser gave it, the CLI rebases against the project — and the
-/// claim is about the document, not about the spelling.
-fn same_document(left: &Project, right: &Project) -> bool {
-    let (a, b) = (left.doc(), right.doc());
-    let (Ok(left_sources), Ok(right_sources)) = (left.sources(), right.sources()) else {
-        return false;
-    };
-    a.template == b.template
-        && a.frame == b.frame
-        && a.cells.len() == b.cells.len()
-        && a.cells
-            .iter()
-            .zip(&b.cells)
-            .all(|(left, right)| left.crop == right.crop)
-        && left_sources
-            .iter()
-            .zip(&right_sources)
-            .all(|(left, right)| match (left, right) {
-                (None, None) => true,
-                (Some(left), Some(right)) => same_file(left) == same_file(right),
-                _ => false,
-            })
 }
 
 /// `../../../…` and the path it points at are the same photo.

@@ -105,6 +105,14 @@ impl Editor {
         self.history.can_undo()
     }
 
+    /// How many undoable commands the history holds (`0` at the document it opened).
+    ///
+    /// The window's tests' handle on "one interaction is one undo step": a count can tell
+    /// one step from two where `can_undo` answers only whether there is one.
+    pub fn undo_depth(&self) -> usize {
+        self.history.undo_depth()
+    }
+
     pub fn can_redo(&self) -> bool {
         self.history.can_redo()
     }

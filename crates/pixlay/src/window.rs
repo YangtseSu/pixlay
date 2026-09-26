@@ -197,6 +197,19 @@ mod imp {
         /// failure mode a test's wait has to be able to name, where frames do arrive
         /// and the canvas paints nothing.
         pub last_draw_error: RefCell<Option<String>>,
+        /// The cell a swap is coming from, if one is marked (S23, ruling 33).
+        ///
+        /// One mark serves all three paths: the strip's swap control sets it, a
+        /// `Shift`+click's press sets it, and a `Shift`+drag sets it when the drag
+        /// begins. The canvas draws it as a dashed outline, the strip's toggle mirrors
+        /// it, and the mark is spent when a swap is applied or cancelled.
+        pub swap: Cell<Option<usize>>,
+        /// The cell under the pointer while a swap drag is in flight (S23).
+        ///
+        /// The drop's highlight, and the cell the release exchanges with. `None` on the
+        /// keyboard path, whose target is the selection and carries the selection
+        /// outline already.
+        pub swap_target: Cell<Option<usize>>,
     }
 
     impl Default for EditorWindow {
@@ -247,6 +260,8 @@ mod imp {
                 toasts: Cell::new(0),
                 actions: RefCell::new(Vec::new()),
                 last_draw_error: RefCell::new(None),
+                swap: Cell::new(None),
+                swap_target: Cell::new(None),
             }
         }
     }
@@ -699,6 +714,10 @@ impl EditorWindow {
         match Editor::new(doc) {
             Ok(editor) => {
                 *self.imp().editor.borrow_mut() = editor;
+                // A marked swap belongs to the document it was marked in (S23): the new
+                // one has its own cells, and the mark's slot may not even exist in them.
+                self.imp().swap.set(None);
+                self.imp().swap_target.set(None);
                 self.select(None);
                 self.requested_grid_reset();
                 self.refresh_document();
@@ -951,6 +970,14 @@ impl EditorWindow {
         self.imp().editor.borrow().can_undo()
     }
 
+    /// How many undoable commands the document's history holds.
+    ///
+    /// The tests' handle on "one interaction is one undo step" (S23): a swap drag commits
+    /// once, on the release, and a *count* is what can tell one step from two.
+    pub fn undo_depth(&self) -> usize {
+        self.imp().editor.borrow().undo_depth()
+    }
+
     pub fn can_redo(&self) -> bool {
         self.imp().editor.borrow().can_redo()
     }
@@ -1000,10 +1027,20 @@ impl EditorWindow {
     fn sync_canvas_label(&self) {
         let area = self.canvas_widget();
         let label = match self.selection() {
-            Some(slot) => fill(
-                gettext("Collage canvas, cell {} of {}"),
-                &[slot + 1, self.document().template.slots.len()],
-            ),
+            Some(slot) => {
+                let cells = self.document().template.slots.len();
+                match self.swap_source().filter(|source| *source != slot) {
+                    // A marked swap is a state of the canvas rather than of one button, so
+                    // the focus's own name carries it: a screen reader that has moved the
+                    // selection to the target is told which cell the swap is coming from
+                    // (S23, ruling 33's keyboard path).
+                    Some(source) => fill(
+                        gettext("Collage canvas, cell {} of {}, swapping with cell {}"),
+                        &[slot + 1, cells, source + 1],
+                    ),
+                    None => fill(gettext("Collage canvas, cell {} of {}"), &[slot + 1, cells]),
+                }
+            }
             None => gettext("Collage canvas"),
         };
         a11y::label(&area, &label);
@@ -1327,7 +1364,154 @@ impl EditorWindow {
     /// be a swap — the same cell twice, a cell outside the layout — are refused by
     /// the command itself, so the CLI and the window report them the same way.
     pub fn swap_slots(&self, left: usize, right: usize) {
-        let _ = self.apply(Command::SwapCells { left, right });
+        let _ = self.swap_cells(left, right);
+    }
+
+    // ---- the swap's own state (S23, ruling 33) -----------------------------
+
+    /// The cell a swap is marked from, if any.
+    ///
+    /// One mark serves the whole interaction (S23, ruling 33): the strip's swap
+    /// control sets it, a `Shift`+click's press sets it, a `Shift`+drag sets it when
+    /// the drag begins, and the canvas draws it as a dashed outline so the cell being
+    /// moved is visible while the other half is chosen.
+    pub fn swap_source(&self) -> Option<usize> {
+        self.imp().swap.get()
+    }
+
+    /// The cell a swap drag is over right now, if one is in flight.
+    ///
+    /// The drop's highlight, and the cell the release exchanges with ([`swap_drag_end`]
+    /// is the release). `None` on the keyboard path: its target is the selection, which
+    /// the canvas outlines already.
+    ///
+    /// [`swap_drag_end`]: Self::swap_drag_end
+    pub fn swap_target(&self) -> Option<usize> {
+        self.imp().swap_target.get()
+    }
+
+    /// Marks `slot` as the cell a swap comes from, or takes the mark off with `None`.
+    pub fn set_swap_source(&self, slot: Option<usize>) {
+        if self.imp().swap.get() == slot {
+            return;
+        }
+        self.imp().swap.set(slot);
+        // A target belongs to the drag that found it: a mark that moved or went away
+        // must not leave another cell looking like the drop's promise.
+        self.imp().swap_target.set(None);
+        self.refresh();
+    }
+
+    /// Takes the swap mark off, the document untouched: what `Esc` does (S23).
+    pub fn cancel_swap(&self) {
+        self.set_swap_source(None);
+    }
+
+    /// The strip's swap control, on the selected cell: marks it, or takes the mark off.
+    pub fn toggle_swap(&self) {
+        let Some(slot) = self.selection() else {
+            return;
+        };
+        let next = (self.swap_source() != Some(slot)).then_some(slot);
+        self.set_swap_source(next);
+    }
+
+    /// `Shift`+click on `target` (S23, ruling 33): the marked cell — or, with none
+    /// marked, the selection — and `target` exchange, and the click's own cell is
+    /// selected, which is where the photo that moved now is.
+    ///
+    /// The click lands on the press and the drag on the release, so this is the one-press
+    /// form of the drag; a press that names the source itself changes nothing (two cells
+    /// are what a swap is).
+    pub fn swap_click(&self, target: usize) -> bool {
+        let source = self.swap_source().or_else(|| self.selection());
+        let swapped = match source {
+            Some(source) if source != target => self.swap_cells(source, target),
+            _ => false,
+        };
+        self.select(Some(target));
+        swapped
+    }
+
+    /// A `Shift`+drag's first motion (S23): the cell under the press is the swap's
+    /// source. `false` when the press was not on a cell — the caller then has no swap
+    /// to carry, and the drag does nothing.
+    pub fn swap_drag_begin(&self, x: f64, y: f64) -> bool {
+        let Some(slot) = self.slot_at_widget(x, y) else {
+            return false;
+        };
+        self.select(Some(slot));
+        self.set_swap_source(Some(slot));
+        true
+    }
+
+    /// The pointer moved while a swap drag is in flight: the cell under it becomes the
+    /// drop's target, and the canvas fills it while the pointer is over it.
+    ///
+    /// The source itself is never a target: releasing there changes nothing, and a cell
+    /// that lights up under a release that does nothing would be a highlight that lies.
+    pub fn swap_drag_update(&self, x: f64, y: f64) {
+        let Some(source) = self.swap_source() else {
+            return;
+        };
+        let target = self.slot_at_widget(x, y).filter(|target| *target != source);
+        if self.imp().swap_target.get() == target {
+            return;
+        }
+        self.imp().swap_target.set(target);
+        self.canvas_widget().queue_draw();
+    }
+
+    /// The release of a swap drag (S23, ruling 33): the two cells exchange when the
+    /// pointer came down on a cell that is not the source, and **nothing happens
+    /// otherwise** — released outside every cell, or on the source itself, the mark goes
+    /// back with it.
+    pub fn swap_drag_end(&self, x: f64, y: f64) -> bool {
+        let Some(source) = self.swap_source() else {
+            // Cancelled (`Esc`) while the pointer was still down: the release of a drag
+            // that no longer exists is not an edit.
+            return false;
+        };
+        let target = self.slot_at_widget(x, y).filter(|target| *target != source);
+        match target {
+            Some(target) => self.swap_cells(source, target),
+            None => {
+                self.set_swap_source(None);
+                false
+            }
+        }
+    }
+
+    /// `Return` with a swap marked: the marked cell and the selected one exchange (S23,
+    /// ruling 33's keyboard path — mark with the strip's control, choose with the
+    /// arrows, `Return` on the target).
+    ///
+    /// `false` — nothing applied — when nothing is marked, nothing is selected, or the
+    /// selection *is* the mark, because a swap of a cell with itself is not an edit.
+    pub fn swap_selected(&self) -> bool {
+        let (Some(source), Some(target)) = (self.swap_source(), self.selection()) else {
+            return false;
+        };
+        if source == target {
+            return false;
+        }
+        self.swap_cells(source, target)
+    }
+
+    /// Exchanges two cells through the one command, and spends the mark.
+    ///
+    /// Every path that swaps ends here, so the mark cannot survive a swap it did, a
+    /// refusal, or a slot a layout change left behind: a mark that cannot act is one the
+    /// user has to press `Esc` out of.
+    fn swap_cells(&self, left: usize, right: usize) -> bool {
+        let cells = self.document().cells.len();
+        let swapped = if left >= cells || right >= cells {
+            false
+        } else {
+            self.apply(Command::SwapCells { left, right }).is_ok()
+        };
+        self.set_swap_source(None);
+        swapped
     }
 
     /// Appends `paths` in the order they arrive, one command.
@@ -1484,6 +1668,9 @@ impl EditorWindow {
         match Editor::new(default_document()) {
             Ok(editor) => {
                 *self.imp().editor.borrow_mut() = editor;
+                // S23: a fresh document carries no marked swap (see `open_document`).
+                self.imp().swap.set(None);
+                self.imp().swap_target.set(None);
                 self.select(None);
                 self.requested_grid_reset();
                 self.refresh_document();

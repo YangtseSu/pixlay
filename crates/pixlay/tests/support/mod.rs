@@ -622,6 +622,40 @@ pub fn rmse(a: &Image, b: &Image) -> f64 {
     (sum / count).sqrt()
 }
 
+/// Whether two loaded projects are the same document.
+///
+/// The comparison the two surfaces' "the same document" criteria use (S14's layout step,
+/// S23's swap): the template, the frame, the cell count, every cell's framing, and the
+/// photos with their paths **resolved** — a window that saves into another directory
+/// rebases its sources, so the spellings may legitimately differ while the photos they
+/// point at do not.
+pub fn same_document(left: &pixlay_core::Project, right: &pixlay_core::Project) -> bool {
+    let (a, b) = (left.doc(), right.doc());
+    let (Ok(left_sources), Ok(right_sources)) = (left.sources(), right.sources()) else {
+        return false;
+    };
+    a.template == b.template
+        && a.frame == b.frame
+        && a.cells.len() == b.cells.len()
+        && a.cells
+            .iter()
+            .zip(&b.cells)
+            .all(|(left, right)| left.crop == right.crop)
+        && left_sources
+            .iter()
+            .zip(&right_sources)
+            .all(|(left, right)| match (left, right) {
+                (None, None) => true,
+                (Some(left), Some(right)) => resolved(left) == resolved(right),
+                _ => false,
+            })
+}
+
+/// `../../../…` and the path it points at are the same photo.
+fn resolved(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
 /// The action a widget activates, for any widget that implements `GtkActionable`
 /// (`GtkWidget` itself does not, which is why this goes through the property).
 pub fn action_name(widget: &gtk::Widget) -> Option<String> {
@@ -662,6 +696,37 @@ pub fn descendants(root: &gtk::Widget) -> Vec<gtk::Widget> {
         }
     }
     found
+}
+
+/// Whether `widget` carries an accessible name.
+///
+/// An accessible name is either set explicitly — on the control or on the compound widget
+/// that owns it, since a `GtkSpinButton`'s inner entry is announced by the spin button — or
+/// derived by GTK from the control's own text, which is how a `GtkButton` carrying a
+/// `GtkLabel` gets its name.
+///
+/// Both halves matter. The first is what this app is responsible for and what most controls
+/// satisfy; the second is the platform behaviour HIG `guidelines/accessibility` leans on
+/// ("GTK provides default accessible descriptions for many UI elements"), without which the
+/// check would fail on GTK's own internals, such as the button `AdwBanner` creates from its
+/// label. GTK exposes no getter for the property's *value*, which is why the tree is walked
+/// rather than read back. `tests/hig.rs` walks the whole window with this; S23's swap test
+/// asks it of the strip's new control.
+pub fn has_accessible_name(widget: &gtk4::Widget) -> bool {
+    let mut current = Some(widget.clone());
+    for _ in 0..3 {
+        let Some(candidate) = current else {
+            break;
+        };
+        if gtk4::test_accessible_has_property(&candidate, gtk4::AccessibleProperty::Label) {
+            return true;
+        }
+        current = candidate.parent();
+    }
+    descendants(widget)
+        .iter()
+        .filter_map(|child| child.downcast_ref::<gtk4::Label>())
+        .any(|label| !label.label().is_empty())
 }
 
 /// Sends one key press to the canvas, through the controller the widget itself has.
