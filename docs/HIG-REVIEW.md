@@ -229,6 +229,23 @@ the canvas is **content** and the interface is **styling**, and the two must not
    - **the remembered folder across runs**: export once, quit, start again — does the next save dialog open
      where the last export landed?
 
+11. **S26–S28 additions: the walk of 2026-09-26's four findings** (rulings 42 and 43; the three steps' own
+   Human lines, and they join the gate after S26–S28):
+   - **the way in, as a button** (finding 1): with the window as it opens, does `Add photos…` in the header
+     bar's top-left read as the thing to press first — at the default size, and at the minimum one (560x420),
+     where the label may have shrunk to its icon: does the header bar still read as three aligned groups?
+   - **the pointer drag** (finding 2): with a photo in a cell, drag inside it — does the photo follow the
+     hand, does the pan stop at the cell's edge rather than uncovering it, and is the release one `Ctrl+Z`?
+     The same with the keyboard's own pan, so the two are one feel;
+   - **the swap's pointer path** (finding 4): press the strip's *Swap with another cell* — does the cell mark
+     itself (the dashed accent outline, and the canvas's own name saying `swapping with cell K`), and does a
+     click on the target exchange the two without touching the keyboard? `Shift`+drag and `Esc` still behave
+     as §2 item 7 asks;
+   - **a layout change keeps its photos** (finding 3): three photos, `−` to two cells, `+` back to three —
+     does the third photo come back in its own cell with its framing, does the one report read as *kept*
+     rather than *lost*, and does the `+`'s own hint make a kept photo findable? Then: `Delete` on a cell
+     still deletes, and a kept photo does not come back after a real delete.
+
 ### The main path's scripted step list (the three-minute walk)
 
 Written for `open → add photos → pick a layout → adjust → export` — the path ruling 31 re-routed to on
