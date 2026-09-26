@@ -1052,7 +1052,7 @@ measurements moved to the archive with a note saying what replaced them
 | a candidate vs `pixlay-render render --template <n> --sketch` at the same grid and the same three parameters (*test*) | **RMSE 0** across the eight-photo document's three candidates — not "below a threshold": both sides call `sketch_rgb8`, and the PNG the CLI writes round-trips through the decoder bit-exactly |
 | the band's own decodes (*test*) | **0**, measured where the canvas cannot contribute (`grid-4-2x2` → `grid-4-2x2g`, two 1:1 four-cell layouts, so the click keeps the canvas's grid and the whole delta is the band's) — and structural: `decode::GalleryJob` carries templates and a style, no path at all |
 | the band, at 1100x760 (*test*) | **120** logical px tall of the window's 760 (was 139); a candidate cell **128x96** (was 128x115 — the caption left with ruling 40), and the canvas is **594** px where it was 575 |
-| the two colours the band draws with (*test*) | paper **255,255,255** · ink **29,29,32** — the dark style's `@view_fg_color` / `@view_bg_color`, read back from `style.css` through `GtkWidget::color()` |
+| the two colours the band draws with (*test*) | paper **255,255,255** · ink **29,29,32** — the dark style's `@view_fg_color` / `@view_bg_color`, read back from `style.css` through `GtkWidget::color()`; **S30 made the ink a dimmed tone** (108,108,110 in the dark style) and its row below carries today's values |
 | a sketch's own cost | **0.12–0.14 ms** per candidate at the band's grid (`render --sketch --stats`, a 128-px sheet) |
 | the band's rebuild, `--band` | **0.14–0.18 ms** for the three candidates, three runs (S18's same row: 169.6–172.5 ms) |
 | the click `mosaic-8-s14` → `strip-8-8x1`, CLI | **125.5 / 126.3 / 127.9 ms** — `template_ms` 0.014, `sources_ms` 82.9–85.7, `composite_ms` 42.2–42.6, **7 decodes** (S18: 123.5–124.8) |
@@ -1203,6 +1203,21 @@ before the step (both binaries at HEAD of their own commit, `cmp` over every tem
 | a sketch's own cost (`render --sketch --stats`, a 128-px sheet, five runs) | **0.115–0.159 ms** (S21: 0.12–0.14) — the extra fill is one more pass over the same path; `peak_rss_mb` **10.0–10.4** |
 | the band as the window draws it (`crates/pixlay/tests/layout.rs`) | `/var/tmp/pixlay-s7/layout-band-gutter.png` — the four 4-cell candidates, `grid-4-2x2g`'s gutter visibly wider than `grid-4-2x2`'s line |
 
+### S30 (2026-09-26, `--release`, this machine)
+
+The band's ink, and the surface it is drawn on: what the tone is, against the tiles a candidate lives in.
+The colour rows are `crates/pixlay/tests/layout.rs`'s own (it reads the band's two colours and the theme's
+two through its probes, under `ForceDark` then `ForceLight`); the tile rows are the window's pixels, sampled
+from a snapshot with the guttered document open.
+
+| what | number |
+|---|---|
+| the band's two colours, dark style (*test*) | paper **255,255,255** (the theme's foreground) · ink **108,108,110** — `color-mix(in srgb, @view_fg_color 35%, @view_bg_color)`, where it was **29,29,32** (`@view_bg_color`, finding 6's defect) |
+| the band's two colours, light style (*test*) | paper **0,0,6** (the foreground in a light theme) · ink **178,178,180**, strictly between it and the ground **255,255,255** |
+| the band's tiles, which the ink has to sit with | dark style **56,56,60** unselected and **100,100,103** checked; light style **230,230,231** and **190,190,192** — so a checked candidate's ink and its tile are 10 levels apart in the dark style, and the gap reads as the tile showing through, which is what the reference draws |
+| the candidates measured before 35% | `@view_bg_color` 29,29,32 (the defect) · `@headerbar_bg_color` 46,46,50 · `@dialog_bg_color` 54,54,58 — surfaces of other parts of the window, all still darker than the band's own tile — and a 50% mix 142,142,144, lighter than both tile states and too light for the outlines |
+| `color-mix()` in this toolkit | resolved by GTK 4.24 in both schemes (the theme's own `--border-color` is one), so the ink is derived from two theme variables and no literal is named |
+
 ## 9. The window (S7), and the shell ruling 31 re-cut (S22)
 
 The GUI is the fifth consumer of the same document, and what it adds is interaction. Its
@@ -1255,7 +1270,10 @@ rely on:
 - **A candidate is drawn in the theme's own two colours, and says its position and nothing else** (S21):
   the paper and the ink come from `style.css`'s `.sketch-paper` / `.sketch-ink` classes, read back through
   `GtkWidget::color()` on two invisible probes — a candidate is interface, not content, so neither colour
-  is a constant and both follow the theme and its high-contrast variant. The cell carries **no caption**:
+  is a constant and both follow the theme and its high-contrast variant. **Since S30 the ink is a dimmed
+  tone** (`color-mix(in srgb, @view_fg_color 35%, @view_bg_color)`, measured in §8's "S30"), because it is
+  the ground a candidate is drawn on as well as its outlines: the band's own tiles are raised surfaces, and
+  the ink has to sit with them the way the reference's tile shows through a gap. The cell carries **no caption**:
   a template's name is machine identity (`edit --template`, `templates`, the document's own embedded copy)
   and never text a user reads (ruling 40), so what a screen reader announces is the position
   (`Layout 3 of 5`) and the widget's own name — the template's — is for callers, not for people.

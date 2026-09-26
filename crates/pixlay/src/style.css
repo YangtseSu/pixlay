@@ -33,12 +33,20 @@
   border-color: var(--accent-bg-color);
 }
 
-/* The sketch's two colours (S21), which the band reads back through
- * `GtkWidget::color()` on the two invisible probes the band builds
- * (`crates/pixlay/src/layout.rs`). A candidate is a small *sheet* with its cells'
- * outlines on it, so the paper is the theme's foreground and the ink its view
- * background: a light sheet with dark lines in the dark style — which is how the
- * reference strips draw a layout (ruling 32) — and the inverse in a light one.
+/* The sketch's two colours (S21; the ink's tone is S30), which the band reads back
+ * through `GtkWidget::color()` on the two invisible probes the band builds
+ * (`crates/pixlay/src/layout.rs`). A candidate is a small *sheet*: its cells are
+ * the theme's foreground, and everything a cell is not — every outline, and the
+ * ground between the cells (S29) — is the ink, which is how the reference strips
+ * draw a layout (ruling 32).
+ *
+ * **The ink is a tone of the theme, not one of its two extremes** (S30): it is the
+ * ground a candidate is drawn on, and the reference lets the band's own tile show
+ * between the cells, so the ink has to sit with that tile. The view background is
+ * the darkest tone in the dark style where the band's tiles are raised surfaces
+ * (§8's S30 row measures all three), which made the drawing's gap the one near-black
+ * thing in the strip — the human's finding of 2026-09-26. A 35% mix of the
+ * foreground over the view background is the dimmed tone that does sit with it.
  * The classes exist so that no colour is named in Rust and both follow the theme
  * and its high-contrast variant; `GtkWidget::color()` is the one public way to
  * read a stylesheet colour back (the style context's own `lookup_color` is
@@ -48,5 +56,5 @@
 }
 
 .sketch-ink {
-  color: @view_bg_color;
+  color: color-mix(in srgb, @view_fg_color 35%, @view_bg_color);
 }

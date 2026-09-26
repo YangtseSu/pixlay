@@ -23,7 +23,9 @@ mod support;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use gtk4 as gtk;
 use gtk4::prelude::*;
+use libadwaita as adw;
 use pixlay::canvas;
 use pixlay_core::{CropTransform, Project, Rgba8, templates};
 use pixlay_imaging::Source;
@@ -868,6 +870,87 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
         cli.doc().cells.len(),
         cli.doc().template.name
     );
+
+    // ---- the sketch's ink is a tone of the theme, not its ground (S30) ------
+    // The human's finding of 2026-09-26: with the view background as the ink, a
+    // candidate's gap was the one near-black thing in the strip, where the band's
+    // own tiles are raised surfaces, lighter than the ground in either scheme. The
+    // claim is the tone, and it is the same claim in both schemes: the paper is the
+    // theme's foreground and the ink lies *strictly between* the theme's two
+    // colours, at neither end.
+    // The two theme colours themselves — read through the test's own probes, the way
+    // `tests/selection.rs` reads the accent, because the band's ink is no longer one
+    // of them. Read afresh in each scheme: the values change with it.
+    let provider = gtk::CssProvider::new();
+    provider.load_from_string(
+        ".tone-fg-probe { color: @view_fg_color; }\n\
+         .tone-bg-probe { color: @view_bg_color; }\n",
+    );
+    gtk::style_context_add_provider_for_display(
+        &gtk::gdk::Display::default().expect("the tests run on a display"),
+        &provider,
+        gtk::STYLE_PROVIDER_PRIORITY_USER,
+    );
+    let tone_probe = |class: &str| {
+        let probe = gtk::Label::new(None);
+        probe.add_css_class(class);
+        probe
+    };
+    let (tone_fg, tone_bg) = (tone_probe("tone-fg-probe"), tone_probe("tone-bg-probe"));
+    let probe_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    probe_box.append(&tone_fg);
+    probe_box.append(&tone_bg);
+    let probe_window = adw::Window::builder().content(&probe_box).build();
+    probe_window.present();
+    let read = |probe: &gtk::Label| {
+        let colour = probe.color();
+        let channel = |value: f32| (value * 255.0).round().clamp(0.0, 255.0) as u8;
+        Rgba8::rgb(
+            channel(colour.red()),
+            channel(colour.green()),
+            channel(colour.blue()),
+        )
+    };
+
+    let manager = adw::StyleManager::default();
+    for scheme in [adw::ColorScheme::ForceDark, adw::ColorScheme::ForceLight] {
+        manager.set_color_scheme(scheme);
+        support::pump(Duration::from_millis(300));
+        let (foreground, ground) = (read(&tone_fg), read(&tone_bg));
+        let style = gallery.sketch_style();
+        eprintln!(
+            "{scheme:?}: the band's sketch draws paper {} ink {} between a foreground of {} \
+             and a ground of {}",
+            rgb(style.paper),
+            rgb(style.ink),
+            rgb(foreground),
+            rgb(ground)
+        );
+        assert_eq!(
+            rgb(style.paper),
+            rgb(foreground),
+            "under {scheme:?} the paper is not the theme's own foreground"
+        );
+        for (low, high) in [
+            (foreground.r, ground.r),
+            (foreground.g, ground.g),
+            (foreground.b, ground.b),
+        ] {
+            let (low, high) = (low.min(high), low.max(high));
+            for channel in [style.ink.r, style.ink.g, style.ink.b] {
+                assert!(
+                    low < channel && channel < high,
+                    "under {scheme:?} the ink {} is not strictly between the theme's own \
+                     two colours ({} and {})",
+                    rgb(style.ink),
+                    rgb(foreground),
+                    rgb(ground)
+                );
+            }
+        }
+    }
+    probe_window.close();
+    manager.set_color_scheme(adw::ColorScheme::ForceDark);
 }
 
 /// Waits for both background builds: the canvas's bitmaps and the band's
