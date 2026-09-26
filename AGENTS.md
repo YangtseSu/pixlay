@@ -309,7 +309,8 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
 
 - **Widgets**: use libadwaita containers and widgets by default (`AdwApplicationWindow` /
   `AdwToolbarView` / `AdwHeaderBar` / `AdwToast` / `AdwStatusPage` / `AdwAboutDialog` and so on — and, since
-  S25, `AdwPreferencesDialog` for the export's settings, ruling 36). S7
+  S25, `AdwPreferencesDialog` for the app's own dialog, which S25b made one surface: the document's frame
+  above the export's settings, rulings 36 and the human's of 2026-09-26). S7
   landed the shell as `AdwApplicationWindow` + `AdwToolbarView` + `AdwHeaderBar` + `AdwToastOverlay` +
   `AdwBanner`, with one custom-drawn widget — the canvas, whose stated reason is that it draws the
   document itself. A custom-drawn widget is the exception and needs a stated reason. **S13 replaced the
