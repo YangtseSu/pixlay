@@ -226,9 +226,14 @@ versions**. Everything follows the latest stable release.
   Downgrade a binding only when it demands a newer system version than Arch ships — never downgrade
   the system.
 - **CI / packaging**: `runs-on: ubuntu-26.04` — the newest hosted Ubuntu image, named explicitly because
-  `ubuntu-latest` still resolves to 24.04 (ruled 2026-09-27) — with an `archlinux:latest` container, and
-  the one action moving with its major tag (`actions/checkout@v7`) rather than being pinned to a commit
-  SHA: under this policy a pin is the thing that has to be justified
+  `ubuntu-latest` still resolves to 24.04 — and **no container** (both ruled 2026-09-27, human): the
+  `archlinux:latest` container this ran in could not present a frame from its headless mutter
+  (`the widget never produced a render node … waited 180.0s, 0 frames arrived`), so the GUI suite never
+  went green there, and the suite now runs on the runner's own display stack with the distribution's
+  libraries. CI therefore answers "does the program run" on Ubuntu's stack — the Arch build is the
+  machine's, through `makepkg` (below). The one action moves with its major tag
+  (`actions/checkout@v7`) rather than being pinned to a commit SHA: under this policy a pin is the thing
+  that has to be justified
 - **Keeping the dependency set minimal** does not conflict with tracking the latest: few, but each
   one current.
 
@@ -549,7 +554,7 @@ not repeated here.*
   (`desktop-file-validate`, `appstreamcli validate --no-net`) run in `meson test` wherever they are
   installed (`data/meson.build`, `required: false`)
 - **CI runs the verification entry and does not build the package** (same ruling): `makepkg`, the PKGBUILD
-  and the install are verified on a machine, where a package can be built *and installed*; the container's
+  and the install are verified on a machine, where a package can be built *and installed*; the runner's
   job is to answer whether the program runs. `release.yml` builds the **binaries** for a tag and attaches
   them to the release — its build is the same `meson setup` / `meson compile` the package wraps, and it runs
   no `makepkg` either

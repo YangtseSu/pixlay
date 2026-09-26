@@ -1,18 +1,18 @@
-# Release (2026-09-27). One thing happens here: a tag `vX.Y.Z` is pushed, the tree is
-# built with the project's own build — `meson setup` / `meson compile`, the same
-# definition the package wraps — and the two binaries go onto the GitHub Release for
-# that tag, as `pixlay-<version>-linux-amd64.tar.gz` beside their `sha256`.
+# Release (2026-09-27). One thing happens here: a tag `vX.Y.Z` is pushed, the tree is built
+# with the project's own build — `meson setup` / `meson compile`, the same definition the
+# package wraps — and the two binaries go onto the GitHub Release for that tag, as
+# `pixlay-<version>-linux-amd64.tar.gz` beside their `sha256`.
 #
-# **amd64 only, and the binaries only.** No GitHub runner has an aarch64 Arch userland
-# (Arch Linux ARM is a separate project with no official image), so the PKGBUILD's
-# `aarch64` is built by whoever runs it on ALARM; and the Arch **package** is built on
-# the machine that maintains it and uploaded by hand — a package build runs no tests and
-# is verified where it can be installed (`AGENTS.md`, "AUR discipline", which also has
-# the four steps of a release).
+# **The runner is `ubuntu-26.04`, named explicitly and with no container**, like the
+# `verify` job and for the same reason (`ci.yml`'s header). `gh` and `git` are the runner's
+# own.
 #
-# The container is the `verify` job's own `archlinux:latest`, so the binaries are built
-# against the rolling system libraries the product targets, and the tag is checked
-# against `meson.build`'s version before anything is published.
+# **amd64 only, and the binaries only.** No GitHub runner has an aarch64 Arch userland (Arch
+# Linux ARM is a separate project with no official image), so the PKGBUILD's `aarch64` is
+# built by whoever runs it on ALARM; and the Arch **package** is built on the machine that
+# maintains it and uploaded by hand — a package build runs no tests and is verified where it
+# can be installed (`AGENTS.md`, "AUR discipline", which also has the four steps of a
+# release). The tag is checked against `meson.build`'s version before anything is published.
 name: Release
 
 on:
@@ -25,16 +25,16 @@ permissions:
 jobs:
   amd64:
     runs-on: ubuntu-26.04
-    container: archlinux:latest
     steps:
       - uses: actions/checkout@v7
-      - name: Install the toolchain
-        # `gettext` and `meson` are the build's own; `git` is what `gh` shells out to
-        # (without it: "unable to find git executable in PATH", measured 2026-09-27),
-        # and `github-cli` is the `gh` that uploads the assets.
-        run: >-
-          pacman -Syu --noconfirm --needed
-          base-devel rust cargo gtk4 libadwaita glycin meson gettext git github-cli
+      - name: Install the libraries
+        # The build's own: the three the package depends on, the seccomp meson looks for,
+        # and `msgfmt` for the desktop entry and the metainfo.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-4-dev libadwaita-1-dev libglycin-2-dev libseccomp-dev \
+            meson ninja-build pkg-config gettext
       - name: Build
         run: |
           meson setup build --prefix=/usr
@@ -60,15 +60,8 @@ jobs:
       - name: Publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # Every `gh` call names the repository, so nothing here depends on a local git
-        # checkout: inside the container `gh` could not discover one (measured 2026-09-27,
-        # "failed to run git: fatal: not a git repository"), and `--repo` uses the API
-        # instead.
-        working-directory: ${{ github.workspace }}
         run: |
           tag="$GITHUB_REF_NAME"
-          gh --version | head -1
-          gh api "/repos/$GITHUB_REPOSITORY" --jq .full_name
           cat > /var/tmp/notes.md <<'EOF'
           The two binaries for x86_64 Linux (`pixlay` and `pixlay-render`), built from this tag.
           They link the gtk4, libadwaita and glycin the system provides, so they run on a machine

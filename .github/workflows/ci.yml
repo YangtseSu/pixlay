@@ -1,37 +1,26 @@
 # CI (S16). **The verification entry `AGENTS.md` names, and nothing else**: the format
-# check, the lint, the whole test suite and the entry's own render — on
-# `archlinux:latest`, the version policy's decision ("CI / packaging: an
-# `archlinux:latest` container, no pinned image tag"), so the rolling toolchain and
-# the rolling system libraries are, by construction, the ones this tree is built
-# against.
+# check, the lint, the whole test suite and the entry's own render.
 #
-# **Every version here is a moving one**, and the runner's OS is named explicitly because its
-# `-latest` lags: `ubuntu-26.04` is the newest hosted image (`ubuntu-latest` still resolves to
-# 24.04, ruled 2026-09-27), and inside it `archlinux:latest` with `pacman -Syu` is the rolling
-# packages rather than a snapshot. The one action moves with its major tag
-# (`actions/checkout@v7`) rather than a commit SHA — the policy is "track the latest", so a pin
-# is the thing that has to be justified, not the other way round.
+# **The runner is `ubuntu-26.04`, named explicitly and with no container** (ruled
+# 2026-09-27, human). It used to be an `archlinux:latest` container on `ubuntu-latest`, and
+# the GUI suite never went green there: the container's headless mutter mapped the window
+# and then never presented a frame — `the widget never produced a render node … waited
+# 180.0s, 0 frames arrived` (`crates/pixlay/tests/mainpath.rs`). So the suite runs on the
+# runner's own display stack, and the libraries come from the distribution.
 #
-# **The package is not built here** (ruled 2026-09-26, human): `makepkg`, the PKGBUILD
-# and its `check()` are verified on a machine, where a package can be built *and
-# installed*, and what this job answers is "does the program run" — the question a
-# container is fit to answer. The tarball-and-makepkg job that stood here is gone with
-# that ruling; the PKGBUILD is tested locally.
+# The floors `meson.build` declares are below what 26.04 ships (gtk4 ≥ 4.12,
+# libadwaita-1 ≥ 1.8 — 26.04 has 1.9.0, and `libglycin-2-dev` is the 2.x package this tree
+# links), and the toolchain is the image's own rustup (1.98.1, the workspace's
+# `rust-version`).
 #
-# **The display is mutter, not an Xvfb** (same ruling; `AGENTS.md`'s entry): mutter is
-# the compositor this app is developed against and the one whose window behaviour the
-# tests measure, and it runs headless with **no GPU node** — measured 2026-09-26 in a
-# container-shaped environment with `/dev/dri` hidden: `Created surfaceless renderer
-# without GPU`. What it does need is a **session bus** (without one it aborts:
-# `set_gnome_env: assertion failed: (session_bus)`) and a machine-id for `dbus-daemon`
-# to hang that bus on; the Test step makes both.
+# **The package is not built here** (ruled 2026-09-26, human): `makepkg`, the PKGBUILD and
+# its `check()` are verified on a machine, where a package can be built *and installed*,
+# and what this job answers is "does the program run".
 #
-# `PIXLAY_TEST_CHILD=1` stays the escape hatch for an environment where mutter cannot
-# run at all: it tells the harness to use the display the process already has instead of
-# starting its own (`tests/support/mod.rs`). A bare Xvfb is **not** that display's equal
-# — with no window manager GTK frames the window inside its own surface, so every window
-# geometry a GUI test reads comes out 10 px smaller in each direction (measured
-# 2026-09-26: 1090x584 against 1100x594).
+# **The display is mutter, not an Xvfb** (same ruling; `AGENTS.md`'s entry): mutter is the
+# compositor this app is developed against and the one whose window behaviour the tests
+# measure, and it needs no GPU node. It does need a **session bus** (`dbus-run-session`,
+# which the Test step provides) and a machine-id for `dbus-daemon`, which the runner has.
 name: CI
 
 on:
@@ -41,35 +30,37 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-26.04
-    container: archlinux:latest
     steps:
       - uses: actions/checkout@v7
-      - name: Install the toolchain
-        # `gettext` is `tests/i18n.rs` (it runs `po/extract-pot`), `libheif` is the
-        # HEIC and AVIF fixtures, `mutter` and `dbus` are the display the tests run on
-        # and the bus it needs, `mesa` is the software GL that renders with no GPU node.
-        run: >-
-          pacman -Syu --noconfirm --needed base-devel rust cargo gtk4 libadwaita
-          gettext shared-mime-info libheif mutter dbus mesa
+      - name: Install the libraries
+        # `libglycin-2-dev` is the decoding backend's 2.x package and `glycin-loaders` the
+        # sandboxed loaders the fixtures need (HEIC and AVIF come from `libheif1`);
+        # `gettext` is `tests/i18n.rs` (it runs `po/extract-pot`), `shared-mime-info` the
+        # MIME database a packaging test reads, `mutter` and `dbus` the display the tests
+        # run on and the bus it needs, and mesa's software rasterizers the GL the runner
+        # has no GPU for.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-4-dev libadwaita-1-dev libglycin-2-dev glycin-loaders libheif1 bubblewrap \
+            libseccomp-dev gettext shared-mime-info meson ninja-build pkg-config \
+            adwaita-icon-theme fonts-dejavu-core \
+            mutter dbus libgl1-mesa-dri libglx-mesa0 libegl-mesa0 mesa-vulkan-drivers
       - name: Format
         run: cargo fmt --check
       - name: Lint
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
-        # The harness starts its own headless mutter, on a virtual monitor of
-        # 1920x1200 (above the app's own 1100x760 default window). The two things it
-        # cannot make for itself are here: `dbus-daemon` refuses to start without a
-        # machine-id, and mutter puts its Wayland socket in `XDG_RUNTIME_DIR`, which a
-        # container does not have at all.
+        # The harness starts its own headless mutter, on a virtual monitor of 1920x1200
+        # (above the app's own 1100x760 default window). What it cannot make for itself is
+        # `XDG_RUNTIME_DIR`, where mutter puts its Wayland socket.
         run: |
-          dbus-uuidgen --ensure=/etc/machine-id
           install -d -m 700 /var/tmp/pixlay-runtime
-          XDG_RUNTIME_DIR=/var/tmp/pixlay-runtime dbus-run-session -- \
-            cargo test --workspace
+          XDG_RUNTIME_DIR=/var/tmp/pixlay-runtime dbus-run-session -- cargo test --workspace
       # The entry's own render, on the repository's own project: eight photos on
-      # `mosaic-8-s14`, which exercises decode, resample, the clamp, `draw` and
-      # the encoder in one run. `--stats` makes it machine-readable; the image
-      # itself is looked at by a person, not by this job.
+      # `mosaic-8-s14`, which exercises decode, resample, the clamp, `draw` and the encoder
+      # in one run. `--stats` makes it machine-readable; the image itself is looked at by a
+      # person, not by this job.
       - name: Render the verification project
         run: >-
           cargo run --release -p pixlay-cli -- render

@@ -4,7 +4,7 @@
 # here pins or delays either: no `ignore`, no `cooldown`, no lockfile-only
 # strategy, and a major is as wanted as a patch. What makes a bump safe to merge
 # is the `verify` job, which `workflows/ci.yml` runs for `pull_request`: the whole
-# verification entry on an `archlinux:latest` container.
+# verification entry on the runner (`workflows/ci.yml`).
 #
 # Checked **daily**, and minor and patch updates arrive as one pull request
 # because their own unit is "the tree this week" — a **major** stays its own,

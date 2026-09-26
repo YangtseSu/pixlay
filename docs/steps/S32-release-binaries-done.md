@@ -9,9 +9,9 @@ own place in the same release.
 **Work**
 
 - `.github/workflows/release.yml` (new): on a `v*` tag, the project's own build (`meson setup` /
-  `meson compile`) inside `archlinux:latest`, the tag checked against `meson.build`'s
-  `project(version:)`, and the two binaries packed as `pixlay-<version>-linux-amd64.tar.gz` beside their
-  `.sha256`, attached to that tag's GitHub Release. **amd64 only, and the binaries only**: no GitHub
+  `meson compile`) on `ubuntu-26.04` — no container since the same day's ruling, below — the tag checked
+  against `meson.build`'s `project(version:)`, and the two binaries packed as
+  `pixlay-<version>-linux-amd64.tar.gz` beside their `.sha256`, attached to that tag's GitHub Release. **amd64 only, and the binaries only**: no GitHub
   runner has an aarch64 Arch userland, and the Arch package is built on a machine — which is where the
   release's package comes from.
 - `packaging/arch/PKGBUILD`: `arch=('x86_64' 'aarch64')` (the `aarch64` half is built on Arch Linux ARM),
@@ -34,10 +34,14 @@ PKGBUILD's `sha256sums` is `9818d3b507d2cf49442b3e01fa8d03ea4b26a7120eb4e800ce47
 with `updpkgsums` over a fresh download of the tag. `packaging/arch/` holds the current version's
 PKGBUILD and package and nothing else.
 
-**What the first release taught the workflow** (both fixed in the same step, the tag re-pointed twice
-before it published): `meson.build` asked for `glycin-1`, which stock Arch does not ship — the 2.x name
-is the one that links, and this machine only saw the 1.x compatibility file; and `gh` inside the
-container needs `git` (absent from `base-devel`) *and* `--repo` (it cannot discover a checkout there).
+**What the first release taught the workflow** (the tag was re-pointed twice before it published):
+`meson.build` asked for `glycin-1`, which stock Arch does not ship — the 2.x name is the one that links,
+and this machine only saw the 1.x compatibility file; and `gh` inside the container needed `git` (absent
+from `base-devel`) *and* `--repo` (it cannot discover a checkout there). And the suite never went green
+in the container at all: `the_main_path_can_be_walked` waited 180 s for a frame the container's headless
+mutter never presented (`the widget never produced a render node … 0 frames arrived`), in three runs in a
+row — so the same day's ruling dropped the container: both workflows run on `ubuntu-26.04` itself, with
+the distribution's libraries and the runner's own display stack (`AGENTS.md`, "Version policy").
 
 **Human**: the AUR upload — `/var/tmp/pixlay-aur/{PKGBUILD,.SRCINFO}` is staged from this tree (the name
 `pixlay` is free on the AUR), and it wants the AUR account's own SSH key. The release itself, which this
