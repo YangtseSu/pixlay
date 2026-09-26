@@ -377,11 +377,31 @@ impl EditorWindow {
         self.set_size_request(560, 420);
 
         // ---- the header bar -------------------------------------------------
-        // One page, so this is the window's own bar: history and the document's
-        // settings, the heading, the menu and the export. The title widget is the
-        // document's name, dirty marker included (`update_title`); since S22 there is
-        // **no Save button** — it sat beside Export and read as the same action
-        // (ruling 37) — and the function lives in the menu and on `Ctrl+S`.
+        // One page, so this is the window's own bar: the way in, history and the
+        // document's settings, the heading, the menu and the export. The title widget
+        // is the document's name, dirty marker included (`update_title`); since S22
+        // there is **no Save button** — it sat beside Export and read as the same
+        // action (ruling 37) — and the function lives in the menu and on `Ctrl+S`.
+        //
+        // The way in is a control of its own (S26, ruling 42): the window opens on one
+        // empty cell, and the thing that reads as "start here" is the leftmost button.
+        // The same action the menu item and `Ctrl+I` run, so there is one chooser.
+        let add_content = adw::ButtonContent::new();
+        add_content.set_icon_name("list-add-symbolic");
+        add_content.set_label(&gettext("Add photos…"));
+        // `can_shrink` is the guard for a header bar too narrow for the label — a
+        // longer translation, a window below the supported minimum: the content gives
+        // way (its label elides or goes) instead of squeezing the heading
+        // (libadwaita's `AdwButtonContent:can-shrink`). Measured 2026-09-26: at
+        // 560x420 the button is 122x24 and the heading keeps 99 px with the property
+        // either way, so nothing gives way at the sizes this app supports.
+        add_content.set_can_shrink(true);
+        let add = gtk::Button::builder()
+            .child(&add_content)
+            .tooltip_text(gettext("Add photos to the collage"))
+            .build();
+        add.set_action_name(Some("win.add-photos"));
+        a11y::label(&add, &gettext("Add photos to the collage"));
         let undo = icon_button("edit-undo-symbolic", &gettext("Undo"));
         undo.set_action_name(Some("win.undo"));
         let redo = icon_button("edit-redo-symbolic", &gettext("Redo"));
@@ -417,13 +437,15 @@ impl EditorWindow {
         // HIG `patterns/containers/header-bars`: navigation actions at the *start*,
         // the heading in the centre, the menu at the *end* (S13c; S13b packed every
         // control at the end), and related buttons grouped with a spacer rather than
-        // linked. The start slot holds the document-editing controls: undo and redo
-        // are one pair, and the frame's own settings are a second concern.
+        // linked. The start slot holds the document-editing controls: the way in is
+        // the leftmost control (S26, ruling 42), undo and redo are one pair, and the
+        // frame's own settings are a second concern.
         let spacer = gtk::Separator::new(gtk::Orientation::Vertical);
         spacer.add_css_class("spacer");
         let header = adw::HeaderBar::new();
         let title = adw::WindowTitle::new(&gettext("Untitled collage"), "");
         header.set_title_widget(Some(&title));
+        header.pack_start(&add);
         header.pack_start(&undo);
         header.pack_start(&redo);
         header.pack_start(&spacer);

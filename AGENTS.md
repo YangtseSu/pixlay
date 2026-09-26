@@ -323,9 +323,11 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
   geometry as stroked outlines rather than a render of the user's photos (ruling 32), because a template
   carries geometry and no style, so a sketch is a complete account of it — and the band decodes nothing.
   **The window's one header bar follows HIG
-  `patterns/containers/header-bars` and the two references**: primary actions at the *start*, the heading
-  (the document's name) in the centre, a primary menu at the *end* — and no Save button, which ruling 37 of
-  2026-09-25 removed because it sat beside Export. The editor's
+  `patterns/containers/header-bars` and the two references**: primary actions at the *start* — **the way in
+  first**, `Add photos…` as the leftmost control ahead of undo and redo (S26, ruling 42 of 2026-09-26: the
+  window opens on an empty cell, so the control that fills it is what has to read as "start here") — the
+  heading (the document's name) in the centre, a primary menu at the *end* — and no Save button, which
+  ruling 37 of 2026-09-25 removed because it sat beside Export. The editor's
   per-cell buttons arrived in S15 as children of the canvas's own `GtkOverlay`, placed by their own
   margins — a `GtkFixed` was rejected because it measures only its children, so a document whose empty
   cells come and go would leave the container 0x0 (`crates/pixlay/src/canvas.rs`). None of those is

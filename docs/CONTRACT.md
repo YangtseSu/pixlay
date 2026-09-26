@@ -1442,16 +1442,23 @@ became the platform's. What a caller may rely on:
   allows one for the export's settings and not for this), and the canvas and the export are unaffected —
   they are document content, not styling. The sheet's frame is the theme's and the sheet's own pixels are
   not: `tests/hig.rs::check_colour_schemes` asserts both under a forced light *and* a forced dark scheme.
-- **The chrome follows HIG `patterns/containers/header-bars`** (ruling 24, re-cut by S22): the window's one
-  header bar holds the document's controls at the **start** (undo, redo, a spacer, the frame's settings),
-  the heading in the **centre** (`AdwWindowTitle`, the document's name with its dirty marker — the same
-  string the window's own title carries) and a **primary menu** with the export button at the **end**. The
-  menu is `[New collage, Open…, Save, Save as…, Export…] · [Add photos…, Reset the framing] ·
+- **The chrome follows HIG `patterns/containers/header-bars`** (ruling 24, re-cut by S22 and S26): the
+  window's one header bar holds the way into the application at the **start** — `Add photos…`, the
+  leftmost control before undo and redo (S26, ruling 42: the window opens on an empty cell, and the
+  control that fills it is the one entry besides the menu item and `Ctrl+I`) — with a spacer and the
+  frame's settings after them, the heading in the **centre** (`AdwWindowTitle`, the document's name with
+  its dirty marker — the same string the window's own title carries) and a **primary menu** with the
+  export button at the **end**. The menu is
+  `[New collage, Open…, Save, Save as…, Export…] · [Add photos…, Reset the framing] ·
   [Preferences, Keyboard shortcuts, About Pixlay]` — the last group is HIG `patterns/controls/menus`'
   "Standard Primary Menu Items", and *Preferences* is S25's addition to it. **There is no Save button**
   (ruling 37: it sat beside Export and read as the same action), which `tests/hig.rs::check_header_chrome`
-  asserts together with the three slots and the menu's items; the export button is an `AdwButtonContent`
-  (icon plus label, one `suggested-action`), and every control carries a tooltip and an accessible name.
+  asserts together with the three slots and the menu's items; the export and Add photos buttons are
+  `AdwButtonContent`s (icon plus label — one `suggested-action` on the export; `can-shrink` on the Add
+  photos button, the guard for a bar too narrow for the label: measured 2026-09-26, the property
+  changes nothing at 560x420 — `Add photos` is 122x24 and the heading keeps 99 px with it either way, so
+  it is what a longer translation would need rather than something that fires today), and every control
+  carries a tooltip and an accessible name.
 - **The export's bounds are the settings' bounds**: `MIN_EXPORT_PX` / `MAX_EXPORT_PX` (`export.rs`) are what
   the settings surface's row offers and what a value read from the file is clamped to (S25); the CLI's own
   range is wider (`MAX_LONG_EDGE_PX`, §5), because it is a machine surface rather than a row.

@@ -542,10 +542,11 @@ fn check_compose(window: &EditorWindow, failures: &mut Vec<String>) {
     window.select(None);
 }
 
-/// The window's header bar, held to the three alignment points HIG
-/// `patterns/containers/header-bars` and ruling 24 fix: the document's own controls at
-/// the start, the heading in the centre, the menu at the end — and, since S22, no Save
-/// button (ruling 37), with the menu carrying the actions a button no longer does.
+/// The window's header bar, held to the alignment points HIG
+/// `patterns/containers/header-bars` and rulings 24 and 42 fix: the way in is the
+/// leftmost control, the document's other controls follow at the start, the heading is
+/// in the centre, the menu and the export at the end — and, since S22, no Save button
+/// (ruling 37), with the menu carrying the actions a button no longer does.
 fn check_header_chrome(window: &EditorWindow, failures: &mut Vec<String>) {
     let Some(header) = window.header() else {
         failures.push("the window has no header bar".into());
@@ -561,9 +562,15 @@ fn check_header_chrome(window: &EditorWindow, failures: &mut Vec<String>) {
         controls
             .iter()
             .find(|widget| support::action_name(widget).as_deref() == Some(action))
+            .cloned()
     };
-    let (Some(frame), Some(export)) = (by_action("win.frame"), by_action("win.export")) else {
-        failures.push("the header is missing the frame or the export control".into());
+    let (Some(frame), Some(export), Some(add)) = (
+        by_action("win.frame"),
+        by_action("win.export"),
+        by_action("win.add-photos"),
+    ) else {
+        failures
+            .push("the header is missing the frame, the export or the Add photos control".into());
         return;
     };
     // Ruling 37: Save is a menu item and an accelerator, not a button beside Export —
@@ -606,27 +613,56 @@ fn check_header_chrome(window: &EditorWindow, failures: &mut Vec<String>) {
         .or_else(|| header.first_child())
         .map(|widget| centre(&widget));
     match (
-        centre(&frame.clone()),
+        centre(&add),
+        by_action("win.undo").and_then(|undo| centre(&undo)),
+        centre(&frame),
         title.flatten(),
         centre(&menu_widget),
+        centre(&export),
     ) {
-        (Some(frame_x), Some(title_x), Some(menu_x)) => {
+        (Some(add_x), Some(undo_x), Some(frame_x), Some(title_x), Some(menu_x), Some(export_x)) => {
+            // Ruling 42: the way in is the leftmost control, ahead of undo and redo.
+            if add_x >= undo_x {
+                failures.push(format!(
+                    "the Add photos button ({add_x:.0}) is not left of undo ({undo_x:.0})"
+                ));
+            }
+            if add_x >= title_x {
+                failures.push(format!(
+                    "the Add photos button ({add_x:.0}) is not left of the heading ({title_x:.0})"
+                ));
+            }
             if frame_x >= title_x {
                 failures.push(format!(
                     "the frame button ({frame_x:.0}) is not left of the heading ({title_x:.0})"
                 ));
             }
-            if menu_x <= title_x {
-                failures.push(format!(
-                    "the menu ({menu_x:.0}) is not right of the heading ({title_x:.0})"
-                ));
+            for (name, x) in [("menu", menu_x), ("export button", export_x)] {
+                if x <= title_x {
+                    failures.push(format!(
+                        "the {name} ({x:.0}) is not right of the heading ({title_x:.0})"
+                    ));
+                }
             }
+            let size = |widget: &gtk4::Widget| format!("{}x{}", widget.width(), widget.height());
+            eprintln!(
+                "the header bar at the default size (centre px from its start, size): \
+                 Add photos {add_x:.0} {}, undo {undo_x:.0}, frame {frame_x:.0} {}, \
+                 heading {title_x:.0}, menu {menu_x:.0} {}, export {export_x:.0} {}",
+                size(&add),
+                size(&frame),
+                size(&menu_widget),
+                size(&export),
+            );
         }
         _ => failures.push("the header's controls are not allocated".into()),
     }
     // Every control *this app* puts in the header carries a tooltip and a name (this
-    // page's own "tooltips on primary controls").
+    // page's own "tooltips on primary controls" and `guidelines/pointer-touch`'s
+    // 24x24 target for the new control at the default size).
+    const MIN_TARGET: i32 = 24;
     for (name, widget) in [
+        ("the Add photos button", add.clone()),
         ("the frame button", frame.clone()),
         ("the export button", export.clone()),
         ("the menu", menu_widget.clone()),
@@ -636,6 +672,13 @@ fn check_header_chrome(window: &EditorWindow, failures: &mut Vec<String>) {
         }
         if !support::has_accessible_name(&widget) {
             failures.push(format!("the header's {name} has no accessible name"));
+        }
+        if widget.width() < MIN_TARGET || widget.height() < MIN_TARGET {
+            failures.push(format!(
+                "the header's {name} is {}x{}, below the {MIN_TARGET} px target",
+                widget.width(),
+                widget.height()
+            ));
         }
     }
 
@@ -686,11 +729,60 @@ fn check_header_chrome(window: &EditorWindow, failures: &mut Vec<String>) {
 }
 
 /// At the minimum size the sheet is still drawn in full inside the canvas
-/// (HIG `guidelines/adaptive`).
+/// (HIG `guidelines/adaptive`) and the header bar still holds its controls
+/// (S26: the way in keeps its 24x24 target when its label has given way, and the
+/// heading keeps an allocation of its own).
 fn check_editor_minimum(window: &EditorWindow, failures: &mut Vec<String>) {
     let minimum = window.size_request();
     window.set_default_size(minimum.0, minimum.1);
     window.pump(Duration::from_millis(500));
+
+    // The header bar at this size, where `AdwButtonContent:can-shrink` may have
+    // dropped the Add photos label: the control is still a control, and the heading
+    // is not squeezed to nothing by the controls beside it.
+    const MIN_TARGET: i32 = 24;
+    let header = window
+        .header()
+        .map(|header| header.upcast::<gtk4::Widget>());
+    let add = header.as_ref().and_then(|header| {
+        support::descendants(header)
+            .into_iter()
+            .find(|widget| support::action_name(widget).as_deref() == Some("win.add-photos"))
+    });
+    let add_size = match &add {
+        Some(add) => {
+            if add.width() < MIN_TARGET || add.height() < MIN_TARGET {
+                failures.push(format!(
+                    "at the minimum size {}x{} the Add photos button is {}x{}, below the \
+                     {MIN_TARGET} px target",
+                    minimum.0,
+                    minimum.1,
+                    add.width(),
+                    add.height()
+                ));
+            }
+            format!("{}x{}", add.width(), add.height())
+        }
+        None => {
+            failures.push("at the minimum size the header has no Add photos control".into());
+            "none".into()
+        }
+    };
+    let heading = window
+        .header()
+        .and_then(|header| header.title_widget().or_else(|| header.first_child()))
+        .map(|widget| widget.width())
+        .unwrap_or(0);
+    if heading <= 0 {
+        failures.push(format!(
+            "at the minimum size {}x{} the heading has no allocation of its own",
+            minimum.0, minimum.1
+        ));
+    }
+    eprintln!(
+        "the header bar at {}x{}: Add photos {add_size}, heading {heading} px wide",
+        minimum.0, minimum.1
+    );
 
     // The band shares the page with the canvas, so "the canvas is drawn in full"
     // and "the band exists" are one criterion at this size.
@@ -732,6 +824,18 @@ fn check_editor_minimum(window: &EditorWindow, failures: &mut Vec<String>) {
             placement.origin.1,
         ));
     }
+
+    // The picture the look at this size is judged from (S26): the walk
+    // `docs/HIG-REVIEW.md` §2 item 11 asks whether the header bar still reads as three
+    // groups here, where the Add photos label has given way — and a question about a
+    // *look* needs the window, so it is written out like the band's and the selection's
+    // own pictures.
+    let picture = support::artifact("minimum.png");
+    support::save_png(&picture, &support::snapshot(window));
+    eprintln!(
+        "the window at its minimum size {}x{}: {picture:?}",
+        minimum.0, minimum.1
+    );
 }
 
 /// The colour scheme is applied to the window, and the **sheet's own pixels** do not
