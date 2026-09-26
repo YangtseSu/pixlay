@@ -29,11 +29,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Install the toolchain
-        # `gettext` and `meson` are the build's own; `github-cli` is the `gh` that
-        # uploads the assets.
+        # `gettext` and `meson` are the build's own; `git` is what `gh` shells out to
+        # (without it: "unable to find git executable in PATH", measured 2026-09-27),
+        # and `github-cli` is the `gh` that uploads the assets.
         run: >-
           pacman -Syu --noconfirm --needed
-          base-devel rust cargo gtk4 libadwaita glycin meson gettext github-cli
+          base-devel rust cargo gtk4 libadwaita glycin meson gettext git github-cli
       - name: Build
         run: |
           meson setup build --prefix=/usr
