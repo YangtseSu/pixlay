@@ -32,12 +32,17 @@ two-cell swap (`docs/2026-09-25-STEPS.md`, ruling 31). That supersedes the photo
 | app-id | `org.yangtse.Pixlay` (own domain `yangtse.org`, reversed; not a borrowed `io.github.*` namespace) |
 | i18n | gettext, domain `pixlay` (source language English; `.pot`/`po/` at the repository root; extraction via `xgettext` — the shell's Rust strings, the desktop template with `--language=Desktop`, and the metainfo through gettext's AppStream ITS rules, all joined into the one `po/pixlay.pot` by `po/extract-pot`, since S16) |
 
-## Verification entry (must run after every change)
+## Verification entry (must run after every change the product can see)
 
     cargo fmt --check
     cargo clippy --workspace --all-targets -- -D warnings
     cargo test
     cargo run --release -p pixlay-cli -- render --project crates/pixlay-cli/tests/fixtures/verify.pixlay --long-edge 14043 --stats --out /var/tmp/a.jpg
+
+**The four are for a change the product can see** — code, shipped data, a template, a constant the render
+reads. A change it cannot see (docs, `.gitignore`, the repository layout) runs only the command that reads
+what changed, if one exists: "Commit discipline" states the rule, and a path a test resolves is the case
+that decides it.
 
 Of the last two: the second one produces a real image, and you must look at it directly.
 **If you cannot see the image, do not judge whether the render is correct.**
@@ -128,8 +133,10 @@ Measurement rules that go with it:
 - **Messages are English** (see "Language conventions"). First line format:
   `<step>: <what changed>`, e.g. `S2: Freeze template geometry and invariant tests`. Non-step
   changes (docs, CI) use the `docs:` / `chore:` prefix.
-- **Run the two commands of the "Verification entry" before committing** (when they do not apply to
-  this step, run the step's own verification command); if it is red, do not commit.
+- **Run the entry's commands that this change can affect before committing**: a change to code or to
+  shipped data runs all four of them; a change the product cannot see — docs, `.gitignore`, the
+  repository layout — runs the one command that reads what changed, and a step's own verification
+  command is that command when the step names one. If it is red, do not commit.
 - Never committed: `target/` (see `.gitignore`). Committed: `Cargo.lock` (AUR discipline).
 - **"Done" means the progress line is rewritten and committed** (see "Session and persistence
   discipline"), not that the code is written and the tests are green.
