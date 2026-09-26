@@ -216,13 +216,21 @@ versions**. Everything follows the latest stable release.
   (currently gtk4 4.24, cairo 1.18.4, libadwaita 1.10), and the bindings take the latest.
   Downgrade a binding only when it demands a newer system version than Arch ships — never downgrade
   the system.
-- **CI / packaging**: an `archlinux:latest` container, no pinned image tag.
+- **CI / packaging**: `runs-on: ubuntu-latest` and an `archlinux:latest` container, no pinned image tag
+  anywhere in `workflows/`, and the one action moves with its major tag (`actions/checkout@v7`) rather
+  than being pinned to a commit SHA — under this policy a pin is the thing that has to be justified
 - **Keeping the dependency set minimal** does not conflict with tracking the latest: few, but each
   one current.
 
 This policy **does not go into tests**: tests must not depend on the network or on a toolchain
-version. It is maintained by two things — the `cargo update` at the start of each step, and looking
-at `Cargo.lock` diffs during review.
+version. It is maintained by three things — the `cargo update` at the start of each step, looking
+at `Cargo.lock` diffs during review, and **Dependabot** (`.github/dependabot.yml`, 2026-09-27):
+`cargo` and `github-actions` updates checked **daily**, with minor and patch updates grouped into one
+pull request and every major one on its own, because a major is the case the code has to move with. It
+neither pins nor delays — no `ignore`, no `cooldown`, no lockfile-only strategy — and every one of its
+pull requests runs the same `verify` job as a hand-made commit. Its commits are the bot's
+(`chore: …`) and carry no `🤖`: nothing in them is written by AI, and a session that has to change
+code for one commits that change itself.
 
 ## Hard constraints
 

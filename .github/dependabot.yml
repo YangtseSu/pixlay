@@ -1,0 +1,36 @@
+# Dependabot, and the shape this repository's version policy asks for: the target
+# is Arch (rolling), dependencies are latest-stable with no upper pin, so every
+# version update is one this tree wants (`AGENTS.md`, "Version policy"). Nothing
+# here pins or delays either: no `ignore`, no `cooldown`, no lockfile-only
+# strategy, and a major is as wanted as a patch. What makes a bump safe to merge
+# is the `verify` job, which `workflows/ci.yml` runs for `pull_request`: the whole
+# verification entry on an `archlinux:latest` container.
+#
+# Checked **daily**, and minor and patch updates arrive as one pull request
+# because their own unit is "the tree this week" — a **major** stays its own,
+# because a major is the case where the code has to move with the dependency
+# ("breakage from upgrades is fixed, not shimmed").
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    # The workspace root: `/` covers every member's manifest and the committed
+    # `Cargo.lock` (AUR discipline keeps it in the tree).
+    directory: "/"
+    schedule:
+      interval: "daily"
+    commit-message:
+      prefix: "chore"
+    groups:
+      cargo-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: "github-actions"
+    # Every `uses:` in `workflows/` — one action today (`actions/checkout`), so
+    # no group: an action's update is almost always a major one, and there is
+    # nothing to group it with.
+    directory: "/"
+    schedule:
+      interval: "daily"
+    commit-message:
+      prefix: "chore"
