@@ -1252,8 +1252,10 @@ rely on:
     moved now is. A press that becomes a drag is the drag instead: the swap happens on the release, never
     on the press.
   - **The strip's swap control plus `Return`** — the keyboard's path. The control is a **toggle**: checking
-    it marks the selected cell (drawn as a *dashed* outline around it, the same mark the drag sets), the
-    arrows move the selection to the other cell, and `Return` exchanges them; `Esc` takes the mark off and
+    it marks the selected cell (drawn as a *dashed* outline around it in the same accent — the selection's
+    own mark, dashed, S24 — and drawn *instead of* the solid one when the marked cell is the selected one,
+    so the dashes are visible), the arrows move the selection to the other cell, and `Return` exchanges
+    them; `Esc` takes the mark off and
     touches nothing. The canvas's accessible name carries the state while the mark is up
     (`Collage canvas, cell 3 of 8, swapping with cell 1`), so the sequence is audible.
   - **`Ctrl+Shift+Arrow`** (S14b) names the neighbour geometrically — `Template::neighbour` is in
@@ -1265,6 +1267,16 @@ rely on:
   is spent by every swap the window applies (a refusal included), so no stale source survives a layout
   change. `tests/swap.rs` is the machine walk: the three paths, the document, the pixels (the swapped
   document's own render, RMSE 0) and one undo step each.
+- **The selected cell is marked in the theme's accent** (S24; finding 6 of the human's pass of 2026-09-25,
+  "the selected cell is not distinguishable enough"): the canvas strokes the selected slot's *own outline*
+  (`slot_path`), 2 device px wide, in `canvas::accent()` — `Adw.StyleManager:accent-color-rgba`, the
+  *system* accent, read from the toolkit rather than named in Rust, and the very colour `style.css`'s
+  `.layout-cell.picked` gives the band's chosen cell, so the app says "this is the one that is chosen" in
+  one colour. Measured 2026-09-26: the accent and the stylesheet's `--accent-bg-color` resolve to
+  `#3584e4` in the dark and the light style, and `tests/selection.rs` reads both halves — the colour, and
+  the mark's pixels over the verification project's own photos. The mark is drawn **over** the document:
+  it is not part of `draw`, so the export and the CLI have no mark, and a canvas with nothing selected has
+  no accent pixel at all.
 - **A candidate cell is a `GtkToggleButton`** with an explicit accessible name, so HIG
   `guidelines/accessibility` and `guidelines/pointer-touch` cover it for free (focusable, named, `Space`
   activates it), and the layout the document is on is shown by the app's own highlight — the accent border

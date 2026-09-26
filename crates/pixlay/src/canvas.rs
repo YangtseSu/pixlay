@@ -5,8 +5,9 @@
 //! [`pixlay_render::draw`] — the same call the CLI and the export make — into the
 //! widget's own cairo context, so "what the window shows" and "what gets
 //! exported" are the same code by construction (`AGENTS.md`, "Hard constraints").
-//! Everything this file adds is drawn *over* that: the selection outline and the
-//! straightening guides, which are interface, not content.
+//! Everything this file adds is drawn *over* that: the selection outline — in the
+//! theme's accent, so a cell is findable at a glance (S24) — and the straightening
+//! guides, which are interface, not content.
 //!
 //! # The grid
 //!
@@ -52,6 +53,7 @@ use gtk4::cairo;
 use gtk4::gdk;
 use gtk4::glib;
 use gtk4::prelude::*;
+use libadwaita as adw;
 
 use pixlay_core::{CollageDoc, CropTransform, PixelSize, Point, Slot};
 use pixlay_imaging::GESTURE_STEP_DEG;
@@ -135,6 +137,25 @@ pub fn slot_at(doc: &CollageDoc, placement: &Placement, x: f64, y: f64) -> Optio
     doc.template.slot_at(placement.to_canvas(x, y)?)
 }
 
+/// The theme's accent, which the selection mark is drawn in (S24).
+///
+/// **libadwaita's `Adw.StyleManager:accent-color-rgba`, not `GtkSettings:gtk-accent-color`.**
+/// The two agree — measured 2026-09-26 at `#3584e4`, the same value the band's chosen cell
+/// resolves `--accent-bg-color` to — but GTK's own property is nullable by contract ("the
+/// desktop accent color, *if available*"), so reading it would need a second source for the
+/// case it is missing; libadwaita's answers the default accent instead of failing. The
+/// accent is a *system* value, so the mark follows the platform's accent and high-contrast
+/// settings by construction — libadwaita's `high-contrast` "cannot be overridden by
+/// applications" (its own documentation), which is why nothing here tries.
+pub fn accent() -> (f64, f64, f64) {
+    let accent = adw::StyleManager::default().accent_color_rgba();
+    (
+        f64::from(accent.red()),
+        f64::from(accent.green()),
+        f64::from(accent.blue()),
+    )
+}
+
 /// Everything one canvas frame needs, so that the draw function and a test are
 /// the same call.
 pub struct View<'a> {
@@ -151,10 +172,14 @@ pub struct View<'a> {
     pub swap_target: Option<usize>,
     /// Draw the straightening guides (true while a rotation is being edited).
     pub guides: bool,
-    /// The theme's text colour, which is what the overlays are drawn with: a
+    /// The theme's text colour, which is what the other overlays are drawn with: a
     /// hard-coded grey would fail in high contrast mode, where the interface is
     /// black on white or white on black and the canvas is white either way.
     pub foreground: (f64, f64, f64),
+    /// The theme's accent ([`accent`]), which is what the selection mark is drawn in
+    /// (S24): a cell has to be findable at a glance against whatever photo is in it,
+    /// and the band's chosen cell already carries this colour.
+    pub accent: (f64, f64, f64),
 }
 
 /// Paints the document and its overlays into `ctx`, sized `width` x `height`.
@@ -173,6 +198,7 @@ pub fn render(
         swap_target,
         guides,
         foreground,
+        accent,
     } = *view;
     let placement = placement(grid, width, height);
 
@@ -226,8 +252,14 @@ pub fn render(
     if guides {
         draw_guides(ctx, &placement, foreground)?;
     }
-    if let Some(slot) = selection.and_then(|slot| doc.template.slots.get(slot)) {
-        draw_outline(ctx, &placement, slot, foreground)?;
+    // The selection's own outline, in the accent (S24). Not drawn when a swap is marked
+    // from the same cell: the dashed source mark below *is* this outline's other state
+    // (S23), and a solid line under a dashed one would hide the dashes.
+    if let Some(slot) = selection
+        .filter(|slot| Some(*slot) != swap_source)
+        .and_then(|slot| doc.template.slots.get(slot))
+    {
+        draw_outline(ctx, &placement, slot, accent)?;
     }
     // The swap's own two marks (S23): the filled target under the drag, and the dashed
     // source outline. Drawn over the selection outline, because a swap in flight is what
@@ -239,7 +271,7 @@ pub fn render(
         draw_swap_target(ctx, &placement, slot, foreground)?;
     }
     if let Some(slot) = swap_source.and_then(|slot| doc.template.slots.get(slot)) {
-        draw_swap_source(ctx, &placement, slot, foreground)?;
+        draw_swap_source(ctx, &placement, slot, accent)?;
     }
 
     Ok(())
@@ -268,14 +300,18 @@ fn draw_guides(
     Ok(())
 }
 
+/// The selected cell's outline, in the theme's accent (S24).
+///
+/// Opaque, because this is the app's strongest "this is the one" mark and it is drawn
+/// over a photo; the band's chosen cell carries the same colour.
 fn draw_outline(
     ctx: &cairo::Context,
     placement: &Placement,
     slot: &Slot,
-    foreground: (f64, f64, f64),
+    accent: (f64, f64, f64),
 ) -> Result<(), cairo::Error> {
     ctx.save()?;
-    ctx.set_source_rgba(foreground.0, foreground.1, foreground.2, 0.9);
+    ctx.set_source_rgba(accent.0, accent.1, accent.2, 1.0);
     ctx.set_line_width(2.0);
     slot_path(ctx, placement, slot)?;
     ctx.stroke()?;
@@ -283,7 +319,8 @@ fn draw_outline(
     Ok(())
 }
 
-/// The cell a swap is coming from (S23): the selection's own outline, dashed.
+/// The cell a swap is coming from (S23): the selection's own outline, dashed, in the
+/// same accent it is drawn in when solid (S24).
 ///
 /// Dashed rather than filled because the two swap marks are different promises: this
 /// one says "this cell is being moved", and the filled one below says "release here
@@ -292,10 +329,10 @@ fn draw_swap_source(
     ctx: &cairo::Context,
     placement: &Placement,
     slot: &Slot,
-    foreground: (f64, f64, f64),
+    accent: (f64, f64, f64),
 ) -> Result<(), cairo::Error> {
     ctx.save()?;
-    ctx.set_source_rgba(foreground.0, foreground.1, foreground.2, 0.9);
+    ctx.set_source_rgba(accent.0, accent.1, accent.2, 1.0);
     ctx.set_line_width(2.0);
     ctx.set_dash(&[6.0, 4.0], 0.0);
     slot_path(ctx, placement, slot)?;
@@ -410,6 +447,7 @@ pub fn build(window: &EditorWindow) -> gtk::DrawingArea {
                 swap_target: window.swap_target(),
                 guides: window.guides(),
                 foreground,
+                accent: accent(),
             };
             match render(ctx, &view, width, height) {
                 Ok(()) => window.set_last_draw_error(None),
