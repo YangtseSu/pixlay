@@ -528,7 +528,7 @@ operations the band performs:
 | `edit --remove-cell` | takes the layout with one cell fewer, dropping the last cell whatever it holds (`Command::RemoveLastCell`, the window's `−`). Exit 2 at one cell (`a collage's layout has at least 1 cell`) — the floor is the layout's, not the photo count's, and it is one cell since S19 (ruling 34). The mirror image of `--add-cell`, and refused together with it (exit 1): they are opposites, and one edit is one intent |
 | `edit --swap <i>,<j>` | exchanges two cells **whole** — photo and framing both (`Command::SwapCells`), because the framing is what makes a photo look right in *that* cell. Exit 2 for the same cell twice (`slot i cannot be swapped with itself`) and for a cell the layout does not have; a malformed pair is exit 1. The window's own paths are the three ruling 33 gave it (S23): a `Shift`+drag from one cell onto another, a `Shift`+click on another cell, and the strip's swap control plus `Return`; `Ctrl+Shift+Arrow` (S14b) names the neighbour geometrically (`Template::neighbour`) and stays |
 | `edit --add-photo <file>` | appends a photo: the first empty cell, else the layout with one slot more (`Command::AddPhotos`). Repeated once per photo in argument order; a photo that is not there is exit 2 with the path named, and a tenth is exit 2 (`a collage takes at most 9 photos`) |
-| `edit --slot <i> --photo <file>` | the photo that cell shows instead. Needs `--slot` (exit 1 otherwise, like the framing flags), and the stored path follows `init --photo`'s rule (relative to the project when the two share a root, absolute otherwise) |
+| `edit --slot <i> --photo <file>` | the photo that cell shows instead. Needs `--slot` (exit 1 otherwise, like the framing flags), and the stored path follows `init --photo`'s rule (relative to the project when the two share a root, absolute otherwise). **An arrival that points several cells at once — a drop from the file manager, a paste (S23b, `Command::PlacePhotos`) — is the same document as one of these per cell**; the difference is the history's, not the file's: the window keeps the whole arrival as *one* undo step and reports the files that did not fit once, while a machine caller gets no history and no silent drop at all |
 | the order of one `edit` | `--template`, `--add-cell`/`--remove-cell`, `--swap`, `--add-photo`, `--slot`/`--photo`, then the framing — so the framing is fitted against the document the earlier flags produced, and `--swap 0,3 --slot 0 --rotate 10` frames the cell that ends up at index 0. `--clear` is exclusive with `--photo` as well as with the framing flags |
 | one implementation | every one of these goes through the same `pixlay_core::Command` the window sends (`crates/pixlay-cli/src/cli.rs::edit_project` applies them to a `History`), so "the CLI and the window produce the same document" is a property of the code rather than of two editors kept in step by hand — asserted in `crates/pixlay/tests/layout.rs` |
 
@@ -585,7 +585,7 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
 | canvas decoration (the frame) | **S11, landed**; its editor is a command since **S15** | `CollageDoc::frame`: `Frame { gapRel, radiusRel, color }`, plus `Frame::covering` / `Frame::clip` and the backdrop + clip stage in `draw`; the CLI's `render --gap/--radius/--border-color` (render-time) and `edit` (§5), and since S15 `Command::SetFrame { frame }` is the one writer both `edit` and the window's `Frame…` dialog send (one undo step, validated per slot). Measured cost at A0: none — the frame is a clip path and a fill (§8, "S11") |
 | template generator | **S2, landed** | `pixlay_core::templates` (`generator` recipes + the committed `frozen` data) and the `templates` / `init` subcommands; see §3 and §5 |
 | the image pipeline | **S4, landed**; the preview-grade reduction landed in **S12b**; the grading stage removed by **S12c** | `pixlay-imaging`: `Source::decode`, `resample`, `slot_bitmap`/`slot_bitmaps`, `probe`, and the preview's `Preview` caches + `reduce::PreviewSource`; the buffer ladder and the colour decisions are §4.1 |
-| command history / hit testing / project writing | **S6.5, landed**; `SetTemplate` added by **S7**; the grade/filter/text commands removed by **S12c** | `pixlay-core`: `Command` (one edit: source, framing, or the template) and `History` (snapshot undo/redo; `apply` is all-or-nothing, answers whether the command was a **step** — one that changes nothing is not (S15d) — and the document has no mutable accessor; the GUI commits **one command per gesture**, §9), `Template::slot_at(point)` for hit testing, `CollageDoc::save` / `Project::save` / `Project::save_as` for writing a document. The CLI's `hit` and `save` are the machine surface of the first and the last; the command history is a test surface only, on purpose (§5) |
+| command history / hit testing / project writing | **S6.5, landed**; `SetTemplate` added by **S7**; the grade/filter/text commands removed by **S12c**; the multi-cell arrival and the move added by **S23b** | `pixlay-core`: `Command` (one edit: source, framing, or the template; `PlacePhotos` for an arrival that points several cells at once and `MovePhoto` for a cut-then-paste — each one undo step, §9) and `History` (snapshot undo/redo; `apply` is all-or-nothing, answers whether the command was a **step** — one that changes nothing is not (S15d) — and the document has no mutable accessor; the GUI commits **one command per gesture**, §9), `Template::slot_at(point)` for hit testing, `CollageDoc::save` / `Project::save` / `Project::save_as` for writing a document. The CLI's `hit` and `save` are the machine surface of the first and the last; the command history is a test surface only, on purpose (§5) |
 | encoding and metadata | **S6, landed**; TIFF and the chroma request removed by **S12c**, resolutions by **S12d** | `pixlay_imaging::encode`: one pass per format writing pixels, sampling and the ICC profile (`icc`), for PNG / JPEG; the CLI's `--long-edge` and the per-format rules are §5, the profile is §4.1 |
 | the library and the selection | **S9, landed** | `pixlay_core::selection`: `Selection` (the ordered photo list, the clamp, `layouts()`), `last_photo` / `remove_last` — pure, no filesystem (the batch add-back left with S14b; the clamp's floor is 1 since S19). `pixlay_imaging::thumb`: `thumbnail(source, long_edge)`, the same `resample` at a preview grid. The CLI's `scan` / `thumb` / `init --photo` are the machine surface (the rules are §5) |
 
@@ -1164,8 +1164,11 @@ from outside it**:
 - an empty cell's own `+`, and `Return` on the selected empty cell, ask for that cell's photo
   (`GtkFileDialog::open`); the selected cell's `Replace` does the same for an occupied one;
 - a **drop** from the file manager (`GtkDropTarget`, the canvas's own) hands the paths to
-  `EditorWindow::drop_files`, which places from the slot under the pointer onward (S23b refines where a
-  drop lands; the rule today is in `window.rs`);
+  `EditorWindow::drop_files`, which places them by the rule below — the cell under the pointer
+  first, then the empty cells in reading order — as **one** `Command::PlacePhotos`, so the whole
+  arrival is one undo step;
+- the **clipboard** (`Ctrl+X` / `Ctrl+C` / `Ctrl+V`, `win.cut` / `win.copy` / `win.paste`, the menu's
+  Edit group) works on the selected cell's photo; the rule is below;
 - `Open…` (`Ctrl+O`) reads a `.pixlay` project;
 - **`pixlay a.jpg b.jpg …`** — the application carries `HANDLES_OPEN`, so a command line's arguments arrive
   as the `open` signal and `pixlay::app::open_files` adds them in argument order through the same
@@ -1219,13 +1222,47 @@ rely on:
   a caller asks anyway, and `selection::layout_for` (same aspect → same recipe family → nearest aspect →
   library order) is the one rule that decides *which* layout either one moves to.
 - **A list of photos longer than the ceiling is trimmed once, with one report** (S19, ruling 34): the
-  window is the surface that trims, and each of its two list paths trims to what *it* can use —
+  window is the surface that trims, and each of its list paths trims to what *it* can use —
   `Add photos…` to the room the ceiling leaves (`MAX_PHOTOS - photo count`), because `Command::AddPhotos`
-  is all-or-nothing and grows the layout one cell at a time, and a **drop** to `MAX_PHOTOS` itself,
-  because a drop places into the document's cells (replacing what one holds when there is nothing empty
-  left), so nine is the longest list it can use. The rest is **one toast** naming how many photos were not
-  used. Core never truncates: `Command::AddPhotos` and `Selection::new` still refuse past the cap, which is
-  what the CLI's `init --photo` and `edit --add-photo` report (exit 1 and exit 2).
+  is all-or-nothing and grows the layout one cell at a time, and a **drop or a paste** to the room the
+  document has, one report naming everything that did not land (below). Core never truncates:
+  `Command::AddPhotos` and `Selection::new` still refuse past the cap, which is what the CLI's
+  `init --photo` and `edit --add-photo` report (exit 1 and exit 2).
+- **A drop, and a paste, land where they are aimed** (S23b, ruling 41 of 2026-09-25). The first file takes
+  the cell the user aimed at — filled when it is empty, **replaced** when it holds a photo — and the files
+  after it fill the empty cells from there on, in reading order and wrapping around the sheet. A file that
+  finds no empty cell is ignored, and the count of everything that did not land (past `MAX_PHOTOS` *or*
+  past the room the sheet has) is **one toast**: a drop never quietly replaces a cell it did not land on,
+  which is the whole point of the rule. The aim is the cell under the pointer for a drop
+  (`GtkDropTarget`'s hit test, `Template::slot_at` — geometry, so the frame's gap and rounded corners are
+  not part of the answer, §5) and the selected cell for a paste; a drop with no cell under it (the
+  canvas's own margin) falls back to the selection, the first empty cell and finally the first cell, so it
+  still lands somewhere visible. The whole arrival is one `Command::PlacePhotos { places }` — the same
+  document as one `edit --slot <i> --photo <file>` per cell — so it is **one undo step**, and the framing
+  of a replaced cell is kept (`SetSource`'s rule: what a photo arrives in re-fits at draw).
+- **The clipboard works on the selected cell's photo** (S23b, ruling 41). `Ctrl+C` puts the photo's path
+  on the clipboard as a **file list** (`text/uri-list`, GTK's own `GdkFileList`), so the photo can be
+  pasted into another application as easily as into another cell, and a file manager's own
+  `text/uri-list` arrives in the same shape. `Ctrl+V` reads it back:
+  - a **file list** is placed exactly as a drop aimed at the selected cell would be (the rule above, one
+    `Command::PlacePhotos`, one report);
+  - an **image with no file behind it** — a texture another application copied — is written out as a real
+    PNG first, because a document references *paths* and a cell whose source is not a file is a cell that
+    cannot be reopened. It lands in the app's own cache, `$XDG_CACHE_HOME/pixlay/pasted/`
+    (`~/.cache/pixlay/pasted/`): one rule for a document with a project directory and one without, and it
+    leaves the user's own tree alone. The name is the digest of the bytes (FNV-1a, 64 bit), so pasting the
+    same image twice is one file, and the bytes are compared rather than the hash trusted;
+  - **`Ctrl+X` remembers the cell** it cut from, and the paste that follows *that photo* is one
+    `Command::MovePhoto { from, to }`: the photo arrives in the target (which keeps its own framing) and
+    the cell it came from comes out whole — no photo and the default framing, which is the document
+    `edit --slot <i> --clear` writes — in **one** undo step. The pair is checked when the paste happens
+    (the cell still holds that source, the clipboard still holds that file), so an edit between the two, a
+    replaced clip or a layout that took the cell away makes the paste a placement rather than a move. A
+    cut on its own changes nothing: the edit happens where the paste lands;
+  - **sensitivity** is the state the window can really act in: copy and cut need a selected cell whose
+    photo is a file that is there, and paste needs a selected cell and a clipboard holding something a
+    cell can take (a file list, or an image). The paste items are insensitive with nothing selected and
+    with a clipboard that holds neither.
 - **An empty cell is a control of its own.** The canvas is wrapped in a `GtkOverlay` and each empty cell
   carries a real `GtkButton` with `list-add-symbolic` at the cell's centre (32x32, `osd` + `circular`
   classes, explicit accessible name): clicking it asks for the photo of *that* cell

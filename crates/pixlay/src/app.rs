@@ -46,6 +46,9 @@ pub const ACCELERATORS: &[(&str, &str)] = &[
     ("win.add-photos", "<Control>i"),
     ("win.undo", "<Control>z"),
     ("win.redo", "<Control><Shift>z"),
+    ("win.cut", "<Control>x"),
+    ("win.copy", "<Control>c"),
+    ("win.paste", "<Control>v"),
     ("win.reset-framing", "<Control>0"),
 ];
 
@@ -63,7 +66,17 @@ pub const SHORTCUT_SECTIONS: &[(&str, &[&str])] = &[
             "win.add-photos",
         ],
     ),
-    ("Editing", &["win.undo", "win.redo", "win.reset-framing"]),
+    (
+        "Editing",
+        &[
+            "win.undo",
+            "win.redo",
+            "win.cut",
+            "win.copy",
+            "win.paste",
+            "win.reset-framing",
+        ],
+    ),
 ];
 
 /// What a shortcut section is called in the dialog.
@@ -100,6 +113,9 @@ pub fn shortcut_title(action: &str) -> String {
         "win.add-photos" => gettext("Add photos…"),
         "win.undo" => gettext("Undo"),
         "win.redo" => gettext("Redo"),
+        "win.cut" => gettext("Cut the photo out of the cell"),
+        "win.copy" => gettext("Copy the photo"),
+        "win.paste" => gettext("Paste the photo into the cell"),
         "win.reset-framing" => gettext("Reset the framing"),
         _ => String::new(),
     }

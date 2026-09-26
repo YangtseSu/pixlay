@@ -649,10 +649,14 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
     .collect();
     assert_eq!(twelve.len(), 12);
 
-    // A drop onto a full nine-cell collage: the first nine land, in the order they
-    // were dropped, and the three that do not fit are reported once.
-    let nine = nine_photo_document();
-    window.open_document(nine);
+    // A drop onto a nine-cell collage with nothing in it: the aimed cell takes the
+    // first file and the empty cells after it take the rest, so nine land, in the order
+    // they were dropped, and the three that do not fit are reported once. S23b re-cut
+    // *where* a drop lands — it fills the cells around the one it was aimed at, and
+    // never replaces a cell it did not land on — which is why the case is a collage
+    // with room rather than a full one.
+    let empty = empty_nine_cell_document();
+    window.open_document(empty);
     settle(&window);
     let toasts = window.toasts();
     window.drop_files(twelve.clone(), Some(0));
@@ -670,8 +674,8 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
     assert!(
         window
             .last_toast()
-            .is_some_and(|message| message.contains('3') && message.contains("not used")),
-        "the report says how many were not used: {:?}",
+            .is_some_and(|message| message.contains('3') && message.contains("did not fit")),
+        "the report says how many did not fit: {:?}",
         window.last_toast()
     );
 
@@ -884,6 +888,16 @@ fn two_photo_document() -> pixlay_core::CollageDoc {
 /// The largest: nine photos, nine slots.
 fn nine_photo_document() -> pixlay_core::CollageDoc {
     document_on("strip-9-9x1")
+}
+
+/// The largest layout with nothing in it: nine cells and no photo, which is the state
+/// a drop of a dozen files needs to land nine of them (S23b).
+fn empty_nine_cell_document() -> pixlay_core::CollageDoc {
+    let template = templates::with_slots(9)
+        .into_iter()
+        .next()
+        .expect("the library has a nine-cell layout");
+    pixlay_core::CollageDoc::new(template)
 }
 
 /// `../../../…` and the path it points at are the same photo.

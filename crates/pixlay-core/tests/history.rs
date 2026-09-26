@@ -73,6 +73,16 @@ fn sequence() -> Vec<Command> {
         Command::AddCell,
         Command::SwapCells { left: 0, right: 1 },
         Command::RemoveLastCell,
+        // S23b's two, after the resize so they act on the known five-cell document:
+        // an arrival that points two cells at once, then the move that carries a photo
+        // between cells and empties the one it came from.
+        Command::PlacePhotos {
+            places: vec![
+                (2, PathBuf::from("photos/c.jpg")),
+                (3, PathBuf::from("photos/d.png")),
+            ],
+        },
+        Command::MovePhoto { from: 2, to: 4 },
         // S15's two: the cell the strip's clear button empties — slot 1, which the swap
         // above moved the framed photo into, so clearing it changes the document — and
         // the frame the dialog edits. Last, so their numbers are read against a known
@@ -1017,4 +1027,223 @@ fn a_frame_change_is_one_undo_step_and_its_refusals_leave_no_trace() {
     }
     assert_eq!(history.undo_depth(), 0, "the refusals left no step");
     assert_eq!(history.doc().frame, Frame::default(), "and no frame");
+}
+
+#[test]
+fn several_photos_land_in_one_step() {
+    // S23b: an arrival that fills or replaces several cells is **one** command, so it
+    // is one undo step rather than one per file — which is what a drop from the file
+    // manager and a paste are. The framing is `SetSource`'s rule: a cell that receives
+    // a photo keeps the area the user framed for it.
+    let mut history = History::new(occupied("grid-4-2x2")).expect("a valid document");
+    let framing = CropTransform {
+        zoom: 2.0,
+        offset: (0.1, -0.2),
+        rotation_deg: 17.0,
+    };
+    history
+        .apply(Command::SetCrop {
+            slot: 2,
+            crop: framing,
+        })
+        .expect("applies");
+    history
+        .apply(Command::ClearCell { slot: 3 })
+        .expect("applies");
+    let before = history.doc().clone();
+
+    let depth = history.undo_depth();
+    history
+        .apply(Command::PlacePhotos {
+            places: vec![
+                (2, PathBuf::from("photos/drop-a.jpg")),
+                (3, PathBuf::from("photos/drop-b.png")),
+            ],
+        })
+        .expect("applies");
+    let doc = history.doc();
+    assert_eq!(
+        doc.cells[2].source,
+        Some(PathBuf::from("photos/drop-a.jpg")),
+        "the first pair replaced what cell 2 held"
+    );
+    assert_eq!(
+        doc.cells[2].crop, framing,
+        "and the framing it was shown with is untouched"
+    );
+    assert_eq!(
+        doc.cells[3].source,
+        Some(PathBuf::from("photos/drop-b.png")),
+        "the second pair filled the empty cell"
+    );
+    assert_eq!(doc.cells[0], before.cells[0], "no other cell moved");
+    assert_eq!(doc.cells[1], before.cells[1]);
+    assert_eq!(
+        history.undo_depth(),
+        depth + 1,
+        "two cells, one arrival, one undo step"
+    );
+    doc.validate().expect("a valid document");
+
+    // The order is the command's own: a pair naming the same slot twice ends on the
+    // last one, because the command says "in the order given".
+    history
+        .apply(Command::PlacePhotos {
+            places: vec![
+                (1, PathBuf::from("photos/first.jpg")),
+                (1, PathBuf::from("photos/last.jpg")),
+            ],
+        })
+        .expect("applies");
+    assert_eq!(
+        history.doc().cells[1].source,
+        Some(PathBuf::from("photos/last.jpg")),
+        "the last pair wins"
+    );
+
+    // An empty list is not a step, and neither is a list that asks for what the
+    // document already has (the history's own rule, PIX-022).
+    let depth = history.undo_depth();
+    assert!(
+        !history
+            .apply(Command::PlacePhotos { places: Vec::new() })
+            .expect("an empty arrival is legal"),
+        "nothing to place is not a step"
+    );
+    assert!(
+        !history
+            .apply(Command::PlacePhotos {
+                places: vec![(1, PathBuf::from("photos/last.jpg"))],
+            })
+            .expect("the same photo in the same cell is legal"),
+        "the same document is not a step"
+    );
+    assert_eq!(history.undo_depth(), depth);
+
+    // A slot the layout does not have is refused, and nothing moves.
+    let refused = history
+        .apply(Command::PlacePhotos {
+            places: vec![
+                (0, PathBuf::from("photos/ok.jpg")),
+                (9, PathBuf::from("photos/past-the-end.jpg")),
+            ],
+        })
+        .expect_err("the layout has four cells");
+    assert!(
+        matches!(refused, CoreError::NoSuchSlot { slot: 9, slots: 4 }),
+        "{refused}"
+    );
+    assert_eq!(history.undo_depth(), depth, "the refusal left no step");
+    assert_eq!(
+        history.doc().cells[0].source,
+        before.cells[0].source,
+        "and the pairs before the bad one did not land"
+    );
+}
+
+#[test]
+fn a_moved_photo_leaves_its_cell_empty() {
+    // S23b: cut-then-paste is one intent, so it is one command and one undo step. The
+    // target keeps its own framing — the same rule as Replace, which `draw` re-fits —
+    // and the source comes out whole: no photo and the default framing, which is the
+    // document `edit --slot i --clear` writes.
+    let mut history = History::new(occupied("grid-4-2x2")).expect("a valid document");
+    let carried = CropTransform {
+        zoom: 2.4,
+        offset: (0.1, -0.2),
+        rotation_deg: 17.0,
+    };
+    let target_framing = CropTransform {
+        zoom: 1.3,
+        offset: (-0.4, 0.05),
+        rotation_deg: -8.5,
+    };
+    history
+        .apply(Command::SetCrop {
+            slot: 1,
+            crop: carried,
+        })
+        .expect("applies");
+    history
+        .apply(Command::SetCrop {
+            slot: 3,
+            crop: target_framing,
+        })
+        .expect("applies");
+    let before = history.doc().clone();
+    assert!(before.cells[1].source.is_some());
+
+    let depth = history.undo_depth();
+    history
+        .apply(Command::MovePhoto { from: 1, to: 3 })
+        .expect("applies");
+    let doc = history.doc();
+    assert_eq!(
+        doc.cells[1],
+        Cell::default(),
+        "the source is an empty cell: no photo and no framing"
+    );
+    assert_eq!(
+        doc.cells[3].source, before.cells[1].source,
+        "the photo arrived"
+    );
+    assert_eq!(
+        doc.cells[3].crop, target_framing,
+        "and the target kept the framing that was its own"
+    );
+    assert_eq!(doc.cells[0], before.cells[0], "no other cell moved");
+    assert_eq!(doc.cells[2], before.cells[2]);
+    assert_eq!(history.undo_depth(), depth + 1, "one move, one step");
+    doc.validate().expect("a valid document");
+
+    // One undo puts the photo back *with* the framing the source had, because the
+    // whole document is the state.
+    assert!(history.undo());
+    assert_eq!(history.doc(), &before, "undo is the state before the move");
+
+    // Two moves that are not edits: into the cell the photo came from, and out of a
+    // cell that holds nothing. Neither is a step, and neither touches the target.
+    let depth = history.undo_depth();
+    assert!(
+        !history
+            .apply(Command::MovePhoto { from: 1, to: 1 })
+            .expect("a move onto itself is legal"),
+        "a paste into the cell the photo was cut from is not an edit"
+    );
+    history
+        .apply(Command::ClearCell { slot: 2 })
+        .expect("applies");
+    let occupied_target = history.doc().cells[3].clone();
+    assert!(
+        !history
+            .apply(Command::MovePhoto { from: 2, to: 3 })
+            .expect("a move out of an empty cell is legal"),
+        "an empty source moves nothing"
+    );
+    assert_eq!(
+        history.doc().cells[3],
+        occupied_target,
+        "and it cannot empty the target"
+    );
+    assert_eq!(history.undo_depth(), depth + 1, "only the clear was a step");
+
+    // A slot the layout does not have is refused, and nothing moves.
+    let depth = history.undo_depth();
+    let before = history.doc().clone();
+    let refused = history
+        .apply(Command::MovePhoto { from: 3, to: 7 })
+        .expect_err("the layout has four cells");
+    assert!(
+        matches!(refused, CoreError::NoSuchSlot { slot: 7, slots: 4 }),
+        "{refused}"
+    );
+    let refused = history
+        .apply(Command::MovePhoto { from: 7, to: 3 })
+        .expect_err("the layout has four cells");
+    assert!(
+        matches!(refused, CoreError::NoSuchSlot { slot: 7, slots: 4 }),
+        "{refused}"
+    );
+    assert_eq!(history.undo_depth(), depth, "the refusals left no step");
+    assert_eq!(history.doc(), &before, "and the document is untouched");
 }

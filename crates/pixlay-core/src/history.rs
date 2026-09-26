@@ -82,6 +82,38 @@ pub enum Command {
     /// Refused past [`MAX_PHOTOS`](crate::MAX_PHOTOS): that is also the format's
     /// slot limit, so there is no layout to grow into.
     AddPhotos { photos: Vec<PathBuf> },
+    /// Point several cells at several photos at once, in the order given (S23b).
+    ///
+    /// The same edit as one [`SetSource`](Self::SetSource) per pair — the framing is
+    /// kept, because a cell that receives a photo keeps the area the user framed
+    /// (`docs/CONTRACT.md` §1) — as **one** command, so an arrival that fills or
+    /// replaces several cells is one undo step rather than one per file. That is what
+    /// a drop from the file manager and a paste are: the window decides which cell
+    /// each file takes (the cell it was aimed at first, then the empty cells in
+    /// reading order), and this is the edit it then sends.
+    ///
+    /// A pair naming the same slot twice is not refused: the command says "in the
+    /// order given", and the last one wins. A slot the layout does not have is
+    /// refused, and then nothing moves — the all-or-nothing rule every command
+    /// follows.
+    PlacePhotos { places: Vec<(usize, PathBuf)> },
+    /// Move one cell's photo into another and leave the source empty (S23b).
+    ///
+    /// The clipboard's cut-then-paste, as one command and one undo step: sending
+    /// `SetSource { to }` and then clearing `from` would be two steps the user has to
+    /// press `Ctrl+Z` through twice for one intent. The target **keeps its own
+    /// framing**, which `draw` re-fits — the same rule as Replace and
+    /// [`SetSource`](Self::SetSource) — and the source comes out whole: no photo *and*
+    /// the default framing, because a cell with no photo and a stale crop is a state
+    /// nothing can show ([`ClearCell`](Self::ClearCell)'s rule, which is what the CLI
+    /// writes for the same document).
+    ///
+    /// `from == to` changes nothing, and is deliberately not an error: pasting a cut
+    /// photo into the cell it came from is not an edit, and the history's own rule
+    /// makes a command that changes nothing no step at all. A source that holds no
+    /// photo moves nothing for the same reason: there is nothing to carry, and
+    /// emptying the target is not something "move" can mean.
+    MovePhoto { from: usize, to: usize },
     /// Drop the last cell, and take the layout with one slot fewer (S14b).
     ///
     /// The count control's `−`, and [`AddCell`](Self::AddCell)'s exact inverse: the
@@ -194,6 +226,25 @@ impl Command {
                             let appended = doc.cells.len() - 1;
                             doc.cells[appended].source = Some(photo.clone());
                         }
+                    }
+                }
+            }
+            Self::PlacePhotos { places } => {
+                for (slot, path) in places {
+                    cell_mut(doc, *slot)?.source = Some(path.clone());
+                }
+            }
+            Self::MovePhoto { from, to } => {
+                if from != to {
+                    let photo = cell_mut(doc, *from)?.source.clone();
+                    let target = cell_mut(doc, *to)?;
+                    // An empty source moves nothing: there is no photo to carry, and
+                    // emptying the target is not something "move" can mean.
+                    if photo.is_some() {
+                        target.source = photo;
+                        let source = cell_mut(doc, *from)?;
+                        source.source = None;
+                        source.crop = CropTransform::IDENTITY;
                     }
                 }
             }

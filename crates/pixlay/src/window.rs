@@ -35,6 +35,7 @@ use std::time::{Duration, Instant};
 
 use adw::prelude::*;
 use gtk4 as gtk;
+use gtk4::gdk;
 use gtk4::gio;
 use gtk4::glib;
 use gtk4::glib::subclass::prelude::ObjectSubclassIsExt as _;
@@ -210,6 +211,23 @@ mod imp {
         /// keyboard path, whose target is the selection and carries the selection
         /// outline already.
         pub swap_target: Cell<Option<usize>>,
+        /// The cell a cut is coming from, and the source it held when it was cut
+        /// (S23b).
+        ///
+        /// `Ctrl+X`'s other half: the path goes on the clipboard, and this is what
+        /// makes the paste that follows a **move** (`Command::MovePhoto`) rather than a
+        /// placement plus a clear. It is checked when the paste happens, never trusted
+        /// — the cell has to still hold exactly this source and the clipboard exactly
+        /// this file — so an edit made between the two, a replaced clip or a layout
+        /// that took the cell away makes the paste a placement instead.
+        pub cut: RefCell<Option<(usize, PathBuf)>>,
+        /// Whether the clipboard holds something a cell can take (S23b).
+        ///
+        /// Read from `GdkClipboard`'s own formats and refreshed on its `changed`
+        /// signal: a file list (`text/uri-list`) or an image is what the paste can use,
+        /// and the action is insensitive otherwise, which is the state HIG wants a
+        /// command to be in when it cannot act.
+        pub clipboard_usable: Cell<bool>,
     }
 
     impl Default for EditorWindow {
@@ -262,6 +280,8 @@ mod imp {
                 last_draw_error: RefCell::new(None),
                 swap: Cell::new(None),
                 swap_target: Cell::new(None),
+                cut: RefCell::new(None),
+                clipboard_usable: Cell::new(false),
             }
         }
     }
@@ -521,6 +541,25 @@ impl EditorWindow {
 
         self.install_actions();
 
+        // The clipboard's own state (S23b): what the paste action can use is a question
+        // about the clipboard's formats, so it is read once here and again whenever GTK
+        // says they changed. Both halves are needed — a clipboard that was filled
+        // before this window existed may never emit `changed` for it.
+        self.imp()
+            .clipboard_usable
+            .set(Self::clipboard_can_fill_a_cell(&self.clipboard()));
+        self.clipboard().connect_changed(glib::clone!(
+            #[weak(rename_to = window)]
+            self,
+            move |clipboard| {
+                window
+                    .imp()
+                    .clipboard_usable
+                    .set(Self::clipboard_can_fill_a_cell(clipboard));
+                window.update_actions();
+            }
+        ));
+
         // ---- unsaved work ---------------------------------------------------
         // **One question, every boundary** (PIX-002, 2026-09-24): closing the
         // window, `New` and `Open` all replace or end the document, so all three
@@ -646,6 +685,31 @@ impl EditorWindow {
                 }
             }),
         );
+        // The clipboard (S23b, ruling 41). Copy and cut need a cell that holds a photo
+        // and a file that is really there; paste needs a cell to paste into and a
+        // clipboard that holds something a cell can take, which is the state this
+        // window keeps an eye on (`clipboard_can_fill_a_cell`).
+        add(
+            "copy",
+            false,
+            Box::new(|window| {
+                window.copy_photo();
+            }),
+        );
+        add(
+            "cut",
+            false,
+            Box::new(|window| {
+                window.cut_photo();
+            }),
+        );
+        add(
+            "paste",
+            false,
+            Box::new(|window| {
+                window.paste_photo();
+            }),
+        );
 
         self.insert_action_group("win", Some(&group));
         *self.imp().actions.borrow_mut() = actions;
@@ -682,6 +746,20 @@ impl EditorWindow {
             .iter()
             .find(|action| action.name() == name)
             .map(|action| action.is_enabled())
+    }
+
+    /// The cell a cut is coming from, if one is (S23b).
+    ///
+    /// The tests' handle on the clipboard's other half: "a cut remembers its source"
+    /// and "a paste spends it" are facts about this state, and no widget shows it.
+    pub fn cut_source(&self) -> Option<usize> {
+        self.imp().cut.borrow().as_ref().map(|(slot, _)| *slot)
+    }
+
+    /// Whether the paste action can act right now (S23b): the clipboard's own formats
+    /// say whether it holds anything a cell can take.
+    pub fn clipboard_usable(&self) -> bool {
+        self.imp().clipboard_usable.get()
     }
 
     /// The `Frame…` dialog (S15).
@@ -1191,40 +1269,236 @@ impl EditorWindow {
         paths.into_iter().take(limit).collect()
     }
 
-    /// Files dropped on the canvas: the slot under the pointer first, then the
-    /// slots after it, so a drop of five photos fills five slots in order. Slots
-    /// that already hold a photo are skipped unless there is nothing else left,
-    /// which is the rule that keeps a drop from silently replacing work.
+    /// Files dropped on the canvas, or pasted from the clipboard: the cell they were
+    /// aimed at first, then the empty cells in reading order (S23b, ruling 41).
     ///
-    /// A drop longer than [`MAX_PHOTOS`] is trimmed first, with one report (S19):
-    /// the drop places into cells, so nine is the whole list it can use.
-    pub fn drop_files(&self, paths: Vec<PathBuf>, at: Option<usize>) {
-        let paths = self.at_most(paths, MAX_PHOTOS);
-        let slots = self.document().template.slots.len();
+    /// **The aimed cell is the first file's, always** — filled when it is empty,
+    /// replaced when it holds a photo — because a drop lands where it was aimed and
+    /// never quietly replaces a cell it did not land on. The files after it take the
+    /// empty cells from there on, wrapping around the sheet; a file that finds none is
+    /// ignored, and the count of everything that did not land is reported **once**.
+    ///
+    /// All of it is one [`Command::PlacePhotos`], so an arrival that touches several
+    /// cells is one undo step rather than one per file.
+    ///
+    /// `at` is the cell under the pointer, or `None` when the pointer is off the sheet
+    /// — a drop in the canvas's own margin — where the selection, the first empty cell
+    /// and finally the first cell stand in for it, so the arrival still lands
+    /// somewhere visible.
+    pub fn place_files(&self, paths: Vec<PathBuf>, at: Option<usize>) {
+        let slots = self.document().cells.len();
+        if paths.is_empty() || slots == 0 {
+            return;
+        }
+        let doc = self.document();
         let start = at
-            .or_else(|| self.selection())
-            .or_else(|| {
-                self.document()
-                    .cells
-                    .iter()
-                    .position(|cell| cell.source.is_none())
-            })
+            .filter(|slot| *slot < slots)
+            .or_else(|| self.selection().filter(|slot| *slot < slots))
+            .or_else(|| doc.cells.iter().position(|cell| cell.source.is_none()))
             .unwrap_or(0);
-        let empty: Vec<usize> = (0..slots)
+
+        let mut places = Vec::with_capacity(paths.len().min(slots));
+        // The aimed cell first: it is this file's whether it holds a photo or not.
+        places.push((start, paths[0].clone()));
+        // Then the empty cells after it, in reading order and wrapping. The aimed cell
+        // is not in this list — the first file has taken it — so a file can never land
+        // in a cell another file of the same arrival is about to replace.
+        let mut empties = (1..slots)
             .map(|offset| (start + offset) % slots)
-            .filter(|slot| self.document().cells[*slot].source.is_none())
-            .collect();
-        let occupied: Vec<usize> = (0..slots).map(|offset| (start + offset) % slots).collect();
-        for (index, path) in paths.into_iter().enumerate() {
-            let slot = empty
-                .get(index)
-                .or(if index == 0 { Some(&start) } else { None })
-                .or_else(|| occupied.get(index));
-            if let Some(slot) = slot {
-                self.place_photo(*slot, path);
+            .filter(|slot| doc.cells[*slot].source.is_none());
+        for path in &paths[1..] {
+            match empties.next() {
+                Some(slot) => places.push((slot, path.clone())),
+                None => break,
             }
         }
-        self.select(Some(start.min(slots - 1)));
+
+        let unused = paths.len() - places.len();
+        if unused > 0 {
+            self.toast(&fill(
+                ngettext(
+                    "{} photo did not fit in the collage",
+                    "{} photos did not fit in the collage",
+                    unused as u32,
+                ),
+                &[unused],
+            ));
+        }
+        if self.apply(Command::PlacePhotos { places }).is_ok() {
+            self.select(Some(start));
+        }
+    }
+
+    /// Files dropped on the canvas: [`place_files`](Self::place_files) with the cell
+    /// under the pointer as the aim (`GtkDropTarget`'s own hit test), or the selection
+    /// when the pointer is off the sheet.
+    pub fn drop_files(&self, paths: Vec<PathBuf>, at: Option<usize>) {
+        self.place_files(paths, at);
+    }
+
+    // ---- the clipboard (S23b, ruling 41) ----------------------------------
+
+    /// The selected cell's photo as the clipboard and a move both need it: the slot,
+    /// the source spelling the document holds, and the path it resolves to.
+    ///
+    /// `None` when nothing is selected, when the cell holds no photo, or when the file
+    /// it names is not there — a photo that cannot be loaded is nothing to copy, and
+    /// the copy and cut actions are insensitive in exactly that case.
+    fn clipboard_source(&self) -> Option<(usize, PathBuf, PathBuf)> {
+        let slot = self.selection()?;
+        let editor = self.imp().editor.borrow();
+        let stored = editor.doc().cells.get(slot)?.source.clone()?;
+        let resolved = editor.sources().paths.get(slot).cloned().flatten()?;
+        Some((slot, stored, resolved))
+    }
+
+    /// `Ctrl+C`: the selected cell's photo goes on the clipboard as a file list
+    /// (`text/uri-list`), which is what a file manager and every other application
+    /// speaks — so the photo can be pasted into another window as easily as into
+    /// another cell, and a photo copied elsewhere arrives in the same shape.
+    pub fn copy_photo(&self) {
+        if let Some((_, _, resolved)) = self.clipboard_source() {
+            self.put_path_on_clipboard(&resolved);
+        }
+    }
+
+    /// `Ctrl+X`: the copy, plus the cell it came from, which is what makes the paste
+    /// that follows a **move** (`Command::MovePhoto`) instead of a placement.
+    ///
+    /// Nothing in the document changes here: a cut is a clipboard state, and where the
+    /// photo leaves from is decided when the paste lands, against the document as it
+    /// then is.
+    pub fn cut_photo(&self) {
+        if let Some((slot, stored, resolved)) = self.clipboard_source()
+            && self.put_path_on_clipboard(&resolved)
+        {
+            *self.imp().cut.borrow_mut() = Some((slot, stored));
+        }
+    }
+
+    /// `Ctrl+V`: what the clipboard holds goes into the selected cell (S23b).
+    ///
+    /// A file list — this window's own copy, or files from a file manager — is placed
+    /// exactly as a drop aimed at the selected cell would be: the first file fills or
+    /// replaces it, the rest fill the empty cells after it, and the count that did not
+    /// fit is reported once ([`place_files`](Self::place_files)). An image with no file
+    /// behind it is written out first ([`pasted_bitmap_file`]), because a document
+    /// references paths and a cell whose source is not a file is a cell that cannot be
+    /// reopened.
+    ///
+    /// **A paste that follows a cut of the very photo it is pasting is one move**: the
+    /// cell the photo was cut from comes out empty, in one command and one undo step.
+    /// The pair is checked here rather than trusted — the cell still holds that source
+    /// and the clipboard still holds that file — so a document edited between the two,
+    /// a replaced clip or a layout that took the cell away makes the paste a placement
+    /// rather than a move across a document that has moved on.
+    pub fn paste_photo(&self) {
+        let Some(target) = self.selection() else {
+            return;
+        };
+        let cut = self.imp().cut.borrow_mut().take();
+        let cut_path = cut.as_ref().and_then(|(slot, stored)| {
+            let editor = self.imp().editor.borrow();
+            (editor.doc().cells.get(*slot)?.source.as_ref() == Some(stored))
+                .then(|| editor.sources().paths.get(*slot).cloned().flatten())
+                .flatten()
+        });
+        self.clipboard().read_value_async(
+            gdk::FileList::static_type(),
+            glib::Priority::DEFAULT_IDLE,
+            gio::Cancellable::NONE,
+            glib::clone!(
+                #[weak(rename_to = window)]
+                self,
+                move |result| match result.map(|value| value.get::<gdk::FileList>()) {
+                    Ok(Ok(files)) => {
+                        let paths: Vec<PathBuf> = files
+                            .files()
+                            .iter()
+                            .filter_map(|file| file.path())
+                            .collect();
+                        window.paste_files(paths, target, cut, cut_path);
+                    }
+                    // No file list: the other thing a clipboard can hold that a cell
+                    // can take is an image (or nothing at all, which the same path
+                    // reports).
+                    _ => window.paste_bitmap(target),
+                }
+            ),
+        );
+    }
+
+    /// A paste that turned into files: the cut's own move, or a placement.
+    fn paste_files(
+        &self,
+        paths: Vec<PathBuf>,
+        target: usize,
+        cut: Option<(usize, PathBuf)>,
+        cut_path: Option<PathBuf>,
+    ) {
+        if let (Some((from, _)), Some(cut_path)) = (cut, cut_path)
+            && from != target
+            && paths.len() == 1
+            && paths[0] == cut_path
+        {
+            let _ = self.apply(Command::MovePhoto { from, to: target });
+            return;
+        }
+        self.place_files(paths, Some(target));
+    }
+
+    /// A paste of an image with no file behind it: written out as a real PNG first,
+    /// then placed like a drop of that one file.
+    ///
+    /// **Its two messages are read before the async call, not inside it**: `xgettext`'s
+    /// Rust scanner does not descend into a `glib::clone!` body (measured 2026-09-26: a
+    /// `gettext` call inside one never reached `po/pixlay.pot`, and the freshness test
+    /// cannot see what the extractor never saw), so the strings live out here, where
+    /// extraction finds them.
+    fn paste_bitmap(&self, target: usize) {
+        let nothing_usable = gettext("The clipboard holds nothing that can go in a cell");
+        let write_failed = gettext("The pasted image could not be written: {}");
+        self.clipboard().read_texture_async(
+            gio::Cancellable::NONE,
+            glib::clone!(
+                #[weak(rename_to = window)]
+                self,
+                move |result| {
+                    let texture = match result {
+                        Ok(Some(texture)) => texture,
+                        _ => {
+                            window.toast(&nothing_usable);
+                            return;
+                        }
+                    };
+                    match pasted_bitmap_file(&texture) {
+                        Ok(path) => window.place_files(vec![path], Some(target)),
+                        Err(error) => window.toast(&fill(write_failed, &[error])),
+                    }
+                }
+            ),
+        );
+    }
+
+    /// Puts one path on the clipboard as a file list; `false` when the clipboard
+    /// refused it, which the caller reports (a copy that silently did nothing would be
+    /// a keystroke the user cannot account for).
+    fn put_path_on_clipboard(&self, path: &Path) -> bool {
+        let files = gdk::FileList::from_array(&[gio::File::for_path(path)]);
+        let provider = gdk::ContentProvider::for_value(&files.to_value());
+        if self.clipboard().set_content(Some(&provider)).is_err() {
+            self.toast(&gettext("The photo could not be put on the clipboard"));
+            return false;
+        }
+        true
+    }
+
+    /// Whether the clipboard holds something a cell can take (S23b).
+    fn clipboard_can_fill_a_cell(clipboard: &gdk::Clipboard) -> bool {
+        let formats = clipboard.formats();
+        formats.contain_mime_type("text/uri-list")
+            || formats.contain_mime_type("image/png")
+            || formats.contains_type(gdk::Texture::static_type())
     }
 
     // ---- the layout stage (S14) -------------------------------------------
@@ -2455,14 +2729,22 @@ impl EditorWindow {
         let state = {
             let editor = self.imp().editor.borrow();
             let doc = editor.doc();
+            let copyable = self.selection().is_some_and(|slot| {
+                editor
+                    .sources()
+                    .paths
+                    .get(slot)
+                    .is_some_and(Option::is_some)
+            });
             (
                 editor.can_undo(),
                 editor.can_redo(),
                 self.selection().is_some(),
                 doc.cells.iter().any(|cell| cell.source.is_some()),
+                copyable,
             )
         };
-        let (undo, redo, selected, has_any_photo) = state;
+        let (undo, redo, selected, has_any_photo, copyable) = state;
         for action in self.imp().actions.borrow().iter() {
             let enabled = match action.name().as_str() {
                 "undo" => undo,
@@ -2470,6 +2752,8 @@ impl EditorWindow {
                 "save" | "save-as" | "frame" => true,
                 "export" => has_any_photo,
                 "clear-cell" | "reset-framing" => selected,
+                "copy" | "cut" => copyable,
+                "paste" => selected && self.imp().clipboard_usable.get(),
                 _ => action.is_enabled(),
             };
             action.set_enabled(enabled);
@@ -2577,7 +2861,9 @@ impl EditorWindow {
 /// reference apps use and ruling 24 asks for: the file items, the editor's own
 /// commands, then the help items. **Save has a menu item here** (S22, ruling 37): its
 /// header-bar button went because it sat beside Export and read as the same action,
-/// and the menu and `Ctrl+S` are what the function lives in.
+/// and the menu and `Ctrl+S` are what the function lives in. The clipboard joined the
+/// editor's own commands in S23b, in HIG's own order — cut, copy, paste — and the
+/// sensitivity of each is the state the window can really act in.
 fn main_menu() -> gio::Menu {
     let menu = gio::Menu::new();
 
@@ -2591,6 +2877,9 @@ fn main_menu() -> gio::Menu {
 
     let edit = gio::Menu::new();
     edit.append(Some(&gettext("Add photos…")), Some("win.add-photos"));
+    edit.append(Some(&gettext("Cut")), Some("win.cut"));
+    edit.append(Some(&gettext("Copy")), Some("win.copy"));
+    edit.append(Some(&gettext("Paste")), Some("win.paste"));
     edit.append(
         Some(&gettext("Reset the framing")),
         Some("win.reset-framing"),
@@ -2603,6 +2892,58 @@ fn main_menu() -> gio::Menu {
     menu.append_section(None, &help);
 
     menu
+}
+
+/// Writes a texture read from the clipboard out as a real PNG, and answers its path
+/// (S23b, ruling 41).
+///
+/// **The app's own cache, not the project's directory**: a paste has to land the same
+/// way in a document that has never been saved (there is no project directory to write
+/// into), and it must not drop a file into the user's own tree without being asked. The
+/// file is a real PNG, which is all a document's `source` needs to be — a cell is a
+/// path, and a path has to survive a save and a reopen.
+///
+/// The name is the digest of the bytes (FNV-1a, 64 bit), so pasting the same image
+/// twice is **one** file that both cells point at rather than a copy per paste. A
+/// digest that is somehow already taken by different bytes gets a numbered name: the
+/// collision is resolved by comparing the bytes themselves, never by trusting the
+/// hash.
+fn pasted_bitmap_file(texture: &gdk::Texture) -> Result<PathBuf, String> {
+    let dir = glib::user_cache_dir().join("pixlay").join("pasted");
+    std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    // A name of this process's own, so two windows pasting at once cannot overwrite
+    // each other's bytes on the way into the cache.
+    let temporary = dir.join(format!("paste-{}.png", std::process::id()));
+    texture
+        .save_to_png(&temporary)
+        .map_err(|error| error.to_string())?;
+    let bytes = std::fs::read(&temporary).map_err(|error| error.to_string())?;
+    let digest = fnv1a64(&bytes);
+
+    let mut target = dir.join(format!("pasted-{digest:016x}.png"));
+    for suffix in 2u32.. {
+        match std::fs::read(&target) {
+            Ok(existing) if existing == bytes => {
+                let _ = std::fs::remove_file(&temporary);
+                return Ok(target);
+            }
+            Ok(_) => target = dir.join(format!("pasted-{digest:016x}-{suffix}.png")),
+            Err(_) => break,
+        }
+    }
+    std::fs::rename(&temporary, &target).map_err(|error| error.to_string())?;
+    Ok(target)
+}
+
+/// FNV-1a, 64 bit: the name a pasted bitmap's bytes get. A name only — the check above
+/// compares the bytes themselves.
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
 }
 
 /// The filter both photo choosers use: the extensions `pixlay-imaging` lists as
