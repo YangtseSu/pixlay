@@ -24,7 +24,7 @@ two-cell swap (`docs/2026-09-25-STEPS.md`, ruling 31). That supersedes the photo
 
 | Item | Value |
 |---|---|
-| Repository | `https://github.com/YangtseSu/pixlay` (private) |
+| Repository | `https://github.com/YangtseSu/pixlay` |
 | Crates | `pixlay` / `pixlay-core` / `pixlay-imaging` / `pixlay-render` / `pixlay-cli` |
 | Binaries | `/usr/bin/pixlay`, `/usr/bin/pixlay-render` |
 | Config / project | `~/.config/pixlay/` · `.pixlay` |
@@ -519,13 +519,27 @@ not a criterion — a visual conclusion must become a number (a probe) in the CL
   meson starts), `depends=('gtk4' 'libadwaita' 'glycin')` (the decoding backend of "Open / to be proven"
   is a linked library, so it is a runtime dependency), `makedepends` names `cargo`, `rust`, `meson` and
   `gettext`, and the license goes to `/usr/share/licenses/$pkgname/` — Arch's path, not the prefix's
+- **A release is a tag plus four steps** (ruled 2026-09-27, human). Push `vX.Y.Z` — the tag has to equal
+  `meson.build`'s `project(version:)`, which the workflow checks — and `release.yml` builds the tree with
+  the project's own build and attaches the **amd64 binaries** (`pixlay-<version>-linux-amd64.tar.gz` and
+  its `.sha256`) to that tag's GitHub Release. Then, on the machine: **update `pkgver` and `sha256sums`**
+  (`updpkgsums`, so the sums stop being `SKIP`); **build the package** (`makepkg` in `packaging/arch`, which
+  leaves `x86_64.pkg.tar.zst` beside the PKGBUILD); **upload it to the same release** (`gh release upload
+  <tag> --clobber …`), so the release carries the binaries and the package together; and **delete the
+  previous version's files** — `packaging/arch/{src,pkg}`, its `.pkg.tar.zst`, the `*.tar.gz` `makepkg`
+  downloaded — so that directory holds the current version only. `arch=('x86_64' 'aarch64')` is the
+  statement that the tree builds under Arch Linux ARM too, and that half is built there, because no GitHub
+  runner has an aarch64 Arch userland. The AUR upload stays a human step: the PKGBUILD, `.SRCINFO` and
+  nothing else
 - **No tests run in a package build** (ruled 2026-09-26, human): `makepkg`'s standard is that it builds and
   packages, the suite is the verification entry's (and CI's), and the two artifact validators
   (`desktop-file-validate`, `appstreamcli validate --no-net`) run in `meson test` wherever they are
   installed (`data/meson.build`, `required: false`)
 - **CI runs the verification entry and does not build the package** (same ruling): `makepkg`, the PKGBUILD
   and the install are verified on a machine, where a package can be built *and installed*; the container's
-  job is to answer whether the program runs
+  job is to answer whether the program runs. `release.yml` builds the **binaries** for a tag and attaches
+  them to the release — its build is the same `meson setup` / `meson compile` the package wraps, and it runs
+  no `makepkg` either
 - SPDX is `GPL-3.0-or-later` throughout (not `-only`)
 
 ## Dependency registry

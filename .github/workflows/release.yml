@@ -1,0 +1,72 @@
+# Release (2026-09-27). One thing happens here: a tag `vX.Y.Z` is pushed, the tree is
+# built with the project's own build — `meson setup` / `meson compile`, the same
+# definition the package wraps — and the two binaries go onto the GitHub Release for
+# that tag, as `pixlay-<version>-linux-amd64.tar.gz` beside their `sha256`.
+#
+# **amd64 only, and the binaries only.** No GitHub runner has an aarch64 Arch userland
+# (Arch Linux ARM is a separate project with no official image), so the PKGBUILD's
+# `aarch64` is built by whoever runs it on ALARM; and the Arch **package** is built on
+# the machine that maintains it and uploaded by hand — a package build runs no tests and
+# is verified where it can be installed (`AGENTS.md`, "AUR discipline", which also has
+# the four steps of a release).
+#
+# The container is the `verify` job's own `archlinux:latest`, so the binaries are built
+# against the rolling system libraries the product targets, and the tag is checked
+# against `meson.build`'s version before anything is published.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  amd64:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the toolchain
+        # `gettext` and `meson` are the build's own; `github-cli` is the `gh` that
+        # uploads the assets.
+        run: >-
+          pacman -Syu --noconfirm --needed
+          base-devel rust cargo gtk4 libadwaita glycin meson gettext github-cli
+      - name: Build
+        run: |
+          meson setup build --prefix=/usr
+          meson compile -C build
+      - name: Check the tag against the tree
+        # A tag that disagrees with `meson.build` would publish binaries named for one
+        # version and built from another.
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          tree=$(meson introspect build --projectinfo |
+                   python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')
+          if [ "$tag" != "$tree" ]; then
+            echo "tag $GITHUB_REF_NAME does not match meson.build's version $tree" >&2
+            exit 1
+          fi
+      - name: Package the two binaries
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          asset="pixlay-$version-linux-amd64.tar.gz"
+          tar -czf "$asset" -C build/crates pixlay pixlay-render
+          sha256sum "$asset" > "$asset.sha256"
+          cat "$asset.sha256"
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          cat > /var/tmp/notes.md <<'EOF'
+          The two binaries for x86_64 Linux (`pixlay` and `pixlay-render`), built from this tag.
+          They link the gtk4, libadwaita and glycin the system provides, so they run on a machine
+          that has them; on Arch the package installed from the AUR brings all of that.
+          EOF
+          gh release view "$tag" >/dev/null 2>&1 ||
+            gh release create "$tag" --title "Pixlay $tag" --notes-file /var/tmp/notes.md --generate-notes
+          gh release upload "$tag" --clobber \
+            pixlay-*-linux-amd64.tar.gz pixlay-*-linux-amd64.tar.gz.sha256

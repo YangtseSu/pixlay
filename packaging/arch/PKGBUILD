@@ -3,8 +3,11 @@ pkgname=pixlay
 pkgver=0.1.0
 pkgrel=1
 pkgdesc="Make a collage out of one to nine photos and export it for printing"
-arch=('x86_64')
-url="https://yangtse.org/pixlay"
+# `aarch64` is the claim that this tree builds under Arch Linux ARM too, and that half
+# is built there: no GitHub runner has an aarch64 Arch userland, so the release workflow
+# ships the amd64 binaries only (`AGENTS.md`, "AUR discipline").
+arch=('x86_64' 'aarch64')
+url="https://github.com/YangtseSu/pixlay"
 license=('GPL-3.0-or-later')
 depends=('gtk4' 'libadwaita' 'glycin')
 makedepends=('cargo' 'rust' 'meson' 'gettext')
