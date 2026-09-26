@@ -49,12 +49,18 @@ pub const MAX_GESTURE_STEPS: u32 = 3600;
 /// pixels: what `switch` measures at when `--canvas` is not given.
 ///
 /// Measured 2026-09-25, `--release`, in the GUI test that drives the same change
-/// (`crates/pixlay/tests/switch.rs`): the editor's canvas widget is **1100x575**, so
-/// a 4:3 document rests at a 735x551 grid and a 16:9 one at 980x551. The number is
-/// here rather than taken from the shell because the CLI must not depend on gtk4
-/// (`AGENTS.md`, module boundaries), and the test prints it on every run, so a
-/// window layout that moves the widget is a fact the next measurement shows rather
-/// than a constant that silently drifts.
+/// (`crates/pixlay/tests/switch.rs`): the editor's canvas widget was **1100x575**, so
+/// a 4:3 document rested at a 735x551 grid and a 16:9 one at 980x551. **Both numbers
+/// are the session's, and both have moved.** The height is the band's (ruling 40
+/// dropped the candidate's caption; measured 2026-09-26 the canvas is **1100x594**, a
+/// 4:3 grid of 760x570), and the width is what the window's content gets: a display
+/// GTK cannot treat as a session frames the window *inside* its own surface, so the
+/// same window reads **1090x584** on an Xvfb with no window manager (measured
+/// 2026-09-26; the numbers are in that test). The default is here rather than taken
+/// from the shell because the CLI must not depend on gtk4 (`AGENTS.md`, module
+/// boundaries), and the test prints the box it measured on every run, so a window
+/// layout that moves the widget is a fact the next measurement shows rather than a
+/// constant that silently drifts.
 pub const DEFAULT_CANVAS_BOX: (i32, i32) = (1100, 575);
 
 /// The one size parameter: what `render` uses when `--long-edge` is not given,
@@ -230,11 +236,14 @@ SWITCH OPTIONS:
                         click takes a candidate of the document's cell count, which
                         `templates --slots <n>` lists.
     --canvas <w>x<h>    The canvas widget the window shows the document in, in
-                        logical pixels, 1..=20000 each. Optional: the editor's own
-                        canvas at the default window is 1100x575, which is the
-                        default. The grid is *derived* from it for each document
+                        logical pixels, 1..=20000 each. Optional: the default is
+                        1100x575, the box this ruler's own numbers were taken at
+                        (the window's canvas moves with the band and with the
+                        session — the GUI test that drives the same switch prints
+                        the box it measured on every run, and that is the number to
+                        pass). The grid is *derived* from it for each document
                         (`pixlay_core::canvas_grid`), because a layout change moves
-                        the grid: the default window's canvas rests at 735x551 for
+                        the grid: at the default box a canvas rests at 735x551 for
                         a 4:3 sheet and 980x551 for a 16:9 one, so the switch's
                         preview-grade copies are for another edge.
     --band              Measure the layout band's rebuild with the switch: every

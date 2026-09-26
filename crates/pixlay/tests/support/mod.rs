@@ -138,7 +138,23 @@ pub fn start() {
             .status();
         match status {
             Ok(status) if status.success() => std::process::exit(0),
-            Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+            Ok(status) => {
+                // Measured 2026-09-26: mutter without a session bus starts, adds its
+                // virtual monitor, and *then* aborts (`set_gnome_env: assertion failed:
+                // (session_bus)`) — so a container that has no bus fails here rather than
+                // in mutter's own startup, and the assertion is all a reader gets. Say
+                // what the fix is instead.
+                if std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() {
+                    eprintln!(
+                        "the private compositor exited ({status}) and this process has no \
+                         session bus, which mutter needs: run the tests under \
+                         `dbus-run-session -- cargo test`, and give `dbus-daemon` a \
+                         machine-id first if the environment has none \
+                         (`dbus-uuidgen --ensure=/etc/machine-id`)"
+                    );
+                }
+                std::process::exit(status.code().unwrap_or(1));
+            }
             Err(error) => panic!(
                 "the GUI tests run inside a private headless mutter, and mutter could not \
                  be started ({error}). Run them on a display of your own instead — any \

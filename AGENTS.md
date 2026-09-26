@@ -53,10 +53,17 @@ generator (`pixlay-core/src/templates/generator.rs`) under the same name and the
 lists what this build ships, and `pixlay-render init --template <name> --out x.pixlay` writes a
 project to start from. Since S7 `cargo test` also builds the GUI; its tests need a display and run on one
 the harness provides — a private headless `mutter` it starts itself, which is the *test environment* and
-not a dependency of the product (no manifest and no `depends` names a compositor). `mutter` therefore has
-to be installed to run `cargo test`; a machine without it can run the GUI tests on a display of its own
-instead — any headless compositor, e.g. `PIXLAY_TEST_CHILD=1 xvfb-run -a cargo test` — and the harness's own
-failure says so. So the entry works on a build box and on a machine that is in use.
+not a dependency of the product (no manifest and no `depends` names a compositor). **Mutter when mutter is
+available** (ruled 2026-09-26, human): it is the compositor this app is developed against and the one whose
+window behaviour these tests measure. It needs no GPU node — measured 2026-09-26 with `/dev/dri` hidden,
+which is a container's shape: `Created surfaceless renderer without GPU`, and the suite green behind it —
+but it does need a **session bus** (`dbus-run-session`; without one it aborts in `set_gnome_env`) and a
+machine-id for `dbus-daemon` to hang that bus on. Where mutter cannot run at all, the harness can be told to
+use the display the process already has — `PIXLAY_TEST_CHILD=1`, e.g. `PIXLAY_TEST_CHILD=1 xvfb-run -a cargo
+test` — and its own failure message says so; **an Xvfb is not mutter's equal**: with no window manager GTK
+frames the window inside its own surface, so every window geometry the suite reads comes out 10 px smaller in
+each direction (measured 1090x584 against 1100x594), and a run on it is a fallback run whose numbers are that
+display's. So the entry works on a build box and on a machine that is in use.
 
 
 Measurement rules that go with it:
@@ -492,9 +499,13 @@ not a criterion — a visual conclusion must become a number (a probe) in the CL
 - `source=` is the release tag's tarball built from `pkgver`; a release pushes `vX.Y.Z`, fills
   `sha256sums` with `updpkgsums` and writes `.SRCINFO`
 - `check()` validates the generated artifacts (`desktop-file-validate`, `appstreamcli validate
-  --no-net`), checks every catalog with `msgfmt`, and runs the workspace's tests offline on a display it
-  provides (`PIXLAY_TEST_CHILD=1` plus Xvfb, because a chroot has no GPU node for the harness' own
-  mutter) — every fixture is in the repository
+  --no-net`), checks every catalog with `msgfmt`, and runs the workspace's tests offline on the compositor
+  those tests are written for — the harness's own headless `mutter`, which `check()` gives a session bus and
+  a runtime directory of its own (`mutter`, `dbus` and `mesa` are makedepends for that: no GPU node is
+  needed, and no Xvfb) — every fixture is in the repository
+- **CI runs the verification entry and does not build the package** (ruled 2026-09-26, human): `makepkg`,
+  the PKGBUILD and its `check()` are verified on a machine, where a package can be built *and installed*;
+  the container's job is to answer whether the program runs
 - SPDX is `GPL-3.0-or-later` throughout (not `-only`)
 
 ## Dependency registry

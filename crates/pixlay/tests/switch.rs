@@ -9,8 +9,10 @@
 //! process, and the two numbers are compared in S18's Result. The bridge between them
 //! is the **canvas box**: the editor's canvas widget is what the window derives a grid
 //! from (`canvas::preferred_grid`, the margin included), so this test prints its own
-//! size and the CLI takes the same number (`--canvas`, and `pixlay-cli`'s default is
-//! this test's measurement at the default window).
+//! size and the CLI takes the same number (`--canvas`; `pixlay-cli`'s default is S18's
+//! measurement of this box at the default window, and a session whose toolkit claims
+//! part of that window for a frame of its own prints a smaller box — the rows below say
+//! which box they were measured at, not which toolkit measured them).
 //!
 //! **One row per candidate the band offers**, each clicked in a **fresh session** that
 //! has just opened the document — which is what a one-shot `pixlay-render switch` models,
@@ -50,6 +52,10 @@ struct Switch {
     /// The widget box a grid is derived from — the number `pixlay-render switch
     /// --canvas` takes.
     canvas_box: (i32, i32),
+    /// The window that canvas sits in, at the same moment: the canvas is the
+    /// window's own width by construction, and the two together say what the
+    /// session drew *inside* the window the app asked for.
+    window_box: (i32, i32),
     from_grid: pixlay_core::PixelSize,
     to_grid: pixlay_core::PixelSize,
     /// The click to the frame that shows the new render.
@@ -127,20 +133,48 @@ fn a_layout_switch_is_measured_from_the_click() {
     for ((label, switch), (from, target)) in rows.iter().zip(&expected) {
         assert_eq!(&switch.from, from, "{label}: the row's starting layout");
         assert_eq!(&switch.target, target, "{label}: the row's target");
+    }
+    // **One box for the three rows, and that box is the window's own.** The CLI is
+    // handed this number (`--canvas`), so rows measured at different boxes would not be
+    // one experiment; and the box is the canvas's by construction — the drawing area
+    // expands into the window (`canvas.rs::build`), so a canvas narrower than its window
+    // is a stale or refused allocation, which is the failure this checks (a full-suite
+    // run has reported a control placed against a `0x0` canvas).
+    //
+    // The box's own *value* is the session's, and that is why no literal stands here.
+    // What a display adds inside the window the app asked for is not this app's
+    // behaviour: a window manager gives the window a frame of its own, while a display
+    // with **no** window manager leaves GTK drawing the frame *inside* the surface
+    // (`window.solid-csd`, whose libadwaita rule is `padding: 5px`), so the content box
+    // is 10 px smaller in each direction than the window: **1090x750** and a canvas of
+    // **1090x584**, against **1100x760** and **1100x594** in a session. Measured
+    // 2026-09-26 with the same GTK (4.24.0) both ways: the harness's own mutter gives
+    // 1100, and `PIXLAY_TEST_CHILD=1` on a bare Xvfb gives 1090x584 — to the pixel of
+    // the number CI printed when it failed. These rows therefore say which box they were
+    // measured at, not which session measured them, and that is what lets the Xvfb
+    // fallback (`AGENTS.md`, the entry: mutter wherever mutter runs) run this suite at all.
+    let boxes: Vec<(i32, i32)> = rows.iter().map(|(_, row)| row.canvas_box).collect();
+    assert!(
+        boxes.windows(2).all(|pair| pair[0] == pair[1]),
+        "the rows were not measured at one canvas box: {boxes:?}"
+    );
+    for (label, row) in &rows {
         assert_eq!(
-            switch.canvas_box.0, 1100,
-            "{label}: the canvas widget is the default window's"
+            row.canvas_box.0, row.window_box.0,
+            "{label}: the canvas is the window's own width"
         );
     }
     for (label, switch) in &rows {
         eprintln!(
-            "switch, {label}: {} → {} · canvas {}x{} · grid {}x{} → {}x{} · \
+            "switch, {label}: {} → {} · canvas {}x{} (of a {}x{} window) · grid {}x{} → {}x{} · \
              canvas {:.1} ms ({} decodes) · band {:.1} ms (0 decodes, a sketch) · total {:.1} ms · \
              budget {:.0} ms · {}",
             switch.from,
             switch.target,
             switch.canvas_box.0,
             switch.canvas_box.1,
+            switch.window_box.0,
+            switch.window_box.1,
             switch.from_grid.width,
             switch.from_grid.height,
             switch.to_grid.width,
@@ -190,6 +224,7 @@ fn measure(window: &EditorWindow, target: &str) -> Switch {
     let from_grid = window.images().0;
     let area = window.canvas_widget();
     let canvas_box = (area.width(), area.height());
+    let window_box = (window.width(), window.height());
 
     // The click, through the band's own cell: `set_active` is what a click leaves
     // behind on a `GtkToggleButton`, and the handler it runs is the window's own
@@ -263,6 +298,7 @@ fn measure(window: &EditorWindow, target: &str) -> Switch {
         from,
         target: target.to_string(),
         canvas_box,
+        window_box,
         from_grid,
         to_grid,
         canvas_ms,

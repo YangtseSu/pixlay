@@ -318,18 +318,25 @@ fn the_package_ships_the_identity_the_code_declares() {
         "the second binary the package installs is the CLI's own name",
     );
 
-    // --- what `check()` needs to work in a chroot --------------------------
+    // --- what `check()` needs to work where it runs ------------------------
     // S16's own requirement, and the reason it is asserted: `makepkg` runs
-    // check() in a chroot with no display, so the GUI tests have to be given one
-    // — `PIXLAY_TEST_CHILD=1` tells the harness to use the display this process
-    // has (`tests/support/mod.rs`), and Xvfb is that display (the harness' own
-    // mutter wants a GPU node a chroot built without /dev/dri has not).
+    // check() in a chroot with no display, so the GUI tests have to be given one —
+    // and it is the compositor they are written for, not an Xvfb (`AGENTS.md`'s
+    // entry: mutter when mutter is available). mutter needs no GPU node (measured
+    // 2026-09-26 with `/dev/dri` hidden: `Created surfaceless renderer without
+    // GPU`) but it does need a session bus, which `dbus-run-session` is; a bare
+    // Xvfb is not the same session at all — with no window manager GTK frames the
+    // window inside its own surface there, and every window geometry the suite
+    // reads comes out 10 px smaller in each direction (1090x584 against
+    // 1100x594).
     assert!(
-        pkgbuild.contains("PIXLAY_TEST_CHILD=1"),
-        "check() runs the GUI tests on a display of its own",
+        pkgbuild.contains("dbus-run-session"),
+        "check() starts the compositor with a session bus of its own",
     );
-    assert!(
-        lists(&pkgbuild, "makedepends", "xorg-server-xvfb"),
-        "that display is a makedepend of the package that asks for it",
-    );
+    for dependency in ["mutter", "dbus", "mesa"] {
+        assert!(
+            lists(&pkgbuild, "makedepends", dependency),
+            "{dependency} is a makedepend of the package whose check() starts that compositor",
+        );
+    }
 }

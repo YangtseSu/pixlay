@@ -1232,9 +1232,14 @@ The package, measured where it can be measured without root (the step's own reco
 | the translation template | `po/extract-pot` writes **111** messages: the shell's Rust strings plus the desktop entry's and the metainfo's, in one `po/pixlay.pot` |
 | the entry's render (unchanged by this step) | 14043x10532, **ms 5133.1 + encode_ms 1217.5**, `peak_rss_mb` **1633.4**, **9,157,670 bytes**, `cmp`-identical to the S30 render — packaging moves no pixel of a document |
 
-**Not measured here**: the clean-chroot `makepkg` and `check()` inside it (both root), and `check()`'s Xvfb
-display on this machine (Xvfb is not installed, and installing it is root). The rootless container that was
-tried instead is recorded in the step's Result, including the one finding it left open.
+**Not measured here**: the clean-chroot `makepkg` and `check()` inside it (both root). The two things recorded
+beside it as skipped have since been done: `check()` has been run on this machine with the same PKGBUILD — the
+suite green on the harness's own headless `mutter`, which `check()` gives a session bus and a runtime directory
+of its own, no Xvfb and no root — and the rootless container's one open finding was reproduced by the first CI
+run and closed the same day (the step's Result, and the ruling of 2026-09-26: the tests run on mutter wherever
+mutter runs, and CI builds no package). That `check()` run's package is **4,130,536 bytes** against the
+**3,727,778** of the table above — a build artifact, not a source change, and this session did not chase it
+further.
 
 ## 9. The window (S7), and the shell ruling 31 re-cut (S22)
 
@@ -1726,9 +1731,11 @@ rely on without reading the PKGBUILD:
   runtime dependency — with `libheif` an optdepend for HEIC and AVIF (as it is for `glycin` itself).
 - **`check()`** validates the generated artifacts as installed files (`desktop-file-validate` wants the
   `.desktop` name), runs `appstreamcli validate --no-net` and `msgfmt --check` on every catalog, and
-  then runs the whole test suite — on a display the build gives it, because a chroot has none:
-  `PIXLAY_TEST_CHILD=1` tells the test harness to use the display this process has
-  (`crates/pixlay/tests/support/mod.rs`), and Xvfb with mesa's software GL is that display, since the
-  harness' own headless mutter wants a GPU node a chroot built without `/dev/dri` has not. Nothing in
-  `check()` reaches the network: the registry is vendored and every fixture is in the repository.
+  then runs the whole test suite — on the compositor those tests are written for, because a chroot has no
+  display and this suite measures window geometry: the harness starts its own headless `mutter`
+  (`crates/pixlay/tests/support/mod.rs`), which needs no GPU node but does need a session bus and a
+  runtime directory of its own (ruled 2026-09-26, human: mutter wherever mutter runs; `PIXLAY_TEST_CHILD=1`
+  with a display of your own is the fallback, and a bare Xvfb is a different session — **1090x584** against
+  **1100x594**). Nothing in `check()` reaches the network: the registry is vendored and every fixture is in
+  the repository.
 - **Not doing** (the plan's own list): Flatpak, Snap, any other distribution.
