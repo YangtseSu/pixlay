@@ -5,9 +5,11 @@
 #
 # The steps are ordered so that nothing is compiled twice that can be compiled once:
 # one clippy pass over every target, one debug build for every test that needs no
-# display, and one release build for the tree meson installs. The two target trees are
-# cached, so a push that changes sources recompiles only what it touched (measured
-# 2026-09-27, before the cache: 902 s, of which ~660 s was compilation).
+# display, and one release build for the tree meson installs — in the profile the release
+# installs (measured 2026-09-27: a different profile for one step made the next one
+# rebuild the tree). The two target trees are cached, so a push that changes sources
+# recompiles only what it touched (before the cache: 902 s, of which ~660 s was
+# compilation).
 name: CI
 
 on:
@@ -61,14 +63,11 @@ jobs:
         run: cargo test --workspace --exclude pixlay --locked
       - name: Build the tree
         # The project's own build, and the only place `meson setup` runs outside a
-        # release. What this step is for is the wiring — the dependency floors, the cargo
-        # call, the install paths — and not the numbers: `thin` LTO and one codegen unit
-        # are what `Cargo.toml` freezes to keep this project's *measurements* comparable,
-        # and CI measures nothing, so both are off here (`release.yml` keeps them).
-        env:
-          CARGO_PROFILE_RELEASE_LTO: 'false'
-          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
-          CARGO_PROFILE_RELEASE_DEBUG: '0'
+        # release. It builds the profile the release builds: turning `thin` LTO and the
+        # single codegen unit off here was measured on 2026-09-27 and moved nothing
+        # (154 s against 144 s), while giving this step an environment the next one did
+        # not have made `meson install` rebuild the whole tree (139 s). The cache below
+        # is what makes this step cheap, not a different profile.
         run: |
           meson setup build --prefix=/usr
           meson compile -C build

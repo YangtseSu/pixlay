@@ -77,9 +77,11 @@ one selection, which is also why the packaging identity test lives in `pixlay-co
 then the complete build — `meson setup` / `meson compile` (both binaries, the shell included) and
 `meson install` into a staging root, which is the definition `makepkg` wraps — and
 every error is recorded in `docs/steps/S33-ci-skips-the-gui-suite-done.md`. CI caches the two build
-trees (`target/` and the build directory's own) and turns the release profile's `thin` LTO and single
-codegen unit **off** for its own build: those two settings exist to keep this project's measured
-numbers comparable, and CI measures nothing (`release.yml` keeps them).
+trees (`target/` and the build directory's own) — measured 2026-09-27, the first run after the cache
+landed was 887 s against 902 s and the cache was cold, so the saving shows on the runs after it — and
+its own build keeps the release profile: turning `thin` LTO and the single codegen unit **off** for CI
+was measured the same day and moved nothing (154 s against 144 s), while a step whose environment
+differed from the next one's made `meson install` rebuild the whole tree (139 s).
 
 
 Measurement rules that go with it:
@@ -256,8 +258,8 @@ versions**. Everything follows the latest stable release.
   `crates/pixlay-core/tests/packaging.rs` — text files only, no display — which is why `APP_ID` and
   `DOMAIN` live in that crate: run from the shell's, cargo built the GTK stack a second time under a
   different feature resolution, **199 s of the 902 s run** (measured 2026-09-27), to read two strings.
-  The two build trees are cached and CI's own build turns the release profile's `thin` LTO and single
-  codegen unit off, because it measures nothing (the entry's paragraph says why).
+  The two build trees are cached, and CI's own build keeps the release profile the release ships (the
+  entry's paragraph records what turning the profile's tuning off for it measured).
   The one action moves with its major tag (`actions/checkout@v7`, `actions/cache@v4`) rather than being
   pinned to a commit SHA: under this policy a pin is the thing that has to be justified
 - **Keeping the dependency set minimal** does not conflict with tracking the latest: few, but each
