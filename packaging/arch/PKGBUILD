@@ -1,6 +1,6 @@
 # Maintainer: Yangtse Su <yangtsesu@gmail.com>
 pkgname=pixlay
-pkgver=0.1.1
+pkgver=0.1.2
 pkgrel=1
 pkgdesc="Make a collage out of one to nine photos and export it for printing"
 # `aarch64` is the claim that this tree builds under Arch Linux ARM too, and that half of the
@@ -12,10 +12,12 @@ license=('GPL-3.0-or-later')
 depends=('gtk4' 'libadwaita' 'glycin')
 makedepends=('cargo' 'rust' 'meson' 'gettext')
 optdepends=('libheif: decode HEIC and AVIF photos')
-# `v0.1.1` is not pushed yet, so there is no checksum to carry; the release replaces this
-# (`updpkgsums`) and writes `.SRCINFO`.
+# `updpkgsums` fills the checksum from the pushed `v$pkgver` tag, so it carries `SKIP` until that
+# tag exists — and a tag that was re-pointed needs the cached `packaging/arch/*.tar.gz` deleted
+# first, because `updpkgsums` reads the file already in `SRCDEST` and would print the old tag's
+# sum (measured 2026-09-27). `.SRCINFO`, the AUR's own file, comes from `makepkg --printsrcinfo`.
 source=("$pkgname-$pkgver.tar.gz::https://github.com/YangtseSu/pixlay/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('328297f007c3cf56e96ec173cf78aba4d70f9ff1b6e968e1f467ff276714647e')
+sha256sums=('SKIP')
 
 # `debug = 1` (Cargo.toml) writes the build path into every binary; the remap rewrites it
 # to the directory the package itself has.
