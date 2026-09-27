@@ -15,7 +15,7 @@ optdepends=('libheif: decode HEIC and AVIF photos')
 # `v0.1.1` is not pushed yet, so there is no checksum to carry; the release replaces this
 # (`updpkgsums`) and writes `.SRCINFO`.
 source=("$pkgname-$pkgver.tar.gz::https://github.com/YangtseSu/pixlay/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('328297f007c3cf56e96ec173cf78aba4d70f9ff1b6e968e1f467ff276714647e')
 
 # `debug = 1` (Cargo.toml) writes the build path into every binary; the remap rewrites it
 # to the directory the package itself has.
