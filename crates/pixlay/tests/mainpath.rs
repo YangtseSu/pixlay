@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 
 use gtk4::prelude::*;
 use pixlay::canvas::Gesture;
+use pixlay::i18n::gettext;
 
 use pixlay_core::{CollageDoc, Command, CropTransform, Project, Rgba8};
 use pixlay_imaging::encode::Format;
@@ -46,7 +47,7 @@ fn the_main_path_can_be_walked() {
     assert_eq!(window.selection(), None, "nothing is selected yet");
     assert_eq!(
         window.title().map(|title| title.to_string()).as_deref(),
-        Some("Untitled collage"),
+        Some(gettext("Untitled collage").as_str()),
         "the window is named after the document"
     );
     // Every entry point of the new document exists as an action or a control: the

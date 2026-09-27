@@ -31,6 +31,7 @@ use std::path::{Path, PathBuf};
 use gtk4::gdk;
 use gtk4::gio;
 use gtk4::prelude::*;
+use pixlay::i18n::{fill, ngettext};
 use pixlay::window::EditorWindow;
 use pixlay_core::{CollageDoc, CropTransform, Project};
 
@@ -82,9 +83,19 @@ fn what_the_canvas_takes_from_outside() {
         "one report, not one per file that did not fit"
     );
     let report = window.last_toast().expect("the drop reported itself");
-    assert!(
-        report.contains('2') && report.contains("did not fit"),
-        "the report says how many did not fit: {report:?}"
+    // The report is the product's own message with the count filled in — read through
+    // `i18n` rather than written out here, because a catalog may translate it.
+    let expected = fill(
+        ngettext(
+            "{} photo did not fit in the collage",
+            "{} photos did not fit in the collage",
+            2,
+        ),
+        &[2],
+    );
+    assert_eq!(
+        report, expected,
+        "the report says how many did not fit, and says it once"
     );
     assert_eq!(
         window.undo_depth(),

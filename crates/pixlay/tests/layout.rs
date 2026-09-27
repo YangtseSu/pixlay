@@ -27,6 +27,7 @@ use gtk4 as gtk;
 use gtk4::prelude::*;
 use libadwaita as adw;
 use pixlay::canvas;
+use pixlay::i18n::{fill, gettext, ngettext};
 use pixlay_core::{CropTransform, Project, Rgba8, templates};
 use pixlay_imaging::Source;
 
@@ -405,9 +406,17 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
     );
     // One report, so a photo that left the sheet does not read as lost.
     let report = window.last_toast().expect("the shrink reported itself");
-    assert!(
-        report.contains("kept") && report.contains('1'),
-        "the report says the photo is kept: {report:?}"
+    assert_eq!(
+        report,
+        fill(
+            ngettext(
+                "{} photo is kept and returns when the layout grows",
+                "{} photos are kept and return when the layout grows",
+                1,
+            ),
+            &[1],
+        ),
+        "the report says the photo is kept"
     );
     // The `+`'s own hint names the photo it would place back (S28), which is what
     // makes a kept photo findable.
@@ -661,12 +670,10 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
         "and the sheet is the only one"
     );
     window.remove_photo();
-    assert!(
-        window
-            .last_toast()
-            .is_some_and(|message| message.contains("at least one photo")),
-        "a removal below the floor reports the floor: {:?}",
-        window.last_toast()
+    assert_eq!(
+        window.last_toast().as_deref(),
+        Some(gettext("A collage needs at least one photo").as_str()),
+        "a removal below the floor reports the floor"
     );
     assert_eq!(window.photo_count(), 1, "and changes nothing");
     assert_eq!(window.document().cells.len(), 1);
@@ -767,12 +774,20 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
         );
     }
     assert_eq!(window.toasts(), toasts + 1, "one report, not one per file");
-    assert!(
-        window
-            .last_toast()
-            .is_some_and(|message| message.contains('3') && message.contains("did not fit")),
-        "the report says how many did not fit: {:?}",
-        window.last_toast()
+    assert_eq!(
+        window.last_toast().as_deref(),
+        Some(
+            fill(
+                ngettext(
+                    "{} photo did not fit in the collage",
+                    "{} photos did not fit in the collage",
+                    3,
+                ),
+                &[3],
+            )
+            .as_str()
+        ),
+        "the report says how many did not fit"
     );
 
     // The chooser's own path trims to the room the ceiling leaves, because its
@@ -795,12 +810,20 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
         "and the layout grew one cell at a time to hold them"
     );
     assert_eq!(window.toasts(), toasts + 1, "one report");
-    assert!(
-        window
-            .last_toast()
-            .is_some_and(|message| message.contains('5') && message.contains("not used")),
-        "the report says how many were not used: {:?}",
-        window.last_toast()
+    assert_eq!(
+        window.last_toast().as_deref(),
+        Some(
+            fill(
+                ngettext(
+                    "{} photo was not used: a collage takes at most {} photos",
+                    "{} photos were not used: a collage takes at most {} photos",
+                    5,
+                ),
+                &[5, 9],
+            )
+            .as_str()
+        ),
+        "the report says how many were not used"
     );
     let filled = window.document();
     for (offset, path) in twelve.iter().take(7).enumerate() {

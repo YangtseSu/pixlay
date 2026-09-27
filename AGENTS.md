@@ -30,7 +30,7 @@ two-cell swap (`docs/completed/2026-09-25-STEPS.md`, ruling 31). That supersedes
 | Config / project | `~/.config/pixlay/` · `.pixlay` |
 | Toolchain | edition 2024 · resolver 3 · `rust-version` follows Arch's installed rustc (currently `1.98`); every baseline number is measured `--release` |
 | app-id | `org.yangtse.Pixlay` (own domain `yangtse.org`, reversed; not a borrowed `io.github.*` namespace) |
-| i18n | gettext, domain `pixlay` (source language English; `.pot`/`po/` at the repository root; extraction via `xgettext` — the shell's Rust strings, the desktop template with `--language=Desktop`, and the metainfo through gettext's AppStream ITS rules, all joined into the one `po/pixlay.pot` by `po/extract-pot`, since S16) |
+| i18n | gettext, domain `pixlay` (source language English; `.pot`/`po/` at the repository root; extraction via `xgettext` — the shell's Rust strings, the desktop template with `--language=Desktop`, and the metainfo through gettext's AppStream ITS rules, all joined into the one `po/pixlay.pot` by `po/extract-pot`, since S16; the one shipped catalog is `po/zh_CN.po` — Simplified Chinese, 2026-09-27 — and `po/LINGUAS` is what a language is added to)|
 
 ## Verification entry (must run after every change the product can see)
 
@@ -122,7 +122,10 @@ Measurement rules that go with it:
   human says so explicitly; do not carry a second language "just for the planning files".
 - **UI copy goes through i18n only, and the source language is English**: GUI strings are English
   source strings; when `LANG` is missing, unknown, or has no translation for that language,
-  everything falls back to English. Translations are a language pack added later, not part of S7.
+  everything falls back to English. A translation is a **language pack** — `po/<language>.po` plus a
+  line in `po/LINGUAS`, nothing else — and packs are added later than S7: the one the repository
+  ships is Simplified Chinese, `po/zh_CN.po` (2026-09-27), and `crates/pixlay/tests/i18n.rs` holds a
+  listed catalog to the template (complete, no `fuzzy`, placeholders kept).
   The translation layer lives **only in `pixlay`** — `pixlay-core` / `-imaging` / `-render` / `-cli`
   must not depend on any i18n library; their error messages are English identifying text, which the
   GUI attaches as-is.

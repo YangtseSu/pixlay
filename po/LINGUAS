@@ -3,7 +3,11 @@
 # `msgfmt --desktop -d po` and `msgfmt --xml -d po` read too, so the desktop
 # file and the metainfo can be generated with the languages merged).
 #
-# It is empty on purpose: English is the source language, and a language pack
-# is added (this file plus `po/<language>.po`) rather than shipped by S16.
-# Nothing depends on a language being listed — with none, the install has the
-# templates' own English text.
+# English is the source language and is not listed: it is the `.pot` itself
+# (`po/pixlay.pot`, extracted by `po/extract-pot`), so a language here is a
+# translation added on top of it, and this file plus `po/<language>.po` is the
+# whole of what one costs. Nothing depends on a language being listed — an
+# unlisted one is simply not built and not installed, and every string falls
+# back to its English source (`crates/pixlay/tests/i18n.rs` holds a listed
+# language to the template: complete, no `fuzzy`, placeholders kept).
+zh_CN

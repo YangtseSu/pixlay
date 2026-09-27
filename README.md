@@ -33,7 +33,8 @@ is aimed at, the clipboard, or the command line (`pixlay a.jpg b.jpg`, in argume
   16-bit buffers; the backdrop is opaque; a source photo is never written to.
 - **Keyboard-first and accessible**: every action has a shortcut, `Ctrl+?` lists them, every
   control has an accessible name. Dark by default. English source strings, translated through
-  gettext.
+  gettext — **Simplified Chinese** ships (`po/zh_CN.po`), and anything a catalog does not carry
+  stays English.
 
 Pixlay makes a collage and nothing else: no colour grading, no filters, no text layer, no
 watermark, no date stamp, no TIFF, no physical sizes or DPI, and no mirroring a cell.

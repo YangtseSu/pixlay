@@ -527,11 +527,14 @@ fn check_compose(window: &EditorWindow, failures: &mut Vec<String>) {
         .filter_map(|widget| widget.downcast_ref::<gtk4::Label>())
         .map(|label| label.label().to_string())
         .collect();
-    if !labels.iter().any(|label| label == "Preferences") {
+    if !labels
+        .iter()
+        .any(|label| *label == i18n::gettext("Preferences"))
+    {
         failures.push("the settings dialog has no heading reading \"Preferences\"".into());
     }
     for group in ["Frame", "Export"] {
-        if !labels.iter().any(|label| label == group) {
+        if !labels.iter().any(|label| *label == i18n::gettext(group)) {
             failures.push(format!("the settings dialog has no {group} group"));
         }
     }

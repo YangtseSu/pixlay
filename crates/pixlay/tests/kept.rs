@@ -17,6 +17,7 @@ mod support;
 use std::path::Path;
 
 use gtk4::prelude::*;
+use pixlay::i18n::{fill, ngettext};
 use pixlay_core::{CollageDoc, CropTransform, templates};
 
 /// The window's own report of a document it shows: the same calls the canvas makes.
@@ -86,9 +87,17 @@ fn a_layout_change_keeps_the_photos_it_takes_off_the_sheet() {
     );
     assert_eq!(window.toasts(), toasts + 1, "reported once");
     let report = window.last_toast().expect("the shrink reported itself");
-    assert!(
-        report.contains("kept"),
-        "the report reads as kept, not lost: {report:?}"
+    assert_eq!(
+        report,
+        fill(
+            ngettext(
+                "{} photo is kept and returns when the layout grows",
+                "{} photos are kept and return when the layout grows",
+                1,
+            ),
+            &[1],
+        ),
+        "the report reads as kept, not lost"
     );
     assert_eq!(window.photo_count(), 2, "the photo is off the sheet");
     assert_eq!(window.kept_count(), 1, "and the document still holds it");

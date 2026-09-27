@@ -6,6 +6,12 @@ All notable changes to Pixlay are documented in this file. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Simplified Chinese**: every string the interface shows, the desktop entry and the AppStream
+  metainfo are translated (`po/zh_CN.po`, `zh_CN` in `po/LINGUAS`). English stays the source language
+  and the fallback for anything a catalog does not carry, and the CLI is not translated at all.
+
 ## [0.1.1] - 2026-09-27
 
 ### Added

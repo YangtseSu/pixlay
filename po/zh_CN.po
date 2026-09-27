@@ -1,0 +1,503 @@
+# Simplified Chinese translation of pixlay.
+# Copyright (C) 2026 Pixlay contributors
+# This file is distributed under the same license as the pixlay package.
+#
+# English is the source language (`po/pixlay.pot` is extracted from it); this is
+# the language pack `po/LINGUAS` lists. `tests/i18n.rs` holds it to the template:
+# every message translated, no `fuzzy`, and the `{}` placeholders of every
+# `rust-format` entry kept, which is what `msgfmt --check` verifies at build time.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: pixlay\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-09-26 20:25+0800\n"
+"PO-Revision-Date: 2026-09-27 16:10+0800\n"
+"Last-Translator: Pixlay contributors\n"
+"Language-Team: Simplified Chinese\n"
+"Language: zh_CN\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+#: crates/pixlay/src/app.rs:97
+msgid "General"
+msgstr "常规"
+
+#: crates/pixlay/src/app.rs:98
+msgid "Collage"
+msgstr "拼贴"
+
+#: crates/pixlay/src/app.rs:99
+msgid "Editing"
+msgstr "编辑"
+
+#: crates/pixlay/src/app.rs:112 crates/pixlay/src/window.rs:3103
+msgid "New collage"
+msgstr "新建拼贴"
+
+#: crates/pixlay/src/app.rs:113 crates/pixlay/src/window.rs:3104
+msgid "Open…"
+msgstr "打开…"
+
+#: crates/pixlay/src/app.rs:114 crates/pixlay/src/window.rs:3123
+msgid "Keyboard shortcuts"
+msgstr "键盘快捷键"
+
+#: crates/pixlay/src/app.rs:115
+msgid "Quit Pixlay"
+msgstr "退出 Pixlay"
+
+#: crates/pixlay/src/app.rs:116 crates/pixlay/src/dialogs.rs:149
+#: crates/pixlay/src/dialogs.rs:154 crates/pixlay/src/window.rs:3122
+msgid "Preferences"
+msgstr "首选项"
+
+#: crates/pixlay/src/app.rs:117 crates/pixlay/src/window.rs:2194
+#: crates/pixlay/src/window.rs:3105
+msgid "Save"
+msgstr "保存"
+
+#: crates/pixlay/src/app.rs:118 crates/pixlay/src/window.rs:3106
+msgid "Save as…"
+msgstr "另存为…"
+
+#: crates/pixlay/src/app.rs:119
+msgid "Close the window"
+msgstr "关闭窗口"
+
+#: crates/pixlay/src/app.rs:120 crates/pixlay/src/window.rs:422
+#: crates/pixlay/src/window.rs:426 crates/pixlay/src/window.rs:2359
+msgid "Export the collage"
+msgstr "导出拼贴"
+
+#: crates/pixlay/src/app.rs:121 crates/pixlay/src/window.rs:397
+#: crates/pixlay/src/window.rs:3111
+msgid "Add photos…"
+msgstr "添加照片…"
+
+#: crates/pixlay/src/app.rs:122 crates/pixlay/src/window.rs:411
+msgid "Undo"
+msgstr "撤销"
+
+#: crates/pixlay/src/app.rs:123 crates/pixlay/src/window.rs:413
+msgid "Redo"
+msgstr "重做"
+
+#: crates/pixlay/src/app.rs:124
+msgid "Cut the photo out of the cell"
+msgstr "剪切格子里的照片"
+
+#: crates/pixlay/src/app.rs:125
+msgid "Copy the photo"
+msgstr "复制照片"
+
+#: crates/pixlay/src/app.rs:126
+msgid "Paste the photo into the cell"
+msgstr "把照片粘贴到格子里"
+
+#: crates/pixlay/src/app.rs:127 crates/pixlay/src/window.rs:3116
+msgid "Reset the framing"
+msgstr "重置构图"
+
+#: crates/pixlay/src/app.rs:307
+msgid "Make a collage out of one to nine photos and export it for printing."
+msgstr "用一到九张照片拼成一张拼贴，导出后即可打印。"
+
+#: crates/pixlay/src/canvas.rs:428 crates/pixlay/src/window.rs:1192
+msgid "Collage canvas"
+msgstr "拼贴画布"
+
+#: crates/pixlay/src/canvas.rs:430
+msgid ""
+"Arrow keys choose a cell; Shift+arrow moves the photo and Ctrl+arrow moves "
+"it further; scroll zooms; Ctrl+scroll rotates; Ctrl+Shift+arrow or "
+"Shift+drag swaps two cells"
+msgstr ""
+"方向键选择格子；Shift+方向键移动照片，Ctrl+方向键移动得更远；滚轮缩放；Ctrl+滚轮旋转；Ctrl+Shift+方向键或"
+"Shift+拖动可交换两个格子"
+
+#: crates/pixlay/src/canvas.rs:947
+msgid "Zoom out"
+msgstr "缩小"
+
+#: crates/pixlay/src/canvas.rs:948
+msgid "Zoom in"
+msgstr "放大"
+
+#: crates/pixlay/src/canvas.rs:949
+msgid "Rotate right"
+msgstr "向右旋转"
+
+#: crates/pixlay/src/canvas.rs:950
+msgid "Replace the photo"
+msgstr "替换照片"
+
+#: crates/pixlay/src/canvas.rs:955
+msgid "Swap with another cell"
+msgstr "与另一个格子交换"
+
+#: crates/pixlay/src/canvas.rs:957
+msgid "Clear the cell"
+msgstr "清空格子"
+
+#: crates/pixlay/src/canvas.rs:1214
+msgid "Add a photo"
+msgstr "添加照片"
+
+#: crates/pixlay/src/dialogs.rs:102
+msgid "Gap"
+msgstr "间距"
+
+#: crates/pixlay/src/dialogs.rs:102
+msgid "Between the photos"
+msgstr "照片之间"
+
+#: crates/pixlay/src/dialogs.rs:103
+msgid "Radius"
+msgstr "圆角"
+
+#: crates/pixlay/src/dialogs.rs:103
+msgid "Rounded corners"
+msgstr "让格子四角变圆"
+
+#: crates/pixlay/src/dialogs.rs:110 crates/pixlay/src/dialogs.rs:112
+msgid "Colour"
+msgstr "颜色"
+
+#: crates/pixlay/src/dialogs.rs:113
+msgid "Behind and between the photos"
+msgstr "照片背后和照片之间"
+
+#: crates/pixlay/src/dialogs.rs:117
+msgid "Frame"
+msgstr "边框"
+
+#: crates/pixlay/src/dialogs.rs:120
+msgid "Both lengths are a share of the collage's height"
+msgstr "两个长度都按整张拼贴高度的比例计算"
+
+#: crates/pixlay/src/dialogs.rs:128
+msgid "Format"
+msgstr "格式"
+
+#: crates/pixlay/src/dialogs.rs:131
+msgid "Export format"
+msgstr "导出格式"
+
+#: crates/pixlay/src/dialogs.rs:138
+msgid "Long edge"
+msgstr "长边"
+
+#: crates/pixlay/src/dialogs.rs:139
+msgid "In pixels"
+msgstr "以像素计"
+
+#: crates/pixlay/src/dialogs.rs:140
+msgid "Long edge in pixels"
+msgstr "长边的像素数"
+
+#: crates/pixlay/src/dialogs.rs:142 crates/pixlay/src/window.rs:419
+msgid "Export"
+msgstr "导出"
+
+#: crates/pixlay/src/dialogs.rs:143
+msgid "The format and the size of an export"
+msgstr "导出的格式和大小"
+
+#: crates/pixlay/src/dialogs.rs:402
+#, rust-format
+msgid "{} in per cent"
+msgstr "{}（百分比）"
+
+#: crates/pixlay/src/layout.rs:112 crates/pixlay/src/layout.rs:357
+msgid "Remove the last cell"
+msgstr "移除最后一个格子"
+
+#: crates/pixlay/src/layout.rs:113 crates/pixlay/src/layout.rs:363
+msgid "Add a cell"
+msgstr "添加一个格子"
+
+#: crates/pixlay/src/layout.rs:120
+msgid "Photos in the collage"
+msgstr "拼贴里的照片"
+
+#: crates/pixlay/src/layout.rs:146
+msgid "Layouts"
+msgstr "布局"
+
+#: crates/pixlay/src/layout.rs:359 crates/pixlay/src/window.rs:1712
+msgid "A collage needs at least one photo"
+msgstr "拼贴至少需要一张照片"
+
+#: crates/pixlay/src/layout.rs:362
+#, rust-format
+msgid "Add a cell and bring back “{}”"
+msgstr "添加一个格子并放回“{}”"
+
+#: crates/pixlay/src/layout.rs:364 crates/pixlay/src/window.rs:1738
+#, rust-format
+msgid "A collage takes at most {} photos"
+msgstr "一张拼贴最多放 {} 张照片"
+
+#: crates/pixlay/src/layout.rs:392 crates/pixlay/src/layout.rs:393
+msgid "No layout has this many photos"
+msgstr "没有能放下这么多照片的布局"
+
+#: crates/pixlay/src/layout.rs:430
+#, rust-format
+msgid "Layout {} of {}"
+msgstr "第 {} 个布局，共 {} 个"
+
+#: crates/pixlay/src/window.rs:407 crates/pixlay/src/window.rs:410
+#: crates/pixlay/src/window.rs:1956
+msgid "Add photos to the collage"
+msgstr "往拼贴里添加照片"
+
+#: crates/pixlay/src/window.rs:432
+msgid "Frame the collage"
+msgstr "给拼贴加边框"
+
+#: crates/pixlay/src/window.rs:437 crates/pixlay/src/window.rs:441
+msgid "Main menu"
+msgstr "主菜单"
+
+#: crates/pixlay/src/window.rs:452 crates/pixlay/src/window.rs:543
+#: crates/pixlay/src/window.rs:2996
+msgid "Untitled collage"
+msgstr "未命名拼贴"
+
+#: crates/pixlay/src/window.rs:471
+msgid "Export progress"
+msgstr "导出进度"
+
+#: crates/pixlay/src/window.rs:493
+msgid "Find it…"
+msgstr "定位…"
+
+#: crates/pixlay/src/window.rs:1186
+#, rust-format
+msgid "Collage canvas, cell {} of {}, swapping with cell {}"
+msgstr "拼贴画布，第 {} 个格子，共 {} 个，将与第 {} 个格子交换"
+
+#: crates/pixlay/src/window.rs:1189
+#, rust-format
+msgid "Collage canvas, cell {} of {}"
+msgstr "拼贴画布，第 {} 个格子，共 {} 个"
+
+#: crates/pixlay/src/window.rs:1333
+#, rust-format
+msgid "{} photo was not used: a collage takes at most {} photos"
+msgid_plural "{} photos were not used: a collage takes at most {} photos"
+msgstr[0] "{} 张照片没有用上：一张拼贴最多放 {} 张照片"
+
+#: crates/pixlay/src/window.rs:1390
+#, rust-format
+msgid "{} photo did not fit in the collage"
+msgid_plural "{} photos did not fit in the collage"
+msgstr[0] "{} 张照片没能放进拼贴"
+
+#: crates/pixlay/src/window.rs:1529
+msgid "The clipboard holds nothing that can go in a cell"
+msgstr "剪贴板里没有能放进格子的内容"
+
+#: crates/pixlay/src/window.rs:1530
+#, rust-format
+msgid "The pasted image could not be written: {}"
+msgstr "无法写入粘贴的图片：{}"
+
+#: crates/pixlay/src/window.rs:1560
+msgid "The photo could not be put on the clipboard"
+msgstr "无法把照片放进剪贴板"
+
+#: crates/pixlay/src/window.rs:1644
+#, rust-format
+msgid "{} photo is kept and returns when the layout grows"
+msgid_plural "{} photos are kept and return when the layout grows"
+msgstr[0] "{} 张照片已留下，布局变大后会回到拼贴里"
+
+#: crates/pixlay/src/window.rs:2098 crates/pixlay/src/window.rs:2246
+msgid "Pixlay collages"
+msgstr "Pixlay 拼贴"
+
+#: crates/pixlay/src/window.rs:2103
+msgid "Open a collage"
+msgstr "打开拼贴"
+
+#: crates/pixlay/src/window.rs:2187
+msgid "Save the changes?"
+msgstr "要保存更改吗？"
+
+#: crates/pixlay/src/window.rs:2189
+msgid "This collage has changes that are not saved anywhere yet."
+msgstr "这张拼贴的更改还没有保存到任何地方。"
+
+#: crates/pixlay/src/window.rs:2192
+msgid "Cancel"
+msgstr "取消"
+
+#: crates/pixlay/src/window.rs:2193
+msgid "Discard"
+msgstr "舍弃"
+
+#: crates/pixlay/src/window.rs:2251
+msgid "Save the collage"
+msgstr "保存拼贴"
+
+#: crates/pixlay/src/window.rs:2303
+#, rust-format
+msgid "Saved {}"
+msgstr "已保存 {}"
+
+#: crates/pixlay/src/window.rs:2317
+msgid "Choose a photo"
+msgstr "选择照片"
+
+#: crates/pixlay/src/window.rs:2522
+#, rust-format
+msgid "{} photo is missing and has to be found before the export"
+msgid_plural "{} photos are missing and have to be found before the export"
+msgstr[0] "{} 张照片缺失，导出前必须先找回"
+
+#: crates/pixlay/src/window.rs:2537
+msgid "Preparing…"
+msgstr "正在准备…"
+
+#: crates/pixlay/src/window.rs:2571
+#, rust-format
+msgid "{} photo is missing"
+msgid_plural "{} photos are missing"
+msgstr[0] "{} 张照片缺失"
+
+#: crates/pixlay/src/window.rs:2587
+#, rust-format
+msgid "Preparing photo {} of {}"
+msgstr "正在准备第 {} 张照片，共 {} 张"
+
+#: crates/pixlay/src/window.rs:2589
+msgid "Compositing…"
+msgstr "正在合成…"
+
+#: crates/pixlay/src/window.rs:2590
+msgid "Writing the file…"
+msgstr "正在写入文件…"
+
+#: crates/pixlay/src/window.rs:2601
+#, rust-format
+msgid "Exported {} ({} MB)"
+msgstr "已导出 {}（{} MB）"
+
+#: crates/pixlay/src/window.rs:2605
+#, rust-format
+msgid "Export failed: {}"
+msgstr "导出失败：{}"
+
+#: crates/pixlay/src/window.rs:2836
+#, rust-format
+msgid "{} photo could not be read"
+msgid_plural "{} photos could not be read"
+msgstr[0] "{} 张照片无法读取"
+
+#: crates/pixlay/src/window.rs:3024
+#, rust-format
+msgid "{} photo could not be loaded"
+msgid_plural "{} photos could not be loaded"
+msgstr[0] "{} 张照片无法加载"
+
+#: crates/pixlay/src/window.rs:3107
+msgid "Export…"
+msgstr "导出…"
+
+#: crates/pixlay/src/window.rs:3112
+msgid "Cut"
+msgstr "剪切"
+
+#: crates/pixlay/src/window.rs:3113
+msgid "Copy"
+msgstr "复制"
+
+#: crates/pixlay/src/window.rs:3114
+msgid "Paste"
+msgstr "粘贴"
+
+#: crates/pixlay/src/window.rs:3124
+msgid "About Pixlay"
+msgstr "关于 Pixlay"
+
+#: crates/pixlay/src/window.rs:3186
+msgid "Photos"
+msgstr "照片"
+
+#: crates/pixlay/src/window.rs:3201
+msgid "Images"
+msgstr "图像"
+
+#: crates/pixlay/src/window.rs:3229 crates/pixlay/src/window.rs:3246
+msgid "collage"
+msgstr "拼贴"
+
+#: crates/pixlay/src/workers.rs:55
+msgid "The photo decoder could not be started"
+msgstr "照片解码器无法启动"
+
+#: crates/pixlay/src/workers.rs:56
+msgid "The photo decoder stopped"
+msgstr "照片解码器已停止"
+
+#: crates/pixlay/src/workers.rs:57
+msgid "The export worker could not be started"
+msgstr "导出功能无法启动"
+
+#: crates/pixlay/src/workers.rs:58
+msgid "The export worker stopped"
+msgstr "导出功能已停止"
+
+#: data/org.yangtse.Pixlay.desktop.in:3
+#: data/org.yangtse.Pixlay.metainfo.xml.in:12
+msgid "Pixlay"
+msgstr "Pixlay"
+
+#: data/org.yangtse.Pixlay.desktop.in:4
+msgid "Photo Collage"
+msgstr "照片拼贴"
+
+#: data/org.yangtse.Pixlay.desktop.in:5
+#: data/org.yangtse.Pixlay.metainfo.xml.in:13
+msgid "Make a collage out of one to nine photos"
+msgstr "用一到九张照片做一张拼贴"
+
+#: data/org.yangtse.Pixlay.desktop.in:10
+msgid "collage;photo;grid;layout;mosaic;"
+msgstr "拼贴;照片;网格;布局;马赛克;"
+
+#: data/org.yangtse.Pixlay.metainfo.xml.in:15
+msgid ""
+"Pixlay lays photos out on a sheet: add one to nine of them, pick a layout, "
+"frame each photo in its cell, give the collage a frame of its own and export "
+"the finished image for printing."
+msgstr "Pixlay 把照片摆在一张纸上：添加一到九张，选一种布局，为每个格子里的照片调整构图，给整张拼贴加上边框，然后导出成品图用于打印。"
+
+#: data/org.yangtse.Pixlay.metainfo.xml.in:20
+msgid "Features:"
+msgstr "功能："
+
+#: data/org.yangtse.Pixlay.metainfo.xml.in:22
+msgid "Regular and irregular layouts for one to nine photos"
+msgstr "一到九张照片的规则与不规则布局"
+
+#: data/org.yangtse.Pixlay.metainfo.xml.in:23
+msgid "Pan, zoom and arbitrary rotation for the photo in each cell"
+msgstr "每个格子里的照片都能平移、缩放和任意角度旋转"
+
+#: data/org.yangtse.Pixlay.metainfo.xml.in:24
+msgid "A frame with its own gap, corner radius and colour"
+msgstr "带间距、圆角和颜色的边框"
+
+#: data/org.yangtse.Pixlay.metainfo.xml.in:25
+msgid "Export to PNG or JPEG at a long edge of your choice"
+msgstr "按自选的长边像素数导出 PNG 或 JPEG"
+
+#: data/org.yangtse.Pixlay.metainfo.xml.in:32
+msgid "Yangtse Su"
+msgstr "Yangtse Su"

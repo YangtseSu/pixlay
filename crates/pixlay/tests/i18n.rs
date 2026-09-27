@@ -1,5 +1,5 @@
-//! i18n: the strings are extractable, the catalog is committed, and the wiring
-//! really translates.
+//! i18n: the strings are extractable, every catalog that ships is complete, and the
+//! wiring really translates.
 //!
 //! The step's criteria are machine-checkable here, and this is where they live:
 //! "the set of files listed in `po/POTFILES` == `crates/pixlay/src/**/*.rs`", "the
@@ -11,9 +11,16 @@
 //! test: the locale is a process property, so a process that wants another one has
 //! to be a different process.
 //!
+//! S16 left `po/LINGUAS` empty and shipped no catalog; the language pack added on
+//! 2026-09-27 (`po/zh_CN.po`) is what makes the other half of the same criteria
+//! checkable, and it is checked per language: a listed catalog carries the
+//! template's whole message set, nothing `fuzzy`, the `{}` placeholders of every
+//! entry, and `msgfmt --check` compiles it — and the compiled catalog is what
+//! `gettext` then answers with, in a child whose locale selects it.
+//!
 //! What is *not* machine-checkable, and is in `docs/HIG-REVIEW.md` instead, is
 //! whether any copy missed its wrapping: the extractor cannot see a string nobody
-//! called `gettext` on.
+//! called `gettext` on — and whether a translation reads well.
 
 mod support;
 
@@ -199,12 +206,17 @@ fn po_string(literal: &str) -> String {
 }
 
 #[test]
-fn the_strings_are_extractable_and_the_fallback_is_english() {
+fn the_strings_are_extractable_the_catalogs_are_complete_and_the_fallback_is_english() {
     support::start();
-    // The child half: a process whose locale is not `C`, to prove that a catalog
-    // installed in a locale directory is really used.
+    // The two child halves: a process whose locale is not `C`, because a catalog
+    // installed in a locale directory is selection by locale — a property of the
+    // process, not of this call.
     if std::env::var_os("PIXLAY_I18N_CHILD").is_some() {
         check_translation();
+        return;
+    }
+    if std::env::var_os("PIXLAY_I18N_CATALOG_CHILD").is_some() {
+        check_catalog_translation();
         return;
     }
     // `po/POTFILES` lists every source file of this crate, and nothing else.
@@ -288,11 +300,11 @@ fn the_strings_are_extractable_and_the_fallback_is_english() {
                 .expect("the locale tree can be created");
             write_mo(
                 &dir.join(&language).join("LC_MESSAGES/pixlay.mo"),
-                &[("Export the collage", "EXPORT")],
+                &[(PROBE, "EXPORT")],
             );
             let output = Command::new(std::env::current_exe().expect("the test binary path"))
                 .arg("--exact")
-                .arg("the_strings_are_extractable_and_the_fallback_is_english")
+                .arg(TEST)
                 .arg("--nocapture")
                 .env("PIXLAY_I18N_CHILD", "1")
                 .env("PIXLAY_LOCALE_DIR", &dir)
@@ -311,14 +323,39 @@ fn the_strings_are_extractable_and_the_fallback_is_english() {
         ),
     }
 
-    // And with no catalog at all, the source strings are what the user sees. That
-    // is gettext's own fallback, which is why this step ships no `.po`.
+    // The catalogs the repository ships (`po/LINGUAS`): each one is the template's
+    // message set translated, and each one compiles with the command the install
+    // runs. A `.po` that has fallen behind the template is the failure no build can
+    // see — `msgfmt` compiles a stale catalog happily.
+    for language in listed("LINGUAS") {
+        check_catalog(&language);
+    }
+
+    // And with no catalog bound, the source strings are what the user sees: that is
+    // gettext's own fallback, and it is asserted against a directory that holds no
+    // catalog rather than against a machine that has none — an installed package
+    // puts `zh_CN`'s exactly there.
+    let empty = support::out_dir().join("no-catalog");
+    let _ = std::fs::remove_dir_all(&empty);
+    std::fs::create_dir_all(&empty).expect("the empty locale tree can be created");
+    assert!(
+        i18n::bind(&empty),
+        "the domain can be bound to an empty directory"
+    );
     assert_eq!(
         i18n::gettext("Export the collage"),
         "Export the collage",
         "an unbound domain must return the msgid (the English source string)"
     );
 }
+
+/// The test's own name, so that a child can be asked to run exactly it.
+const TEST: &str =
+    "the_strings_are_extractable_the_catalogs_are_complete_and_the_fallback_is_english";
+
+/// The one string every catalog the shell ships carries: the check reads a
+/// language's own words back through it, so it needs no word of its own.
+const PROBE: &str = "Export the collage";
 
 /// The language this environment can translate into, if it has one.
 fn test_language() -> Option<String> {
@@ -336,7 +373,8 @@ fn test_language() -> Option<String> {
     Some(language)
 }
 
-/// The child half: a locale directory with a catalog in it is really consulted.
+/// The child half of [`check_translation`]: a locale directory with a catalog in it
+/// is really consulted.
 fn check_translation() {
     let dir = std::env::var("PIXLAY_LOCALE_DIR").expect("the child is given a locale directory");
     i18n::init();
@@ -345,9 +383,197 @@ fn check_translation() {
         "the domain can be bound to the test catalog"
     );
     assert_eq!(
-        i18n::gettext("Export the collage"),
+        i18n::gettext(PROBE),
         "EXPORT",
         "the installed catalog has to be used"
+    );
+    assert_eq!(
+        i18n::gettext("Untranslated string"),
+        "Untranslated string",
+        "and a string the catalog does not carry falls back to English"
+    );
+}
+
+/// One entry of a `.po`: its ids (a plural message has two), its translation, and
+/// whether it is flagged `fuzzy`.
+struct CatalogEntry {
+    ids: Vec<String>,
+    translation: Option<String>,
+    fuzzy: bool,
+}
+
+/// The entries of a `.po`, in file order.
+fn catalog_entries(po: &str) -> Vec<CatalogEntry> {
+    let mut entries: Vec<CatalogEntry> = Vec::new();
+    let mut fuzzy = false;
+    let mut lines = po.lines().peekable();
+    while let Some(line) = lines.next() {
+        if let Some(flags) = line.strip_prefix("#,") {
+            // `#, fuzzy` is the flag that makes `msgfmt` drop the entry from the
+            // catalog it builds: a translated string nobody would ever see.
+            fuzzy = flags.split(',').any(|flag| flag.trim() == "fuzzy");
+            continue;
+        }
+        if line.starts_with('#') || line.is_empty() {
+            continue;
+        }
+        let (keyword, literal) = line.split_once(' ').unwrap_or((line, ""));
+        let mut value = po_string(literal);
+        while let Some(next) = lines.peek() {
+            if !next.starts_with('"') {
+                break;
+            }
+            value.push_str(&po_string(next));
+            lines.next();
+        }
+        match keyword {
+            "msgid" => {
+                entries.push(CatalogEntry {
+                    ids: vec![value],
+                    translation: None,
+                    fuzzy,
+                });
+                fuzzy = false;
+            }
+            "msgid_plural" => {
+                if let Some(entry) = entries.last_mut() {
+                    entry.ids.push(value);
+                }
+            }
+            keyword if keyword.starts_with("msgstr") => {
+                if let Some(entry) = entries.last_mut() {
+                    entry.translation = Some(value);
+                }
+            }
+            _ => {}
+        }
+    }
+    // The header is `msgid ""`, and it is not a string a translator writes.
+    entries.retain(|entry| entry.ids.first().is_some_and(|id| !id.is_empty()));
+    entries
+}
+
+/// One language's catalog: the template's message set translated, no `fuzzy`, the
+/// `{}` placeholders kept, compiled by the tool the install uses — and then that
+/// compiled catalog really answering.
+fn check_catalog(language: &str) {
+    let root = root();
+    let path = root.join("po").join(format!("{language}.po"));
+    let po = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("{} is committed: {error}", path.display()));
+    let template =
+        std::fs::read_to_string(root.join("po/pixlay.pot")).expect("po/pixlay.pot is committed");
+    let template_ids: BTreeSet<String> = messages(&template)
+        .into_iter()
+        .map(|message| message.id)
+        .collect();
+    let entries = catalog_entries(&po);
+    let ids: BTreeSet<String> = entries
+        .iter()
+        .flat_map(|entry| entry.ids.iter().cloned())
+        .collect();
+    assert_eq!(
+        ids,
+        template_ids,
+        "{} is out of date with the template:\n  missing: {:?}\n  stale: {:?}\n\
+         bring it up to date with `msgmerge -U {} po/pixlay.pot`, then translate what it marks",
+        path.display(),
+        template_ids.difference(&ids).collect::<Vec<_>>(),
+        ids.difference(&template_ids).collect::<Vec<_>>(),
+        path.display(),
+    );
+    for entry in &entries {
+        let id = &entry.ids[0];
+        assert!(
+            !entry.fuzzy,
+            "{}: {id:?} is fuzzy, so a build would drop it",
+            path.display()
+        );
+        let translated = entry
+            .translation
+            .as_deref()
+            .filter(|text| !text.is_empty())
+            .unwrap_or_else(|| panic!("{}: {id:?} is not translated", path.display()));
+        for form in &entry.ids {
+            assert_eq!(
+                form.matches("{}").count(),
+                translated.matches("{}").count(),
+                "{}: {id:?} has to keep every placeholder of its msgid — the values are \
+                 substituted into the translation, left to right",
+                path.display()
+            );
+        }
+    }
+    // The install's own command (`po/meson.build`), on the file that ships.
+    let dir = support::out_dir().join("catalogs");
+    std::fs::create_dir_all(&dir).expect("the catalog directory can be created");
+    let mo = dir.join(format!("{language}.mo"));
+    let output = Command::new("msgfmt")
+        .args(["--check", "-o"])
+        .arg(&mo)
+        .arg(&path)
+        .output()
+        .expect("msgfmt runs (the install needs it too: `po/meson.build`)");
+    assert!(
+        output.status.success(),
+        "msgfmt --check refused {}:\n{}",
+        path.display(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // And the compiled catalog is the one gettext reads. Selection is by the
+    // process's locale, so the file is installed under *this environment's*
+    // language and the child runs in it: the directory name is a lookup path here,
+    // and the words that come back are the catalog's own.
+    let Some(environment) = test_language() else {
+        eprintln!(
+            "no language in this environment: {language}'s catalog was compiled, not read back"
+        );
+        return;
+    };
+    let lookup = dir.join("locale");
+    let _ = std::fs::remove_dir_all(&lookup);
+    std::fs::create_dir_all(lookup.join(&environment).join("LC_MESSAGES"))
+        .expect("the locale tree can be created");
+    std::fs::copy(&mo, lookup.join(&environment).join("LC_MESSAGES/pixlay.mo"))
+        .expect("the compiled catalog can be installed");
+    let expected = entries
+        .iter()
+        .find(|entry| entry.ids[0] == PROBE)
+        .and_then(|entry| entry.translation.clone())
+        .expect("every catalog carries the probe");
+    let output = Command::new(std::env::current_exe().expect("the test binary path"))
+        .arg("--exact")
+        .arg(TEST)
+        .arg("--nocapture")
+        .env("PIXLAY_I18N_CATALOG_CHILD", "1")
+        .env("PIXLAY_LOCALE_DIR", &lookup)
+        .env("PIXLAY_CATALOG_EXPECT", &expected)
+        .env("LANG", format!("{environment}.UTF-8"))
+        .env("LC_ALL", format!("{environment}.UTF-8"))
+        .output()
+        .expect("the child test runs");
+    assert!(
+        output.status.success(),
+        "{language}'s catalog was not used:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// The child half of [`check_catalog`]: the catalog that ships, compiled and
+/// installed in a locale directory, is what [`i18n::gettext`] answers with.
+fn check_catalog_translation() {
+    let dir = std::env::var("PIXLAY_LOCALE_DIR").expect("the child is given a locale directory");
+    let expected =
+        std::env::var("PIXLAY_CATALOG_EXPECT").expect("the child is given the catalog's words");
+    i18n::init();
+    assert!(
+        i18n::bind(&dir),
+        "the domain can be bound to the compiled catalog"
+    );
+    assert_eq!(
+        i18n::gettext(PROBE),
+        expected,
+        "the shipped catalog has to be the one gettext reads"
     );
     assert_eq!(
         i18n::gettext("Untranslated string"),

@@ -1676,6 +1676,10 @@ became the platform's. What a caller may rely on:
   no catalog — a missing, `C` or unknown locale — the msgs come back as the English source
   strings. The locale itself is set by `gtk::init()` (measured: `gettext` returns the msgid
   before it and the translated string after), so no `unsafe` `setlocale` call exists.
+  `po/zh_CN.po` (Simplified Chinese, 2026-09-27) is the one catalog the repository ships, and
+  `crates/pixlay/tests/i18n.rs` holds every language `po/LINGUAS` lists to the template: the
+  whole message set, nothing `fuzzy`, the `{}` placeholders kept, `msgfmt --check` clean, and the
+  compiled catalog really answering.
 - **A missing photo is visible, not silent**: the cell renders white, an `AdwBanner` says how
   many photos are missing and its button selects the first of them, and an export refuses
   (as the CLI does) instead of writing a hole.
@@ -1684,8 +1688,9 @@ What the window does *not* do, by decision: no second renderer, no second docume
 **parallel** modes over one document (a sequential creation flow is not a mode — 2026-09-22's ruling),
 no utility pane (ruling 18: the shell has one custom-drawn widget, the canvas, and every other control
 is a stock or libadwaita widget), no per-window state that a saved project does not carry, and no
-translation shipped **in the repository** — the pipeline that installs one is §10's (S16); what
-ships today is the English source strings and the machinery that would carry a language pack.
+translation inside the window's own code — a language is `po/<language>.po` plus a line in
+`po/LINGUAS`, and the only one that ships is `zh_CN` (2026-09-27); the pipeline that carries one is
+§10's (S16), and English stays the source language and the fallback.
 
 ## 10. The package (S16)
 
@@ -1719,8 +1724,11 @@ rely on without reading the PKGBUILD:
   `po/POTFILES` (this crate's sources) and `po/POTFILES.data` (the two templates) are held to the tree
   by the same test.
 - **The language fallback is gettext's** and §9 states it: no catalog for the locale, and every string
-  is the English source string. `po/LINGUAS` is empty in this repository, so the package installs no
-  catalog at all today and the two generated files are their templates verbatim; a language pack is a
+  is the English source string. `po/LINGUAS` lists **`zh_CN`** — the language pack added on
+  2026-09-27, `po/zh_CN.po` — so the package installs
+  `/usr/share/locale/zh_CN/LC_MESSAGES/pixlay.mo` and the two generated files carry that language's
+  `Name[zh_CN]` / `<summary xml:lang="zh-Hans-CN">` beside their English text (the metainfo's tag is
+  AppStream's own spelling of the locale, which is what `msgfmt --xml` writes); a further language pack is a
   `.po` file plus a line in `LINGUAS`, and nothing else changes.
 - **The build and the install are the project's own** (S31). `meson.build` declares the system libraries
   (`gtk4 >= 4.12`, `libadwaita-1 >= 1.8`, `glycin-2`, `libseccomp`, `glib-2.0`, `gio-2.0`), so `meson setup`

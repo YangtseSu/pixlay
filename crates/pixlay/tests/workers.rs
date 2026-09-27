@@ -18,6 +18,7 @@ mod support;
 
 use std::time::Duration;
 
+use pixlay::i18n::gettext;
 use pixlay::workers::{WorkerPlan, Workers};
 
 /// The state a wait on the canvas would hang on: a grid marked in flight.
@@ -50,12 +51,10 @@ fn a_worker_that_is_down_reports_and_clears_its_pending_state() {
         "a decode that was never queued must not be marked in flight ({:?})",
         window.requested_grid()
     );
-    assert!(
-        window
-            .last_toast()
-            .is_some_and(|toast| toast.contains("photo decoder could not be started")),
-        "the window says the decoder could not be started, got {:?}",
-        window.last_toast()
+    assert_eq!(
+        window.last_toast().as_deref(),
+        Some(gettext("The photo decoder could not be started").as_str()),
+        "the window says the decoder could not be started"
     );
     // And it says it once: the canvas asks again on every resize and every edit.
     let toasts = window.toasts();
@@ -100,12 +99,10 @@ fn a_worker_that_is_down_reports_and_clears_its_pending_state() {
         !canvas_pending(&vanished),
         "a send that failed must not leave a grid in flight"
     );
-    assert!(
-        vanished
-            .last_toast()
-            .is_some_and(|toast| toast.contains("photo decoder stopped")),
-        "the window says the decoder stopped, got {:?}",
-        vanished.last_toast()
+    assert_eq!(
+        vanished.last_toast().as_deref(),
+        Some(gettext("The photo decoder stopped").as_str()),
+        "the window says the decoder stopped"
     );
 
     // ---- the export thread cannot be started -----------------------------
@@ -128,12 +125,10 @@ fn a_worker_that_is_down_reports_and_clears_its_pending_state() {
         !export_window.progress_revealed(),
         "a failed start must not leave a progress bar up"
     );
-    assert!(
-        export_window
-            .last_toast()
-            .is_some_and(|toast| toast.contains("export worker could not be started")),
-        "the window says the export worker could not be started, got {:?}",
-        export_window.last_toast()
+    assert_eq!(
+        export_window.last_toast().as_deref(),
+        Some(gettext("The export worker could not be started").as_str()),
+        "the window says the export worker could not be started"
     );
     assert!(!out.exists(), "nothing was written");
     assert!(

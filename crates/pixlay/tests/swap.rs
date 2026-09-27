@@ -29,6 +29,7 @@ use gtk4::gdk;
 use gtk4::prelude::*;
 
 use pixlay::canvas;
+use pixlay::i18n::{fill, gettext};
 use pixlay::window::EditorWindow;
 use pixlay::workers::{WorkerPlan, Workers};
 use pixlay_core::{CollageDoc, PixelSize, Point, Project};
@@ -308,10 +309,13 @@ fn two_cells_swap_whole_by_drag_click_and_keyboard() {
     assert!(swap.is_active(), "the control's checked state is the mark");
     assert_eq!(window.swap_source(), Some(LEFT));
     window.select(Some(RIGHT));
-    assert!(
-        window.canvas_label().contains("swapping with cell 1"),
-        "the canvas announces the swap it is in: {:?}",
-        window.canvas_label()
+    assert_eq!(
+        window.canvas_label(),
+        fill(
+            gettext("Collage canvas, cell {} of {}, swapping with cell {}"),
+            &[RIGHT + 1, window.document().template.slots.len(), LEFT + 1],
+        ),
+        "the canvas announces the swap it is in"
     );
     let depth = window.undo_depth();
     assert!(
@@ -371,7 +375,7 @@ fn two_cells_swap_whole_by_drag_click_and_keyboard() {
     let widget = swap.clone().upcast::<gtk4::Widget>();
     assert_eq!(
         swap.tooltip_text().as_deref(),
-        Some(pixlay::i18n::gettext("Swap with another cell").as_str()),
+        Some(gettext("Swap with another cell").as_str()),
         "the control says what it does"
     );
     assert!(swap.is_focusable(), "the control is Tab-reachable");

@@ -281,6 +281,10 @@ the canvas is **content** and the interface is **styling**, and the two must not
    - **no language pack, no change**: with `LANG=de_DE.UTF-8` — a language nothing translates yet — the
      interface is English and the desktop file's name is `Pixlay` without a `Name[de]` line; `LANG` unset
      or `C` behaves the same.
+   - **the shipped pack, on the installed binary**: with `LANG=zh_CN.UTF-8` the whole interface reads
+     Simplified Chinese (`po/zh_CN.po`, 2026-09-27) — header bar, layout band, the settings dialog, the
+     toasts — the desktop entry carries `Name[zh_CN]` and the metainfo a `<summary xml:lang="zh-Hans-CN">`,
+     and the copy reads well rather than merely being translated (the one thing no test can judge).
    - **both binaries are the package's**: `pixlay-render templates` lists what this build ships and a
      `render` writes the image — the machine surface is installed, not left behind in the build tree.
 

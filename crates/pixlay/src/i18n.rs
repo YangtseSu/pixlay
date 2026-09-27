@@ -10,9 +10,10 @@
 //!
 //! * **A missing or unknown locale falls back to English.** That is gettext's own
 //!   behaviour (an unbound or empty catalog returns the msgid, and the msgid *is*
-//!   the English source string), which is why this step ships no `.po` and still
-//!   satisfies the criterion "with `LANG` unset, `C` or unknown, the interface is
-//!   English and starts up".
+//!   the English source string), which is what makes the criterion "with `LANG`
+//!   unset, `C` or unknown, the interface is English and starts up" hold whatever
+//!   `po/LINGUAS` lists: a language is a catalog added on top of the English source
+//!   strings, never a replacement for them.
 //! * **The locale is set before the first string is asked for.** No `setlocale`
 //!   call of ours is needed or possible (`unsafe`, and this workspace denies
 //!   `unsafe_code`): measured 2026-09-21 on this machine, `g_gettext` returns the
@@ -21,8 +22,10 @@
 //!   before the window is built.
 //!
 //! `po/POTFILES` lists exactly the source files of this crate, and a test in
-//! `tests/i18n.rs` compares that list with the tree and re-extracts the strings
-//! to check the committed `.pot`.
+//! `tests/i18n.rs` compares that list with the tree, re-extracts the strings to check
+//! the committed `.pot`, and holds every catalog `po/LINGUAS` lists to that template
+//! (complete, no `fuzzy`, placeholders kept) — including the one the repository ships,
+//! `po/zh_CN.po`.
 
 use std::path::PathBuf;
 

@@ -51,6 +51,24 @@ that reads what changed, if one exists. The four are also what CI runs, minus th
 complete build and a `meson install` into a staging root; the Arch package and the GUI suite are the
 machine's.
 
+## Translations
+
+The interface is English source strings and gettext carries them (`po/pixlay.pot`, extracted by
+`po/extract-pot`), so a language is a **catalog**: `po/zh_CN.po` is the one the repository ships. To
+add another:
+
+    msgmerge -U po/<language>.po po/pixlay.pot     # a new language starts from the template
+    # translate every entry, then:
+    printf '%s\n' <language> >> po/LINGUAS
+
+`po/meson.build` runs `msgfmt --check` on every language `LINGUAS` lists and installs the compiled
+catalog, and `msgfmt --desktop` / `msgfmt --xml` merge the same catalogs into the desktop entry and
+the metainfo. `crates/pixlay/tests/i18n.rs` holds each listed catalog to the template — the whole
+message set, nothing `fuzzy`, the `{}` placeholders of every entry kept, `msgfmt --check` clean, and
+the compiled catalog really answering `gettext`. An untranslated message is not a build error (it
+falls back to its English source), but the test fails: a language the repository ships is one it
+ships complete. The CLI is never translated — it is a machine interface.
+
 ## The GUI suite and the display it runs on
 
 `cargo test` builds and runs the shell's tests too, which need a display. The harness starts its own
