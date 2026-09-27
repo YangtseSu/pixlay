@@ -47,21 +47,17 @@ The PKGBUILD under `packaging/arch` builds the tree and installs it:
     cd packaging/arch
     makepkg -si
 
-### Any Linux, from source
-
-Needs GTK 4.12+, libadwaita 1.8+, glycin 2, libseccomp, glib and gio (the runtime libraries), plus a
-Rust toolchain, meson, ninja and gettext. `meson setup` names anything that is missing:
-
-    meson setup build --prefix=/usr
-    meson compile -C build
-    sudo meson install -C build
-
 ### Prebuilt
 
 Every GitHub release carries the Linux binaries in two tarballs — `pixlay-<version>-linux-amd64.tar.gz`
 for x86_64 and `pixlay-<version>-linux-arm64.tar.gz` for aarch64 — each with its `.sha256`, beside the
 `x86_64` Arch package. The binaries link the system's GTK, libadwaita and glycin; HEIC and AVIF photos
 need `libheif` installed.
+
+### Any Linux, from a checkout
+
+Build it with the project's own build — the requirements, the three commands and everything else a
+checkout needs are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Use
 
@@ -94,35 +90,12 @@ The subcommands are `render`, `probe`, `image`, `scan`, `thumb`, `templates`, `i
 `--stats` adds measurements, and the exit codes are fixed: 0 success, 1 usage error, 2 failure.
 Output never depends on the locale.
 
-## Development
+## Contributing
 
-|Crate|What it is|
-|---|---|
-|`pixlay-core`|`CollageDoc`, templates, geometry, framing, history. No GTK, no Cairo|
-|`pixlay-imaging`|Decoding (glycin), resampling, colour, encoding (PNG/JPEG). No GTK, no Cairo|
-|`pixlay-render`|The one `draw(doc, images, target)`, on Cairo|
-|`pixlay-cli`|`pixlay-render`: the windowless entry point and the probe surface|
-|`pixlay`|`pixlay`: the GTK4 + libadwaita shell|
-
-The verification entry, run before every commit that the product can see:
-
-    cargo fmt --check
-    cargo clippy --workspace --all-targets -- -D warnings
-    cargo test
-    cargo run --release -p pixlay-cli -- render --project crates/pixlay-cli/tests/fixtures/verify.pixlay --long-edge 14043 --stats --out /var/tmp/a.jpg
-
-The GUI tests need a display and a compositor: they start their own private headless `mutter`, which
-needs a session bus and a machine-id but no GPU. Where mutter cannot run, the harness can be told to
-use the display the process already has, at the cost of that display's own window geometry:
-
-    PIXLAY_TEST_CHILD=1 xvfb-run -a cargo test
-
-The rules the project runs by are in [`AGENTS.md`](AGENTS.md), the shapes it promises are in
-[`docs/CONTRACT.md`](docs/CONTRACT.md), the plan lives in [`docs/steps/`](docs/steps/), and
-[`docs/ROADMAP.md`](docs/ROADMAP.md) holds directions that are not scheduled. The release history is
-in [`CHANGELOG.md`](CHANGELOG.md).
+Building from a checkout, the tests to run and the project's own rules are in
+[`CONTRIBUTING.md`](CONTRIBUTING.md); the release history is in [`CHANGELOG.md`](CHANGELOG.md).
+Issues and patches go to the [GitHub repository](https://github.com/YangtseSu/pixlay).
 
 ## License
 
-GPL-3.0-or-later — see [`LICENSE`](LICENSE). Issues and patches go to the
-[GitHub repository](https://github.com/YangtseSu/pixlay).
+GPL-3.0-or-later — see [`LICENSE`](LICENSE).
