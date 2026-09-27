@@ -464,6 +464,12 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
   *Rationale: levels / curves is a professional control that needs a full ICC pipeline and is opaque
   to the target user; geocoding carries API quotas, identity requirements and privacy costs, and a
   hand-typed place name replaces it; the rest is unrelated to the core value of a collage.*
+- **Linux is the only platform** — ruled 2026-09-27 (human): macOS, or any second desktop platform, is
+  not a target, and a release publishes Linux binaries only. The basis, stated the same day: the
+  decoding backend's sandboxed loader is `cfg(target_os = "linux")` and the in-process one covers no
+  HEIC and no AVIF (S4's measurement); `meson.build` requires `libseccomp`, which is the Linux one; and
+  a macOS application is an `.app` bundle with a signature this product has no story for, while the
+  shell follows the target's own GTK and libadwaita.
 
 ## Module boundaries
 
