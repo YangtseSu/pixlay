@@ -24,7 +24,8 @@ use gtk4::prelude::*;
 use libadwaita as adw;
 use libadwaita::prelude::*;
 
-use pixlay::{APP_ID, app, canvas, i18n, window::EditorWindow};
+use pixlay::{app, canvas, i18n, window::EditorWindow};
+use pixlay_core::APP_ID;
 
 /// The accelerator combinations HIG `reference/keyboard` requires *for the
 /// features this product has*: quit, close, open, save, save as, undo, redo, the

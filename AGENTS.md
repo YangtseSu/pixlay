@@ -72,11 +72,14 @@ display's. So the entry works on a build box and on a machine that is in use. **
 machine's, not CI's** (ruled 2026-09-27, human): no display a runner could give it worked — the
 `archlinux:latest` container's headless mutter never presented a frame, the runner's own mutter dies of its
 GL setup, and a headless Weston runs the suite only to fail the HIG walk against the runner's older GTK —
-so `ci.yml` runs the entry's commands **minus this suite** (`cargo test --workspace --exclude pixlay`,
-plus the shell's `packaging.rs`, which needs no display) and
+so `ci.yml` runs the entry's commands **minus this suite** (`cargo test --workspace --exclude pixlay` —
+one selection, which is also why the packaging identity test lives in `pixlay-core`) and
 then the complete build — `meson setup` / `meson compile` (both binaries, the shell included) and
 `meson install` into a staging root, which is the definition `makepkg` wraps — and
-every error is recorded in `docs/steps/S33-ci-skips-the-gui-suite-done.md`.
+every error is recorded in `docs/steps/S33-ci-skips-the-gui-suite-done.md`. CI caches the two build
+trees (`target/` and the build directory's own) and turns the release profile's `thin` LTO and single
+codegen unit **off** for its own build: those two settings exist to keep this project's measured
+numbers comparable, and CI measures nothing (`release.yml` keeps them).
 
 
 Measurement rules that go with it:
@@ -249,10 +252,14 @@ versions**. Everything follows the latest stable release.
   steps `makepkg` wraps), because a tree that only ever compiles as a side effect of `cargo test` is a tree
   whose meson files first run at a release. So CI answers "does the windowless half run, and does the tree
   build and install" — the GUI suite and the Arch package are the machine's, through `cargo test` and
-  `makepkg` (below). The shell's crate contributes the one test a runner can run — `tests/packaging.rs`,
-  text files only — so the identity and the version chain are checked here too.
-  The one action moves with its major tag (`actions/checkout@v7`) rather than being pinned to a commit SHA:
-  under this policy a pin is the thing that has to be justified
+  `makepkg` (below). The identity and the version chain are checked here too, by
+  `crates/pixlay-core/tests/packaging.rs` — text files only, no display — which is why `APP_ID` and
+  `DOMAIN` live in that crate: run from the shell's, cargo built the GTK stack a second time under a
+  different feature resolution, **199 s of the 902 s run** (measured 2026-09-27), to read two strings.
+  The two build trees are cached and CI's own build turns the release profile's `thin` LTO and single
+  codegen unit off, because it measures nothing (the entry's paragraph says why).
+  The one action moves with its major tag (`actions/checkout@v7`, `actions/cache@v4`) rather than being
+  pinned to a commit SHA: under this policy a pin is the thing that has to be justified
 - **Keeping the dependency set minimal** does not conflict with tracking the latest: few, but each
   one current.
 
@@ -403,8 +410,8 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
   own grids (`guidelines/app-icons`, `guidelines/ui-icons`, `reference/palette` — the app-id is their file
   name, and the desktop file's `Icon=` is the same string), and the desktop entry, the AppStream metainfo
   and the `.pixlay` MIME registration live as templates under `data/`, generated with `msgfmt` at build
-  time. `crates/pixlay/tests/packaging.rs` holds the names, the version and the license to
-  `pixlay::APP_ID` and the manifests; what only the tools can judge is the install's own `meson test`
+  time. `crates/pixlay-core/tests/packaging.rs` holds the names, the version and the license to
+  `pixlay_core::APP_ID` and the manifests; what only the tools can judge is the install's own `meson test`
   (`desktop-file-validate`, `appstreamcli validate`).
 - **Keyboard**: standard shortcuts per HIG `reference/keyboard`; `Alt+*`, `Super+*` and
   system-reserved combinations are forbidden; the main path must be walkable with the keyboard
@@ -473,7 +480,7 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
 
 ## Module boundaries
 
-    pixlay-core     CollageDoc, templates, geometry, framing transforms, command history, the selection policy. Must not depend on gtk / cairo
+    pixlay-core     CollageDoc, templates, geometry, framing transforms, command history, the selection policy, the product's identity strings (the app-id and the gettext domain — here, in the crate with no GTK, because the packaging test reads them without a display). Must not depend on gtk / cairo
     pixlay-imaging  decoding (glycin), resampling, EXIF, color spaces, preview thumbnails, encoding (PNG/JPEG). Must not depend on gtk or cairo
     pixlay-render   the single draw(doc, images, target), on Cairo. Must not depend on gtk
     pixlay-cli      windowless render entry point, automation and verification tooling, and the AI's operating surface. Must not depend on gtk4
@@ -562,7 +569,7 @@ not repeated here.*
   `gettext`, and the license goes to `/usr/share/licenses/$pkgname/` — Arch's path, not the prefix's
 - **A release is a tag plus four steps** (ruled 2026-09-27, human). **The release's notes are
   `CHANGELOG.md`'s section for that version, written before the tag is pushed** —
-  `crates/pixlay/tests/packaging.rs` holds that section's version to `Cargo.toml`'s, so a bump without
+  `crates/pixlay-core/tests/packaging.rs` holds that section's version to `Cargo.toml`'s, so a bump without
   one fails the suite. Push `vX.Y.Z` — the tag has to equal
   `meson.build`'s `project(version:)`, which the workflow checks — and `release.yml` builds the tree with
   the project's own build and attaches the **Linux binaries** (`pixlay-<version>-linux-amd64.tar.gz` and

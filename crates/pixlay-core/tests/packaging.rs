@@ -2,7 +2,7 @@
 //! and the data files carry.
 //!
 //! Three things can drift apart silently and none of them is visible in a build
-//! that succeeds: the **app-id** (`pixlay::APP_ID`) against the desktop entry,
+//! that succeeds: the **app-id** (`pixlay_core::APP_ID`) against the desktop entry,
 //! the icon and the metainfo — a package whose desktop file says a name its
 //! icon does not have shows a blank icon, and whose metainfo id differs is not
 //! the component the desktop file launches; the **version**, which lives in
@@ -17,9 +17,20 @@
 //! templates the install generates its files from, the three `meson.build` files that
 //! name every installed path, and the PKGBUILD that wraps them (`AGENTS.md`'s AUR
 //! discipline: the install is the project's, and a package build runs no tests).
+//!
+//! It lives in `pixlay-core`, the crate with no GTK, because the identity it holds
+//! together must be checkable without a display: measured 2026-09-27, the CI step that
+//! ran it inside the shell's crate spent **199 s of the run** compiling the GTK stack
+//! for the two strings it needs. `APP_ID` and `DOMAIN` moved here with it for the same
+//! reason, and the shell's own name comes from the shell's manifest — `CARGO_PKG_NAME`
+//! in this test would answer for *this* crate. The version and the license are
+//! `env!`'s here as everywhere: every member inherits them from the workspace
+//! (`version.workspace = true`), which is the one place they are declared.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+
+use pixlay_core::{APP_ID, DOMAIN};
 
 /// The repository root, from this crate's manifest directory.
 fn root() -> PathBuf {
@@ -30,6 +41,29 @@ fn read(path: &str) -> String {
     let path = root().join(path);
     std::fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("{} is committed: {error}", path.display()))
+}
+
+/// A `key = "value"` line from one table of a member's manifest.
+///
+/// Read from that member's own manifest, and as text: this test runs in
+/// `pixlay-core`, so cargo's `CARGO_PKG_NAME` answers for *this* crate, while the
+/// name the package installs is the shell's — and the second binary's is the CLI's
+/// `[[bin]]`, which is not the CLI's package name. `marker` is the table header
+/// verbatim (`[package]`, `[[bin]]`).
+fn manifest_value(path: &str, marker: &str, key: &str) -> String {
+    let manifest = read(path);
+    let table = manifest
+        .split(marker)
+        .nth(1)
+        .unwrap_or_else(|| panic!("{path} declares {marker}"));
+    let prefix = format!("{key} = ");
+    table
+        .lines()
+        .find_map(|line| line.strip_prefix(&prefix))
+        .unwrap_or_else(|| panic!("{path}'s {marker} declares {key}"))
+        .trim()
+        .trim_matches('"')
+        .to_string()
 }
 
 /// The file without its XML comments.
@@ -167,7 +201,8 @@ fn lists(pkgbuild: &str, name: &str, word: &str) -> bool {
 
 #[test]
 fn the_package_ships_the_identity_the_code_declares() {
-    let app = pixlay::APP_ID;
+    let app = APP_ID;
+    let shell = manifest_value("crates/pixlay/Cargo.toml", "[package]", "name");
     let desktop = read(&format!("data/{app}.desktop.in"));
     let metainfo = without_comments(&read(&format!("data/{app}.metainfo.xml.in")));
     let mime = without_comments(&read(&format!("data/{app}.mime.xml")));
@@ -220,7 +255,7 @@ fn the_package_ships_the_identity_the_code_declares() {
     );
     assert_eq!(
         element(&metainfo, "translation"),
-        pixlay::i18n::DOMAIN,
+        DOMAIN,
         "a <translation type=\"gettext\"> names the gettext domain, which is the one the shell binds",
     );
     // The version is the workspace's, and a release that forgets one of the two
@@ -238,7 +273,7 @@ fn the_package_ships_the_identity_the_code_declares() {
     );
     assert_eq!(
         element(&metainfo, "binary"),
-        env!("CARGO_PKG_NAME"),
+        shell,
         "the metainfo's <provides><binary> is the installed binary's name",
     );
 
@@ -312,7 +347,7 @@ fn the_package_ships_the_identity_the_code_declares() {
     // --- the package -------------------------------------------------------
     assert_eq!(
         assignment(&pkgbuild, "pkgname").as_deref(),
-        Some(env!("CARGO_PKG_NAME"))
+        Some(shell.as_str())
     );
     assert_eq!(
         assignment(&pkgbuild, "pkgver").as_deref(),
@@ -375,7 +410,7 @@ fn the_package_ships_the_identity_the_code_declares() {
     }
     // The two binaries: `crates/meson.build` copies what the workspace builds into the
     // build directory, under the names `bindir` gets.
-    for binary in [env!("CARGO_PKG_NAME"), "pixlay-render"] {
+    for binary in [shell.as_str(), "pixlay-render"] {
         assert!(
             crates_meson.contains(&format!("'{binary}'")),
             "crates/meson.build installs {binary} into the bindir",
@@ -417,15 +452,16 @@ fn the_package_ships_the_identity_the_code_declares() {
         "po/meson.build compiles the catalogs `LINGUAS` lists",
     );
     assert!(
-        install_script.contains(&format!("LC_MESSAGES/{}.mo", pixlay::i18n::DOMAIN)),
+        install_script.contains(&format!("LC_MESSAGES/{DOMAIN}.mo")),
         "the catalogs are installed as the domain the shell binds",
     );
     assert!(
         crates_meson.contains("PIXLAY_LOCALEDIR"),
         "the build passes the prefix's localedir into the binary",
     );
-    assert!(
-        read("crates/pixlay-cli/Cargo.toml").contains("name = \"pixlay-render\""),
+    assert_eq!(
+        manifest_value("crates/pixlay-cli/Cargo.toml", "[[bin]]", "name"),
+        "pixlay-render",
         "the second binary the package installs is the CLI's own name",
     );
 

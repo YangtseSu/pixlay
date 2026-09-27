@@ -27,10 +27,7 @@
 use std::path::PathBuf;
 
 pub use gettextrs::{bind_textdomain_codeset, bindtextdomain, gettext, ngettext};
-
-/// The gettext domain every string in this crate belongs to. The `.desktop` file
-/// and the AppStream metainfo of S8 use the same one.
-pub const DOMAIN: &str = "pixlay";
+use pixlay_core::DOMAIN;
 
 /// Where compiled catalogs (`<lang>/LC_MESSAGES/pixlay.mo`) are looked up when
 /// `PIXLAY_LOCALEDIR` was not set at build time. It is the prefix an installed

@@ -2,6 +2,12 @@
 # (`docs/steps/S33-ci-skips-the-gui-suite-done.md`), then the project's own build and
 # install into a staging root (`AGENTS.md`, "AUR discipline"). No container: the
 # libraries come from the distribution.
+#
+# The steps are ordered so that nothing is compiled twice that can be compiled once:
+# one clippy pass over every target, one debug build for every test that needs no
+# display, and one release build for the tree meson installs. The two target trees are
+# cached, so a push that changes sources recompiles only what it touched (measured
+# 2026-09-27, before the cache: 902 s, of which ~660 s was compilation).
 name: CI
 
 on:
@@ -17,6 +23,22 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
+      - name: Cache the two build trees
+        # `target/` holds clippy's check artefacts and the tests' debug build;
+        # `build/crates/target` is the release build `meson compile` makes in the build
+        # directory (`crates/meson.build` sets `--target-dir` to `current_build_dir()`),
+        # which no cargo command in this job touches. The key is `Cargo.lock`, so a
+        # source change reuses the tree and a dependency bump does not; `restore-keys`
+        # keeps a warmed tree across a bump.
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            build/crates/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
       - name: Install the libraries
         # Ubuntu splits libheif's decoders into plugins: the HEIC fixture needs libde265
         # and the AVIF one dav1d.
@@ -31,11 +53,22 @@ jobs:
       - name: Lint
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Test the windowless crates
+        # One selection, one compile. The GUI suite is the only thing left out — it needs
+        # a display — and the packaging identity test rides here now, in
+        # `crates/pixlay-core/tests/`: run from the shell's crate it made cargo build the
+        # GTK stack a second time under a different feature resolution (measured
+        # 2026-09-27: 199 s of the run, for a test that reads text files).
         run: cargo test --workspace --exclude pixlay --locked
-      - name: Test the packaging identity
-        # Needs no display: it reads the repository's own text files.
-        run: cargo test -p pixlay --test packaging --locked
       - name: Build the tree
+        # The project's own build, and the only place `meson setup` runs outside a
+        # release. What this step is for is the wiring — the dependency floors, the cargo
+        # call, the install paths — and not the numbers: `thin` LTO and one codegen unit
+        # are what `Cargo.toml` freezes to keep this project's *measurements* comparable,
+        # and CI measures nothing, so both are off here (`release.yml` keeps them).
+        env:
+          CARGO_PROFILE_RELEASE_LTO: 'false'
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
+          CARGO_PROFILE_RELEASE_DEBUG: '0'
         run: |
           meson setup build --prefix=/usr
           meson compile -C build

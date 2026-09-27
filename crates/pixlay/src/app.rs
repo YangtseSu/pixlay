@@ -141,7 +141,7 @@ pub fn shortcut_title(action: &str) -> String {
 /// document.
 pub fn build() -> adw::Application {
     let app = adw::Application::builder()
-        .application_id(crate::APP_ID)
+        .application_id(pixlay_core::APP_ID)
         .flags(gio::ApplicationFlags::HANDLES_OPEN)
         .build();
     install_actions(&app);
@@ -291,13 +291,13 @@ pub fn shortcuts_dialog() -> adw::ShortcutsDialog {
     dialog
 }
 
-/// The about dialog. Its id and version come from [`crate::APP_ID`] and the
+/// The about dialog. Its id and version come from [`pixlay_core::APP_ID`] and the
 /// crate's own metadata rather than being written out a second time, which is
 /// what keeps the window, the desktop file (S8) and the package in agreement.
 pub fn about_dialog() -> adw::AboutDialog {
     let dialog = adw::AboutDialog::new();
     dialog.set_application_name("Pixlay");
-    dialog.set_application_icon(crate::APP_ID);
+    dialog.set_application_icon(pixlay_core::APP_ID);
     dialog.set_version(env!("CARGO_PKG_VERSION"));
     dialog.set_developer_name("Yangtse Su");
     dialog.set_website("https://yangtse.org/pixlay");

@@ -1694,10 +1694,11 @@ files the identity is spelled in, and the pipeline that would carry a language p
 rely on without reading the PKGBUILD:
 
 - **One identity, spelled once per surface.** `org.yangtse.Pixlay` is the app-id at the same time in
-  `pixlay::APP_ID` (`lib.rs`), the desktop file's own name and its `Icon=`, the icon files
+  `pixlay_core::APP_ID` (`lib.rs`, in the crate with no GTK so that the test below needs no display), the
+  desktop file's own name and its `Icon=`, the icon files
   (`hicolor/scalable/apps/org.yangtse.Pixlay.svg` and `hicolor/symbolic/apps/org.yangtse.Pixlay-symbolic.svg`),
   the metainfo's file name and its `<id>`, its `<launchable>` (`org.yangtse.Pixlay.desktop`) and the MIME
-  registration's `<icon>`. `crates/pixlay/tests/packaging.rs` is what fails when one of them moves
+  registration's `<icon>`. `crates/pixlay-core/tests/packaging.rs` is what fails when one of them moves
   without the others.
 - **Paths.** `/usr/bin/pixlay` and `/usr/bin/pixlay-render` — the window and the machine surface
   (`AGENTS.md`, "the CLI is the only machine-operable surface"; a caller with no display uses the

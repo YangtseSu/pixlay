@@ -2,7 +2,9 @@
 //!
 //! Boundary: this crate must not depend on gtk or cairo, and must stay testable
 //! without a display. Geometry is normalized — coordinates live in `[0, 1]`;
-//! absolute pixels exist only at the render and export boundary.
+//! absolute pixels exist only at the render and export boundary. The product's
+//! identity strings ([`APP_ID`], [`DOMAIN`]) are here for that same reason: the
+//! packaging test that holds them to the installed files must not link the shell.
 //!
 //! The v1 contract frozen by S1 (review copy: `docs/CONTRACT.md`):
 //!
@@ -59,6 +61,19 @@ pub use selection::{
     MAX_PHOTOS, MIN_PHOTOS, Selection, SelectionError, last_photo, layout_for, remove_last,
 };
 pub use template::{AREA_TOLERANCE, Family, SharedEdge, Slot, Template};
+
+/// The application id. The desktop file, the two icons and the AppStream
+/// metadata must all match it exactly.
+///
+/// It lives in this crate — the one with no GTK — together with [`DOMAIN`], because
+/// the packaging test that holds every copy of the identity together must not link the
+/// shell to read a string: measured 2026-09-27, the CI step that did spent **199 s of
+/// its run** compiling the GTK stack for it (`crates/pixlay-core/tests/packaging.rs`).
+pub const APP_ID: &str = "org.yangtse.Pixlay";
+
+/// The gettext domain the catalogs are installed as, and the domain the shell binds
+/// (`pixlay::i18n`) — the one crate allowed to translate a string.
+pub const DOMAIN: &str = "pixlay";
 
 /// Version of the document format this build reads and writes.
 ///

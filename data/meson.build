@@ -1,7 +1,7 @@
 # The data the desktop reads: the entry and the metainfo are their templates with the
 # catalogs merged in (`msgfmt --desktop` and `msgfmt --xml`, which is what
 # `i18n.merge_file` runs), the two icons, and the private `.pixlay` type. What this file
-# installs is what `crates/pixlay/tests/packaging.rs` holds to the names beside it.
+# installs is what `crates/pixlay-core/tests/packaging.rs` holds to the names beside it.
 app_id = 'org.yangtse.Pixlay'
 
 desktop_file = i18n.merge_file(

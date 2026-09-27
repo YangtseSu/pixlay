@@ -38,7 +38,3 @@ pub mod workers;
 
 pub use app::run;
 pub use window::EditorWindow;
-
-/// Application id. The desktop file, the icon name and the AppStream metadata
-/// must all match it exactly.
-pub const APP_ID: &str = "org.yangtse.Pixlay";

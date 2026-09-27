@@ -7,7 +7,7 @@ release — the app, the PKGBUILD and the prebuilt tarballs are described in [`R
 
 |Path|What it is|
 |---|---|
-|`crates/pixlay-core`|`CollageDoc`, templates, geometry, framing, history. No GTK, no Cairo|
+|`crates/pixlay-core`|`CollageDoc`, templates, geometry, framing, history, the product's identity strings. No GTK, no Cairo|
 |`crates/pixlay-imaging`|Decoding (glycin), resampling, colour, encoding (PNG/JPEG). No GTK, no Cairo|
 |`crates/pixlay-render`|The one `draw(doc, images, target)`, on Cairo|
 |`crates/pixlay-cli`|`pixlay-render`: the windowless entry point and the probe surface|
