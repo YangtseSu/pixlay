@@ -1739,11 +1739,13 @@ rely on without reading the PKGBUILD:
   library, so it is a runtime dependency — with `libheif` an optdepend for HEIC and AVIF (as it is for
   `glycin` itself), and the license goes to `/usr/share/licenses/pixlay/`, which is Arch's path and not
   the prefix's.
-- **Two architectures, and a release's two assets** (ruled 2026-09-27, human): `arch=('x86_64'
-  'aarch64')` — the tree is expected to build under Arch Linux ARM too, and that half is built there by
-  whoever runs it, because no GitHub runner has an aarch64 Arch userland. A tag's GitHub Release therefore
-  carries the **amd64 binaries** (`pixlay-<version>-linux-amd64.tar.gz` and its `.sha256`, built from the
-  tag by `release.yml` with the project's own build) and the **`x86_64` package**
+- **Two architectures, and a release's assets** (ruled 2026-09-27, human; extended the same day: the arm64
+  runner exists): `arch=('x86_64' 'aarch64')` — the tree is expected to build under Arch Linux ARM too, and
+  that half of the **package** is built there by whoever runs it, because no GitHub runner has an aarch64
+  Arch userland. A tag's GitHub Release therefore carries the **Linux binaries**
+  (`pixlay-<version>-linux-amd64.tar.gz` and `pixlay-<version>-linux-arm64.tar.gz`, each with its
+  `.sha256`, built from the tag by `release.yml` with the project's own build on `ubuntu-26.04` and
+  `ubuntu-26.04-arm`) and the **`x86_64` package**
   (`pixlay-<version>-1-x86_64.pkg.tar.zst`, built on the machine and uploaded by hand). `url=` is the
   repository, `https://github.com/YangtseSu/pixlay`
 - **A package build runs no tests** (ruled 2026-09-26, human): `makepkg`'s standard is that it builds and

@@ -559,8 +559,9 @@ not repeated here.*
   `crates/pixlay/tests/packaging.rs` holds that section's version to `Cargo.toml`'s, so a bump without
   one fails the suite. Push `vX.Y.Z` — the tag has to equal
   `meson.build`'s `project(version:)`, which the workflow checks — and `release.yml` builds the tree with
-  the project's own build and attaches the **amd64 binaries** (`pixlay-<version>-linux-amd64.tar.gz` and
-  its `.sha256`) to that tag's GitHub Release. Then, on the machine: **update `pkgver` and `sha256sums`**
+  the project's own build and attaches the **Linux binaries** (`pixlay-<version>-linux-amd64.tar.gz` and
+  `pixlay-<version>-linux-arm64.tar.gz`, each with its `.sha256`) to that tag's GitHub Release. Then, on
+  the machine: **update `pkgver` and `sha256sums`**
   (`updpkgsums`, so the sums stop being `SKIP` — and when the tag was re-pointed, delete the cached
   `packaging/arch/*.tar.gz` first: `updpkgsums` reads the file already in `SRCDEST` and would print the
   old tag's sum, measured 2026-09-27); **build the package** (`makepkg` in `packaging/arch`, which
@@ -568,9 +569,10 @@ not repeated here.*
   <tag> --clobber …`), so the release carries the binaries and the package together; and **delete the
   previous version's files** — `packaging/arch/{src,pkg}`, its `.pkg.tar.zst`, the `*.tar.gz` `makepkg`
   downloaded — so that directory holds the current version only. `arch=('x86_64' 'aarch64')` is the
-  statement that the tree builds under Arch Linux ARM too, and that half is built there, because no GitHub
-  runner has an aarch64 Arch userland. The AUR upload stays a human step: the PKGBUILD, `.SRCINFO` and
-  nothing else
+  statement that the tree builds under Arch Linux ARM too, and that half of the **package** is built
+  there, because no GitHub runner has an aarch64 Arch userland; the arm64 **binaries** come from the arm64
+  runner (`ubuntu-26.04-arm`), beside the amd64 ones. The AUR upload stays a human step: the PKGBUILD,
+  `.SRCINFO` and nothing else
 - **No tests run in a package build** (ruled 2026-09-26, human): `makepkg`'s standard is that it builds and
   packages, the suite is the verification entry's (and CI's), and the two artifact validators
   (`desktop-file-validate`, `appstreamcli validate --no-net`) run in `meson test` wherever they are

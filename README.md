@@ -58,9 +58,10 @@ Rust toolchain, meson, ninja and gettext. `meson setup` names anything that is m
 
 ### Prebuilt
 
-Every GitHub release carries `pixlay-<version>-linux-amd64.tar.gz` with both binaries and its
-`.sha256`, and the `x86_64` Arch package. The binaries link the system's GTK, libadwaita and
-glycin; HEIC and AVIF photos need `libheif` installed.
+Every GitHub release carries the Linux binaries in two tarballs — `pixlay-<version>-linux-amd64.tar.gz`
+for x86_64 and `pixlay-<version>-linux-arm64.tar.gz` for aarch64 — each with its `.sha256`, beside the
+`x86_64` Arch package. The binaries link the system's GTK, libadwaita and glycin; HEIC and AVIF photos
+need `libheif` installed.
 
 ## Use
 

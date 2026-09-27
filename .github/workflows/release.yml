@@ -1,8 +1,7 @@
-# Release: a pushed `vX.Y.Z` tag is built with the project's own build, and its two binaries
-# are attached to that tag's GitHub Release as `pixlay-<version>-linux-amd64.tar.gz` beside
-# their `.sha256`. amd64 only, and the binaries only: no GitHub runner has an aarch64 Arch
-# userland, and the Arch package is built and uploaded on a machine (`AGENTS.md`, "AUR
-# discipline").
+# Release: a pushed `vX.Y.Z` tag is built with the project's own build, and its binaries are
+# attached to that tag's GitHub Release as `pixlay-<version>-linux-<arch>.tar.gz` beside their
+# `.sha256`. Linux only, and the binaries only: the Arch package is built and uploaded on a
+# machine (`AGENTS.md`, "AUR discipline").
 name: Release
 
 on:
@@ -13,18 +12,27 @@ permissions:
   contents: write
 
 jobs:
-  amd64:
-    runs-on: ubuntu-26.04
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-26.04
+            arch: amd64
+          - runner: ubuntu-26.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
       - name: Install the libraries
-        # The three the package depends on, the seccomp meson looks for, and `msgfmt` for the
-        # desktop entry and the metainfo.
+        # The three the package depends on, the seccomp meson looks for, `msgfmt` for the
+        # desktop entry and the metainfo, and `gh`, which publishes.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libgtk-4-dev libadwaita-1-dev libglycin-2-dev libseccomp-dev \
-            meson ninja-build pkg-config gettext
+            meson ninja-build pkg-config gettext gh
       - name: Build
         run: |
           meson setup build --prefix=/usr
@@ -42,8 +50,8 @@ jobs:
           fi
       - name: Package the two binaries
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          asset="pixlay-$version-linux-amd64.tar.gz"
+          asset="pixlay-${GITHUB_REF_NAME#v}-linux-${{ matrix.arch }}.tar.gz"
+          echo "asset=$asset" >> "$GITHUB_ENV"
           tar -czf "$asset" -C build/crates pixlay pixlay-render
           sha256sum "$asset" > "$asset.sha256"
           cat "$asset.sha256"
@@ -52,13 +60,17 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           tag="$GITHUB_REF_NAME"
+          # Both matrix jobs publish: the first creates the release, the second finds it, and
+          # a create that loses the race is not a failure.
           cat > /var/tmp/notes.md <<'EOF'
-          The two binaries for x86_64 Linux (`pixlay` and `pixlay-render`), built from this tag.
-          They link the gtk4, libadwaita and glycin the system provides, so they run on a machine
-          that has them; on Arch the `pixlay` package brings all of them.
+          The binaries for Linux (`pixlay` and `pixlay-render`), built from this tag: the
+          tarball named `amd64` for x86_64, the one named `arm64` for aarch64. They link the
+          gtk4, libadwaita and glycin the system provides, so they run on a machine that has
+          them; on Arch the `pixlay` package brings all of them.
           EOF
           gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
             gh release create "$tag" --repo "$GITHUB_REPOSITORY" --verify-tag \
-              --title "Pixlay $tag" --notes-file /var/tmp/notes.md --generate-notes
+              --title "Pixlay $tag" --notes-file /var/tmp/notes.md --generate-notes ||
+            gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null
           gh release upload "$tag" --repo "$GITHUB_REPOSITORY" --clobber \
-            pixlay-*-linux-amd64.tar.gz pixlay-*-linux-amd64.tar.gz.sha256
+            "$asset" "$asset.sha256"
