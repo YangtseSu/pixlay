@@ -72,7 +72,10 @@ display's. So the entry works on a build box and on a machine that is in use. **
 machine's, not CI's** (ruled 2026-09-27, human): no display a runner could give it worked — the
 `archlinux:latest` container's headless mutter never presented a frame, the runner's own mutter dies of its
 GL setup, and a headless Weston runs the suite only to fail the HIG walk against the runner's older GTK —
-so `ci.yml` runs the entry's commands **minus this suite** (`cargo test --workspace --exclude pixlay`), and
+so `ci.yml` runs the entry's commands **minus this suite** (`cargo test --workspace --exclude pixlay`,
+plus the shell's `packaging.rs`, which needs no display) and
+then the complete build — `meson setup` / `meson compile` (both binaries, the shell included) and
+`meson install` into a staging root, which is the definition `makepkg` wraps — and
 every error is recorded in `docs/steps/S33-ci-skips-the-gui-suite-done.md`.
 
 
@@ -159,6 +162,13 @@ one `**Progress**` line that says where it stands. A status change renames the f
 not `plans` because a plan is a set of steps and this is the unit that has a file, and not `phases`
 because nothing here is one; the S-numbering continues across plans.
 
+**A one-off task is not a step** (ruled 2026-09-27, human): a small change nobody asked to be a step — a CI
+fix, a document edit, a dependency bump, a bug fixed on the spot — is done and committed and creates no
+file under `docs/steps/`, because the directory holds the plan and a file per errand turns the plan into a
+log. The commit message's own prefix (`docs:` / `chore:`, "Commit discipline") is what marks one. A step
+file is written when the human names the work a step, or when the work needs the one thing only a step
+file carries: a machine-checkable exit of its own, a `Human` gate, or a ruling with a `Result` to record.
+
 1. Every step must have a **machine-checkable** exit. A "step" with no checkable exit is not a step.
 2. First do the one thing that can overturn the whole choice of technology (S0).
 3. Freeze the contract first, then scale up (S1).
@@ -234,8 +244,13 @@ versions**. Everything follows the latest stable release.
   `ubuntu-latest` still resolves to 24.04 — with **no container** and **no GUI suite** (both ruled
   2026-09-27, human): the suite needs a display, a compositor and the libraries the product targets, and a
   runner could not give it all three, so CI runs the entry's commands minus that suite and every failure is
-  recorded in `docs/steps/S33-ci-skips-the-gui-suite-done.md`. CI therefore answers "does the windowless
-  half run" — the shell and the Arch build are the machine's, through `cargo test` and `makepkg` (below).
+  recorded in `docs/steps/S33-ci-skips-the-gui-suite-done.md`. CI also makes the **complete build** with the
+  project's own definition (`meson setup` / `meson compile` / `meson install` into a staging root, the same
+  steps `makepkg` wraps), because a tree that only ever compiles as a side effect of `cargo test` is a tree
+  whose meson files first run at a release. So CI answers "does the windowless half run, and does the tree
+  build and install" — the GUI suite and the Arch package are the machine's, through `cargo test` and
+  `makepkg` (below). The shell's crate contributes the one test a runner can run — `tests/packaging.rs`,
+  text files only — so the identity and the version chain are checked here too.
   The one action moves with its major tag (`actions/checkout@v7`) rather than being pinned to a commit SHA:
   under this policy a pin is the thing that has to be justified
 - **Keeping the dependency set minimal** does not conflict with tracking the latest: few, but each

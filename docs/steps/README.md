@@ -11,3 +11,7 @@ Each file carries the step's own goal, work, machine-checkable exit, `Human` lin
 that one `**Progress**` line, which is the authority on where the step stands. The binding rule is
 `AGENTS.md`, "Step discipline"; the S-numbering continues across plans, and `docs/CONTRACT.md` stays the
 authority for every shape.
+
+**A one-off task is not a step** (ruled 2026-09-27, human): a small change nobody asked to be a step — a CI
+fix, a document edit, a dependency bump — is committed under the `docs:` / `chore:` prefix and creates no
+file here. The rule and its reasons are in `AGENTS.md`, "Step discipline".
