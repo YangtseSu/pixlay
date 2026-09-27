@@ -77,11 +77,13 @@ one selection, which is also why the packaging identity test lives in `pixlay-co
 then the complete build — `meson setup` / `meson compile` (both binaries, the shell included) and
 `meson install` into a staging root, which is the definition `makepkg` wraps — and
 every error is recorded in `docs/steps/S33-ci-skips-the-gui-suite-done.md`. CI caches the two build
-trees (`target/` and the build directory's own) — measured 2026-09-27, the first run after the cache
-landed was 887 s against 902 s and the cache was cold, so the saving shows on the runs after it — and
-its own build keeps the release profile: turning `thin` LTO and the single codegen unit **off** for CI
-was measured the same day and moved nothing (154 s against 144 s), while a step whose environment
-differed from the next one's made `meson install` rebuild the whole tree (139 s).
+trees (`target/` and the build directory's own) — measured 2026-09-27, the same job was **902 s**
+without that cache and **255 s** with it: a fresh checkout still recompiles this workspace's five
+crates (the test build 9.96 s against 3m 42s, the release one 41.96 s against 2m 24s), and what is
+left is work — ~120 s of tests and 12 s of render. That is the lever, not a cheaper profile: turning
+the release profile's `thin` LTO and single codegen unit **off** for CI's build moved nothing (154 s
+against 144 s) and, because the step after it then had a different environment, made `meson install`
+rebuild the whole tree (139 s where it had been 1 s). CI builds the profile the release ships.
 
 
 Measurement rules that go with it:
@@ -258,8 +260,8 @@ versions**. Everything follows the latest stable release.
   `crates/pixlay-core/tests/packaging.rs` — text files only, no display — which is why `APP_ID` and
   `DOMAIN` live in that crate: run from the shell's, cargo built the GTK stack a second time under a
   different feature resolution, **199 s of the 902 s run** (measured 2026-09-27), to read two strings.
-  The two build trees are cached, and CI's own build keeps the release profile the release ships (the
-  entry's paragraph records what turning the profile's tuning off for it measured).
+  The two build trees are cached (the entry's paragraph has the measurement: **902 s → 255 s**), and
+  CI's own build keeps the release profile the release ships.
   The one action moves with its major tag (`actions/checkout@v7`, `actions/cache@v4`) rather than being
   pinned to a commit SHA: under this policy a pin is the thing that has to be justified
 - **Keeping the dependency set minimal** does not conflict with tracking the latest: few, but each

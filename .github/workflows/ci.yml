@@ -7,9 +7,10 @@
 # one clippy pass over every target, one debug build for every test that needs no
 # display, and one release build for the tree meson installs — in the profile the release
 # installs (measured 2026-09-27: a different profile for one step made the next one
-# rebuild the tree). The two target trees are cached, so a push that changes sources
-# recompiles only what it touched (before the cache: 902 s, of which ~660 s was
-# compilation).
+# rebuild the tree). The two target trees are cached: the same job measured 902 s with a
+# cold cache and 255 s with a warm one, of which ~120 s is the suite running and 12 s the
+# render — the cache holds the dependency tree, so a fresh checkout recompiles only this
+# workspace's five crates.
 name: CI
 
 on:
