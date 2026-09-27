@@ -168,3 +168,37 @@ that parked the question, or the assistant's suggestion.
   the document is dirty, write it periodically to `$XDG_CACHE_HOME/pixlay/`, and at startup offer to
   recover a document found there. It must never touch the user's own project file, and it must be
   removable without leaving anything behind.
+
+## More languages
+
+**Status: not scheduled.** *Asked for* (2026-09-27): more languages should be possible — and adding one is
+cheap — but it is not needed while the project has no audience.
+
+- **What holds today.** The pipeline is S16's and exactly one language pack ships: `po/zh_CN.po`
+  (Simplified Chinese, 2026-09-27) with `zh_CN` in `po/LINGUAS`. English is the source language and the
+  fallback, and the CLI is never translated (`AGENTS.md`, "Language conventions"). A language is a `.po`
+  file plus a line in `LINGUAS` and **nothing else changes** (`docs/CONTRACT.md` §10): `po/meson.build`
+  runs `msgfmt --check` over every listed language and installs the compiled catalog, `msgfmt --desktop` /
+  `msgfmt --xml` merge the same catalogs into the desktop entry and the metainfo, and
+  `crates/pixlay/tests/i18n.rs` holds a listed catalog to the template — the template's whole message set,
+  nothing `fuzzy`, the `{}` placeholders of every entry kept, `msgfmt --check` clean, and the compiled
+  catalog really answering `gettext` in a process whose locale selects it.
+- **Measured on the one pack that exists** (2026-09-27): 110 messages, all translated; the GUI suite is
+  green with that catalog bound (`PIXLAY_LOCALEDIR` + `LANG=zh_CN.UTF-8`); the desktop entry carries
+  `Name[zh_CN]`, the metainfo `<summary xml:lang="zh-Hans-CN">`; the window and its settings dialog read
+  Chinese in a snapshot. That is the whole cost of a language: one file, one line, and a speaker to read
+  the copy.
+- **Why it is not scheduled.** *Asked for* (2026-09-27): **nobody but the author uses the product, and
+  nobody else is watching the repository.** A third language would be translated for nobody — and the one
+  thing no test can check is whether the copy *reads well* (`docs/HIG-REVIEW.md`'s walk item), which needs
+  a speaker of that language rather than a translation. So this is a decision about an audience that does
+  not exist yet, and the honest state is "the mechanism is ready, the reason is missing".
+- **What would trigger it**: the first person who asks for a language, a distribution's translation
+  community offering a catalog, or the author's own decision. The mechanism is proven, so a step is only
+  needed for the parts that are decisions rather than translation: which languages the repository ships
+  (curating `po/LINGUAS`), and whether a pack travels with the tree at all or ships separately — a
+  translation-only package, the shape a distribution's own language packaging takes.
+- **What must not be added**: a per-language branch in the code, a second copy of the copy, or a language
+  that needs more than a `.po` and a `LINGUAS` line. Extraction, the template and the English fallback are
+  one pipeline, and the CLI's output is English by rule — a language that wants either changed is a design
+  change, not a language pack.
