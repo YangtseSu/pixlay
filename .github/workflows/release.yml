@@ -1,18 +1,8 @@
-# Release (2026-09-27). One thing happens here: a tag `vX.Y.Z` is pushed, the tree is built
-# with the project's own build — `meson setup` / `meson compile`, the same definition the
-# package wraps — and the two binaries go onto the GitHub Release for that tag, as
-# `pixlay-<version>-linux-amd64.tar.gz` beside their `sha256`.
-#
-# **The runner is `ubuntu-26.04`, named explicitly and with no container**, like the
-# `verify` job and for the same reason (`ci.yml`'s header). `gh` and `git` are the runner's
-# own.
-#
-# **amd64 only, and the binaries only.** No GitHub runner has an aarch64 Arch userland (Arch
-# Linux ARM is a separate project with no official image), so the PKGBUILD's `aarch64` is
-# built by whoever runs it on ALARM; and the Arch **package** is built on the machine that
-# maintains it and uploaded by hand — a package build runs no tests and is verified where it
-# can be installed (`AGENTS.md`, "AUR discipline", which also has the four steps of a
-# release). The tag is checked against `meson.build`'s version before anything is published.
+# Release: a pushed `vX.Y.Z` tag is built with the project's own build, and its two binaries
+# are attached to that tag's GitHub Release as `pixlay-<version>-linux-amd64.tar.gz` beside
+# their `.sha256`. amd64 only, and the binaries only: no GitHub runner has an aarch64 Arch
+# userland, and the Arch package is built and uploaded on a machine (`AGENTS.md`, "AUR
+# discipline").
 name: Release
 
 on:
@@ -28,8 +18,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Install the libraries
-        # The build's own: the three the package depends on, the seccomp meson looks for,
-        # and `msgfmt` for the desktop entry and the metainfo.
+        # The three the package depends on, the seccomp meson looks for, and `msgfmt` for the
+        # desktop entry and the metainfo.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -40,8 +30,8 @@ jobs:
           meson setup build --prefix=/usr
           meson compile -C build
       - name: Check the tag against the tree
-        # A tag that disagrees with `meson.build` would publish binaries named for one
-        # version and built from another.
+        # A tag that disagrees with `meson.build` would publish binaries named for one version
+        # and built from another.
         run: |
           tag="${GITHUB_REF_NAME#v}"
           tree=$(meson introspect build --projectinfo |
@@ -65,7 +55,7 @@ jobs:
           cat > /var/tmp/notes.md <<'EOF'
           The two binaries for x86_64 Linux (`pixlay` and `pixlay-render`), built from this tag.
           They link the gtk4, libadwaita and glycin the system provides, so they run on a machine
-          that has them; on Arch the package installed from the AUR brings all of that.
+          that has them; on Arch the `pixlay` package brings all of them.
           EOF
           gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
             gh release create "$tag" --repo "$GITHUB_REPOSITORY" --verify-tag \

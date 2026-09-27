@@ -1,35 +1,7 @@
-# CI (S16, rewritten 2026-09-27). Two halves, in one job because they share the one
-# checkout and the one set of libraries: the **tests of the windowless crates** — the
-# verification entry's commands minus the GUI suite, plus the shell's own packaging test,
-# which needs no display — and the **complete build**, the project's own `meson setup` /
-# `meson compile` / `meson install` into a staging root, which is the definition `makepkg`
-# wraps (`AGENTS.md`, "AUR discipline").
-#
-# **Why the build is here.** `cargo clippy --workspace --all-targets` compiles the shell
-# too, so a shell that does not build fails either way; what no cargo command reaches is
-# the build and install definition itself — the meson files that declare the system
-# libraries, copy the two binaries, generate the desktop entry and the metainfo from
-# their templates with `msgfmt` and install every path the package then ships. Before
-# this rewrite that definition first ran at a tag, in `release.yml`, which is the worst
-# moment for it to fail.
-#
-# **Why the GUI suite is not here**, with the errors recorded in
-# `docs/steps/S33-ci-skips-the-gui-suite-done.md`: no display a runner can give it has
-# worked. The `archlinux:latest` container's headless mutter mapped the window and never
-# presented a frame (`0 frames arrived`, three runs in a row); the runner's own mutter dies
-# of its own GL setup (`Mutter terminated with a failure: … 139`); a headless Weston does
-# run the suite, but its GTK is 4.21 where the target's is 4.24, and the HIG walk then
-# reports 47 unnamed widgets, GTK's own chrome among them. The suite needs a display, a
-# compositor and the target's libraries; a machine has all three, and that is where the
-# entry's `cargo test` runs it.
-#
-# **The runner is `ubuntu-26.04`**, named explicitly because `ubuntu-latest` still
-# resolves to 24.04, and there is no container: the libraries come from the distribution.
-#
-# **The package is not built here** (ruled 2026-09-26, human): `makepkg`, the PKGBUILD and
-# its `check()` are verified on a machine, where a package can be built *and installed*,
-# and what this job answers is "does the windowless half run, and does the tree build and
-# install".
+# CI: the verification entry's commands minus the GUI suite
+# (`docs/steps/S33-ci-skips-the-gui-suite-done.md`), then the project's own build and
+# install into a staging root (`AGENTS.md`, "AUR discipline"). No container: the
+# libraries come from the distribution.
 name: CI
 
 on:
@@ -42,21 +14,12 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-26.04
-    # A hung meson or a test that never returns should fail the job, not sit in the
-    # six-hour default.
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
       - name: Install the libraries
-        # The lint compiles the shell too, so GTK and libadwaita's headers are here;
-        # `libglycin-2-dev` is the decoding backend's 2.x package and `glycin-loaders` the
-        # sandboxed loaders the CLI's fixtures decode through — and Ubuntu splits libheif's
-        # decoders into plugins, so the HEIC fixture needs `libheif-plugin-libde265` and the
-        # AVIF one `libheif-plugin-dav1d` (measured 2026-09-27: without them a decode
-        # reports a photo it cannot read). `meson`, `ninja-build` and `gettext` are the
-        # build's own (`meson setup` fails without `msgfmt`), and `desktop-file-utils` and
-        # `appstream` are what `meson test` validates the generated data files with —
-        # wherever those tools are installed, which is here.
+        # Ubuntu splits libheif's decoders into plugins: the HEIC fixture needs libde265
+        # and the AVIF one dav1d.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -66,39 +29,21 @@ jobs:
       - name: Format
         run: cargo fmt --check
       - name: Lint
-        # `--all-targets` compiles the shell and its tests as well, so this is also the
-        # check that every crate of the workspace still builds as a Rust target.
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Test the windowless crates
-        # `pixlay-core`, `-imaging`, `-render` and `-cli` are windowless by construction
-        # (`AGENTS.md`, the module boundaries) and their tests are the ones a runner can
-        # judge; the shell's need a display and run in the entry's own `cargo test` on a
-        # machine.
         run: cargo test --workspace --exclude pixlay --locked
       - name: Test the packaging identity
-        # The shell's crate holds one test that needs no display: `tests/packaging.rs` reads
-        # the repository's own text files and holds the app-id, the version chain (the
-        # manifest, the PKGBUILD, `meson.build`, the metainfo, `CHANGELOG.md`) and the
-        # installed names to each other. It is the text-level half of what the staging
-        # install below checks at runtime, so it runs here rather than only on a machine.
+        # Needs no display: it reads the repository's own text files.
         run: cargo test -p pixlay --test packaging --locked
       - name: Build the tree
-        # The project's own build, which the package wraps: cargo over the workspace in
-        # the release profile, both binaries, and the shell among them. Its target
-        # directory is the build directory's own, so it neither reads nor writes the
-        # tree's `target/`.
         run: |
           meson setup build --prefix=/usr
           meson compile -C build
       - name: Validate the generated data files
-        # `desktop-file-validate` and `appstreamcli validate --no-net` on what the build
-        # generated from the templates (`data/meson.build`; the two programs are the only
-        # judges of those files, and this step is why they are installed above).
+        # `desktop-file-validate` and `appstreamcli validate --no-net` (`data/meson.build`).
         run: meson test -C build --print-errorlogs
       - name: Install into a staging root
-        # `meson install` is the half a tag used to be the first to exercise: it is where
-        # the prefix, the prefix's localedir and the installed file names are decided. The
-        # checks below are the paths `docs/CONTRACT.md` §10 promises the package ships.
+        # The paths `docs/CONTRACT.md` §10 promises.
         run: |
           meson install -C build --destdir /var/tmp/pixlay-install
           for path in \
@@ -118,11 +63,7 @@ jobs:
           done
           /var/tmp/pixlay-install/usr/bin/pixlay-render --version
       - name: Render the verification project
-        # The entry's own render, through the binary the build produced (the one the
-        # package installs, not a second `cargo run`): eight photos on `mosaic-8-s14`,
-        # which exercises decode, resample, the clamp, `draw` and the encoder in one run.
-        # `--stats` makes it machine-readable; the image itself is looked at by a person,
-        # not by this job.
+        # Eight photos on `mosaic-8-s14`, through the binary the build produced.
         run: |
           ./build/crates/pixlay-render render \
             --project crates/pixlay-cli/tests/fixtures/verify.pixlay \

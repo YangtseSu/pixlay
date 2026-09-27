@@ -1,7 +1,7 @@
 # S33 · CI runs no GUI suite
 
 **Progress**: done (2026-09-27) — `ci.yml` runs the entry's commands minus the GUI suite, and the failures
-that led there are recorded below and in the workflow's own header.
+that led there are recorded below.
 
 **Goal**: a CI that answers something true. The GUI suite needed a display, a compositor and the target's
 libraries at once; a GitHub runner could not give it all three, and every attempt to make one of them
