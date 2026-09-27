@@ -1,16 +1,14 @@
-# CI: the verification entry's fast half. The GUI suite is the machine's
-# (`docs/steps/S33-ci-skips-the-gui-suite-done.md`) and the packaging half — the project's
-# own build and install — is `packaging.yml`'s, which runs on demand (ruled 2026-09-27,
-# human): it costs a release build of the whole workspace, the shell included, and the push
-# job was paying that for changes that touch no packaging file. No container: the libraries
-# come from the distribution.
+# CI: the verification entry, minus the GUI suite (`docs/steps/S33-ci-skips-the-gui-suite-done.md`)
+# and minus the packaging half, which is `packaging.yml`'s and runs on demand (ruled 2026-09-27,
+# human: the push job was paying a release build of the whole workspace, the shell included, for
+# changes that touch no packaging file). No container: the libraries come from the distribution.
 #
-# What runs here: one clippy pass over every target (the shell included — it is checked,
-# never built, because its suite is the machine's), one debug build for the windowless
-# crates' tests, and one release build of `pixlay-cli` for the entry's own render command,
-# which writes a real 14043 px image. `target/` is cached, so a fresh checkout recompiles
-# this workspace's crates rather than their dependencies (the pre-split job's numbers, cold
-# against warm, are in S33's record).
+# What runs here: one clippy pass over every target (the shell included — it is checked, never
+# built, because its suite is the machine's) and one debug build for the windowless crates'
+# tests, which render real images of their own (`crates/pixlay-cli/tests/cli.rs` runs the
+# `pixlay-render` binary). `target/` is cached, so a fresh checkout recompiles this workspace's
+# crates rather than their dependencies (the pre-split job's numbers, cold against warm, are in
+# S33's record).
 name: CI
 
 on:
@@ -27,9 +25,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Cache the build tree
-        # `target/` holds clippy's check artefacts, the tests' debug build and the release
-        # build the render runs. The key is `Cargo.lock`, so a source change reuses the tree
-        # and a dependency bump does not; `restore-keys` keeps a warmed tree across a bump.
+        # `target/` holds clippy's check artefacts and the tests' debug build. The key is
+        # `Cargo.lock`, so a source change reuses the tree and a dependency bump does not;
+        # `restore-keys` keeps a warmed tree across a bump.
         uses: actions/cache@v4
         with:
           path: |
@@ -59,12 +57,3 @@ jobs:
         # GTK stack a second time under a different feature resolution (measured
         # 2026-09-27: 199 s of the run, for a test that reads text files).
         run: cargo test --workspace --exclude pixlay --locked
-      - name: Render the verification project
-        # Eight photos on `mosaic-8-s14`, at the entry's own long edge, through
-        # `pixlay-cli`'s binary — the packaging build used to be what produced it, and this
-        # is the release profile the entry names.
-        run: |
-          cargo build --release -p pixlay-cli --locked
-          ./target/release/pixlay-render render \
-            --project crates/pixlay-cli/tests/fixtures/verify.pixlay \
-            --long-edge 14043 --stats --out /var/tmp/a.jpg

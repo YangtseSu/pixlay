@@ -37,9 +37,10 @@ runner with a GPU node so mutter's own GL path survives. Until then the suite is
 
 **Amended 2026-09-27** (human ruling, after this step closed): the **complete build** that used to ride in
 this job — `meson setup` / `meson compile` / `meson test` / `meson install` into a staging root — moved to
-`.github/workflows/packaging.yml`, which runs **on demand** (`workflow_dispatch`). The push job keeps the
-entry's four commands (format, lint, the windowless crates' tests, and the render — the last one now
-through the `pixlay-cli` binary cargo builds, since the meson build no longer produces one here), because
-that is the answer a push has to give; the packaging question costs a release build of the whole workspace,
-the shell included, and is asked before a release or after a packaging change instead. The numbers above
-stay as this job's record: the **902 s / 255 s** pair is the pre-split composition's.
+`.github/workflows/packaging.yml`, which runs **on demand** (`workflow_dispatch`), because it costs a
+release build of the whole workspace, the shell included, for a change that touches no packaging file. The
+push job keeps the entry's commands, and the entry itself lost its fourth one the same day (human ruling:
+the 139.5 MP render of `verify.pixlay` was the assistant's own addition to the entry, not a ruling, and it
+cost a release build plus that render on every change for a picture no machine reads — the fixture stays,
+because the windowless tests render it). So the push job is format, lint and the windowless crates' tests.
+The numbers above stay as this job's record: the **902 s / 255 s** pair is the pre-split composition's.

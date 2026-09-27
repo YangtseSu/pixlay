@@ -33,27 +33,28 @@ Rust toolchain, meson, ninja and gettext. `meson setup` names anything that is m
 ## The verification entry
 
 Every change the product can see — code, shipped data, a template, a constant the render reads —
-runs these four:
+runs these three:
 
     cargo fmt --check
     cargo clippy --workspace --all-targets -- -D warnings
     cargo test
-    cargo run --release -p pixlay-cli -- render --project crates/pixlay-cli/tests/fixtures/verify.pixlay --long-edge 14043 --stats --out /var/tmp/a.jpg
 
-The last one is not a unit test: it writes a real 14043 px image from a document of eight photos
-(JPEG, PNG, 16-bit PNG, HEIC, EXIF Orientation=6, a date) and prints its measurements, so it
-exercises decode, resample, the clamp, `draw` and the encoder in one run. **Judge it by looking at
-the image**, and write artifacts to a disk path (`/var/tmp`, `$XDG_CACHE_HOME`) rather than `/tmp`,
-which is tmpfs on many machines.
+`cargo test` renders real images of its own: `crates/pixlay-cli/tests/cli.rs` and `preview.rs` run the
+`pixlay-render` binary on the fixtures, which cover eight photos (JPEG, PNG, 16-bit PNG, HEIC, EXIF
+Orientation=6, a date) and the windowless pipeline end to end. A 139.5 MP render of
+`crates/pixlay-cli/tests/fixtures/verify.pixlay` at `--long-edge 14043 --stats` is still a probe anyone
+may run by hand — it is what the A0 rows in `docs/CONTRACT.md` were measured with — but it is no longer
+part of the entry (ruled 2026-09-27, human: it cost a release build and a 139.5 MP render on every
+change for a picture no machine reads). Write artifacts to a disk path (`/var/tmp`, `$XDG_CACHE_HOME`)
+rather than `/tmp`, which is tmpfs on many machines.
 
 A change the product cannot see — docs, `.gitignore`, the repository layout — runs only the command
-that reads what changed, if one exists. CI runs the fast half of the four on every push — format, lint,
-the windowless crates' tests and the render — and the **complete build** (the project's own `meson setup` /
-`meson compile` / `meson test` / `meson install` into a staging root) is a workflow of its own,
-`.github/workflows/packaging.yml`, which is **started by hand** (`gh workflow run packaging.yml`, or the
-Actions tab): run it before a release, after touching `meson.build`, `data/`, `po/` or an install path, or
-whenever the question is "does the tree build and install". The Arch package and the GUI suite are the
-machine's either way.
+that reads what changed, if one exists. CI runs the entry on every push (the GUI suite is the machine's),
+and the **complete build** (the project's own `meson setup` / `meson compile` / `meson test` /
+`meson install` into a staging root) is a workflow of its own, `.github/workflows/packaging.yml`, which is
+**started by hand** (`gh workflow run packaging.yml`, or the Actions tab): run it before a release, after
+touching `meson.build`, `data/`, `po/` or an install path, or whenever the question is "does the tree
+build and install". The Arch package and the GUI suite are the machine's either way.
 
 ## Translations
 

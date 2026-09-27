@@ -631,7 +631,7 @@ Those features were removed by the purity ruling, so a row that mentions `text`,
 one. The rows from S0 to S12 also name millimetres, DPI and resolutions (`--dpi`, `pHYs`,
 JFIF densities, "A0 at 300 dpi = 139.5 MP" grids): S12d removed the whole concept, so those
 numbers are records of the grids the builds rendered — including what a "14043 px long
-edge" *means*, which is why the verification entry still renders that many pixels — and
+edge" *means*, which is why the probe's own long edge is 14043 px (the A0 sheet's) — and
 not claims about a document field or file chunk this build has. The numbers stay as they
 were taken: they are the process record, and the S12c/S12d results in
 `docs/archive/2026-09-22-STEPS.md` are where the removals themselves are accounted for.
@@ -648,7 +648,7 @@ were taken: they are the process record, and the S12c/S12d results in
 
 | Item | Value |
 |---|---|
-| the `AGENTS.md` verification render (`render --project tests/fixtures/verify.pixlay --dpi 300 --stats`, eight real photos: JPEG, PNG, 16-bit PNG, HEIC, EXIF-rotated, dated) | 14043×10532, **ms 6311** (decode + resample + draw) + **encode_ms 1844**, **`peak_rss_mb` 1633**, 9,056,692 bytes |
+| the 14043 px verification render (`render --project tests/fixtures/verify.pixlay --dpi 300 --stats`, eight real photos: JPEG, PNG, 16-bit PNG, HEIC, EXIF-rotated, dated) | 14043×10532, **ms 6311** (decode + resample + draw) + **encode_ms 1844**, **`peak_rss_mb` 1633**, 9,056,692 bytes |
 | the same project as a 1200 px preview | 805 ms, 35 MB peak, 224,649 bytes |
 | the photo-free smoke path (`render --template mosaic-8-s14 --dpi 300`, A0, every cell empty) | draw only, 264 ms, 996 MB peak — a white sheet is what "no photos" means |
 | decode, per photo (`image`) | 20–52 ms over the eight fixtures, process start included; peak well under 100 MB |
@@ -664,7 +664,7 @@ were taken: they are the process record, and the S12c/S12d results in
 
 | Item | Value |
 |---|---|
-| the `AGENTS.md` verification render (`render --project tests/fixtures/verify.pixlay --dpi 300 --stats`, eight photos **and one `{date}` layer** since S5) | 14043x10532, **ms 6164/6359** (two runs) + **encode_ms 2469/2475**, **`peak_rss_mb` 1641**, 9,114,833 bytes. The same project with the layer removed: ms 6360/5660, peak 1631, 9,056,692 bytes — **the one line's cost is below the run-to-run spread of the decode+resample stage**, so no per-layer number is claimed at 139.5 MP |
+| the 14043 px verification render (`render --project tests/fixtures/verify.pixlay --dpi 300 --stats`, eight photos **and one `{date}` layer** since S5) | 14043x10532, **ms 6164/6359** (two runs) + **encode_ms 2469/2475**, **`peak_rss_mb` 1641**, 9,114,833 bytes. The same project with the layer removed: ms 6360/5660, peak 1631, 9,056,692 bytes — **the one line's cost is below the run-to-run spread of the decode+resample stage**, so no per-layer number is claimed at 139.5 MP |
 | per-layer cost at 16.7 MP (400x300 mm at 300 dpi, empty cells) | white sheet alone **24-42 ms** (3 runs); + 2,601 tiles **295-436 ms** → a tile is about **0.13 ms**, so the 10,000-tile cap is ~1.3 s of drawing at that size; + 20 wrapped CJK captions 31-57 ms (below the spread) |
 | punctuation squeezing | one em per full-width mark; a full-width full stop followed by a full-width comma = 0.5 + 1.0 em, three consecutive full-width full stops = 0.5 + 0.5 + 1.0, a lone full-width full stop = 1.0, and a mark at a line boundary keeps 1.0 |
 | kinsoku | a six-character CJK sample (three identical Han characters, then one more Han character, a full-width full stop and a final Han character) at a four-em width breaks after the third character; over 4 paragraphs x 6 widths, no line starts with any of a 21-mark closing set (eight punctuation marks — ideographic comma, ideographic full stop, full-width comma, full-width full stop, full-width colon, full-width semicolon, full-width question mark, full-width exclamation mark — the three full-width closing brackets, the eight CJK closing brackets and the two closing quotation marks) and none ends with any of a 13-mark opening set (the three full-width opening brackets, the eight CJK opening brackets and the two opening quotation marks) |
@@ -674,7 +674,7 @@ were taken: they are the process record, and the S12c/S12d results in
 
 ### S6 (2026-09-21, `--release`, this machine)
 
-The `AGENTS.md` verification render (`render --project tests/fixtures/verify.pixlay --dpi 300`),
+The 14043 px verification render (`render --project tests/fixtures/verify.pixlay --dpi 300`),
 eight photos and one `{date}` layer on a 14043x10532 A0 sheet, per format:
 
 | Item | Value |
@@ -733,7 +733,7 @@ The gallery's raw material: 15 new layouts, and not one shipped layout moved. Th
 | the shipped geometry | `frozen.rs` **16,795 bytes**; the regeneration diff is **193 insertions, 0 deletions**, so every byte a project built before S10 embeds is still there |
 | the same fact as a test | `templates_that_shipped_before_s10_keep_their_geometry`: FNV-1a against the emitted source of all 12 pre-S10 templates; verified to fail by moving `strip-2-1x2`'s split by one lattice cell and regenerating |
 | the new layouts render | 15/15 `init --photo` then `render --long-edge 800` exit 0, **135,986–282,539 bytes** each on the fixture photos, and the contact sheet of all 15 is `/var/tmp/pixlay-s10/s10-layouts.png` |
-| the `AGENTS.md` verification render, unchanged by this step | 14043x10532, **ms 7232** + **`encode_ms` 2132**, **`peak_rss_mb` 1638**, 9,221,906 bytes, `text = 1`, `occupied = 8` — the same document S9 rendered, since `verify.pixlay` carries its own geometry |
+| the 14043 px verification render, unchanged by this step | 14043x10532, **ms 7232** + **`encode_ms` 2132**, **`peak_rss_mb` 1638**, 9,221,906 bytes, `text = 1`, `occupied = 8` — the same document S9 rendered, since `verify.pixlay` carries its own geometry |
 | the test suite | `cargo test` green; the sweeps that walk the whole library got 88 slots longer (hit test 152 slots, layout region sweep 152 × framings, framing sweep 27 templates) |
 
 **Ruling (2026-09-22, human): keep all 15 layouts.** The visual gate after S10 was answered against the
@@ -779,7 +779,7 @@ Two changes were measured against the build before them, and neither costs anyth
 |---|---|
 | byte-identity, the S1 golden image (rectangle slots, angles 12°/0°) | **RMSE 0.0** against the committed `tests/golden/draw-v1.png` — the same 0.0 S1 measured, so the backdrop fill and the (skipped) frame clip moved no pixel |
 | byte-identity, the S5 verification document (`verify.pixlay`: eight photos **including the concave slot**, one `{date}` layer) | the rendered JPEG is **byte-identical**: md5 `b28abd09648280185c95002b5f49f4f4` before and after — same for the *regenerated* fixture, which now carries an explicit `frame` block, so "the default frame renders as the absent field did" is a measured claim and not an argument |
-| the `AGENTS.md` verification render, new build | 14043x10532, **ms 6704/6854** + `encode_ms` 2009/2128, **`peak_rss_mb` 1638–1640**, 9,221,906 bytes, `gap = 0.000000`, `radius = 0.000000`, `border = 255,255,255`, `text = 1`, `occupied = 8` — inside the S10 spread of 7232/1638 for the same document |
+| the 14043 px verification render, new build | 14043x10532, **ms 6704/6854** + `encode_ms` 2009/2128, **`peak_rss_mb` 1638–1640**, 9,221,906 bytes, `gap = 0.000000`, `radius = 0.000000`, `border = 255,255,255`, `text = 1`, `occupied = 8` — inside the S10 spread of 7232/1638 for the same document |
 | the covering zoom, as a function of the angle | over **all 152 shipped slots, every whole degree 0..=180 and six photo aspects**, the worst covering zoom is **21.73** (a 2.4:1 photo in `strip-9-9x1`'s 1/16-wide pane at 6 degrees, whose *upright* floor is already 21.6). Per photo aspect: 0.5 → 9.06, 0.8 → 9.06, 1 → 9.06, 4:3 → **12.07**, 1.5 → 13.58, 2.4 → 21.73. `MAX_ZOOM` is 1000, so the cap is 46x above the worst angle — the free angle never reaches the bound that exists for the bitmap arithmetic (`pixlay-core/tests/framing.rs` prints this table) |
 | the free angle's cost, exactly (a 4:3 slot with a matching photo) | 1.0x upright, **1.396x at 20°**, **1.886x at 45°**, 1.333x at 90° — the closed form `r·sin t + cos t`, asserted to 1e-9 |
 | A0 at the worst angle (`strip-10-10x1`, ten 1600x1200 photos, 300 dpi, 14043x7899) | upright: **ms 5067** + encode 1574, **`peak_rss_mb` 1189**, 8,481,685 bytes. Every cell at **6 degrees** (the worst angle, zoom 6.11x on the 2/16 panes and 12.07x on the 1/16 ones): **ms 8583** + encode 1642, **`peak_rss_mb` 1451**, 8,463,260 bytes. The extra 262 MB is the rotation's own cost, not the zoom's: a rotated cell's bitmap is the *axis-aligned* box of the rotated cell, about 22% larger at 6°, while the zoom itself resamples a smaller source region into the same output. Against S4's 1182 MB for the same shape upright, and `AGENTS.md`'s 2.5 GB budget, the free angle fits |
@@ -884,7 +884,7 @@ for a file, and it pays 1.6–2.4 s for it.
   `mainpath.rs` — a test S12 does not touch — timed out in `snapshot` twice while a release build of the A0
   render tests ran alongside it, and the same test takes 10-12 s on an idle machine; `cargo test --workspace`
   on its own was green in every run). A timeout that fires still means "hung".
-- **The `AGENTS.md` verification entry**, unchanged code as above: 14043x10532, **ms 6791** + `encode_ms`
+- **The 14043 px verification render**, unchanged code as above: 14043x10532, **ms 6791** + `encode_ms`
   1809, **`peak_rss_mb` 1641**, 9,216,300 bytes, `text = 1`, `occupied = 8`, `gap = 0.000000`, `radius =
   0.000000`, `border = 255,255,255` — inside the S10/S11 spread for the same document. The image was looked
   at (a downscale of `/var/tmp/a.jpg`): eight cells filled, the `{date}` layer reading `2019:07:14 10:32:00`
@@ -1177,7 +1177,7 @@ new — the *blend* row below was measured against the S19 binary itself, which 
 | the concave slot (`mosaic-8-s14`'s L, any gap) | the notch's two seams measure the *neighbour's half* alone (43 px against a frame number of 85 at `--gap 0.08`) — the frame insets a cell's bounding box, so an interior edge of the outline keeps its own place. The probe judges each row against the geometry there, so this is reported and passes; it is the template's geometry, not a defect, and S20 did not change it |
 | the same L, `--gap 0.01`–`0.08` at 709–1417, framed | `probe` still reports **2 of 12 seams unclean**, exactly as it did before S20: the *blend* criterion (S0) sees the notch's two blend bands inside its ±3 px window. Pre-existing (the criterion predates the frame) and unchanged by this step; the numbers it is quoted from (S0: 1.08 px of blend per seam px, §5's `probe` threshold table) are untouched |
 | the interior sample at a gap (S20's one ruler regression, fixed here) | the sample was the point farthest from the *outline's* boundary, so at a large gap a cell on the sheet's edge could be sampled inside the frame's band and read the backdrop (measured: `slot.3.match = false` on `mosaic-8-s14` at `--gap 0.08`). It is now the point farthest from the *visible* region's boundary, and the same document is 8 of 8 |
-| byte-identity at `gapRel = 0` | the S1 golden image is still **RMSE 0.0** (`pixlay-render/tests/render.rs`), and the `AGENTS.md` verification render is the same **9,157,639 bytes** as S19's: the sheet's own band is zero-width at gap 0, so nothing about the identity frame moved |
+| byte-identity at `gapRel = 0` | the S1 golden image is still **RMSE 0.0** (`pixlay-render/tests/render.rs`), and the 14043 px verification render is the same **9,157,639 bytes** as S19's: the sheet's own band is zero-width at gap 0, so nothing about the identity frame moved |
 | the fit's floor with a frame | unchanged property, moved reference: the framed sweep (36,480 framings) is green, and the floor is now measured about the *slot's* centre against the visible rectangle, which since S20 can sit off-centre in its cell (the sheet's band takes a whole gap off the outer side and half off the inner ones) |
 
 ### S28 (2026-09-26, `--release`, this machine)

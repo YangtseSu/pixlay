@@ -37,26 +37,26 @@ two-cell swap (`docs/completed/2026-09-25-STEPS.md`, ruling 31). That supersedes
     cargo fmt --check
     cargo clippy --workspace --all-targets -- -D warnings
     cargo test
-    cargo run --release -p pixlay-cli -- render --project crates/pixlay-cli/tests/fixtures/verify.pixlay --long-edge 14043 --stats --out /var/tmp/a.jpg
 
-**The four are for a change the product can see** — code, shipped data, a template, a constant the render
+**The three are for a change the product can see** — code, shipped data, a template, a constant the render
 reads. A change it cannot see (docs, `.gitignore`, the repository layout) runs only the command that reads
 what changed, if one exists: "Commit discipline" states the rule, and a path a test resolves is the case
 that decides it.
 
-Of the last two: the second one produces a real image, and you must look at it directly.
-**If you cannot see the image, do not judge whether the render is correct.**
-The project is `crates/pixlay-cli/tests/fixtures/verify.pixlay`: eight photos on `mosaic-8-s14`
-(JPEG, PNG, a 16-bit PNG, a HEIC, one carrying EXIF Orientation=6, one carrying a date), so the command
-exercises decode, resample, the clamp, `draw` and the encoder in one run. It carries no text layer any
-more: S12c removed them, and the document is a `docVersion`-3 file. Until S3 the
-command used `--template mosaic-8-s14`, which renders every cell empty and is now a *white sheet*:
-the flag is a geometry smoke (it checks that the template loads and the output path works), not an
-image to judge. `mosaic-8-s14` has been valid since S1 and, since S2, is emitted by the template
-generator (`pixlay-core/src/templates/generator.rs`) under the same name and the same
-`templateVersion`; `--stats` makes each round's ruler machine-readable. `pixlay-render templates`
-lists what this build ships, and `pixlay-render init --template <name> --out x.pixlay` writes a
-project to start from. Since S7 `cargo test` also builds the GUI; its tests need a display and run on one
+**A fourth command was removed** (ruled 2026-09-27, human): it rendered
+`crates/pixlay-cli/tests/fixtures/verify.pixlay` at `--long-edge 14043` and printed `--stats`, and it was
+the assistant's own addition to this list (S12d) rather than a human's ruling — a release build plus a
+139.5 MP render on every change, for a picture no machine reads and a number no test compares. **The
+fixture stays**: it is what the windowless tests render (`crates/pixlay-cli/tests/cli.rs` and
+`preview.rs` run `pixlay-render` itself) and what the GUI suite opens
+(`support::verify_project`) — eight photos on `mosaic-8-s14` (JPEG, PNG, a 16-bit PNG, a HEIC, one
+carrying EXIF Orientation=6, one carrying a date), so decode, resample, the clamp, `draw` and the encoder
+are exercised by `cargo test` in one run. The document is a `docVersion`-3 file and carries no text layer
+any more (S12c removed them). A 139.5 MP render is still a probe anyone may run by hand — it is what the
+S0 budget and every A0 row in `docs/CONTRACT.md` were measured with — and `pixlay-render templates` lists
+what this build ships, while `pixlay-render init --template <name> --out x.pixlay` writes a project to
+start from.
+Since S7 `cargo test` also builds the GUI; its tests need a display and run on one
 the harness provides — a private headless `mutter` it starts itself, which is the *test environment* and
 not a dependency of the product (no manifest and no `depends` names a compositor). **Mutter when mutter is
 available** (ruled 2026-09-26, human): it is the compositor this app is developed against and the one whose
@@ -155,7 +155,7 @@ Measurement rules that go with it:
   `<step>: <what changed>`, e.g. `S2: Freeze template geometry and invariant tests`. Non-step
   changes (docs, CI) use the `docs:` / `chore:` prefix.
 - **Run the entry's commands that this change can affect before committing**: a change to code or to
-  shipped data runs all four of them; a change the product cannot see — docs, `.gitignore`, the
+  shipped data runs all three of them; a change the product cannot see — docs, `.gitignore`, the
   repository layout — runs the one command that reads what changed, and a step's own verification
   command is that command when the step names one. If it is red, do not commit.
 - Never committed: `target/` (see `.gitignore`). Committed: `Cargo.lock` (AUR discipline).
