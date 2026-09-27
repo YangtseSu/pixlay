@@ -17,7 +17,7 @@ optdepends=('libheif: decode HEIC and AVIF photos')
 # first, because `updpkgsums` reads the file already in `SRCDEST` and would print the old tag's
 # sum (measured 2026-09-27). `.SRCINFO`, the AUR's own file, comes from `makepkg --printsrcinfo`.
 source=("$pkgname-$pkgver.tar.gz::https://github.com/YangtseSu/pixlay/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('0aa89d76242d2e151ac7bbc2b9ce9faab6d41c706d6acbf86650f6ed985e1c8d')
 
 # `debug = 1` (Cargo.toml) writes the build path into every binary; the remap rewrites it
 # to the directory the package itself has.
