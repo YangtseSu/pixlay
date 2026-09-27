@@ -539,7 +539,10 @@ not repeated here.*
   meson starts), `depends=('gtk4' 'libadwaita' 'glycin')` (the decoding backend of "Open / to be proven"
   is a linked library, so it is a runtime dependency), `makedepends` names `cargo`, `rust`, `meson` and
   `gettext`, and the license goes to `/usr/share/licenses/$pkgname/` — Arch's path, not the prefix's
-- **A release is a tag plus four steps** (ruled 2026-09-27, human). Push `vX.Y.Z` — the tag has to equal
+- **A release is a tag plus four steps** (ruled 2026-09-27, human). **The release's notes are
+  `CHANGELOG.md`'s section for that version, written before the tag is pushed** —
+  `crates/pixlay/tests/packaging.rs` holds that section's version to `Cargo.toml`'s, so a bump without
+  one fails the suite. Push `vX.Y.Z` — the tag has to equal
   `meson.build`'s `project(version:)`, which the workflow checks — and `release.yml` builds the tree with
   the project's own build and attaches the **amd64 binaries** (`pixlay-<version>-linux-amd64.tar.gz` and
   its `.sha256`) to that tag's GitHub Release. Then, on the machine: **update `pkgver` and `sha256sums`**

@@ -6,8 +6,9 @@
 //! the icon and the metainfo — a package whose desktop file says a name its
 //! icon does not have shows a blank icon, and whose metainfo id differs is not
 //! the component the desktop file launches; the **version**, which lives in
-//! `Cargo.toml`, in the PKGBUILD's `pkgver`, in `meson.build`'s `project()` and in
-//! the metainfo's `<release>`; and the **file names**, which the desktop file, the
+//! `Cargo.toml`, in the PKGBUILD's `pkgver`, in `meson.build`'s `project()`, in
+//! the metainfo's `<release>` and in the newest section of `CHANGELOG.md`; and the
+//! **file names**, which the desktop file, the
 //! metainfo and the MIME registration all spell out and the meson files install.
 //!
 //! All three are text, so all three are checked here — offline, without `makepkg`, and
@@ -113,6 +114,29 @@ fn attribute(text: &str, tag: &str, name: &str) -> String {
         .to_string()
 }
 
+/// `CHANGELOG.md`'s newest *released* version and its date: the first `## [x.y.z]`
+/// heading, skipping `## [Unreleased]` — Keep a Changelog's own shape, which the file
+/// states it follows.
+fn newest_release(text: &str) -> (String, Option<String>) {
+    for line in text.lines() {
+        let Some(heading) = line.strip_prefix("## [") else {
+            continue;
+        };
+        let (version, rest) = heading
+            .split_once(']')
+            .unwrap_or_else(|| panic!("a changelog heading closes its bracket: {line:?}"));
+        if version == "Unreleased" {
+            continue;
+        }
+        let date = rest
+            .strip_prefix(" - ")
+            .map(|date| date.trim().to_string())
+            .filter(|date| !date.is_empty());
+        return (version.to_string(), date);
+    }
+    panic!("CHANGELOG.md has a released version's heading, `## [x.y.z] - <date>`");
+}
+
 /// A bash assignment at the start of a line: `name=value` or `name=(a b c)`.
 ///
 /// The PKGBUILD's lists are written one line each, and this is a read of that
@@ -216,6 +240,29 @@ fn the_package_ships_the_identity_the_code_declares() {
         element(&metainfo, "binary"),
         env!("CARGO_PKG_NAME"),
         "the metainfo's <provides><binary> is the installed binary's name",
+    );
+
+    // --- the changelog -----------------------------------------------------
+    // The release's own notes. Its newest section is the workspace's version, so a
+    // version bump that forgets its section fails here rather than at the tag — and the
+    // bump and the tag are the same day's work (`AGENTS.md`, "AUR discipline").
+    let (version, date) = newest_release(&read("CHANGELOG.md"));
+    assert_eq!(
+        version,
+        env!("CARGO_PKG_VERSION"),
+        "CHANGELOG.md's newest section is the workspace's version",
+    );
+    let date = date.expect("the newest release's section carries its date");
+    let bytes = date.as_bytes();
+    assert!(
+        bytes.len() == 10
+            && bytes[4] == b'-'
+            && bytes[7] == b'-'
+            && bytes
+                .iter()
+                .enumerate()
+                .all(|(at, byte)| at == 4 || at == 7 || byte.is_ascii_digit()),
+        "a release's date is ISO 8601 (YYYY-MM-DD): {date:?}",
     );
 
     // --- the `.pixlay` type -----------------------------------------------
