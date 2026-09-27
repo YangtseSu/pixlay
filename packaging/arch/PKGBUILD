@@ -1,6 +1,6 @@
 # Maintainer: Yangtse Su <yangtsesu@gmail.com>
 pkgname=pixlay
-pkgver=0.1.0
+pkgver=0.1.1
 pkgrel=1
 pkgdesc="Make a collage out of one to nine photos and export it for printing"
 # `aarch64` is the claim that this tree builds under Arch Linux ARM too, and that half of the
@@ -12,10 +12,10 @@ license=('GPL-3.0-or-later')
 depends=('gtk4' 'libadwaita' 'glycin')
 makedepends=('cargo' 'rust' 'meson' 'gettext')
 optdepends=('libheif: decode HEIC and AVIF photos')
-# The release tag is not pushed yet, so there is no checksum to carry; a release replaces
-# this (`updpkgsums`) and writes `.SRCINFO`.
+# `v0.1.1` is not pushed yet, so there is no checksum to carry; the release replaces this
+# (`updpkgsums`) and writes `.SRCINFO`.
 source=("$pkgname-$pkgver.tar.gz::https://github.com/YangtseSu/pixlay/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('9818d3b507d2cf49442b3e01fa8d03ea4b26a7120eb4e800ce473a49832dbbf4')
+sha256sums=('SKIP')
 
 # `debug = 1` (Cargo.toml) writes the build path into every binary; the remap rewrites it
 # to the directory the package itself has.

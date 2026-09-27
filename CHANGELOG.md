@@ -6,6 +6,14 @@ All notable changes to Pixlay are documented in this file. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-27
+
+### Added
+
+- Linux **arm64** binaries: every release now carries `pixlay-<version>-linux-arm64.tar.gz` with both
+  binaries beside the amd64 tarball, each with its `.sha256`, and both built from the tag by
+  `release.yml` (`ubuntu-26.04` and `ubuntu-26.04-arm`).
+
 ## [0.1.0] - 2026-09-27
 
 The first release.
@@ -45,5 +53,6 @@ The first release.
   catalogs; an Arch PKGBUILD that wraps it; and a GitHub release carrying the amd64 binaries and
   the `x86_64` package.
 
-[Unreleased]: https://github.com/YangtseSu/pixlay/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/YangtseSu/pixlay/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/YangtseSu/pixlay/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/YangtseSu/pixlay/releases/tag/v0.1.0
