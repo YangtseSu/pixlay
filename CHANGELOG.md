@@ -6,6 +6,16 @@ All notable changes to Pixlay are documented in this file. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **The app icon loads again**: both icon files opened with an XML comment above the `<svg>`
+  element, which pushed that element past the end of the file that gdk-pixbuf sniffs an SVG
+  by — so the desktop could not read either one and gnome-shell drew a blank icon in the app
+  grid (`Could not load a pixbuf from icon theme.`), as did this application's own About
+  dialog. The files carry no comments any more (the drawing's rationale is the icon rows in
+  `docs/HIG-REVIEW.md` §1), and `crates/pixlay-core/tests/packaging.rs` holds the 256-byte
+  window to both of them.
+
 ### Added
 
 - **Simplified Chinese**: every string the interface shows, the desktop entry and the AppStream

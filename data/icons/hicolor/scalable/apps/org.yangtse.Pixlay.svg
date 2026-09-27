@@ -1,13 +1,4 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- The Pixlay app icon (S16): the product's own sheet — a collage of photos in
-     cells, one cell still empty — drawn on the GNOME HIG's app-icon grid
-     (https://developer.gnome.org/hig/guidelines/app-icons): a 128x128 canvas,
-     the shape inside 16..112 on the 2 px grid, flat colours from the standard
-     palette (https://developer.gnome.org/hig/reference/palette.html) — blue 3
-     for the sheet's frame, blue 4 for its front profile, blue 2 / green 3 /
-     yellow 3 for three photos and light 3 for the cell that is still empty —
-     and no shadow, since HIG draws those from the silhouette. The symbolic
-     version beside it is `org.yangtse.Pixlay-symbolic.svg`. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
   <title>Pixlay</title>
   <defs>
@@ -15,12 +6,9 @@
       <rect x="16" y="12" width="96" height="96" rx="20"/>
     </clipPath>
   </defs>
-  <!-- The sheet: the document's own frame colour, with HIG's front profile. -->
   <rect x="16" y="12" width="96" height="96" rx="20" fill="#3584e4"/>
   <rect x="16" y="104" width="96" height="8" fill="#1a5fb4" clip-path="url(#frame)"/>
-  <!-- The paper the photos sit on. -->
   <rect x="26" y="22" width="76" height="76" rx="8" fill="#ffffff"/>
-  <!-- Four cells of a 2x2 layout: three photos and one cell still empty. -->
   <rect x="32" y="28" width="29" height="29" rx="4" fill="#62a0ea"/>
   <rect x="67" y="28" width="29" height="29" rx="4" fill="#33d17a"/>
   <rect x="32" y="63" width="29" height="29" rx="4" fill="#f6d32d"/>

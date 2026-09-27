@@ -1,11 +1,4 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- The symbolic Pixlay icon (S16): the full-size icon's metaphor at 16x16 — a
-     layout of cells with one of them still empty — drawn the way HIG
-     `guidelines/ui-icons` asks for a symbolic: monochrome (GTK recolours it
-     through the widget's own `color`), orthogonal, aligned to the pixel grid,
-     with a margin around the shape and no 1 px line anywhere (three filled
-     5x5 cells with 2 px gutters; the fourth slot is negative space, which reads
-     with the colours inverted too). -->
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
   <title>Pixlay</title>
   <g fill="#3d3846">

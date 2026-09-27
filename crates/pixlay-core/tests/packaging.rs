@@ -66,23 +66,31 @@ fn manifest_value(path: &str, marker: &str, key: &str) -> String {
         .to_string()
 }
 
-/// The file without its XML comments.
+/// The file without its XML comments, **every remaining byte at its own offset**.
 ///
 /// A comment is not data, and the comments here quote the very tags the checks
 /// below look for (`<id>`) — so a search that read them would answer with a
-/// sentence from a comment and pass for the wrong reason.
+/// sentence from a comment and pass for the wrong reason. A comment's bytes
+/// become spaces instead of going away, because one check below asks where an
+/// element starts **in the file as it is committed**: an icon's first bytes are
+/// what the desktop sniffs.
 fn without_comments(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    while let Some(start) = rest.find("<!--") {
-        out.push_str(&rest[..start]);
-        match rest[start..].find("-->") {
-            Some(end) => rest = &rest[start + end + 3..],
-            None => return out,
+    let mut bytes = text.as_bytes().to_vec();
+    let mut from = 0;
+    while let Some(start) = text[from..].find("<!--") {
+        let start = from + start;
+        let end = match text[start..].find("-->") {
+            Some(end) => start + end + "-->".len(),
+            None => text.len(),
+        };
+        for byte in &mut bytes[start..end] {
+            if *byte != b'\n' {
+                *byte = b' ';
+            }
         }
+        from = end;
     }
-    out.push_str(rest);
-    out
+    String::from_utf8(bytes).expect("only ASCII bytes were replaced")
 }
 
 /// The `[Desktop Entry]` group's keys, as `key -> value`.
@@ -332,13 +340,40 @@ fn the_package_ships_the_identity_the_code_declares() {
     let scalable = without_comments(&read(&format!(
         "data/icons/hicolor/scalable/apps/{app}.svg"
     )));
+    let symbolic = without_comments(&read(&format!(
+        "data/icons/hicolor/symbolic/apps/{app}-symbolic.svg"
+    )));
+
+    // And `<svg` has to start inside the file's first **256 bytes**. The desktop
+    // loads an icon file by sniffing its bytes — gnome-shell's `St` through
+    // `gdk_pixbuf_new_from_stream_at_scale` and GTK4 (this application's own About
+    // dialog) through `gdk_pixbuf_new_from_file_at_size` — and gdk-pixbuf recognises
+    // an SVG only when `<svg` starts within that window: past it the loader answers
+    // "Unrecognized image file format", which is a blank icon in the shell's app grid
+    // and in About, with only `gnome-shell[…] Could not load a pixbuf from icon
+    // theme.` to say so. Measured 2026-09-27 by loading this tree's icons at 128 px:
+    // `<svg` at byte 255 loads and at byte 256 does not, and both files' explanatory
+    // comments had pushed it to 735 and 547 — the files carry no comments any more, and
+    // the drawing's own rationale is where it is read from: the two rows in
+    // `docs/HIG-REVIEW.md` §1.
+    for (name, icon) in [
+        ("the app icon", &scalable),
+        ("the symbolic icon", &symbolic),
+    ] {
+        let at = icon
+            .find("<svg")
+            .expect("an icon file has an <svg> element");
+        assert!(
+            at < 256,
+            "{name}: its `<svg` starts at byte {at}, outside the 256-byte window in which \
+             gdk-pixbuf recognises an SVG — an icon the desktop cannot load",
+        );
+    }
+
     assert!(
         scalable.contains("width=\"128\"") && scalable.contains("height=\"128\""),
         "the app icon is drawn on the HIG's 128x128 canvas",
     );
-    let symbolic = without_comments(&read(&format!(
-        "data/icons/hicolor/symbolic/apps/{app}-symbolic.svg"
-    )));
     assert!(
         symbolic.contains("width=\"16\"") && symbolic.contains("height=\"16\""),
         "the symbolic icon is drawn on the 16x16 grid",
