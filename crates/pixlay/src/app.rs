@@ -303,8 +303,9 @@ pub fn about_dialog() -> adw::AboutDialog {
     dialog.set_website("https://yangtse.org/pixlay");
     dialog.set_issue_url("https://github.com/YangtseSu/pixlay/issues");
     dialog.set_license_type(gtk::License::Gpl30);
-    dialog.set_comments(&gettext(
-        "Make a collage out of one to nine photos and export it for printing.",
-    ));
+    // The same sentence the desktop entry's `Comment=` and the metainfo's
+    // `<summary>` carry, so the About dialog cannot drift from what the desktop
+    // says the application is — one message, one translation.
+    dialog.set_comments(&gettext("Make a collage out of one to nine photos"));
     dialog
 }

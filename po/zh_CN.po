@@ -11,7 +11,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: pixlay\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-26 20:25+0800\n"
+"POT-Creation-Date: 2026-09-28 00:08+0800\n"
 "PO-Revision-Date: 2026-09-27 16:10+0800\n"
 "Last-Translator: Pixlay contributors\n"
 "Language-Team: Simplified Chinese\n"
@@ -101,9 +101,10 @@ msgstr "把照片粘贴到格子里"
 msgid "Reset the framing"
 msgstr "重置构图"
 
-#: crates/pixlay/src/app.rs:307
-msgid "Make a collage out of one to nine photos and export it for printing."
-msgstr "用一到九张照片拼成一张拼贴，导出后即可打印。"
+#: crates/pixlay/src/app.rs:309 data/org.yangtse.Pixlay.desktop.in:5
+#: data/org.yangtse.Pixlay.metainfo.xml.in:13
+msgid "Make a collage out of one to nine photos"
+msgstr "用一到九张照片做一张拼贴"
 
 #: crates/pixlay/src/canvas.rs:428 crates/pixlay/src/window.rs:1192
 msgid "Collage canvas"
@@ -115,8 +116,8 @@ msgid ""
 "it further; scroll zooms; Ctrl+scroll rotates; Ctrl+Shift+arrow or "
 "Shift+drag swaps two cells"
 msgstr ""
-"方向键选择格子；Shift+方向键移动照片，Ctrl+方向键移动得更远；滚轮缩放；Ctrl+滚轮旋转；Ctrl+Shift+方向键或"
-"Shift+拖动可交换两个格子"
+"方向键选择格子；Shift+方向键移动照片，Ctrl+方向键移动得更远；滚轮缩放；"
+"Ctrl+滚轮旋转；Ctrl+Shift+方向键或Shift+拖动可交换两个格子"
 
 #: crates/pixlay/src/canvas.rs:947
 msgid "Zoom out"
@@ -462,11 +463,6 @@ msgstr "Pixlay"
 msgid "Photo Collage"
 msgstr "照片拼贴"
 
-#: data/org.yangtse.Pixlay.desktop.in:5
-#: data/org.yangtse.Pixlay.metainfo.xml.in:13
-msgid "Make a collage out of one to nine photos"
-msgstr "用一到九张照片做一张拼贴"
-
 #: data/org.yangtse.Pixlay.desktop.in:10
 msgid "collage;photo;grid;layout;mosaic;"
 msgstr "拼贴;照片;网格;布局;马赛克;"
@@ -475,8 +471,10 @@ msgstr "拼贴;照片;网格;布局;马赛克;"
 msgid ""
 "Pixlay lays photos out on a sheet: add one to nine of them, pick a layout, "
 "frame each photo in its cell, give the collage a frame of its own and export "
-"the finished image for printing."
-msgstr "Pixlay 把照片摆在一张纸上：添加一到九张，选一种布局，为每个格子里的照片调整构图，给整张拼贴加上边框，然后导出成品图用于打印。"
+"the finished image."
+msgstr ""
+"Pixlay 把照片摆在一张纸上：添加一到九张，选一种布局，为每个格子里的照片调整构"
+"图，给整张拼贴加上边框，然后导出成品图。"
 
 #: data/org.yangtse.Pixlay.metainfo.xml.in:20
 msgid "Features:"

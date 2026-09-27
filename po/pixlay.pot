@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: pixlay\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-26 20:25+0800\n"
+"POT-Creation-Date: 2026-09-28 00:08+0800\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -98,8 +98,9 @@ msgstr ""
 msgid "Reset the framing"
 msgstr ""
 
-#: crates/pixlay/src/app.rs:307
-msgid "Make a collage out of one to nine photos and export it for printing."
+#: crates/pixlay/src/app.rs:309 data/org.yangtse.Pixlay.desktop.in:5
+#: data/org.yangtse.Pixlay.metainfo.xml.in:13
+msgid "Make a collage out of one to nine photos"
 msgstr ""
 
 #: crates/pixlay/src/canvas.rs:428 crates/pixlay/src/window.rs:1192
@@ -464,11 +465,6 @@ msgstr ""
 msgid "Photo Collage"
 msgstr ""
 
-#: data/org.yangtse.Pixlay.desktop.in:5
-#: data/org.yangtse.Pixlay.metainfo.xml.in:13
-msgid "Make a collage out of one to nine photos"
-msgstr ""
-
 #: data/org.yangtse.Pixlay.desktop.in:10
 msgid "collage;photo;grid;layout;mosaic;"
 msgstr ""
@@ -477,7 +473,7 @@ msgstr ""
 msgid ""
 "Pixlay lays photos out on a sheet: add one to nine of them, pick a layout, "
 "frame each photo in its cell, give the collage a frame of its own and export "
-"the finished image for printing."
+"the finished image."
 msgstr ""
 
 #: data/org.yangtse.Pixlay.metainfo.xml.in:20

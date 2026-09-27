@@ -1,6 +1,6 @@
 # Pixlay
 
-Make a collage out of one to nine photos and export it for printing.
+Native Linux photo collage maker designed for GNOME.
 
 Pixlay is a Linux desktop application: a GTK4 + libadwaita window over a Cairo canvas, in Rust. The
 target platform is Arch Linux; the license is GPL-3.0-or-later.
