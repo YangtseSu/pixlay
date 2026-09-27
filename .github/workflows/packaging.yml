@@ -1,0 +1,80 @@
+# The packaging half of CI, on demand: the project's own build and install
+# (`AGENTS.md`, "AUR discipline"), which is what a release and the Arch package wrap. It is
+# a `workflow_dispatch` workflow and not part of the push job (ruled 2026-09-27, human):
+# it costs a release build of the whole workspace, the shell included, for a change that
+# touches no packaging file. Run it before a release, after touching `meson.build`, `data/`,
+# `po/` or an install path, or whenever the question is "does the tree build and install".
+#
+# What it answers, and the only thing that does: `meson setup` / `meson compile` build both
+# binaries in the profile the release ships, `meson test` runs the two data-file validators,
+# and `meson install` into a staging root writes the paths `docs/CONTRACT.md` §10 promises.
+# The Arch package and the GUI suite stay the machine's.
+name: Packaging
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  packaging:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - name: Cache the meson build tree
+        # `build/crates/target` is the release build `meson compile` makes inside the build
+        # directory (`crates/meson.build` sets `--target-dir` to `current_build_dir()`), and
+        # no cargo command touches it. Its own key rather than the push job's: a cache is
+        # saved once and two workflows sharing a key would race for it.
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            build/crates/target
+          key: ${{ runner.os }}-packaging-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-packaging-
+      - name: Install the libraries
+        # The four the build needs and the two the validators need; the decoders Ubuntu
+        # splits out of libheif are here too, so a `meson`-built binary can decode the
+        # fixtures.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-4-dev libadwaita-1-dev libglycin-2-dev glycin-loaders bubblewrap \
+            libseccomp-dev libheif1 libheif-plugin-libde265 libheif-plugin-dav1d \
+            pkg-config meson ninja-build gettext desktop-file-utils appstream
+      - name: Build the tree
+        # It builds the profile the release builds: turning `thin` LTO and the single
+        # codegen unit off here was measured on 2026-09-27 and moved nothing (154 s against
+        # 144 s), while giving this step an environment the next one did not have made
+        # `meson install` rebuild the whole tree (139 s). The cache above is what makes this
+        # step cheap, not a different profile.
+        run: |
+          meson setup build --prefix=/usr
+          meson compile -C build
+      - name: Validate the generated data files
+        # `desktop-file-validate` and `appstreamcli validate --no-net` (`data/meson.build`).
+        run: meson test -C build --print-errorlogs
+      - name: Install into a staging root
+        # The paths `docs/CONTRACT.md` §10 promises.
+        run: |
+          meson install -C build --destdir /var/tmp/pixlay-install
+          for path in \
+            usr/bin/pixlay \
+            usr/bin/pixlay-render \
+            usr/share/applications/org.yangtse.Pixlay.desktop \
+            usr/share/metainfo/org.yangtse.Pixlay.metainfo.xml \
+            usr/share/icons/hicolor/scalable/apps/org.yangtse.Pixlay.svg \
+            usr/share/icons/hicolor/symbolic/apps/org.yangtse.Pixlay-symbolic.svg \
+            usr/share/mime/packages/org.yangtse.Pixlay.xml
+          do
+            test -f "/var/tmp/pixlay-install/$path" || {
+              echo "meson install did not write $path" >&2
+              exit 1
+            }
+            echo "installed: $path"
+          done
+          /var/tmp/pixlay-install/usr/bin/pixlay-render --version

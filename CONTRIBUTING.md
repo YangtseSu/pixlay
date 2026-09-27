@@ -47,9 +47,13 @@ the image**, and write artifacts to a disk path (`/var/tmp`, `$XDG_CACHE_HOME`) 
 which is tmpfs on many machines.
 
 A change the product cannot see — docs, `.gitignore`, the repository layout — runs only the command
-that reads what changed, if one exists. The four are also what CI runs, minus the GUI suite, plus the
-complete build and a `meson install` into a staging root; the Arch package and the GUI suite are the
-machine's.
+that reads what changed, if one exists. CI runs the fast half of the four on every push — format, lint,
+the windowless crates' tests and the render — and the **complete build** (the project's own `meson setup` /
+`meson compile` / `meson test` / `meson install` into a staging root) is a workflow of its own,
+`.github/workflows/packaging.yml`, which is **started by hand** (`gh workflow run packaging.yml`, or the
+Actions tab): run it before a release, after touching `meson.build`, `data/`, `po/` or an install path, or
+whenever the question is "does the tree build and install". The Arch package and the GUI suite are the
+machine's either way.
 
 ## Translations
 

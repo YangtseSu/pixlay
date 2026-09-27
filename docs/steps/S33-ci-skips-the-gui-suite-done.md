@@ -34,3 +34,12 @@ targets. Two candidates, neither tried: an Arch container whose display comes fr
 `/tmp/.X11-unix` with `PIXLAY_TEST_CHILD=1 xvfb-run -a`, `xorg-server-xvfb` inside the container), or a
 runner with a GPU node so mutter's own GL path survives. Until then the suite is the entry's, on a machine
 — which is where its numbers have always come from.
+
+**Amended 2026-09-27** (human ruling, after this step closed): the **complete build** that used to ride in
+this job — `meson setup` / `meson compile` / `meson test` / `meson install` into a staging root — moved to
+`.github/workflows/packaging.yml`, which runs **on demand** (`workflow_dispatch`). The push job keeps the
+entry's four commands (format, lint, the windowless crates' tests, and the render — the last one now
+through the `pixlay-cli` binary cargo builds, since the meson build no longer produces one here), because
+that is the answer a push has to give; the packaging question costs a release build of the whole workspace,
+the shell included, and is asked before a release or after a packaging change instead. The numbers above
+stay as this job's record: the **902 s / 255 s** pair is the pre-split composition's.

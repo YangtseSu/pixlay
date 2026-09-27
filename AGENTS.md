@@ -73,17 +73,20 @@ machine's, not CI's** (ruled 2026-09-27, human): no display a runner could give 
 `archlinux:latest` container's headless mutter never presented a frame, the runner's own mutter dies of its
 GL setup, and a headless Weston runs the suite only to fail the HIG walk against the runner's older GTK —
 so `ci.yml` runs the entry's commands **minus this suite** (`cargo test --workspace --exclude pixlay` —
-one selection, which is also why the packaging identity test lives in `pixlay-core`) and
-then the complete build — `meson setup` / `meson compile` (both binaries, the shell included) and
-`meson install` into a staging root, which is the definition `makepkg` wraps — and
-every error is recorded in `docs/steps/S33-ci-skips-the-gui-suite-done.md`. CI caches the two build
-trees (`target/` and the build directory's own) — measured 2026-09-27, the same job was **902 s**
-without that cache and **255 s** with it: a fresh checkout still recompiles this workspace's five
-crates (the test build 9.96 s against 3m 42s, the release one 41.96 s against 2m 24s), and what is
-left is work — ~120 s of tests and 12 s of render. That is the lever, not a cheaper profile: turning
-the release profile's `thin` LTO and single codegen unit **off** for CI's build moved nothing (154 s
-against 144 s) and, because the step after it then had a different environment, made `meson install`
-rebuild the whole tree (139 s where it had been 1 s). CI builds the profile the release ships.
+one selection, which is also why the packaging identity test lives in `pixlay-core`) and minus the
+packaging half, which is `packaging.yml`'s and **runs on demand** (ruled 2026-09-27, human: the push job
+was paying a release build of the whole workspace, the shell included, for changes that touch no
+packaging file). `packaging.yml` is the **complete build** — `meson setup` / `meson compile` (both
+binaries, the shell included), `meson test` and `meson install` into a staging root, which is the
+definition `makepkg` wraps — and `docs/steps/S33-ci-skips-the-gui-suite-done.md` is where every failure
+is recorded. Both jobs cache their own build tree (`target/` and the build directory's own), and the
+measurement that made the cache the lever is the pre-split job's (2026-09-27): **902 s** cold against
+**255 s** warm — a fresh checkout recompiles this workspace's five crates (the test build 9.96 s against
+3m 42s, the release one 41.96 s against 2m 24s) and what is left is work, ~120 s of tests and 12 s of
+render. That is the lever, not a cheaper profile: turning the release profile's `thin` LTO and single
+codegen unit **off** for CI's build moved nothing (154 s against 144 s) and, because the step after it
+then had a different environment, made `meson install` rebuild the whole tree (139 s where it had been
+1 s). CI builds the profile the release ships.
 
 
 Measurement rules that go with it:
@@ -254,16 +257,19 @@ versions**. Everything follows the latest stable release.
   `ubuntu-latest` still resolves to 24.04 — with **no container** and **no GUI suite** (both ruled
   2026-09-27, human): the suite needs a display, a compositor and the libraries the product targets, and a
   runner could not give it all three, so CI runs the entry's commands minus that suite and every failure is
-  recorded in `docs/steps/S33-ci-skips-the-gui-suite-done.md`. CI also makes the **complete build** with the
-  project's own definition (`meson setup` / `meson compile` / `meson install` into a staging root, the same
-  steps `makepkg` wraps), because a tree that only ever compiles as a side effect of `cargo test` is a tree
-  whose meson files first run at a release. So CI answers "does the windowless half run, and does the tree
-  build and install" — the GUI suite and the Arch package are the machine's, through `cargo test` and
-  `makepkg` (below). The identity and the version chain are checked here too, by
-  `crates/pixlay-core/tests/packaging.rs` — text files only, no display — which is why `APP_ID` and
+  recorded in `docs/steps/S33-ci-skips-the-gui-suite-done.md`. The **complete build** with the project's own
+  definition (`meson setup` / `meson compile` / `meson test` / `meson install` into a staging root, the same
+  steps `makepkg` wraps) is a workflow of its own, `packaging.yml`, and it **runs on demand**
+  (`workflow_dispatch`, ruled 2026-09-27, human) rather than on every push: it costs a release build of the
+  whole workspace, the shell included, and the push job was paying it for changes that touch no packaging
+  file — while the answer the push job has to give is "does the windowless half run". So the split is: push
+  CI answers the fast half (format, lint, the windowless crates' tests, the entry's render), `packaging.yml`
+  answers "does the tree build and install", and the GUI suite and the Arch package stay the machine's,
+  through `cargo test` and `makepkg` (below). The identity and the version chain are checked in the push job,
+  by `crates/pixlay-core/tests/packaging.rs` — text files only, no display — which is why `APP_ID` and
   `DOMAIN` live in that crate: run from the shell's, cargo built the GTK stack a second time under a
   different feature resolution, **199 s of the 902 s run** (measured 2026-09-27), to read two strings.
-  The two build trees are cached (the entry's paragraph has the measurement: **902 s → 255 s**), and
+  Each job caches its own build tree (the entry's paragraph has the measurement: **902 s → 255 s**), and
   CI's own build keeps the release profile the release ships.
   The one action moves with its major tag (`actions/checkout@v7`, `actions/cache@v4`) rather than being
   pinned to a commit SHA: under this policy a pin is the thing that has to be justified
@@ -599,9 +605,10 @@ not repeated here.*
   installed (`data/meson.build`, `required: false`)
 - **CI runs the verification entry and does not build the package** (same ruling): `makepkg`, the PKGBUILD
   and the install are verified on a machine, where a package can be built *and installed*; the runner's
-  job is to answer whether the program runs. `release.yml` builds the **binaries** for a tag and attaches
-  them to the release — its build is the same `meson setup` / `meson compile` the package wraps, and it runs
-  no `makepkg` either
+  job is to answer whether the program runs. The push job runs the fast half of the entry; the complete
+  build and install is `packaging.yml`, **on demand** (2026-09-27). `release.yml` builds the **binaries**
+  for a tag and attaches them to the release — its build is the same `meson setup` / `meson compile` the
+  package wraps, and it runs no `makepkg` either
 - SPDX is `GPL-3.0-or-later` throughout (not `-only`)
 
 ## Dependency registry

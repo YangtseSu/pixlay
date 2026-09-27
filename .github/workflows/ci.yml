@@ -1,16 +1,16 @@
-# CI: the verification entry's commands minus the GUI suite
-# (`docs/steps/S33-ci-skips-the-gui-suite-done.md`), then the project's own build and
-# install into a staging root (`AGENTS.md`, "AUR discipline"). No container: the
-# libraries come from the distribution.
+# CI: the verification entry's fast half. The GUI suite is the machine's
+# (`docs/steps/S33-ci-skips-the-gui-suite-done.md`) and the packaging half — the project's
+# own build and install — is `packaging.yml`'s, which runs on demand (ruled 2026-09-27,
+# human): it costs a release build of the whole workspace, the shell included, and the push
+# job was paying that for changes that touch no packaging file. No container: the libraries
+# come from the distribution.
 #
-# The steps are ordered so that nothing is compiled twice that can be compiled once:
-# one clippy pass over every target, one debug build for every test that needs no
-# display, and one release build for the tree meson installs — in the profile the release
-# installs (measured 2026-09-27: a different profile for one step made the next one
-# rebuild the tree). The two target trees are cached: the same job measured 902 s with a
-# cold cache and 255 s with a warm one, of which ~120 s is the suite running and 12 s the
-# render — the cache holds the dependency tree, so a fresh checkout recompiles only this
-# workspace's five crates.
+# What runs here: one clippy pass over every target (the shell included — it is checked,
+# never built, because its suite is the machine's), one debug build for the windowless
+# crates' tests, and one release build of `pixlay-cli` for the entry's own render command,
+# which writes a real 14043 px image. `target/` is cached, so a fresh checkout recompiles
+# this workspace's crates rather than their dependencies (the pre-split job's numbers, cold
+# against warm, are in S33's record).
 name: CI
 
 on:
@@ -26,31 +26,28 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
-      - name: Cache the two build trees
-        # `target/` holds clippy's check artefacts and the tests' debug build;
-        # `build/crates/target` is the release build `meson compile` makes in the build
-        # directory (`crates/meson.build` sets `--target-dir` to `current_build_dir()`),
-        # which no cargo command in this job touches. The key is `Cargo.lock`, so a
-        # source change reuses the tree and a dependency bump does not; `restore-keys`
-        # keeps a warmed tree across a bump.
+      - name: Cache the build tree
+        # `target/` holds clippy's check artefacts, the tests' debug build and the release
+        # build the render runs. The key is `Cargo.lock`, so a source change reuses the tree
+        # and a dependency bump does not; `restore-keys` keeps a warmed tree across a bump.
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-            build/crates/target
           key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
       - name: Install the libraries
         # Ubuntu splits libheif's decoders into plugins: the HEIC fixture needs libde265
-        # and the AVIF one dav1d.
+        # and the AVIF one dav1d. No meson, no ninja, no gettext and no data-file
+        # validators: those are the packaging workflow's.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libgtk-4-dev libadwaita-1-dev libglycin-2-dev glycin-loaders bubblewrap \
             libseccomp-dev libheif1 libheif-plugin-libde265 libheif-plugin-dav1d \
-            pkg-config meson ninja-build gettext desktop-file-utils appstream
+            pkg-config
       - name: Format
         run: cargo fmt --check
       - name: Lint
@@ -62,42 +59,12 @@ jobs:
         # GTK stack a second time under a different feature resolution (measured
         # 2026-09-27: 199 s of the run, for a test that reads text files).
         run: cargo test --workspace --exclude pixlay --locked
-      - name: Build the tree
-        # The project's own build, and the only place `meson setup` runs outside a
-        # release. It builds the profile the release builds: turning `thin` LTO and the
-        # single codegen unit off here was measured on 2026-09-27 and moved nothing
-        # (154 s against 144 s), while giving this step an environment the next one did
-        # not have made `meson install` rebuild the whole tree (139 s). The cache below
-        # is what makes this step cheap, not a different profile.
-        run: |
-          meson setup build --prefix=/usr
-          meson compile -C build
-      - name: Validate the generated data files
-        # `desktop-file-validate` and `appstreamcli validate --no-net` (`data/meson.build`).
-        run: meson test -C build --print-errorlogs
-      - name: Install into a staging root
-        # The paths `docs/CONTRACT.md` §10 promises.
-        run: |
-          meson install -C build --destdir /var/tmp/pixlay-install
-          for path in \
-            usr/bin/pixlay \
-            usr/bin/pixlay-render \
-            usr/share/applications/org.yangtse.Pixlay.desktop \
-            usr/share/metainfo/org.yangtse.Pixlay.metainfo.xml \
-            usr/share/icons/hicolor/scalable/apps/org.yangtse.Pixlay.svg \
-            usr/share/icons/hicolor/symbolic/apps/org.yangtse.Pixlay-symbolic.svg \
-            usr/share/mime/packages/org.yangtse.Pixlay.xml
-          do
-            test -f "/var/tmp/pixlay-install/$path" || {
-              echo "meson install did not write $path" >&2
-              exit 1
-            }
-            echo "installed: $path"
-          done
-          /var/tmp/pixlay-install/usr/bin/pixlay-render --version
       - name: Render the verification project
-        # Eight photos on `mosaic-8-s14`, through the binary the build produced.
+        # Eight photos on `mosaic-8-s14`, at the entry's own long edge, through
+        # `pixlay-cli`'s binary — the packaging build used to be what produced it, and this
+        # is the release profile the entry names.
         run: |
-          ./build/crates/pixlay-render render \
+          cargo build --release -p pixlay-cli --locked
+          ./target/release/pixlay-render render \
             --project crates/pixlay-cli/tests/fixtures/verify.pixlay \
             --long-edge 14043 --stats --out /var/tmp/a.jpg
