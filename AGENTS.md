@@ -43,13 +43,21 @@ two-cell swap (`docs/completed/2026-09-25-STEPS.md`, ruling 31). That supersedes
     cargo fmt --check
     cargo clippy --workspace --all-targets -- -D warnings
     cargo test
+    reuse lint
 
 **The three are for a change the product can see** — code, shipped data, a template, a constant the render
 reads. A change it cannot see (docs, `.gitignore`, the repository layout) runs only the command that reads
 what changed, if one exists: "Commit discipline" states the rule, and a path a test resolves is the case
 that decides it.
 
-**A fourth command was removed** (ruled 2026-09-27, human): it rendered
+**`reuse lint` is the fourth command, and it runs for every change** (ruled 2026-09-28, human): it reads
+every file's header, so every change is one it reads, and it is a second's work (measured 2026-09-28: 0.9 s,
+174 files carrying the tags, reuse-tool 6.2.0). Its answer is the licensing metadata "Distribution"
+requires — the two tags in every file, the license text in `LICENSES/`, `REUSE.toml` for the files that
+cannot carry a header. It is the entry's one command that is not cargo's, and it needs the `reuse` tool
+installed (`ci.yml` installs the distribution's package).
+
+**A render command was removed from this list** (ruled 2026-09-27, human): it rendered
 `crates/pixlay-cli/tests/fixtures/verify.pixlay` at `--long-edge 14043` and printed `--stats`, and it was
 the assistant's own addition to this list (S12d) rather than a human's ruling — a release build plus a
 139.5 MP render on every change, for a picture no machine reads and a number no test compares. **The
@@ -163,7 +171,8 @@ Measurement rules that go with it:
 - **Run the entry's commands that this change can affect before committing**: a change to code or to
   shipped data runs all three of them; a change the product cannot see — docs, `.gitignore`, the
   repository layout — runs the one command that reads what changed, and a step's own verification
-  command is that command when the step names one. If it is red, do not commit.
+  command is that command when the step names one. `reuse lint` reads every file, so it is that command
+  for every change and runs beside all of them. If it is red, do not commit.
 - Never committed: `target/` (see `.gitignore`). Committed: `Cargo.lock`.
 - **"Done" means the step's `**Progress**` line is rewritten and committed** (see "Session and persistence
   discipline"), not that the code is written and the tests are green.
@@ -600,13 +609,17 @@ not repeated here.*
   2026-09-26, human): `desktop-file-validate` and `appstreamcli validate --no-net` run in `meson test`
   wherever those tools are installed (`data/meson.build`, `required: false`)
 - **CI runs the verification entry and does not make a distribution** (same ruling): the runner's job is
-  to answer whether the program runs, and the push job runs the fast half of the entry. The complete build
+  to answer whether the program runs, and the push job runs the fast half of the entry (`reuse lint`,
+  which needs no build, included). The complete build
   and install is `packaging.yml`, **on demand** (ruled 2026-09-27, human); `release.yml` builds the
   **binaries** for a tag and attaches them to its release, with the same `meson setup` / `meson compile`
 - **SPDX is `GPL-3.0-or-later` throughout** (not `-only`), and **the metadata is REUSE's**
-  (REUSE specification 3.3, checked with reuse-tool 6.2.0's `reuse lint`): the license text is
-  `LICENSES/GPL-3.0-or-later.txt`, the root `LICENSE` is the same text for the desktop's and
-  GitHub's sake, and **every file carries the two tags in its own header**:
+  (REUSE specification 3.3; `reuse lint` is the entry's fourth command, reuse-tool 6.2.0): the license
+  text is `LICENSES/GPL-3.0-or-later.txt`, and the root `LICENSE` is **the same text copied there** —
+  GitHub reads that one, a distribution's recipe installs it (`install -Dm644 LICENSE …`), and a symlink
+  would flatten to a text file holding the path in a zip download — with
+  `crates/pixlay-core/tests/packaging.rs` holding the two byte for byte. **Every file carries the two
+  tags in its own header**:
 
   ```text
   SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>

@@ -22,6 +22,14 @@
 //! path. It reads no package recipe, because none lives in this tree
 //! (`AGENTS.md`, "Distribution").
 //!
+//! A fourth text drifts the same way: the **license**, which the tree keeps twice on
+//! purpose (`AGENTS.md`, "Distribution") — `LICENSES/<SPDX identifier>.txt` is where REUSE
+//! reads it, and the root `LICENSE` is the copy GitHub reads and a package recipe installs
+//! (`install -Dm644 LICENSE …`). The two are held together by
+//! [`the_license_text_is_the_same_wherever_it_is_read`]: a text kept twice is a text that
+//! can drift, and a symlink instead of the copy is what the check is chosen over — a zip
+//! download or a Windows checkout flattens a symlink into a file holding the path.
+//!
 //! It lives in `pixlay-core`, the crate with no GTK, because the identity it holds
 //! together must be checkable without a display: measured 2026-09-27, the CI step that
 //! ran it inside the shell's crate spent **199 s of the run** compiling the GTK stack
@@ -437,5 +445,26 @@ fn the_package_ships_the_identity_the_code_declares() {
         manifest_value("crates/pixlay-cli/Cargo.toml", "[[bin]]", "name"),
         "pixlay-render",
         "the second binary the install ships is the CLI's own name",
+    );
+}
+
+/// The license text where REUSE reads it is the text the root carries.
+///
+/// `LICENSES/<SPDX identifier>.txt` is the file the specification names — its own name is
+/// the manifest's `license` (`env!("CARGO_PKG_LICENSE")`), so a re-licensing that renames
+/// one and not the other fails here — and the root `LICENSE` is the copy the desktop and a
+/// distribution's recipe read (`AGENTS.md`, "Distribution"). Symlinking the second to the
+/// first would need no check at all and is what this is chosen over: a zip download or a
+/// Windows checkout does not follow a symlink and leaves a file holding the path instead of
+/// the text.
+#[test]
+fn the_license_text_is_the_same_wherever_it_is_read() {
+    let identifier = env!("CARGO_PKG_LICENSE");
+    let canonical = read(&format!("LICENSES/{identifier}.txt"));
+    assert_eq!(
+        read("LICENSE"),
+        canonical,
+        "the root LICENSE is not the same text as LICENSES/{identifier}.txt, which is the \
+         file the specification reads and the one a package recipe installs",
     );
 }

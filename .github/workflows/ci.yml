@@ -7,7 +7,8 @@
 # human: the push job was paying a release build of the whole workspace, the shell included, for
 # changes that touch no packaging file). No container: the libraries come from the distribution.
 #
-# What runs here: one clippy pass over every target (the shell included — it is checked, never
+# What runs here: `reuse lint` — the entry's fourth command, which needs no build — then one clippy
+# pass over every target (the shell included — it is checked, never
 # built, because its suite is the machine's) and one debug build for the windowless crates'
 # tests, which render real images of their own (`crates/pixlay-cli/tests/cli.rs` runs the
 # `pixlay-render` binary). `target/` is cached, so a fresh checkout recompiles this workspace's
@@ -43,13 +44,21 @@ jobs:
       - name: Install the libraries
         # Ubuntu splits libheif's decoders into plugins: the HEIC fixture needs libde265
         # and the AVIF one dav1d. No meson, no ninja, no gettext and no data-file
-        # validators: those are the packaging workflow's.
+        # validators: those are the packaging workflow's. `reuse` is not a library but the
+        # entry's fourth command (`reuse lint`), and it rides here so the job pays for one
+        # `apt-get update`.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libgtk-4-dev libadwaita-1-dev libglycin-2-dev glycin-loaders bubblewrap \
             libseccomp-dev libheif1 libheif-plugin-libde265 libheif-plugin-dav1d \
-            pkg-config
+            pkg-config reuse
+      - name: The licensing metadata
+        # `reuse lint` — the entry's fourth command (`AGENTS.md`), and a check that needs no
+        # build runs before the ones that do: every file's header, the license text in
+        # `LICENSES/`, and `REUSE.toml` for the files that cannot carry a header. A second's
+        # work; a red one means a file was added or edited without its two tags.
+        run: reuse lint
       - name: Format
         run: cargo fmt --check
       - name: Lint
