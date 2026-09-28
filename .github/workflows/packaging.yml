@@ -32,7 +32,7 @@ jobs:
         # directory (`crates/meson.build` sets `--target-dir` to `current_build_dir()`), and
         # no cargo command touches it. Its own key rather than the push job's: a cache is
         # saved once and two workflows sharing a key would race for it.
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
