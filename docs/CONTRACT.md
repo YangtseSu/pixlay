@@ -1739,4 +1739,7 @@ identity is spelled in, and the pipeline that would carry a language pack. What 
   and `appstreamcli validate --no-net` run there wherever those tools are installed (`data/meson.build`,
   `required: false`); the rest of the suite is the verification entry's (`AGENTS.md`) and CI's. Nothing in
   the build reaches the network, and every fixture is in the repository.
+- **The release carries the Arch package** (ruled 2026-09-27, human): each `vX.Y.Z` tag's GitHub Release
+  carries `pixlay-<version>-<pkgrel>-x86_64.pkg.tar.zst` beside the Linux binaries — built on this machine
+  and uploaded by hand, which is why no workflow produces it.
 - **Not doing** (the plan's own list): Flatpak, Snap, any other distribution.

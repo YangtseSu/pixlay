@@ -586,7 +586,10 @@ not repeated here.*
   without one fails the suite. Push `vX.Y.Z` — the tag has to equal `meson.build`'s
   `project(version:)`, which the workflow checks — and `release.yml` builds the tree with the project's
   own build and attaches the **Linux binaries** (`pixlay-<version>-linux-amd64.tar.gz` and
-  `pixlay-<version>-linux-arm64.tar.gz`, each with its `.sha256`) to that tag's GitHub Release
+  `pixlay-<version>-linux-arm64.tar.gz`, each with its `.sha256`) to that tag's GitHub Release.
+  **That release carries the Arch package too** (same ruling):
+  `pixlay-<version>-<pkgrel>-x86_64.pkg.tar.zst`, built on this machine and **uploaded by hand** beside the
+  binaries. No script wraps either step: the package is the maintainer's, not CI's.
 - **The suite and the two artifact validators are the verification entry's and `meson test`'s** (ruled
   2026-09-26, human): `desktop-file-validate` and `appstreamcli validate --no-net` run in `meson test`
   wherever those tools are installed (`data/meson.build`, `required: false`)
