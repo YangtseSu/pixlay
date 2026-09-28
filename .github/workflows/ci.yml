@@ -28,7 +28,7 @@ jobs:
         # `target/` holds clippy's check artefacts and the tests' debug build. The key is
         # `Cargo.lock`, so a source change reuses the tree and a dependency bump does not;
         # `restore-keys` keeps a warmed tree across a bump.
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
