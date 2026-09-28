@@ -27,16 +27,16 @@ is aimed at, the clipboard, or the command line (`pixlay a.jpg b.jpg`, in argume
 
 - **One to nine photos.** A single photo is a legal collage; a selection or a drop past nine is
   trimmed to the first nine, with one report saying how many were not used.
-- **27 layouts** over cell counts one … nine and five sheet aspects (4:3, 16:9, 1:1, 3:2, 2:3),
-  regular and irregular — `pixlay-render templates` lists this build's own. The layout band draws
-  each candidate as a *sketch* of its geometry, not a render of your photos.
+- **Layouts for every count**: cell counts one … nine over five sheet aspects (4:3, 16:9, 1:1, 3:2,
+  2:3), regular and irregular — `pixlay-render templates` lists this build's own. The layout band
+  draws each candidate as a *sketch* of its geometry, not a render of your photos.
 - **Framing per cell**: pan, zoom and rotation by any angle. The clamp follows the exact angle, so
   the cell stays covered; `Ctrl+0` resets the framing.
 - **Swap any two cells** whole — photo and framing both — by dragging one onto the other, with
   `Shift` and a click, or with `Ctrl+Shift` and an arrow key. One undo step.
 - **A canvas frame**: the gap between two photos, the corner radius and the colour. White, gapless
   and square-cornered by default, so an older project renders byte-identically.
-- **Export as PNG or JPEG** at a long edge you choose, 1 … 30000 pixels, through the platform's own
+- **Export as PNG or JPEG** at a long edge you choose, through the platform's own
   save dialog. The file carries its ICC profile and a JPEG is 4:4:4, written in the same pass as
   the pixels.
 - **Undo and redo** across every edit, atomic saves, and a check before unsaved work is discarded.

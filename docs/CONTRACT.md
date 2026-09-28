@@ -6,44 +6,10 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # S1 contract v1
 
-Frozen on 2026-09-20. This file is the reading copy for the **contract review**: every shape, every limit and every non-goal that was reviewed is in here.
-The implementation is authoritative, and this file is its guide; when the two disagree the tests win (the tests are in
-`crates/pixlay-core/tests/`, `crates/pixlay-render/tests/`, `crates/pixlay-cli/tests/`).
-
-The contract is **frozen at S1** and every step after it is built on top of it (`AGENTS.md`, "Step discipline", principle 3).
-
-> **What the ruling of 2026-09-22 changes in this file.** The shapes landed in the plan's S11
-> (2026-09-22), so everything below is the implementation this build has.
-> - the **±45° cap on a cell's rotation is removed** — the angle is free and the clamp never reduces it, so
->   `CLAMP_ZOOM_LIMIT`, `CropFit::rotation_limited` and §2's "clamp degradation threshold" row are gone;
-> - **flip and quarter turns are not product capabilities**, so the geometry stage is `crop → arbitrary rotation`;
-> - the canvas backdrop stops being hard-coded white: it becomes `frame.color`, which **defaults to white**, so
->   every project written before the field renders byte-identically (measured: the S1 golden image at RMSE
->   **0.0**, and the S5 `verify.pixlay` render byte-identical — §8, "S11");
-> - `CollageDoc` gains `frame: { gapRel, radiusRel, color }`, and the fit's coverage reference becomes the
->   **visible rectangle** rather than the slot polygon.
->
-> The rest of the contract is untouched. The rulings themselves are in `docs/archive/2026-09-22-UX-DIRECTION.md` §6,
-> and the steps that carried them out are in `docs/archive/2026-09-22-STEPS.md` (S11 in particular).
->
-> **What S20 changes in this file.** The frame's gap stops being an inset and becomes the visible
-> distance it is named after (ruled 2026-09-25, ruling 35):
-> - **`gapRel` is the distance between two photos, and the same distance stands between the photos and
->   the sheet's edge.** Half of it comes off every side of a cell — so two neighbours are `gapRel`
->   apart — and the sheet's own edge gives up the whole gap, because outside the sheet there is no photo
->   to give up the second half. Before S20 each cell gave up `gapRel/2` and the sheet's border kept
->   `gapRel/2`, so the border measured *half* the number while the seam measured all of it; measured at a
->   4000 px long edge with `--gap 0.04`: the seam 160 px both before and after, the border 80 px before
->   and 160 px after (§8, "S20");
-> - **the field's shape, its range and the dialog's rows do not change, and `docVersion` does not
->   bump**: a document written before S20 still loads and still renders, with the gap meaning the new
->   thing. Only `gapRel = 0` renders byte-identically, which is exactly the promise S11's ruling made
->   (§8, "S11"), and a version bump would refuse files that this build reads correctly;
-> - a gap of half the canvas height or more now leaves *every* cell with nothing visible, so it is
->   refused per slot naming the slot (`MAX_FRAME_REL` itself stays 1.0 — it governs the radius too,
->   which is clamped at use rather than refused).
->
-> The rest of the contract is untouched.
+This file is the contract's reading copy: every shape, every limit and every non-goal in one
+place. The implementation is authoritative and this file is its guide; when the two disagree the
+tests win (the tests are in `crates/pixlay-core/tests/`, `crates/pixlay-render/tests/`,
+`crates/pixlay-cli/tests/`).
 
 ---
 
@@ -201,7 +167,6 @@ Conventions:
 | `--long-edge` (export size) | 1..=30000 (long edge, in pixels; `MAX_LONG_EDGE_PX` in `pixlay-core`) | the whole size request: the edge is exact, the other edge follows the template's aspect rounded half away from zero (at least 1 px). The **canvas pixel budget still applies to the grid it derives** (a square canvas at 20000 px is 400 MP and is refused, exit 2), so the flag's range and the budget are two different limits and both are checked |
 | `--grid` (`gesture`) | 1..=20000 (long edge, in pixels) | the resting canvas grid a gesture is measured at, derived by the same `PixelSize::for_long_edge` the window's and `render`'s grids are (S15e) — so the rounding and the canvas pixel budget are one rule rather than three, and a 4:3 canvas at 20000 (300 MP) is refused, exit 2 |
 | decoded source | ≤ 120 MP and ≤ 20000 px per edge, 20 s | `MAX_DECODE_PIXELS` / `MAX_DECODE_EDGE` / `DECODE_TIMEOUT` in `pixlay-imaging`. A source is RGBA at its own depth, so 120 MP is 480 MB as 8-bit and 960 MB as 16-bit; the area cap is checked between the loader's header and its pixels, so a decompression bomb costs nothing |
-| clamp degradation threshold | ~~when the zoom the **requested rotation** needs exceeds `CLAMP_ZOOM_LIMIT` = **1.5 times the upright covering zoom**, the angle is reduced to the widest one that fits~~ — **removed by S11 (2026-09-22): the angle is free and is never reduced, so the rule and the constant are gone; the zoom pays for the angle, and its worst case over the whole library is 21.7x against a cap of 1000x (§8)** | the S3 row as it was decided (`docs/completed/2026-09-20-STEPS-done.md`): its reference was the upright floor, not an absolute zoom, and a ten-column strip needs 6x upright for a 4:3 photo, so a narrow slot was never degraded. Measured kept angles, matching photo and 45° asked (2026-09-21): 45° (unlimited) at 1:1, 34.0° at 6:5, 27.3° at 4:3, 22.6° at 3:2, 18.0° at 16:9, 11.2° at 8:3, mirrored for portrait slots. Kept as the record of what the cap did |
 
 Every entry above is enforced with a typed error, never a panic, and each is covered by
 `crates/pixlay-core/tests/contract.rs` or `crates/pixlay-cli/tests/cli.rs`. An implementation
@@ -597,8 +562,8 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
   one-click filter preset. S4 implemented both and S12c removed them; the pipeline has one
   colour rule left, which is "the decoder's ICC → sRGB" (§4.1)
 - nested groups / layer trees / blend modes
-- ~~framing rotation beyond ±45°~~ — **removed 2026-09-22: the angle is free**, so the cap and the
-  angle-degradation rule that went with it are gone (S11); **rotation only crops edges, it never grows the canvas**
+- the framing rotation is **free** (any angle, since 2026-09-22/S11): **it only crops edges, it never
+  grows the canvas**
 - **flipping or mirroring a cell, in any form**: 2026-09-22's ruling — the per-cell capabilities are
   zoom, move and rotation by any angle. (Loupe has mirror icons and glycin has a `Mirror` operation;
   neither is a reason to add one.)
@@ -630,17 +595,10 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
 
 ## 8. Measured (2026-09-20, this machine)
 
-**A note on the records below (S12c + S12d, 2026-09-22).** The sections from S5 onwards include rows
-for text layers, and the rows for S4 and later include grading and the canvas-wide filter.
-Those features were removed by the purity ruling, so a row that mentions `text`, `grade`,
-`filter` or `chroma` is a record of the build that measured it, not a description of this
-one. The rows from S0 to S12 also name millimetres, DPI and resolutions (`--dpi`, `pHYs`,
-JFIF densities, "A0 at 300 dpi = 139.5 MP" grids): S12d removed the whole concept, so those
-numbers are records of the grids the builds rendered — including what a "14043 px long
-edge" *means*, which is why the probe's own long edge is 14043 px (the A0 sheet's) — and
-not claims about a document field or file chunk this build has. The numbers stay as they
-were taken: they are the process record, and the S12c/S12d results in
-`docs/archive/2026-09-22-STEPS.md` are where the removals themselves are accounted for.
+**These rows are records of the builds that measured them.** A row that mentions `text`, `grade`,
+`filter`, `chroma`, a DPI or a resolution is a step's own record of a grid that build rendered —
+those features and the whole size concept left with S12c/S12d — and what a "14043 px long edge"
+*means* is why the probe's own long edge is 14043 px (the A0 sheet's).
 
 | Item | Value |
 |---|---|
@@ -747,36 +705,6 @@ contact sheet rendered with the fixture photos (`/var/tmp/pixlay-s10/s10-layouts
 §3 stands as measured, nothing was dropped and nothing reworked; the numbers above are its basis, and the
 plan's next step is S11.
 
-**Decisions this step made** (all of them additions to a frozen artifact, so each one is a name that can
-never be edited again):
-
-- **The histogram is asserted over `MIN_PHOTOS..=MAX_PHOTOS`, not over a literal 2..=9.** The range is the
-  selection's own pair of constants, so a change to the ceiling moves the assertion with it instead of
-  leaving a gap behind. Ten keeps the one template it had: it is the library's `MAX_SLOTS`, not a count the
-  product offers, and its coverage is S2's criterion, which still holds it.
-- **The shipped geometry is pinned by a fingerprint, not by the regeneration diff alone.** The determinism
-  test cannot catch "edit an old recipe, regenerate, commit": both sides move together. The fingerprint table
-  (`SHIPPED_BEFORE_S10`, FNV-1a over the emitted source, written out rather than `DefaultHasher` because a
-  hash algorithm that changes with the toolchain would fail for the wrong reason) is what makes the rule
-  *a shipped name keeps its geometry forever* machine-checked, and the failure message prints the whole
-  emitted geometry so a reviewer sees which vertex moved.
-- **The gutter idiom extended to a strip** (`strip-2-2x1g`, 1/16 of the canvas, top border to bottom). It
-  gives the second gutter *shape* a hit test has to answer for — `grid-4-2x2g`'s cross reaches the border in
-  four directions, this one in two — and it is the layout two photos with a visible frame between them is.
-  The `g` suffix is therefore documented for both families, and the hit test now checks both.
-- **A second portrait layout, and four new aspect groups.** `strip-3-1x3` (2:3) and `grid-6-2x3` (2:3) are
-  the portrait counterparts of layouts that only existed landscape: a portrait canvas with three or six
-  photos had one candidate and now has three. Every new layout was placed in a family the count did not have
-  yet where one was missing, which is why every count 2..=9 ends up with three or more aspects rather than
-  the required two.
-- **The new layouts are equal-sized where a dyadic lattice allows it and deliberately uneven otherwise**
-  (`strip-5-5x1` is 3/16 × four plus 4/16, `strip-9-9x1` is six 2/16 panes then 1/16, 1/16, 2/16): an odd
-  number of equal columns is not representable on a power-of-two lattice, and `strip-10-10x1` had already set
-  the pattern. The alternative — a /64 lattice for the strips — would have multiplied the ladder's smallest
-  cells for no visible gain.
-- **No new dependency, no `Cargo.lock` change** (`cargo update --workspace` locked 0 packages), and no change
-  to any document, limit or CLI shape: S10 is data, plus the assertion that keeps the data's growth honest.
-
 ### S11 (2026-09-22, `--release`, this machine)
 
 Two changes were measured against the build before them, and neither costs anything:
@@ -794,44 +722,6 @@ Two changes were measured against the build before them, and neither costs anyth
 | `edit` | stores the fit: a 25° request on a portrait cell with a landscape photo writes `rotationDeg = 25` with the zoom the angle needs, and the same edit twice writes **byte-identical** files (also with a frame, and with a pan that has to be clamped); a request above the floor keeps the user's zoom exactly (`3.5` stays `3.5`) |
 | a pan beside a clamped axis (**S27**) | `verify.pixlay`'s cell 0 is the case by construction — a 2:3 photo in a 4:3 cell, so the covering zoom is 1.0 and **all** of the travel is vertical: `edit --slot 0 --offset <x,y>` stores `(0, 0.02)` → `(0.0000, 0.0200)` and `(0.02, 0)` → `(0.0000, 0.0000)` both before and after (those are the two single-axis requests), while **`(0.02, 0.02)` → `(0.0000, 0.0000)` before, `(0.0000, 0.0200)` after** and **`(0.02, 0.2)` → `(0.0000, 0.0000)` before, `(0.0000, 0.2000)` after**: the horizontal component lands on its limit (this cell has none) and the vertical one is no longer paid for it. The same shape through a **real pointer** (`gtk4-broadwayd` + a browser, 2026-09-26): with the old rule a diagonal drag of 60x40 device px asked for an offset of `(0.1402, 0.0702)` and the document held `(0.0012, 0.0006)`; with the per-axis rule the photo's vertical pan is what moves (`/var/tmp/pixlay-s7/s27-drag-before.png` and `…-after.png` are the same drag, looked at) |
 | the test suite | `cargo test`: the core framing sweep is 125,400 framings (11 angles across the whole circle, 5 offsets, 5 photo aspects, 3 zooms, all 27 templates) plus a 36,480-framing framed sweep; the render crate adds `tests/frame.rs` (five pixel probes) |
-
-**Decisions this step made** (recorded here because each one is a shape later steps build on):
-
-- **The coverage reference is the outline *clipped* to the inset rectangle, not the inset rectangle itself.**
-  For every rectangular slot — all of them but `mosaic-8-s14`'s L — the two are the same polygon, so the
-  measured behaviour of the gap is exactly what the plan described. They differ for the L: taking the
-  bounding box literally would have magnified its photo by up to 4.5% at near-diagonal angles, and the plan's
-  own exit criterion says a document with no frame renders byte-identically. `Polygon::clipped_to` is
-  Sutherland–Hodgman against the rectangle (exact, since the clip region is convex) and it returns a polygon
-  that is already inside unchanged *bit for bit*, which is what makes the unframed fit S3's own arithmetic.
-- **A rounded corner is not subtracted from that reference.** The visible region is a rounded rectangle whose
-  exact support needs circular arcs; the reference stays a polygon, so the corner asks for slightly more zoom
-  than it strictly needs — bounded by the radius, exactly zero at `radiusRel = 0`. The alternative was
-  polygon-approximating the arcs, which would make the fit's numbers depend on a segment count.
-- **The rotation is normalized on the way in and on every edit, not inside `validate`.** `validate` is
-  `&self`, so it cannot wrap; `from_json` and `Command::SetCrop` / `edit` do, and `validate` then only checks
-  that the angle is finite. The new `CoreError::NotFinite` exists for exactly that check: a domain
-  (`NaN` is not a number to compute with) is not a range, and an `OutOfRange` message would have named a
-  bound the value was never compared against.
-- **The frame's colour must be opaque.** `Rgba8` carries an alpha channel because the format writes a
-  four-channel colour, but a translucent backdrop would make the exported pixel depend on the surface
-  behind it — which is the one thing "preview and export are the same picture" cannot survive. It is refused at load rather than silently
-  forced to 255.
-- **`render`'s frame flags are a render-time override and `edit` is the writer.** Both spellings are the same
-  three flags; the scope is the difference, and the report always prints the frame that was used, so "which
-  frame did that render use" needs no pixel counting. `edit` is also what the round-trip criterion needed: a
-  document's frame must be writable without a window.
-- **`edit` stores the fit, and only where a photo exists to fit against.** Storage that described the picture
-  was worth more than storage that repeated the request — and it is what makes `edit` idempotent, which is the
-  property the plan asked to be re-asserted through the new entry point. An empty cell has no aspect to cover
-  and keeps its numbers; `draw` fits it when it gets a photo.
-- **`--offset` is a comma pair** (`--offset 0.2,-0.3`), not the two arguments the plan's sketch wrote: `--at`
-  already established the convention for a pair on this surface, and a second spelling of "a point" would be
-  one more thing to remember.
-- **No new dependency, no `Cargo.lock` change** (`cargo update --workspace` locked 0 packages). The frame's
-  rounded corners are cairo arcs and the new geometry is 40 lines of clipping in `pixlay-core`.
-
-Every threshold constant in the tests annotates this source, so a change in the numbers can be discovered.
 
 ### S12 (2026-09-22, `--release`, this machine)
 
@@ -895,37 +785,6 @@ for a file, and it pays 1.6–2.4 s for it.
   0.000000`, `border = 255,255,255` — inside the S10/S11 spread for the same document. The image was looked
   at (a downscale of `/var/tmp/a.jpg`): eight cells filled, the `{date}` layer reading `2019:07:14 10:32:00`
   at the bottom, no seam or corner artefact.
-
-**Decisions this step made** (recorded here because each one is a shape later steps build on):
-
-- **The caches live in `pixlay-imaging::preview`, not in the window.** The window's decoding thread and the
-  CLI's `gesture` probe are then the *same* build, which is the only way the number can be about the window
-  (`AGENTS.md`: nothing may be possible only in the GUI) — and it lets the caches be tested without a display.
-- **The bitmap identity includes the source file's modification time**, which S7's rule did not: without it a
-  photo edited in another program kept its old bitmap until the user touched that cell, and "a stale cache is a
-  wrong picture" is the one thing this cache may never be. The price is one `stat` per occupied cell per build,
-  measured 2026-09-22 at **2 µs for eight files** against a 30–110 ms decode.
-- **The source cache keys on path **and** modification time, with the file's own identity read by the caller
-  once per build.** A file that changed is decoded again; a file replaced while reproducing the same
-  modification time is not detected, and the module says so rather than implying otherwise.
-- **The cache keeps at least its newest entry**, even when that entry alone is over budget: dropping it would
-  re-decode on every motion, which is the cost the cache exists to remove. A source larger than the whole
-  budget is decoded and *not* kept (there is nowhere to put it), which is the only case where a lookup
-  re-decodes.
-- **The gesture grid is half the resting one, and a discrete step never coarsens.** A key press or the zoom
-  spin row is one frame the user is meant to look at, so it is committed and drawn at the resting grid
-  (`Gesture::Step`); a drag, a wheel and a slider are streams, and those are drawn coarse and refined when
-  they end.
-- **The verdict is computed from the warm median and does not move the exit code.** The counts and the grids
-  are stable output; the times appear only with `--stats`.
-- **No new dependency, no `Cargo.lock` change** (`cargo update --workspace` locked 0 packages).
-
-- **What a preview-grade source would buy, measured.** The same 24 MP photo, pre-reduced to the same layout at
-  several sizes, stepped at grid 780: **1024 px → `warm` 7.44 ms** (max 8.28, `pipeline_holds`), **1560 px →
-  15.65 ms** (max 17.96, holds by 1 ms), **2048 px → 39.08 ms** (max 46.25, `gpu_preview`), and the original
-  6000 px → 199.9 ms. The reduction's own size is what decides it, not the original's: a source at or below
-  ~1.5x the preview grid is inside the frame budget, and one at 2.5x is not. This is the measurement the fork's
-  ruling reads next to the 200 ms above; it is not a decision S12 made.
 
 ### S12b (2026-09-22, `--release`, this machine)
 
@@ -995,36 +854,6 @@ at these sizes is up to 50% between runs, which is why every cell carries both);
   same shape after the reductions became 16-bit (PIX-013): 241.3 MB at grid 780 and 419.8 MB at 1600, with
   the copies' own byte counts in §8, "S15f"** — the copies doubled and the peak rose by a fraction of that,
   still six times inside the budget.
-
-**Decisions this step made** (recorded here because each one is a shape later steps build on):
-
-- **The reduction is a box average in linear light, not `resample`.** One reading pass, no ringing, no
-  three-lobe kernel; the colour path is the pipeline's own, because averaging sRGB code values is not
-  averaging light (a 2x2 black-and-white checkerboard would come back at 0.22 of its linear value). It is
-  exact for an integer factor, and it *never enlarges* a photo: at or below the target the samples are the
-  decoder's own, which is what makes "a photo the preview can already show" cost nothing but the copy the
-  cache has to own.
-- **The copy carries the photo's `aspect()`, and that is the whole geometry story.** The fit and the region
-  are functions of that number, so a preview's framing is *identical* to an export's — only the sampling
-  grid differs. Without it a 1600x1200 photo reduced to 350x263 would frame the cell differently from the
-  photo, and every later comparison against `render` would carry a geometry error on top of the filtering
-  one.
-- **The cache keys on path + `mtime` + target size.** The target is a function of the grid, the resting
-  grid moves with the window, and a gesture's grid is half of it; so a file legitimately has up to two
-  copies, and a window resize simply makes a new key (the LRU budget evicts the old ones). A copy is a
-  function of (file, target) alone — never of what was built before — so the preview's pixels cannot
-  depend on the order in which the user happened to resize or drag.
-- **The target is a function of the grid, not of the document's own cells.** Sizing the copy by the largest
-  cell's displayed extent would buy another 2-3x on small-cell layouts (a 3x3 grid's cells cover a third of
-  the canvas), at the price of a copy that depends on the layout rather than on the window, and of a cache
-  key the document can invalidate. Not worth it: the step is 23x inside the budget at the editor's grid
-  already.
-- **No new dependency, no `Cargo.lock` change** (`cargo update --workspace` locked 0 packages). The
-  reduction is arithmetic over a buffer that was already there, and the only new code outside it is a
-  16-bit inverse-transfer table (`linear_to_srgb16`, 128 KB, built once). S12b reduced *at the source's own
-  depth*; **S15f made every reduction 16-bit** (PIX-013: a reduction is an intermediate between two
-  resampling stages, and the only quantization belongs at the final write), which is what the copy sizes in
-  §8, "S15f" are about.
 
 ### What S12's number says about the preview's future
 Read on the plan's own subject — the verification project, at the editor's own grid — the pipeline **holds**:

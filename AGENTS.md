@@ -10,11 +10,10 @@ A Linux-native collage tool. **The editor is the whole application**: open it, a
 and beyond are ignored with one report), pick a layout, adjust, export. Regular and irregular
 templates; per-slot framing (pan / zoom / rotation by any angle); a canvas frame (gap / corner radius /
 colour); export of high-resolution finished images as **PNG or JPEG** (a specified long edge
-in pixels — physical size and DPI left with S12d, TIFF and the JPEG chroma request with S12c).
-**The product is only a collage** (ruled 2026-09-22, S12c): it places photos and frames them. It has no
-colour grading, no text layer, no watermark and no date stamp — S4's per-slot grade and one-click filter
-and S5's canvas-level text layers were built and then removed, because none of them is on the main path
-and the text layer was the one feature whose pixels depended on the host's installed fonts.
+in pixels).
+**The product is only a collage** (ruled 2026-09-22): it places photos and frames them. It has no colour
+grading, no text layer, no watermark and no date stamp — none of them is on the main path, and a text
+layer's pixels would depend on the host's installed fonts.
 GPL-3.0-or-later · Rust · GTK4 + libadwaita shell · Cairo canvas · target platform Arch.
 
 **Scope criterion: the shortest main path.** "Open → add photos → pick a layout → adjust → export" must
@@ -57,50 +56,34 @@ requires — the two tags in every file, the license text in `LICENSES/`, `REUSE
 cannot carry a header. It is the entry's one command that is not cargo's, and it needs the `reuse` tool
 installed (`ci.yml` installs the distribution's package).
 
-**A render command was removed from this list** (ruled 2026-09-27, human): it rendered
-`crates/pixlay-cli/tests/fixtures/verify.pixlay` at `--long-edge 14043` and printed `--stats`, and it was
-the assistant's own addition to this list (S12d) rather than a human's ruling — a release build plus a
-139.5 MP render on every change, for a picture no machine reads and a number no test compares. **The
-fixture stays**: it is what the windowless tests render (`crates/pixlay-cli/tests/cli.rs` and
-`preview.rs` run `pixlay-render` itself) and what the GUI suite opens
-(`support::verify_project`) — eight photos on `mosaic-8-s14` (JPEG, PNG, a 16-bit PNG, a HEIC, one
-carrying EXIF Orientation=6, one carrying a date), so decode, resample, the clamp, `draw` and the encoder
-are exercised by `cargo test` in one run. The document is a `docVersion`-3 file and carries no text layer
-any more (S12c removed them). A 139.5 MP render is still a probe anyone may run by hand — it is what the
-S0 budget and every A0 row in `docs/CONTRACT.md` were measured with — and `pixlay-render templates` lists
-what this build ships, while `pixlay-render init --template <name> --out x.pixlay` writes a project to
-start from.
+**No render probe is in this list** (ruled 2026-09-27, human): a release build plus a 139.5 MP render on
+every change, for a picture no machine reads and a number no test compares. **The fixture stays**: it is
+what the windowless tests render (`crates/pixlay-cli/tests/cli.rs` and `preview.rs` run `pixlay-render`
+itself) and what the GUI suite opens (`support::verify_project`) — eight photos on `mosaic-8-s14` (JPEG,
+PNG, a 16-bit PNG, a HEIC, one carrying EXIF Orientation=6, one carrying a date), so decode, resample,
+the clamp, `draw` and the encoder are exercised by `cargo test` in one run; it is a `docVersion`-3 file.
+A 139.5 MP render is still a probe anyone may run by hand, and `pixlay-render templates` lists what this
+build ships while `pixlay-render init --template <name> --out x.pixlay` writes a project to start from.
 Since S7 `cargo test` also builds the GUI; its tests need a display and run on one
 the harness provides — a private headless `mutter` it starts itself, which is the *test environment* and
 not a dependency of the product (no manifest and no `depends` names a compositor). **Mutter when mutter is
 available** (ruled 2026-09-26, human): it is the compositor this app is developed against and the one whose
-window behaviour these tests measure. It needs no GPU node — measured 2026-09-26 with `/dev/dri` hidden,
-which is a container's shape: `Created surfaceless renderer without GPU`, and the suite green behind it —
-but it does need a **session bus** (`dbus-run-session`; without one it aborts in `set_gnome_env`) and a
-machine-id for `dbus-daemon` to hang that bus on. Where mutter cannot run at all, the harness can be told to
+window behaviour these tests measure. It needs no GPU node (`/dev/dri` hidden: `Created surfaceless
+renderer without GPU`), but it does need a **session bus** (`dbus-run-session`; without one it aborts in
+`set_gnome_env`) and a machine-id for `dbus-daemon` to hang that bus on. Where mutter cannot run at all, the harness can be told to
 use the display the process already has — `PIXLAY_TEST_CHILD=1`, e.g. `PIXLAY_TEST_CHILD=1 xvfb-run -a cargo
 test` — and its own failure message says so; **an Xvfb is not mutter's equal**: with no window manager GTK
 frames the window inside its own surface, so every window geometry the suite reads comes out 10 px smaller in
 each direction (measured 1090x584 against 1100x594), and a run on it is a fallback run whose numbers are that
-display's. So the entry works on a build box and on a machine that is in use. **The GUI suite is the
-machine's, not CI's** (ruled 2026-09-27, human): no display a runner could give it worked — the
-`archlinux:latest` container's headless mutter never presented a frame, the runner's own mutter dies of its
-GL setup, and a headless Weston runs the suite only to fail the HIG walk against the runner's older GTK —
-so `ci.yml` runs the entry's commands **minus this suite** (`cargo test --workspace --exclude pixlay` —
-one selection, which is also why the packaging identity test lives in `pixlay-core`) and minus the
-packaging half, which is `packaging.yml`'s and **runs on demand** (ruled 2026-09-27, human: the push job
-was paying a release build of the whole workspace, the shell included, for changes that touch no
-packaging file). `packaging.yml` is the **complete build** — `meson setup` / `meson compile` (both
-binaries, the shell included), `meson test` and `meson install` into a staging root — and
-`docs/steps/S33-ci-skips-the-gui-suite-done.md` is where every failure
-is recorded. Both jobs cache their own build tree (`target/` and the build directory's own), and the
-measurement that made the cache the lever is the pre-split job's (2026-09-27): **902 s** cold against
-**255 s** warm — a fresh checkout recompiles this workspace's five crates (the test build 9.96 s against
-3m 42s, the release one 41.96 s against 2m 24s) and what is left is work, ~120 s of tests and 12 s of
-render. That is the lever, not a cheaper profile: turning the release profile's `thin` LTO and single
-codegen unit **off** for CI's build moved nothing (154 s against 144 s) and, because the step after it
-then had a different environment, made `meson install` rebuild the whole tree (139 s where it had been
-1 s). CI builds the profile the release ships.
+display's. So the entry works on a build box and on a machine that is in use.
+**The GUI suite is the machine's, not CI's** (ruled 2026-09-27, human): no display a runner could give it
+worked, so `ci.yml` runs the entry's commands **minus this suite** (`cargo test --workspace --exclude
+pixlay` — one selection, which is also why the packaging identity test lives in `pixlay-core`) and minus
+the packaging half, which is `packaging.yml`'s and **runs on demand** (ruled 2026-09-27, human: the push
+job was paying a release build of the whole workspace for changes that touch no packaging file). Every
+attempt that failed is in `docs/steps/S33-ci-skips-the-gui-suite-done.md`. Both jobs cache their own build
+tree, and the cache is the lever this job's own measurements named — "Version policy" has them — and CI
+builds the profile the release ships.
 
 
 Measurement rules that go with it:
@@ -186,9 +169,8 @@ session. The steps themselves are one file each under `docs/steps/`.
 few words, the **status last** and one of `todo`, `doing`, `blocked`, `done`, so a directory listing is
 the plan — carrying the step's goal, work, machine-checkable exit, `Human` line, rulings, `Result` and the
 one `**Progress**` line that says where it stands. A status change renames the file
-(`git mv S32-…-doing.md S32-…-done.md`) in the same commit as that line. The directory is **`steps`** and
-not `plans` because a plan is a set of steps and this is the unit that has a file, and not `phases`
-because nothing here is one; the S-numbering continues across plans.
+(`git mv S32-…-doing.md S32-…-done.md`) in the same commit as that line, and the S-numbering continues
+across plans.
 
 **A one-off task is not a step** (ruled 2026-09-27, human): a small change nobody asked to be a step — a CI
 fix, a document edit, a dependency bump, a bug fixed on the spot — is done and committed and creates no
@@ -210,9 +192,6 @@ file carries: a machine-checkable exit of its own, a `Human` gate, or a ruling w
    *Precondition: a boundary holds only if the **conclusion is already on disk** (the threshold constants in the tests + the measured numbers in `docs/CONTRACT.md` + the step's
    `**Progress**` line).
    A conclusion that is not on disk means switching session equals measuring it again.*
-   By this rule the natural boundaries are `S0 ┊ S1 ┊ S2+S3 ┊ S4 ┊ S5+S6 ┊ S7 ┊ S8` (six sessions, not nine).
-   *That line belongs to the retired plan of 2026-09-20 and is kept as the example that produced the rule;
-   the plan of 2026-09-22 states its own boundaries in its own file.*
 
 ## Session and persistence discipline
 
@@ -324,10 +303,10 @@ code for one commits that change itself.
   written through it loses its colour space. Writing PNG through Cairo is forbidden for the same
   reason as a second pass.
   Since S6 the encoder is `pixlay_imaging::encode`: PNG `iCCP`, JPEG `APP2` ICC + the `SOF0`
-  sampling factors, which are 4:4:4 since S12c — each written while the pixels go out, never by
-  a second pass over the finished file. The third format, TIFF, the `--chroma` request and every
-  resolution (PNG `pHYs`, the JFIF density, the `--dpi` flag, the `canvas` field) left with the
-  same two rulings. The ICC rule and the per-format field list are in `docs/CONTRACT.md` §5.
+  sampling factors, which are 4:4:4 — each written while the pixels go out, never by
+  a second pass over the finished file, and the third format and every resolution stay unwritten
+  (no TIFF, no PNG `pHYs`, no JFIF density, no `--dpi`, no `canvas` field).
+  The ICC rule and the per-format field list are in `docs/CONTRACT.md` §5.
 - **The evaluation order is frozen** and must not be reordered:
   `decode + color normalization → geometry (crop / arbitrary rotation) → per-slot
   compositing → canvas decoration → output transform`
@@ -540,7 +519,7 @@ not repeated here.*
 
 **Every rule a test can enforce lives only in the tests; this file does not restate it.**
 
-## Open / to be proven
+## Settled questions (the number beside each one closed it)
 
 - A0@300dpi on Cairo (9933×14043, 139.5 MP) has been **re-measured and passes** (S0, 2026-09-20; the
   formal criterion is the in-repo probe, not a one-off script): 185 ms for 2 slots and 551 ms for
