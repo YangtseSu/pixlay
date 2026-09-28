@@ -11,14 +11,12 @@
 //! **file names**, which the desktop file, the
 //! metainfo and the MIME registration all spell out and the meson files install.
 //!
-//! All three are text, so all three are checked here — offline, without `makepkg`, and
-//! without the validators, which `meson test` runs wherever they are installed
-//! (`data/meson.build`). What this file reads is the repository as committed: the
-//! templates the install generates its files from, and the three `meson.build` files
-//! that name every installed path. **Not the PKGBUILD**: since 2026-09-28 (human) it is
-//! maintained in the AUR and not in this tree, so its `pkgver` is the release step's to
-//! keep equal to the manifest rather than a test's to check (`AGENTS.md`, "AUR
-//! discipline").
+//! All three are text, so all three are checked here — offline, and without the
+//! validators, which `meson test` runs wherever they are installed (`data/meson.build`).
+//! What this file reads is the repository as committed: the templates the install
+//! generates its files from, and the three `meson.build` files that name every installed
+//! path. It reads no package recipe, because none lives in this tree
+//! (`AGENTS.md`, "Distribution").
 //!
 //! It lives in `pixlay-core`, the crate with no GTK, because the identity it holds
 //! together must be checkable without a display: measured 2026-09-27, the CI step that
@@ -261,7 +259,7 @@ fn the_package_ships_the_identity_the_code_declares() {
     // --- the changelog -----------------------------------------------------
     // The release's own notes. Its newest section is the workspace's version, so a
     // version bump that forgets its section fails here rather than at the tag — and the
-    // bump and the tag are the same day's work (`AGENTS.md`, "AUR discipline").
+    // bump and the tag are the same day's work (`AGENTS.md`, "Distribution").
     let (version, date) = newest_release(&read("CHANGELOG.md"));
     assert_eq!(
         version,
@@ -353,12 +351,10 @@ fn the_package_ships_the_identity_the_code_declares() {
     );
 
     // --- the install definition --------------------------------------------
-    // What the package installs is the project's own install definition (S31):
+    // What the install writes is the project's own install definition (S31):
     // `meson.build` and the two files under it name every installed path, so the
     // identity is checked where it can drift silently: the meson files against the
-    // data files' own names. The PKGBUILD around them is not read here — it is
-    // maintained in the AUR and not in this tree (ruled 2026-09-28, human), so its
-    // `pkgver`, its `depends` and its `check()`-less build are the AUR's to keep.
+    // data files' own names.
     let meson = read("meson.build");
     let crates_meson = read("crates/meson.build");
     let data_meson = read("data/meson.build");
@@ -374,16 +370,12 @@ fn the_package_ships_the_identity_the_code_declares() {
         meson.contains(&format!("license: '{}'", env!("CARGO_PKG_LICENSE"))),
         "and the manifest's SPDX license",
     );
-    // Every runtime dependency the package names is one meson has to find by name,
-    // with the version the bindings need (`AGENTS.md`, the dependency registry).
-    for (package, pc) in [
-        ("gtk4", "gtk4"),
-        ("libadwaita", "libadwaita-1"),
-        ("glycin", "glycin-2"),
-    ] {
+    // Every system library the workspace links is one meson has to find by name,
+    // with the version floor the bindings need (`AGENTS.md`, the dependency registry).
+    for pc in ["gtk4", "libadwaita-1", "glycin-2"] {
         assert!(
             meson.contains(&format!("dependency('{pc}'")),
-            "meson.build declares {pc}, which is what depends=('{package}') links",
+            "meson.build declares {pc}",
         );
     }
     // The two binaries: `crates/meson.build` copies what the workspace builds into the
@@ -440,11 +432,6 @@ fn the_package_ships_the_identity_the_code_declares() {
     assert_eq!(
         manifest_value("crates/pixlay-cli/Cargo.toml", "[[bin]]", "name"),
         "pixlay-render",
-        "the second binary the package installs is the CLI's own name",
+        "the second binary the install ships is the CLI's own name",
     );
-
-    // The package built around this install — the vendored registry, the PKGBUILD's
-    // own `depends` / `makedepends`, and its `check()`-less build — left the tree with
-    // the PKGBUILD: it is maintained in the AUR and not here (ruled 2026-09-28, human),
-    // so no test reads it any more.
 }

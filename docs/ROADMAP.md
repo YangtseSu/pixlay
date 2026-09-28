@@ -126,7 +126,7 @@ so that the same layouts can be used by other software of the same kind.
 
 **Status: not scheduled.** *Proposed.* A directory of artifacts — the format above — scanned by both the
 CLI and the GUI, listed beside the shipped library, and delimited by a namespace so a pack can never
-shadow a shipped name. Packs are the vehicle the format travels in: an AUR package of layouts, a friend's
+shadow a shipped name. Packs are the vehicle the format travels in: a package of layouts, a friend's
 handful of grids, a generated family. They are also what makes a band with a *count* filter insufficient,
 which is the point at which categories or a search would have to be considered.
 

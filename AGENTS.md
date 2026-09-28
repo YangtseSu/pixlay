@@ -9,7 +9,7 @@ in pixels — physical size and DPI left with S12d, TIFF and the JPEG chroma req
 colour grading, no text layer, no watermark and no date stamp — S4's per-slot grade and one-click filter
 and S5's canvas-level text layers were built and then removed, because none of them is on the main path
 and the text layer was the one feature whose pixels depended on the host's installed fonts.
-GPL-3.0-or-later · Rust · GTK4 + libadwaita shell · Cairo canvas · target platform Arch/AUR.
+GPL-3.0-or-later · Rust · GTK4 + libadwaita shell · Cairo canvas · target platform Arch.
 
 **Scope criterion: the shortest main path.** "Open → add photos → pick a layout → adjust → export" must
 take under three minutes. Before adding any feature, ask: does it make the main path longer? If so, cut it.
@@ -77,8 +77,8 @@ one selection, which is also why the packaging identity test lives in `pixlay-co
 packaging half, which is `packaging.yml`'s and **runs on demand** (ruled 2026-09-27, human: the push job
 was paying a release build of the whole workspace, the shell included, for changes that touch no
 packaging file). `packaging.yml` is the **complete build** — `meson setup` / `meson compile` (both
-binaries, the shell included), `meson test` and `meson install` into a staging root, which is the
-definition `makepkg` wraps — and `docs/steps/S33-ci-skips-the-gui-suite-done.md` is where every failure
+binaries, the shell included), `meson test` and `meson install` into a staging root — and
+`docs/steps/S33-ci-skips-the-gui-suite-done.md` is where every failure
 is recorded. Both jobs cache their own build tree (`target/` and the build directory's own), and the
 measurement that made the cache the lever is the pre-split job's (2026-09-27): **902 s** cold against
 **255 s** warm — a fresh checkout recompiles this workspace's five crates (the test build 9.96 s against
@@ -112,8 +112,8 @@ Measurement rules that go with it:
 ## Language conventions
 
 - **Everything machine- or upstream-facing is English**: commit messages, code comments (inline and
-  doc), identifiers, test names, logs and error messages, configuration keys, the PKGBUILD's
-  `pkgdesc` — every text aimed at machines or upstream maintainers.
+  doc), identifiers, test names, logs and error messages, configuration keys — every text aimed at
+  machines or upstream maintainers.
   *Rationale: comments and error messages are text that talks to upstream crates, issues and
   patches; mixing languages means translating them again every time.*
 - **All repository documents are English**: `AGENTS.md`, everything under `docs/`, and any file
@@ -158,7 +158,7 @@ Measurement rules that go with it:
   shipped data runs all three of them; a change the product cannot see — docs, `.gitignore`, the
   repository layout — runs the one command that reads what changed, and a step's own verification
   command is that command when the step names one. If it is red, do not commit.
-- Never committed: `target/` (see `.gitignore`). Committed: `Cargo.lock` (AUR discipline).
+- Never committed: `target/` (see `.gitignore`). Committed: `Cargo.lock`.
 - **"Done" means the step's `**Progress**` line is rewritten and committed** (see "Session and persistence
   discipline"), not that the code is written and the tests are green.
 
@@ -258,14 +258,14 @@ versions**. Everything follows the latest stable release.
   2026-09-27, human): the suite needs a display, a compositor and the libraries the product targets, and a
   runner could not give it all three, so CI runs the entry's commands minus that suite and every failure is
   recorded in `docs/steps/S33-ci-skips-the-gui-suite-done.md`. The **complete build** with the project's own
-  definition (`meson setup` / `meson compile` / `meson test` / `meson install` into a staging root, the same
-  steps `makepkg` wraps) is a workflow of its own, `packaging.yml`, and it **runs on demand**
+  definition (`meson setup` / `meson compile` / `meson test` / `meson install` into a staging root) is a
+  workflow of its own, `packaging.yml`, and it **runs on demand**
   (`workflow_dispatch`, ruled 2026-09-27, human) rather than on every push: it costs a release build of the
   whole workspace, the shell included, and the push job was paying it for changes that touch no packaging
   file — while the answer the push job has to give is "does the windowless half run". So the split is: push
   CI answers the fast half (format, lint, the windowless crates' tests, the entry's render), `packaging.yml`
-  answers "does the tree build and install", and the GUI suite and the Arch package stay the machine's,
-  through `cargo test` and `makepkg` (below). The identity and the version chain are checked in the push job,
+  answers "does the tree build and install", and the GUI suite stays the machine's, through `cargo test`.
+  The identity and the version chain are checked in the push job,
   by `crates/pixlay-core/tests/packaging.rs` — text files only, no display — which is why `APP_ID` and
   `DOMAIN` live in that crate: run from the shell's, cargo built the GTK stack a second time under a
   different feature resolution, **199 s of the 902 s run** (measured 2026-09-27), to read two strings.
@@ -565,58 +565,35 @@ not repeated here.*
   of that size shows the same pixel proportionally larger, and it is the same renderer's
   (`docs/archive/2026-09-22-STEPS.md`, `S13 · Ruling`).
 
-## AUR discipline
+## Distribution
 
-- Commit `Cargo.lock`; keep dependencies minimal; `cargo vendor` must pass
+- `Cargo.lock` is committed and the dependency set stays minimal; `cargo vendor` passes, so the
+  workspace builds with the network closed
 - **The build and the install are the project's own** (S31): `meson.build` runs cargo over the workspace
   (`--locked`, offline against the vendored registry) and installs everything the desktop reads — both
   binaries, the desktop entry and the metainfo generated from their templates with `msgfmt`, the two icons,
   the `.pixlay` MIME registration and the catalogs `po/LINGUAS` lists (`docs/CONTRACT.md` §10). GNOME's
   applications are built this way and this is one, so a distribution other than Arch installs it with
   `meson setup build && meson compile -C build && meson install -C build` and nothing else
-- **The PKGBUILD is the AUR's, not this repository's** (ruled 2026-09-28, human): `packaging/arch/` was
-  deleted, and the package's `PKGBUILD` and `.SRCINFO` live in the AUR — `pixlay` on
-  `https://aur.archlinux.org/packages/pixlay`, a git repository of their own that a release updates. It
-  wraps the install above and adds what is Arch's: `source=` is the
-  release tag's tarball built from `pkgver` (a release pushes `vX.Y.Z`, fills `sha256sums` with
-  `updpkgsums` and writes `.SRCINFO`), the registry is vendored (`CARGO_NET_OFFLINE=true` for the cargo
-  meson starts), `depends=('gtk4' 'libadwaita' 'glycin')` (the decoding backend of "Open / to be proven"
-  is a linked library, so it is a runtime dependency), `makedepends` names `cargo`, `rust`, `meson` and
-  `gettext`, and the license goes to `/usr/share/licenses/$pkgname/` — Arch's path, not the prefix's.
-  **The version chain is four links, not five, from that ruling**: `Cargo.toml`, `meson.build`'s
-  `project()`, the metainfo's `<release>` and `CHANGELOG.md`'s newest section are held equal by
-  `crates/pixlay-core/tests/packaging.rs`; the AUR's `pkgver` is outside the tree and the release sets it
-  by hand, so nothing fails when the two drift apart
-- **A release is a tag plus four steps** (ruled 2026-09-27, human). **The release's notes are
-  `CHANGELOG.md`'s section for that version, written before the tag is pushed** —
-  `crates/pixlay-core/tests/packaging.rs` holds that section's version to `Cargo.toml`'s, so a bump without
-  one fails the suite. Push `vX.Y.Z` — the tag has to equal
-  `meson.build`'s `project(version:)`, which the workflow checks — and `release.yml` builds the tree with
-  the project's own build and attaches the **Linux binaries** (`pixlay-<version>-linux-amd64.tar.gz` and
-  `pixlay-<version>-linux-arm64.tar.gz`, each with its `.sha256`) to that tag's GitHub Release. Then, on
-  the machine, in the AUR's own checkout (the PKGBUILD is no longer in this tree, ruled 2026-09-28):
-  **update `pkgver` and `sha256sums`**
-  (`updpkgsums`, so the sums stop being `SKIP` — and when the tag was re-pointed, delete the cached
-  `*.tar.gz` in that checkout first: `updpkgsums` reads the file already in `SRCDEST` and would print the
-  old tag's sum, measured 2026-09-27); **build the package** (`makepkg` there, which
-  leaves `x86_64.pkg.tar.zst` beside the PKGBUILD); **upload it to the same release** (`gh release upload
-  <tag> --clobber …`), so the release carries the binaries and the package together; and **prune that
-  checkout** — `{src,pkg}`, its `.pkg.tar.zst`, the `*.tar.gz` `makepkg`
-  downloaded — so it holds the current version only. `arch=('x86_64' 'aarch64')` is the
-  statement that the tree builds under Arch Linux ARM too, and that half of the **package** is built
-  there, because no GitHub runner has an aarch64 Arch userland; the arm64 **binaries** come from the arm64
-  runner (`ubuntu-26.04-arm`), beside the amd64 ones. **The AUR push stays a human step** — it wants the
-  AUR account's own key — and the AUR carries the PKGBUILD and `.SRCINFO` and nothing else
-- **No tests run in a package build** (ruled 2026-09-26, human): `makepkg`'s standard is that it builds and
-  packages, the suite is the verification entry's (and CI's), and the two artifact validators
-  (`desktop-file-validate`, `appstreamcli validate --no-net`) run in `meson test` wherever they are
-  installed (`data/meson.build`, `required: false`)
-- **CI runs the verification entry and does not build the package** (same ruling): `makepkg`, the PKGBUILD
-  and the install are verified on a machine, where a package can be built *and installed*; the runner's
-  job is to answer whether the program runs. The push job runs the fast half of the entry; the complete
-  build and install is `packaging.yml`, **on demand** (2026-09-27). `release.yml` builds the **binaries**
-  for a tag and attaches them to the release — its build is the same `meson setup` / `meson compile` the
-  package wraps, and it runs no `makepkg` either
+- **This repository is the software, not a distribution of it** (ruled 2026-09-28, human): no package
+  recipe lives in this tree — the packaging is maintained where the packages are published — so nothing
+  here fails when a package's metadata drifts from the code. **The version chain is four links**:
+  `Cargo.toml`, `meson.build`'s `project()`, the metainfo's `<release>` and `CHANGELOG.md`'s newest
+  section, held equal by `crates/pixlay-core/tests/packaging.rs`
+- **A release is a tag, its notes and the binaries built from it** (ruled 2026-09-27, human). **The
+  release's notes are `CHANGELOG.md`'s section for that version, written before the tag is pushed** —
+  `crates/pixlay-core/tests/packaging.rs` holds that section's version to `Cargo.toml`'s, so a bump
+  without one fails the suite. Push `vX.Y.Z` — the tag has to equal `meson.build`'s
+  `project(version:)`, which the workflow checks — and `release.yml` builds the tree with the project's
+  own build and attaches the **Linux binaries** (`pixlay-<version>-linux-amd64.tar.gz` and
+  `pixlay-<version>-linux-arm64.tar.gz`, each with its `.sha256`) to that tag's GitHub Release
+- **The suite and the two artifact validators are the verification entry's and `meson test`'s** (ruled
+  2026-09-26, human): `desktop-file-validate` and `appstreamcli validate --no-net` run in `meson test`
+  wherever those tools are installed (`data/meson.build`, `required: false`)
+- **CI runs the verification entry and does not make a distribution** (same ruling): the runner's job is
+  to answer whether the program runs, and the push job runs the fast half of the entry. The complete build
+  and install is `packaging.yml`, **on demand** (ruled 2026-09-27, human); `release.yml` builds the
+  **binaries** for a tag and attaches them to its release, with the same `meson setup` / `meson compile`
 - SPDX is `GPL-3.0-or-later` throughout (not `-only`)
 
 ## Dependency registry

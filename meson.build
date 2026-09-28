@@ -1,7 +1,6 @@
 # The project's own install definition (S31): `meson setup build && meson compile -C
 # build && meson install -C build` is how this application is built and installed on a
-# Linux system, and the PKGBUILD in the AUR only wraps that (`AGENTS.md`, "AUR
-# discipline").
+# Linux system (`AGENTS.md`, "Distribution").
 # GNOME's applications are built this way, and this is one.
 #
 # `'rust'` is the language meson has to know about — the compiler itself is cargo's

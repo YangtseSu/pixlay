@@ -1,7 +1,7 @@
 # Contributing to Pixlay
 
 What a checkout needs, how to build and test it, and where the project's rules live. Users install a
-release — the app, the AUR package and the prebuilt tarballs are described in [`README.md`](README.md).
+release — the app and the prebuilt tarballs are described in [`README.md`](README.md).
 
 ## What is where
 
@@ -24,11 +24,6 @@ Rust toolchain, meson, ninja and gettext. `meson setup` names anything that is m
     meson setup build --prefix=/usr
     meson compile -C build
     sudo meson install -C build
-
-The PKGBUILD that wraps exactly this is maintained in the AUR — `pixlay` on
-[aur.archlinux.org](https://aur.archlinux.org/packages/pixlay) — and not in this tree (ruled
-2026-09-28, human). Older revisions of this repository carried a copy under `packaging/arch/`;
-`makepkg -si` from an AUR checkout is the same build this section describes.
 
 ## The verification entry
 
@@ -89,7 +84,7 @@ so every window geometry the suite reads comes out 10 px smaller in each directi
 ## Where the rules are
 
 [`AGENTS.md`](AGENTS.md) is the project's rulebook — the hard constraints, the module boundaries, the
-step and session discipline, the version policy and the AUR discipline — and it is the authority when
+step and session discipline, the version policy and the distribution rules — and it is the authority when
 this file and it disagree.
 
 - [`docs/CONTRACT.md`](docs/CONTRACT.md) — the frozen shapes: the `CollageDoc` JSON, the invariants,
@@ -120,10 +115,9 @@ this file and it disagree.
   with gates — a human criterion, an irreversible contract, or a technology choice that could be
   overturned — so a gate's next action is a new session.
 
-Releasing is a tag plus four steps on the machine: the notes are the new `CHANGELOG.md` section,
-`vX.Y.Z` must equal `meson.build`'s `project(version:)`, `release.yml` attaches the Linux binaries,
-and then the AUR's `pkgver` / `sha256sums`, its `makepkg` run and the upload follow. The full procedure
-is in `AGENTS.md`, "AUR discipline".
+Releasing is a tag and its notes: the notes are the new `CHANGELOG.md` section, `vX.Y.Z` must equal
+`meson.build`'s `project(version:)`, and `release.yml` attaches the Linux binaries. The full procedure
+is in `AGENTS.md`, "Distribution".
 
 ## License
 

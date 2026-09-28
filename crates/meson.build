@@ -3,7 +3,7 @@
 #
 # The target directory is this build directory's own, so `meson compile` neither reads
 # nor writes the tree's `target/` — that one belongs to a developer's `cargo build`.
-# `--locked` is `Cargo.lock` (committed: the build is the lock file's, AUR discipline)
+# `--locked` is `Cargo.lock` (committed: the build is the lock file's)
 # and `--profile release` is the profile every number this project records is measured
 # in. Where cargo gets its registry from is the environment's business: a distribution
 # build points `CARGO_HOME` at its sources or vendors them, with

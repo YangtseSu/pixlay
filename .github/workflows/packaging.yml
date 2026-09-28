@@ -1,5 +1,5 @@
-# The packaging half of CI, on demand: the project's own build and install
-# (`AGENTS.md`, "AUR discipline"), which is what a release and the Arch package wrap. It is
+# The complete build and install, on demand: the project's own definition
+# (`AGENTS.md`, "Distribution"), the same one a release is built from. It is
 # a `workflow_dispatch` workflow and not part of the push job (ruled 2026-09-27, human):
 # it costs a release build of the whole workspace, the shell included, for a change that
 # touches no packaging file. Run it before a release, after touching `meson.build`, `data/`,
@@ -8,7 +8,7 @@
 # What it answers, and the only thing that does: `meson setup` / `meson compile` build both
 # binaries in the profile the release ships, `meson test` runs the two data-file validators,
 # and `meson install` into a staging root writes the paths `docs/CONTRACT.md` §10 promises.
-# The Arch package and the GUI suite stay the machine's.
+# The GUI suite stays the machine's.
 name: Packaging
 
 on:

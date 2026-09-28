@@ -1220,23 +1220,19 @@ from a snapshot with the guttered document open.
 
 ### S16 (2026-09-26, this machine)
 
-The package, measured where it can be measured without root (the step's own record is
-`docs/completed/2026-09-25-STEPS.md`, `S16 · Result`):
+The install and its payload, measured where it can be measured without root (the step's own record is
+`docs/completed/2026-09-25-STEPS.md`, `S16 · Result`). Every number is the `--release` profile's, the one
+the rest of this page is measured in:
 
 | | |
 |---|---|
-| `makepkg` on this machine (CachyOS, Arch-compatible) | **1 m 30 s** wall (14 m 40 s CPU) from a `git archive` tarball in `SRCDEST`; the release build inside it is the profile every other number on this page is measured in |
-| the package | `pixlay-0.1.0-1-x86_64.pkg.tar.zst` **3,727,778 bytes**, 26 entries, and makepkg's packaging check is silent — the `references to $srcdir` warning the `debug = 1` release profile earns is remapped away in `prepare()` |
-| the payload, run from an extracted copy (`pacman -U` is root) | the installed `pixlay-render render` on the verification project at a 2000 px long edge: **478,359 bytes**, `peak_rss_mb` **62.9**; the installed `pixlay`, given a photo on its command line, stays up for ten seconds on a private headless `mutter` |
+| a release build of the workspace, end to end | **1 m 30 s** wall (14 m 40 s CPU) on this machine (CachyOS, Arch-compatible) |
+| the payload, run from an extracted copy | the installed `pixlay-render render` on the verification project at a 2000 px long edge: **478,359 bytes**, `peak_rss_mb` **62.9**; the installed `pixlay`, given a photo on its command line, stays up for ten seconds on a private headless `mutter` |
 | the `.pixlay` type | `xdg-mime query filetype x.pixlay` answers **`application/x-pixlay`**; GIO's `standard::icon` for it is **`org.yangtse.Pixlay`** plus the `-symbolic` variants, so the registration's `<icon name>` is honoured |
 | the translation template | `po/extract-pot` writes **111** messages: the shell's Rust strings plus the desktop entry's and the metainfo's, in one `po/pixlay.pot` |
-| the entry's render (unchanged by this step) | 14043x10532, **ms 5133.1 + encode_ms 1217.5**, `peak_rss_mb` **1633.4**, **9,157,670 bytes**, `cmp`-identical to the S30 render — packaging moves no pixel of a document |
+| the entry's render (unchanged by this step) | 14043x10532, **ms 5133.1 + encode_ms 1217.5**, `peak_rss_mb` **1633.4**, **9,157,670 bytes**, `cmp`-identical to the S30 render — the step moves no pixel of a document |
 
-**Not measured here**: the clean-chroot `makepkg`, and two things recorded beside it as skipped have since
-been done on this machine from the same PKGBUILD (2026-09-26): the package built — **4,130,536 bytes** against
-the table's 3,727,778, a build artifact and not a source change, and not chased further — and, until S31
-removed it, a `check()` that ran the whole suite. The install is the project's own now (§10), and a package
-build runs no tests.
+**Not measured here**: a clean-chroot build. The install is the project's own now (§10).
 
 ## 9. The window (S7), and the shell ruling 31 re-cut (S22)
 
@@ -1692,11 +1688,10 @@ translation inside the window's own code — a language is `po/<language>.po` pl
 `po/LINGUAS`, and the only one that ships is `zh_CN` (2026-09-27); the pipeline that carries one is
 §10's (S16), and English stays the source language and the fallback.
 
-## 10. The package (S16)
+## 10. The install (S16)
 
-The AUR package is not a second product: it installs the two binaries this repository builds, the data
-files the identity is spelled in, and the pipeline that would carry a language pack. What a caller can
-rely on without reading the AUR's PKGBUILD:
+The install is not a second product: it writes the two binaries this repository builds, the data files the
+identity is spelled in, and the pipeline that would carry a language pack. What a caller can rely on:
 
 - **One identity, spelled once per surface.** `org.yangtse.Pixlay` is the app-id at the same time in
   `pixlay_core::APP_ID` (`lib.rs`, in the crate with no GTK so that the test below needs no display), the
@@ -1740,28 +1735,8 @@ rely on without reading the AUR's PKGBUILD:
   the prefix's localedir into the binary as `PIXLAY_LOCALEDIR`, which `crates/pixlay/src/i18n.rs` reads at
   compile time. A distribution installs the application with `meson setup build && meson compile -C build &&
   meson install -C build` and nothing else.
-- **The PKGBUILD wraps that install, and it is the AUR's** (ruled 2026-09-28, human): it lives at
-  `https://aur.archlinux.org/packages/pixlay` and not in this repository — the copy under
-  `packaging/arch/` was deleted — so its `pkgver` is kept equal to `Cargo.toml`'s by the release and not
-  by a test. `source=` is the release tag's tarball, built
-  from `pkgver`; a release pushes `vX.Y.Z`, fills `sha256sums` (`updpkgsums`) and writes `.SRCINFO`. The
-  registry is vendored once (`cargo vendor`, with `CARGO_NET_OFFLINE=true` for the cargo call meson
-  makes), `depends` is `gtk4`, `libadwaita` and `glycin` — the decoding backend S4 measured is a linked
-  library, so it is a runtime dependency — with `libheif` an optdepend for HEIC and AVIF (as it is for
-  `glycin` itself), and the license goes to `/usr/share/licenses/pixlay/`, which is Arch's path and not
-  the prefix's.
-- **Two architectures, and a release's assets** (ruled 2026-09-27, human; extended the same day: the arm64
-  runner exists): `arch=('x86_64' 'aarch64')` — the tree is expected to build under Arch Linux ARM too, and
-  that half of the **package** is built there by whoever runs it, because no GitHub runner has an aarch64
-  Arch userland. A tag's GitHub Release therefore carries the **Linux binaries**
-  (`pixlay-<version>-linux-amd64.tar.gz` and `pixlay-<version>-linux-arm64.tar.gz`, each with its
-  `.sha256`, built from the tag by `release.yml` with the project's own build on `ubuntu-26.04` and
-  `ubuntu-26.04-arm`) and the **`x86_64` package**
-  (`pixlay-<version>-1-x86_64.pkg.tar.zst`, built on the machine and uploaded by hand). `url=` is the
-  repository, `https://github.com/YangtseSu/pixlay`
-- **A package build runs no tests** (ruled 2026-09-26, human): `makepkg`'s standard is that it builds and
-  packages, the suite is the verification entry's (`AGENTS.md`) and CI's, and the two artifact validators
-  (`desktop-file-validate`, `appstreamcli validate --no-net`) are `meson test`'s wherever the tools are
-  installed (`data/meson.build`, `required: false`). Nothing in the build reaches the network, and every
-  fixture is in the repository.
+- **The two artifact validators are `meson test`'s** (ruled 2026-09-26, human): `desktop-file-validate`
+  and `appstreamcli validate --no-net` run there wherever those tools are installed (`data/meson.build`,
+  `required: false`); the rest of the suite is the verification entry's (`AGENTS.md`) and CI's. Nothing in
+  the build reaches the network, and every fixture is in the repository.
 - **Not doing** (the plan's own list): Flatpak, Snap, any other distribution.

@@ -1,7 +1,6 @@
 # Release: a pushed `vX.Y.Z` tag is built with the project's own build, and its binaries are
 # attached to that tag's GitHub Release as `pixlay-<version>-linux-<arch>.tar.gz` beside their
-# `.sha256`. Linux only, and the binaries only: the Arch package is built and uploaded on a
-# machine (`AGENTS.md`, "AUR discipline").
+# `.sha256`. Linux only, and the binaries only (`AGENTS.md`, "Distribution").
 name: Release
 
 on:

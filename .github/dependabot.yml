@@ -14,7 +14,7 @@ version: 2
 updates:
   - package-ecosystem: "cargo"
     # The workspace root: `/` covers every member's manifest and the committed
-    # `Cargo.lock` (AUR discipline keeps it in the tree).
+    # `Cargo.lock`.
     directory: "/"
     schedule:
       interval: "daily"
