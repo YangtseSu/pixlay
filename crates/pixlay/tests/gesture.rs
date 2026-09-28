@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! S12's GUI criteria, driven through the window the way a pointer and a wheel
 //! drive it.
 //!

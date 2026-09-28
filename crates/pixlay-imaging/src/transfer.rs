@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! sRGB ↔ linear conversion tables, and the 16-bit buffers the pipeline uses.
 //!
 //! The project's rule is `sRGB → linear → process → sRGB`, with 16-bit

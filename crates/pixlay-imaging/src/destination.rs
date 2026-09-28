@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The export destination: the one file an export may not be.
 //!
 //! `AGENTS.md`'s first hard constraint is that a source image is read-only — every

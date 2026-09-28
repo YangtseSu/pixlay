@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Typed errors for the image pipeline.
 //!
 //! English identifiers, no localization and no panics (project language rules):

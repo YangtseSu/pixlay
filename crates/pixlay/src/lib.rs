@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! GTK4 and libadwaita shell and interaction.
 //!
 //! Boundary (`AGENTS.md`, "Module boundaries"): the only crate allowed to depend

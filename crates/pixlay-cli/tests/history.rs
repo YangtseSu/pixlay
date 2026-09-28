@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! S6.5 through the real pipeline: decode, resample, `draw`.
 //!
 //! `pixlay-render/tests/history.rs` measures the same criterion at `draw`'s own

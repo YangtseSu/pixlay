@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! S3 at the pixel boundary: the framing a document stores is a *request*, and
 //! what `draw` paints is its fit.
 //!

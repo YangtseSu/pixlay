@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
 # Pixlay Whole-Project Code Review — 2026-09-24
 
 > **Closed 2026-09-25.** Every finding below was answered by the S15 series (S15b … S15i, plus S15j for

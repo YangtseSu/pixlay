@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # The catalogs: `LINGUAS` lists the languages, and one `msgfmt --check` per language
 # compiles `po/<language>.po` into the catalog the shell binds its domain from.
 #

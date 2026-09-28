@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # The languages this project ships translations for, one per line, as
 # `po/<language>.po` and `<language>` in a locale directory (the convention
 # `msgfmt --desktop -d po` and `msgfmt --xml -d po` read too, so the desktop

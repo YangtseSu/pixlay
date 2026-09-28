@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The sketch renderer: one template's geometry as ink on paper.
 //!
 //! A template carries geometry and no style, so a drawing of its cells' outlines

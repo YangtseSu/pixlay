@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+
+# SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """Regenerates the fixture photos and the fixture projects.
 
 Committed alongside its output so the fixtures are reproducible: the repo must

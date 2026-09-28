@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Regenerates `crates/pixlay-core/src/templates/frozen.rs`.
 //!
 //! A committed bin, not a `build.rs` (`docs/CONTRACT.md` §3): the frozen

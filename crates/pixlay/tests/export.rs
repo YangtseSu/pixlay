@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! S15c and S25: the export surface, and the two things it refuses to do — write over
 //! one of the document's own photos, and write bytes under a name that lies about them.
 //!

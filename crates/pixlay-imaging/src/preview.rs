@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The preview's caches, and the grid a live gesture draws at.
 //!
 //! A gesture step is the most latency-sensitive work this product does: a wheel

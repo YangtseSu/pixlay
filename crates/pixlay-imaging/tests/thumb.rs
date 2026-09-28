@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! S9's preview criteria: a thumbnail is the pipeline's picture of a photo, at an
 //! exact long edge.
 //!

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # The complete build and install, on demand: the project's own definition
 # (`AGENTS.md`, "Distribution"), the same one a release is built from. It is
 # a `workflow_dispatch` workflow and not part of the push job (ruled 2026-09-27, human):

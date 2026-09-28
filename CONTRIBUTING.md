@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
 # Contributing to Pixlay
 
 What a checkout needs, how to build and test it, and where the project's rules live. Users install a
@@ -121,4 +127,6 @@ is in `AGENTS.md`, "Distribution".
 
 ## License
 
-GPL-3.0-or-later — see [`LICENSE`](LICENSE). Contributions are under the same license.
+GPL-3.0-or-later — the text is [`LICENSES/GPL-3.0-or-later.txt`](LICENSES/GPL-3.0-or-later.txt)
+([`LICENSE`](LICENSE) is the same text). Contributions are under the same license, every file carries
+its own SPDX tags ([REUSE](https://reuse.software/)-compliant); keep them in place when you edit one.

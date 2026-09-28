@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! S12b's drift criterion: the preview-grade source is still the export's renderer.
 //!
 //! The reduction gave the preview a *second* source of pixels, and a second source

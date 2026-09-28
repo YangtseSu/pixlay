@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! S23's exit criteria: two cells exchange whole — photo *and* framing — by drag, by
 //! `Shift`+click and from the keyboard, each one undo step, and a plain drag still pans
 //! the photo.

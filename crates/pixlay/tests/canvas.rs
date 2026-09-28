@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! What the window draws is what the CLI writes.
 //!
 //! The step's criterion: "what the window renders is pixel-identical to

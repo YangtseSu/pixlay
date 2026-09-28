@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! S23b's exit criteria: what the canvas takes from outside — a drop that lands where
 //! it is aimed, and the clipboard (`Ctrl+C` / `Ctrl+X` / `Ctrl+V`) on the selected
 //! cell's photo.

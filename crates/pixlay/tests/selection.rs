@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The selected cell is obvious: the canvas draws it in the theme's accent (S24).
 //!
 //! Finding 6 of the human's pass of 2026-09-25 was "the selected cell is not

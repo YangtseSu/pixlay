@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! S7's machine-checkable GNOME HIG subset, and the interface's language.
 //!
 //! One test: GTK lives on one thread (see `support`). What is checked here is the

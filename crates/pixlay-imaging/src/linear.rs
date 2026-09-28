@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! 16-bit linear buffers: the pipeline's intermediate representation.
 //!
 //! Two shapes, in the order the frozen evaluation order uses them

@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
 # Pixlay
 
 [![Vibe Coded](https://img.shields.io/badge/vibe--coded-%F0%9F%A4%96-8A2BE2)](#how-this-was-built)
@@ -121,4 +127,6 @@ glance at an image.
 
 ## License
 
-GPL-3.0-or-later — see [`LICENSE`](LICENSE).
+GPL-3.0-or-later — the text is [`LICENSES/GPL-3.0-or-later.txt`](LICENSES/GPL-3.0-or-later.txt)
+([`LICENSE`](LICENSE) is the same text), and every file carries its own SPDX tags, so the tree is
+[REUSE](https://reuse.software/)-compliant.

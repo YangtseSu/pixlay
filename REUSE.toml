@@ -1,0 +1,49 @@
+# REUSE annotations: the files that cannot carry the two tags themselves
+# (`AGENTS.md`, "Distribution"). A binary has nowhere to put a comment, and the two
+# icons must not have one — gdk-pixbuf recognises an SVG only when `<svg` starts
+# inside the file's first 256 bytes, which is why both are comment-free
+# (`crates/pixlay-core/tests/packaging.rs` holds that window to them). Every other
+# file in this tree carries `SPDX-FileCopyrightText` and `SPDX-License-Identifier`
+# in its own header, and `reuse lint` (reuse-tool 6.2.0, REUSE specification 3.3) is
+# the check.
+#
+# SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+version = 1
+
+[[annotations]]
+# The fixture photos and the golden render: pixels.
+path = [
+  "crates/pixlay-cli/tests/fixtures/photos/*",
+  "crates/pixlay-render/tests/golden/*.png",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Yangtse Su <yangtsesu@gmail.com>"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+[[annotations]]
+# The two icons: a comment above `<svg` moves that element out of the 256-byte
+# window gdk-pixbuf sniffs an SVG in (measured 2026-09-27), so the tag cannot live
+# in the file. The drawing's own rationale is in `docs/HIG-REVIEW.md` §1.
+path = ["data/icons/**/*.svg"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Yangtse Su <yangtsesu@gmail.com>"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+[[annotations]]
+# Generated files: cargo rewrites `Cargo.lock` and `xgettext` rewrites
+# `po/pixlay.pot` (`po/extract-pot`), so a header inside either is lost the next
+# time its generator runs.
+path = ["Cargo.lock", "po/pixlay.pot"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Yangtse Su <yangtsesu@gmail.com>"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+[[annotations]]
+# The project the windowless tests render (`AGENTS.md`, "Verification entry"): JSON,
+# which has no comments (`docs/CONTRACT.md` §1).
+path = ["crates/pixlay-cli/tests/fixtures/verify.pixlay"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Yangtse Su <yangtsesu@gmail.com>"
+SPDX-License-Identifier = "GPL-3.0-or-later"

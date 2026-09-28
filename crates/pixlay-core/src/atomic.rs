@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Replacing a file the way a crash cannot damage it: a temporary file beside the
 //! target, one `rename`, and nothing at the target's own name until the content is
 //! complete and on the disk.

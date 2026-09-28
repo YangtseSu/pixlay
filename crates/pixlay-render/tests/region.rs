@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! A bitmap that holds only part of the photo renders exactly like the whole one.
 //!
 //! S4's buffer ladder hands `draw` the part of the photo a slot can show rather

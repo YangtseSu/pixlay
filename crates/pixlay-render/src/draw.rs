@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The single rendering path: `draw(doc, images, target)`.
 //!
 //! Preview and export are the same code with a different `scale` (and, for a

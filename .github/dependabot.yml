@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # Dependabot, and the shape this repository's version policy asks for: the target
 # is Arch (rolling), dependencies are latest-stable with no upper pin, so every
 # version update is one this tree wants (`AGENTS.md`, "Version policy"). Nothing

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The window: one document, its actions, and everything that connects them.
 //!
 //! This is the only place in the GUI that knows about the document. The canvas

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Resource measurement, on the definition the whole project shares: peak memory
 //! from `/proc/self/status` `VmHWM`, time from `CLOCK_MONOTONIC`.
 

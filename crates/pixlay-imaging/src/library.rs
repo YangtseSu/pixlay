@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Which files in a folder are photos: the one list, and the one walk.
 //!
 //! One answer, not one per surface: the CLI's `scan` (S9) walks a folder with

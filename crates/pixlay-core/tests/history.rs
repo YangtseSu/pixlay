@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! S6.5: the command history, as tests.
 //!
 //! Two properties, and they are the step's exit criteria in miniature: a sequence

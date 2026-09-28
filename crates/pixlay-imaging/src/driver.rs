@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The one thread that talks to the decoder.
 //!
 //! A glycin frame request only completes while a `MainContext` is being

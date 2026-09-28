@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
 # GNOME HIG conformance checklist
 
 The "GNOME HIG" section of `AGENTS.md` is a **hard constraint**, and this file is its execution checklist: it sorts

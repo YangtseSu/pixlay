@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The per-slot pipeline: what a slot's bitmap is, where it sits, and how big it
 //! is allowed to be.
 //!

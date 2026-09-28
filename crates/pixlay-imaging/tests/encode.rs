@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! S6's export criteria, one file at a time.
 //!
 //! Every criterion here is about what the *file* says, so the assertions read the

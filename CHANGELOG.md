@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
 # Changelog
 
 All notable changes to Pixlay are documented in this file. The format follows

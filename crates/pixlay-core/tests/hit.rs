@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! S6.5: point → slot hit testing, as tests.
 //!
 //! The promise is small and exact: a normalized canvas point falls in the slot

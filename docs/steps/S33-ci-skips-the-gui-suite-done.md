@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
 # S33 · CI runs no GUI suite
 
 **Progress**: done (2026-09-27) — `ci.yml` runs the entry's commands minus the GUI suite, and the failures

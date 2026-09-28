@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The app's one dialog: the document's frame above the app's export settings
 //! (S15, ruling 18; merged by S25b).
 //!

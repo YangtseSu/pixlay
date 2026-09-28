@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! S12b's preview-grade source: the photo, at fewer samples.
 //!
 //! The step's criteria that belong to this layer, each as a check rather than a

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! S15h: the canvas's keyboard model — the arrow keys choose a cell, the selection
 //! follows, and a screen reader is told which cell it is on (PIX-017's ruling of
 //! 2026-09-24).

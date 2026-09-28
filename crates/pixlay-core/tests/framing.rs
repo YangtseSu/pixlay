@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! S3 and S11: the framing clamp, as tests.
 //!
 //! The clamp promises one thing — after it, the photo covers the whole visible

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Headless render entry point: a thin shell over [`pixlay_cli::cli::run`], so
 //! the binary and the integration tests exercise exactly the same code.
 

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! S14's exit criteria, as one test: the layout band and the count control — with
 //! S21's sketch in place of the candidate renders.
 //!

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The sRGB profile every export carries.
 //!
 //! The pipeline produces sRGB (`docs/CONTRACT.md` §4.1) and an export is only

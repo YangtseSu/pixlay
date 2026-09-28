@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! S4's decode criteria: the file's orientation, its colour, its depth, its cap.
 //!
 //! Every image here is a committed fixture, so these tests need no network and no

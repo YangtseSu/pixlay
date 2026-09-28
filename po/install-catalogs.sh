@@ -1,4 +1,9 @@
 #!/bin/sh
+
+# SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # Installs the catalogs `po/meson.build` built: `$1` is the `localedir` option (relative
 # to the prefix, which is what `MESON_INSTALL_DESTDIR_PREFIX` already carries) and the
 # rest are the `.mo` files, each named after its language. Every one of them is the same

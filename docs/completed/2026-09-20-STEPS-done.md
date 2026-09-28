@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
 # Pixlay steps, done
 
 The closed steps' pages of the plan that began on **2026-09-20** (the commit that added

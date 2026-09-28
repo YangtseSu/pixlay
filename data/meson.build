@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # The data the desktop reads: the entry and the metainfo are their templates with the
 # catalogs merged in (`msgfmt --desktop` and `msgfmt --xml`, which is what
 # `i18n.merge_file` runs), the two icons, and the private `.pixlay` type. What this file

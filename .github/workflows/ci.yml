@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # CI: the verification entry, minus the GUI suite (`docs/steps/S33-ci-skips-the-gui-suite-done.md`)
 # and minus the packaging half, which is `packaging.yml`'s and runs on demand (ruled 2026-09-27,
 # human: the push job was paying a release build of the whole workspace, the shell included, for

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Background work for the canvas and the layout band.
 //!
 //! `pixlay-imaging` is synchronous and pure, and a decode is tens of milliseconds

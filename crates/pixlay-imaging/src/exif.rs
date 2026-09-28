@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The one EXIF field the product reads out of a photo: when it was taken.
 //!
 //! It was written for S5's `{date}` text layer, which S12c removed; what is left

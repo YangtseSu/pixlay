@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Normalized geometry primitives: points, rectangles and polygons.
 //!
 //! Every coordinate in `pixlay-core` lives in `[0, 1]` canvas space, with

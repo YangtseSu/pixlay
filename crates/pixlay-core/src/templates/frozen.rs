@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Frozen template geometry: the data a build ships.
 //!
 //! GENERATED FILE — do not edit by hand. Regenerate with:

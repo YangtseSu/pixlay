@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The layout band: every candidate layout of the current photo count, drawn as a
 //! sketch of its geometry, plus the count control that decides what that count is.
 //!

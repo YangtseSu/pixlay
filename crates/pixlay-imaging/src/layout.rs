@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The per-slot pipeline: one decoded photo to one bitmap the canvas can blit.
 //!
 //! This is where the frozen evaluation order is executed:

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Output encoding: pixels and metadata in one pass.
 //!
 //! A collage is exported as a picture, so the file has to say what colour space it

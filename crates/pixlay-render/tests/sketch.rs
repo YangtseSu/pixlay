@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! S21's rendering surface, as tests: a template drawn as ink on paper.
 //!
 //! No display and no decoder: these are the sketch alone, so they are the same on

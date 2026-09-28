@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! S15h: a background worker that cannot start, or that is gone, is a report and a
 //! cleared pending state — not a panic and not a wait that never ends (PIX-014).
 //!

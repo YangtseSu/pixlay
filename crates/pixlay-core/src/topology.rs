@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The global topology of a template's slots: no overlap, no interior hole.
 //!
 //! The library's own invariants (S2) say what a layout has to be — pairwise zero

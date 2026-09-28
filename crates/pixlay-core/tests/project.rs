@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! S6.5: writing a `.pixlay` — the atomic save, and what a copy does to the
 //! paths inside it.
 //!

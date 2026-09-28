@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! S4's resampling criteria: agreement with an independent implementation, and
 //! freedom from aliasing at a large reduction.
 //!

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The probes' own discriminating power.
 //!
 //! S1 requires that a criterion which cannot pass makes the test go red, and S3

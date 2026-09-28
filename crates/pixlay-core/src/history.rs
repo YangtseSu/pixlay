@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Command history: the document only ever changes through a named command.
 //!
 //! S6.5 (`docs/CONTRACT.md` §7). Two of the contract's decisions — one gesture is one

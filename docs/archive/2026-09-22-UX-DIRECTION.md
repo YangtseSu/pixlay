@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
 # Direction review (2026-09-22): the picker-first UX, and which codebase to build it on
 
 > **Superseded 2026-09-25.** The route this review argued for was removed by the human's ruling 31 of

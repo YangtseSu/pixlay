@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
 # Pixlay
 
 A Linux-native collage tool. **The editor is the whole application**: open it, add 1–9 photos (a tenth
@@ -597,7 +603,23 @@ not repeated here.*
   to answer whether the program runs, and the push job runs the fast half of the entry. The complete build
   and install is `packaging.yml`, **on demand** (ruled 2026-09-27, human); `release.yml` builds the
   **binaries** for a tag and attaches them to its release, with the same `meson setup` / `meson compile`
-- SPDX is `GPL-3.0-or-later` throughout (not `-only`)
+- **SPDX is `GPL-3.0-or-later` throughout** (not `-only`), and **the metadata is REUSE's**
+  (REUSE specification 3.3, checked with reuse-tool 6.2.0's `reuse lint`): the license text is
+  `LICENSES/GPL-3.0-or-later.txt`, the root `LICENSE` is the same text for the desktop's and
+  GitHub's sake, and **every file carries the two tags in its own header**:
+
+  ```text
+  SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+  SPDX-License-Identifier: GPL-3.0-or-later
+  ```
+
+  **Adding a file means adding both**, and a generated file takes its header from its generator
+  (`crates/pixlay-core`'s template emitter writes `frozen.rs`'s, so regenerating cannot lose it).
+  `REUSE.toml` annotates the files that cannot carry a header, each with its reason written there:
+  the binary fixtures, `Cargo.lock` and `po/pixlay.pot` (their generators rewrite them), the JSON
+  project fixture, and the two icons — which must stay comment-free, because gdk-pixbuf recognises
+  an SVG only when `<svg` starts inside the file's first 256 bytes
+  (`crates/pixlay-core/tests/packaging.rs`).
 
 ## Dependency registry
 

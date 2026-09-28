@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
 # S1 contract v1
 
 Frozen on 2026-09-20. This file is the reading copy for the **contract review**: every shape, every limit and every non-goal that was reviewed is in here.

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! S12's and S12b's preview criteria, without a window.
 //!
 //! The window's decoding thread and the CLI's `gesture` probe run the same

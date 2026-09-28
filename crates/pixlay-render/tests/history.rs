@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! S6.5 at the pixel boundary: what undo and redo do to the finished image.
 //!
 //! The criterion is pixel-identical, so this file renders. A document is put

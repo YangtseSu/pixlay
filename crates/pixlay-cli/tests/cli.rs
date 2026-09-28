@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The CLI contract, as tests: the machine surface is what every later step's
 //! verification loop depends on, so its promises are pinned here.
 //!

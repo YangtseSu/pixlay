@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! S15d: the pending edit and the document survive every boundary that can end a
 //! session (PIX-002, PIX-005, PIX-006, PIX-022).
 //!

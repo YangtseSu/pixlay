@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! S28's exit criterion through the window's own controls: a layout change keeps
 //! every photo it takes off the sheet.
 //!

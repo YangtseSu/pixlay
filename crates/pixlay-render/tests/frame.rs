@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! S11: the frame, as pixels.
 //!
 //! `AGENTS.md`: "looks right" is not a criterion. The frame's three fields each

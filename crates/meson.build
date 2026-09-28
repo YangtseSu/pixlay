@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # The workspace, built by cargo: the two binaries are the two `[[bin]]` targets the
 # workspace produces, and they are what this application installs.
 #

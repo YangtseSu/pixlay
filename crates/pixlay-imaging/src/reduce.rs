@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The preview-grade source: a decoded photo reduced to a size a preview shows.
 //!
 //! S12 measured the stutter's cause and its size (`docs/CONTRACT.md` §8, "S12"):

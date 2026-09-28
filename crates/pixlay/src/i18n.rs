@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! gettext wiring: the one place a user-visible string becomes a translated one.
 //!
 //! The mechanism is the contract's (`docs/CONTRACT.md` §9, "The window"): gettext,

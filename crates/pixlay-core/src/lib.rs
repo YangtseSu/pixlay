@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Document model, templates, geometry, framing transforms, command history.
 //!
 //! Boundary: this crate must not depend on gtk or cairo, and must stay testable

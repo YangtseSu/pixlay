@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The bitmaps the canvas is allowed to see.
 //!
 //! A bitmap handed to the renderer is already decoded, already resampled to the

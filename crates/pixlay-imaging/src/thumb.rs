@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Photo previews: a photo (or a rectangle of one) resampled to a preview size.
 //!
 //! A preview shows *the photo*: a `Contain` fit at rest and the photo's own pixels at

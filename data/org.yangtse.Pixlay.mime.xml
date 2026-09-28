@@ -1,4 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
+
+<!--
+SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
 <!-- The `.pixlay` project type (S16): the document `Save as…` writes and `Open…`
      reads is JSON (docs/CONTRACT.md §1), so the type is a private one
      subclassing application/json, with the app's own icon on it. Installed as

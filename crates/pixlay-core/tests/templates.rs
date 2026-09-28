@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The template library's invariants.
 //!
 //! `AGENTS.md` requires the geometry to hold: zero overlap between slots, no

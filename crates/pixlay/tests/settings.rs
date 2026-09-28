@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! S25: the app's settings — the surface, the file, and the export that follows them
 //! (rulings 36 and 39).
 //!

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 crates/pixlay/src/a11y.rs
 crates/pixlay/src/app.rs
 crates/pixlay/src/canvas.rs

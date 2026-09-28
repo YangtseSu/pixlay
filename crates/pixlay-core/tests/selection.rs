@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The selection policy: order, the 1–9 clamp, the count filter and the count rule.
 //!
 //! These are the rules the window, the layout stage (S14) and the CLI's

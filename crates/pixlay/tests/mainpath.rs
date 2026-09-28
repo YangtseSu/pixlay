@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The main path, walked by machine: open → Add photos… → pick a layout → adjust
 //! framing → export → save → reopen, plus the same path's second entry, the command
 //! line.

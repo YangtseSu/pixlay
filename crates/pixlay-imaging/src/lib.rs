@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Decoding, resampling, colour conversion, EXIF, preview copies and encoding.
 //!
 //! Boundary: no gtk, and no cairo either — a bitmap leaves this crate as a bare

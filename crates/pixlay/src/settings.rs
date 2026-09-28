@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The app's own settings, and the surface that edits them (S25, rulings 36 and 39).
 //!
 //! Ruling 36 moved the export's format and long edge out of the export's own dialog

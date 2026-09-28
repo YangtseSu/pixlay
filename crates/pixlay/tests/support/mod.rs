@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The shared harness of the GUI tests.
 //!
 //! **One test per binary, on purpose.** GTK is single-threaded, and libtest runs

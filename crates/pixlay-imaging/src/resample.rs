@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Lanczos3 resampling, in linear light, with the support scaled for downscaling.
 //!
 //! The pipeline resamples exactly once, and it resamples *from the source* — not

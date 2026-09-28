@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Export: the one size parameter, in the background, with progress.
 //!
 //! The pipeline is the CLI's, stage for stage — decode each slot in this

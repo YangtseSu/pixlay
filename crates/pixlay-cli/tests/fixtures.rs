@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! The committed fixtures, checked without a decoder.
 //!
 //! S1 committed six photos; S4 added the rest — a HEIC, a 12-bit-capable 16-bit
