@@ -9,7 +9,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 [![Vibe Coded](https://img.shields.io/badge/vibe--coded-%F0%9F%A4%96-8A2BE2)](#how-this-was-built)
 [![Release](https://img.shields.io/github/v/release/YangtseSu/pixlay?sort=semver&label=release)](https://github.com/YangtseSu/pixlay/releases/latest)
 [![CI](https://github.com/YangtseSu/pixlay/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/YangtseSu/pixlay/actions/workflows/ci.yml)
-[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSES/GPL-3.0-or-later.txt)
 [![GTK 4](https://img.shields.io/badge/GTK-4-7FE719?logo=gtk)](https://gtk.org)
 [![AUR](https://img.shields.io/aur/version/pixlay?label=AUR&logo=archlinux&logoColor=1793d1)](https://aur.archlinux.org/packages/pixlay)
 
@@ -127,6 +127,6 @@ glance at an image.
 
 ## License
 
-GPL-3.0-or-later — the text is [`LICENSES/GPL-3.0-or-later.txt`](LICENSES/GPL-3.0-or-later.txt)
-([`LICENSE`](LICENSE) is the same text), and every file carries its own SPDX tags, so the tree is
+GPL-3.0-or-later — the text is [`LICENSES/GPL-3.0-or-later.txt`](LICENSES/GPL-3.0-or-later.txt),
+and every file carries its own SPDX tags, so the tree is
 [REUSE](https://reuse.software/)-compliant.

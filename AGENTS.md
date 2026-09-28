@@ -615,11 +615,8 @@ not repeated here.*
   **binaries** for a tag and attaches them to its release, with the same `meson setup` / `meson compile`
 - **SPDX is `GPL-3.0-or-later` throughout** (not `-only`), and **the metadata is REUSE's**
   (REUSE specification 3.3; `reuse lint` is the entry's fourth command, reuse-tool 6.2.0): the license
-  text is `LICENSES/GPL-3.0-or-later.txt`, and the root `LICENSE` is **the same text copied there** —
-  GitHub reads that one, a distribution's recipe installs it (`install -Dm644 LICENSE …`), and a symlink
-  would flatten to a text file holding the path in a zip download — with
-  `crates/pixlay-core/tests/packaging.rs` holding the two byte for byte. **Every file carries the two
-  tags in its own header**:
+  text is `LICENSES/GPL-3.0-or-later.txt`, which is also the file a package recipe installs
+  (`docs/CONTRACT.md` §10). **Every file carries the two tags in its own header**:
 
   ```text
   SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>
