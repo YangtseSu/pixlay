@@ -1,5 +1,12 @@
 # Pixlay
 
+[![Vibe Coded](https://img.shields.io/badge/vibe--coded-%F0%9F%A4%96-8A2BE2)](#how-this-was-built)
+[![Release](https://img.shields.io/github/v/release/YangtseSu/pixlay?sort=semver&label=release)](https://github.com/YangtseSu/pixlay/releases/latest)
+[![CI](https://github.com/YangtseSu/pixlay/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/YangtseSu/pixlay/actions/workflows/ci.yml)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
+[![GTK 4](https://img.shields.io/badge/GTK-4-7FE719?logo=gtk)](https://gtk.org)
+[![AUR](https://img.shields.io/aur/version/pixlay?label=AUR&logo=archlinux&logoColor=1793d1)](https://aur.archlinux.org/packages/pixlay)
+
 Native Linux photo collage maker designed for GNOME.
 
 Pixlay is a Linux desktop application: a GTK4 + libadwaita window over a Cairo canvas, in Rust. The
@@ -96,6 +103,19 @@ Output never depends on the locale.
 Building from a checkout, the tests to run and the project's own rules are in
 [`CONTRIBUTING.md`](CONTRIBUTING.md); the release history is in [`CHANGELOG.md`](CHANGELOG.md).
 Issues and patches go to the [GitHub repository](https://github.com/YangtseSu/pixlay).
+
+## How this was built
+
+This repository is developed with an AI coding agent: the human sets the requirements and rules at
+each gate — the `(…, human)` ruling blocks under `docs/` are the record — and the code is written by
+the agent. Commit titles end with 🤖, the marker for AI-written or AI-modified content, which at this
+stage is everything. [`AGENTS.md`](AGENTS.md) holds the division of labour and the contracts the
+product is held to; [`docs/steps/`](docs/steps/) holds the work, one file per step.
+
+"Looks right" is not a criterion here. A change the product can see runs the verification entry
+before it is committed — `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
+`cargo test` — and a claim about pixels becomes a number through `pixlay-render probe` rather than a
+glance at an image.
 
 ## License
 
