@@ -574,12 +574,19 @@ not repeated here.*
   the `.pixlay` MIME registration and the catalogs `po/LINGUAS` lists (`docs/CONTRACT.md` §10). GNOME's
   applications are built this way and this is one, so a distribution other than Arch installs it with
   `meson setup build && meson compile -C build && meson install -C build` and nothing else
-- The PKGBUILD (`packaging/arch/PKGBUILD`) wraps that install and adds what is Arch's: `source=` is the
+- **The PKGBUILD is the AUR's, not this repository's** (ruled 2026-09-28, human): `packaging/arch/` was
+  deleted, and the package's `PKGBUILD` and `.SRCINFO` live in the AUR — `pixlay` on
+  `https://aur.archlinux.org/packages/pixlay`, a git repository of their own that a release updates. It
+  wraps the install above and adds what is Arch's: `source=` is the
   release tag's tarball built from `pkgver` (a release pushes `vX.Y.Z`, fills `sha256sums` with
   `updpkgsums` and writes `.SRCINFO`), the registry is vendored (`CARGO_NET_OFFLINE=true` for the cargo
   meson starts), `depends=('gtk4' 'libadwaita' 'glycin')` (the decoding backend of "Open / to be proven"
   is a linked library, so it is a runtime dependency), `makedepends` names `cargo`, `rust`, `meson` and
-  `gettext`, and the license goes to `/usr/share/licenses/$pkgname/` — Arch's path, not the prefix's
+  `gettext`, and the license goes to `/usr/share/licenses/$pkgname/` — Arch's path, not the prefix's.
+  **The version chain is four links, not five, from that ruling**: `Cargo.toml`, `meson.build`'s
+  `project()`, the metainfo's `<release>` and `CHANGELOG.md`'s newest section are held equal by
+  `crates/pixlay-core/tests/packaging.rs`; the AUR's `pkgver` is outside the tree and the release sets it
+  by hand, so nothing fails when the two drift apart
 - **A release is a tag plus four steps** (ruled 2026-09-27, human). **The release's notes are
   `CHANGELOG.md`'s section for that version, written before the tag is pushed** —
   `crates/pixlay-core/tests/packaging.rs` holds that section's version to `Cargo.toml`'s, so a bump without
@@ -587,18 +594,19 @@ not repeated here.*
   `meson.build`'s `project(version:)`, which the workflow checks — and `release.yml` builds the tree with
   the project's own build and attaches the **Linux binaries** (`pixlay-<version>-linux-amd64.tar.gz` and
   `pixlay-<version>-linux-arm64.tar.gz`, each with its `.sha256`) to that tag's GitHub Release. Then, on
-  the machine: **update `pkgver` and `sha256sums`**
+  the machine, in the AUR's own checkout (the PKGBUILD is no longer in this tree, ruled 2026-09-28):
+  **update `pkgver` and `sha256sums`**
   (`updpkgsums`, so the sums stop being `SKIP` — and when the tag was re-pointed, delete the cached
-  `packaging/arch/*.tar.gz` first: `updpkgsums` reads the file already in `SRCDEST` and would print the
-  old tag's sum, measured 2026-09-27); **build the package** (`makepkg` in `packaging/arch`, which
+  `*.tar.gz` in that checkout first: `updpkgsums` reads the file already in `SRCDEST` and would print the
+  old tag's sum, measured 2026-09-27); **build the package** (`makepkg` there, which
   leaves `x86_64.pkg.tar.zst` beside the PKGBUILD); **upload it to the same release** (`gh release upload
-  <tag> --clobber …`), so the release carries the binaries and the package together; and **delete the
-  previous version's files** — `packaging/arch/{src,pkg}`, its `.pkg.tar.zst`, the `*.tar.gz` `makepkg`
-  downloaded — so that directory holds the current version only. `arch=('x86_64' 'aarch64')` is the
+  <tag> --clobber …`), so the release carries the binaries and the package together; and **prune that
+  checkout** — `{src,pkg}`, its `.pkg.tar.zst`, the `*.tar.gz` `makepkg`
+  downloaded — so it holds the current version only. `arch=('x86_64' 'aarch64')` is the
   statement that the tree builds under Arch Linux ARM too, and that half of the **package** is built
   there, because no GitHub runner has an aarch64 Arch userland; the arm64 **binaries** come from the arm64
-  runner (`ubuntu-26.04-arm`), beside the amd64 ones. The AUR upload stays a human step: the PKGBUILD,
-  `.SRCINFO` and nothing else
+  runner (`ubuntu-26.04-arm`), beside the amd64 ones. **The AUR push stays a human step** — it wants the
+  AUR account's own key — and the AUR carries the PKGBUILD and `.SRCINFO` and nothing else
 - **No tests run in a package build** (ruled 2026-09-26, human): `makepkg`'s standard is that it builds and
   packages, the suite is the verification entry's (and CI's), and the two artifact validators
   (`desktop-file-validate`, `appstreamcli validate --no-net`) run in `meson test` wherever they are

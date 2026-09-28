@@ -6,7 +6,7 @@
 //! the icon and the metainfo — a package whose desktop file says a name its
 //! icon does not have shows a blank icon, and whose metainfo id differs is not
 //! the component the desktop file launches; the **version**, which lives in
-//! `Cargo.toml`, in the PKGBUILD's `pkgver`, in `meson.build`'s `project()`, in
+//! `Cargo.toml`, in `meson.build`'s `project()`, in
 //! the metainfo's `<release>` and in the newest section of `CHANGELOG.md`; and the
 //! **file names**, which the desktop file, the
 //! metainfo and the MIME registration all spell out and the meson files install.
@@ -14,9 +14,11 @@
 //! All three are text, so all three are checked here — offline, without `makepkg`, and
 //! without the validators, which `meson test` runs wherever they are installed
 //! (`data/meson.build`). What this file reads is the repository as committed: the
-//! templates the install generates its files from, the three `meson.build` files that
-//! name every installed path, and the PKGBUILD that wraps them (`AGENTS.md`'s AUR
-//! discipline: the install is the project's, and a package build runs no tests).
+//! templates the install generates its files from, and the three `meson.build` files
+//! that name every installed path. **Not the PKGBUILD**: since 2026-09-28 (human) it is
+//! maintained in the AUR and not in this tree, so its `pkgver` is the release step's to
+//! keep equal to the manifest rather than a test's to check (`AGENTS.md`, "AUR
+//! discipline").
 //!
 //! It lives in `pixlay-core`, the crate with no GTK, because the identity it holds
 //! together must be checkable without a display: measured 2026-09-27, the CI step that
@@ -179,34 +181,6 @@ fn newest_release(text: &str) -> (String, Option<String>) {
     panic!("CHANGELOG.md has a released version's heading, `## [x.y.z] - <date>`");
 }
 
-/// A bash assignment at the start of a line: `name=value` or `name=(a b c)`.
-///
-/// The PKGBUILD's lists are written one line each, and this is a read of that
-/// text rather than a shell: a list that grows a second line makes this return
-/// `None`, and the assertions below then fail with their own message instead of
-/// pretending the value was checked.
-fn assignment(pkgbuild: &str, name: &str) -> Option<String> {
-    for line in pkgbuild.lines() {
-        let Some(rest) = line.strip_prefix(&format!("{name}=")) else {
-            continue;
-        };
-        let value = rest
-            .strip_prefix('(')
-            .and_then(|rest| rest.strip_suffix(')'))
-            .unwrap_or(rest);
-        return Some(value.to_string());
-    }
-    None
-}
-
-/// Whether a bash list assignment carries `word` as one of its entries.
-fn lists(pkgbuild: &str, name: &str, word: &str) -> bool {
-    assignment(pkgbuild, name)
-        .unwrap_or_else(|| panic!("the PKGBUILD assigns {name} on one line"))
-        .split_whitespace()
-        .any(|entry| entry.trim_matches(['\'', '"']) == word)
-}
-
 #[test]
 fn the_package_ships_the_identity_the_code_declares() {
     let app = APP_ID;
@@ -214,7 +188,6 @@ fn the_package_ships_the_identity_the_code_declares() {
     let desktop = read(&format!("data/{app}.desktop.in"));
     let metainfo = without_comments(&read(&format!("data/{app}.metainfo.xml.in")));
     let mime = without_comments(&read(&format!("data/{app}.mime.xml")));
-    let pkgbuild = read("packaging/arch/PKGBUILD");
 
     // --- the desktop entry -------------------------------------------------
     // It is the template the package generates the installed file from, so
@@ -379,43 +352,13 @@ fn the_package_ships_the_identity_the_code_declares() {
         "the symbolic icon is drawn on the 16x16 grid",
     );
 
-    // --- the package -------------------------------------------------------
-    assert_eq!(
-        assignment(&pkgbuild, "pkgname").as_deref(),
-        Some(shell.as_str())
-    );
-    assert_eq!(
-        assignment(&pkgbuild, "pkgver").as_deref(),
-        Some(env!("CARGO_PKG_VERSION")),
-        "the package's version is the workspace's, or the installed binary reports another one",
-    );
-    let source = assignment(&pkgbuild, "source").expect("the PKGBUILD names its source");
-    assert!(
-        source.contains("refs/tags/v$pkgver.tar.gz"),
-        "the source is the release tag's tarball, built from pkgver: {source:?}",
-    );
-    assert!(
-        lists(&pkgbuild, "license", env!("CARGO_PKG_LICENSE")),
-        "the package's license is the manifest's SPDX ({})",
-        env!("CARGO_PKG_LICENSE"),
-    );
-    assert!(
-        !assignment(&pkgbuild, "arch")
-            .expect("arch is set")
-            .is_empty()
-    );
-    // The decoding backend S4 measured is a linked library, so it is a runtime
-    // dependency and not only a build one.
-    for dependency in ["gtk4", "libadwaita", "glycin"] {
-        assert!(
-            lists(&pkgbuild, "depends", dependency),
-            "{dependency} is a runtime dependency",
-        );
-    }
-    // And what the package installs is the project's own install definition (S31):
-    // `meson.build` and the two files under it name every installed path, and the
-    // PKGBUILD wraps them rather than repeating them. So the identity is checked where
-    // it can drift silently: the meson files against the data files' own names.
+    // --- the install definition --------------------------------------------
+    // What the package installs is the project's own install definition (S31):
+    // `meson.build` and the two files under it name every installed path, so the
+    // identity is checked where it can drift silently: the meson files against the
+    // data files' own names. The PKGBUILD around them is not read here — it is
+    // maintained in the AUR and not in this tree (ruled 2026-09-28, human), so its
+    // `pkgver`, its `depends` and its `check()`-less build are the AUR's to keep.
     let meson = read("meson.build");
     let crates_meson = read("crates/meson.build");
     let data_meson = read("data/meson.build");
@@ -500,32 +443,8 @@ fn the_package_ships_the_identity_the_code_declares() {
         "the second binary the package installs is the CLI's own name",
     );
 
-    // --- the PKGBUILD wraps that install, and tests nothing ----------------
-    // What a package has to get right is building and packaging (`AGENTS.md`, "AUR
-    // discipline"): the suite is the verification entry's, and the PKGBUILD names no
-    // `check()` at all.
-    assert!(
-        pkgbuild.contains("cargo vendor") && pkgbuild.contains("CARGO_NET_OFFLINE=true"),
-        "the build runs offline against the vendored registry",
-    );
-    for step in ["meson setup", "meson compile", "meson install"] {
-        assert!(
-            pkgbuild.contains(step),
-            "the PKGBUILD runs the project's own build and install: `{step}`",
-        );
-    }
-    assert!(
-        pkgbuild.contains("--destdir \"$pkgdir\""),
-        "and installs into the package root",
-    );
-    assert!(
-        !pkgbuild.contains("check()"),
-        "the PKGBUILD runs no tests: the suite is CI's and the entry's (ruled 2026-09-26)",
-    );
-    for dependency in ["cargo", "rust", "meson", "gettext"] {
-        assert!(
-            lists(&pkgbuild, "makedepends", dependency),
-            "{dependency} is a makedepend of the build meson drives",
-        );
-    }
+    // The package built around this install — the vendored registry, the PKGBUILD's
+    // own `depends` / `makedepends`, and its `check()`-less build — left the tree with
+    // the PKGBUILD: it is maintained in the AUR and not here (ruled 2026-09-28, human),
+    // so no test reads it any more.
 }

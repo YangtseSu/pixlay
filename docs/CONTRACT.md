@@ -1696,7 +1696,7 @@ translation inside the window's own code — a language is `po/<language>.po` pl
 
 The AUR package is not a second product: it installs the two binaries this repository builds, the data
 files the identity is spelled in, and the pipeline that would carry a language pack. What a caller can
-rely on without reading the PKGBUILD:
+rely on without reading the AUR's PKGBUILD:
 
 - **One identity, spelled once per surface.** `org.yangtse.Pixlay` is the app-id at the same time in
   `pixlay_core::APP_ID` (`lib.rs`, in the crate with no GTK so that the test below needs no display), the
@@ -1740,8 +1740,10 @@ rely on without reading the PKGBUILD:
   the prefix's localedir into the binary as `PIXLAY_LOCALEDIR`, which `crates/pixlay/src/i18n.rs` reads at
   compile time. A distribution installs the application with `meson setup build && meson compile -C build &&
   meson install -C build` and nothing else.
-- **The PKGBUILD wraps that install** (at `packaging/arch/PKGBUILD`, where a `makepkg` run's own work tree
-  and packages land beside it and `.gitignore` covers them): `source=` is the release tag's tarball, built
+- **The PKGBUILD wraps that install, and it is the AUR's** (ruled 2026-09-28, human): it lives at
+  `https://aur.archlinux.org/packages/pixlay` and not in this repository — the copy under
+  `packaging/arch/` was deleted — so its `pkgver` is kept equal to `Cargo.toml`'s by the release and not
+  by a test. `source=` is the release tag's tarball, built
   from `pkgver`; a release pushes `vX.Y.Z`, fills `sha256sums` (`updpkgsums`) and writes `.SRCINFO`. The
   registry is vendored once (`cargo vendor`, with `CARGO_NET_OFFLINE=true` for the cargo call meson
   makes), `depends` is `gtk4`, `libadwaita` and `glycin` — the decoding backend S4 measured is a linked

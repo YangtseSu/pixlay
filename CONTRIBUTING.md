@@ -1,7 +1,7 @@
 # Contributing to Pixlay
 
 What a checkout needs, how to build and test it, and where the project's rules live. Users install a
-release — the app, the PKGBUILD and the prebuilt tarballs are described in [`README.md`](README.md).
+release — the app, the AUR package and the prebuilt tarballs are described in [`README.md`](README.md).
 
 ## What is where
 
@@ -12,7 +12,7 @@ release — the app, the PKGBUILD and the prebuilt tarballs are described in [`R
 |`crates/pixlay-render`|The one `draw(doc, images, target)`, on Cairo|
 |`crates/pixlay-cli`|`pixlay-render`: the windowless entry point and the probe surface|
 |`crates/pixlay`|`pixlay`: the GTK4 + libadwaita shell|
-|`data/`, `po/`, `packaging/arch/`|The installed desktop files, the translation catalogs, the PKGBUILD|
+|`data/`, `po/`|The installed desktop files and the translation catalogs|
 |`docs/`|The contract, the HIG walk, the roadmap and the plan|
 |`meson.build`|The build and the install, the way GNOME's own applications have one|
 
@@ -25,10 +25,10 @@ Rust toolchain, meson, ninja and gettext. `meson setup` names anything that is m
     meson compile -C build
     sudo meson install -C build
 
-`packaging/arch/PKGBUILD` wraps exactly this, which is how Arch installs the app:
-
-    cd packaging/arch
-    makepkg -si
+The PKGBUILD that wraps exactly this is maintained in the AUR — `pixlay` on
+[aur.archlinux.org](https://aur.archlinux.org/packages/pixlay) — and not in this tree (ruled
+2026-09-28, human). Older revisions of this repository carried a copy under `packaging/arch/`;
+`makepkg -si` from an AUR checkout is the same build this section describes.
 
 ## The verification entry
 
@@ -122,7 +122,7 @@ this file and it disagree.
 
 Releasing is a tag plus four steps on the machine: the notes are the new `CHANGELOG.md` section,
 `vX.Y.Z` must equal `meson.build`'s `project(version:)`, `release.yml` attaches the Linux binaries,
-and then the PKGBUILD's `pkgver` / `sha256sums`, `makepkg` and the upload follow. The full procedure
+and then the AUR's `pkgver` / `sha256sums`, its `makepkg` run and the upload follow. The full procedure
 is in `AGENTS.md`, "AUR discipline".
 
 ## License

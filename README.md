@@ -50,10 +50,12 @@ watermark, no date stamp, no TIFF, no physical sizes or DPI, and no mirroring a 
 
 ### Arch Linux
 
-The PKGBUILD under `packaging/arch` builds the tree and installs it:
+From the AUR, which is where the PKGBUILD is maintained:
 
-    cd packaging/arch
-    makepkg -si
+    paru -S pixlay
+
+`makepkg` from an AUR checkout builds exactly what `meson` does — the build and the install are the
+project's own.
 
 ### Prebuilt
 

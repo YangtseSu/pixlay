@@ -1,11 +1,2 @@
 /target
 /build
-
-# Arch packaging: `makepkg` in `packaging/arch` writes its work tree (`src/`,
-# `pkg/`), the tag tarball it downloads and the packages it builds beside the
-# PKGBUILD, because it defaults `BUILDDIR`, `SRCDEST` and `PKGDEST` to the
-# directory the PKGBUILD is in (`makepkg`'s own `canonicalize_path` loop).
-/packaging/arch/src/
-/packaging/arch/pkg/
-/packaging/arch/*.tar.gz
-/packaging/arch/*.pkg.tar.*

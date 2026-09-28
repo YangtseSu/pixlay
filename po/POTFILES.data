@@ -1,6 +1,6 @@
 # The data files whose strings are translated: the desktop entry and the
 # AppStream metainfo. Their templates are installed (the desktop file and the
-# metainfo are generated from them by `msgfmt`, see `packaging/`), so the
+# metainfo are generated from them by `msgfmt`, see `data/`), so the
 # strings live in the `.in` files and not in the installed ones.
 #
 # `extract-pot` extracts these by extension — the desktop entry with
