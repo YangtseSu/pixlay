@@ -594,8 +594,12 @@ not repeated here.*
   **binaries** for a tag and attaches them to its release, with the same `meson setup` / `meson compile`
 - **SPDX is `GPL-3.0-or-later` throughout** (not `-only`), and **the metadata is REUSE's**
   (REUSE specification 3.3; `reuse lint` is the entry's fourth command, reuse-tool 6.2.0): the license
-  text is `LICENSES/GPL-3.0-or-later.txt`, which is also the file a package recipe installs
-  (`docs/CONTRACT.md` §10). **Every file carries the two tags in its own header**:
+  text is the root `LICENSE`, once — it is the file GitHub's reader shows and the file a package recipe
+  installs (`docs/CONTRACT.md` §10) — and `LICENSES/GPL-3.0-or-later.txt` is a **symlink** to it, which
+  is what REUSE resolves the identifier through (`reuse lint` reads the link, measured 2026-09-29: with
+  the target gone it reports the license missing; a ZIP of the tree is the one reader that loses, since
+  git stores the link and a ZIP download rewrites it as a text file holding `../LICENSE`).
+  **Every file carries the two tags in its own header**:
 
   ```text
   SPDX-FileCopyrightText: 2026 Yangtse Su <yangtsesu@gmail.com>

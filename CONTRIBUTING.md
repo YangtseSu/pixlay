@@ -127,6 +127,6 @@ is in `AGENTS.md`, "Distribution".
 
 ## License
 
-GPL-3.0-or-later — the text is [`LICENSES/GPL-3.0-or-later.txt`](LICENSES/GPL-3.0-or-later.txt).
+GPL-3.0-or-later — the text is [`LICENSE`](LICENSE).
 Contributions are under the same license, every file carries its own SPDX tags
 ([REUSE](https://reuse.software/)-compliant); keep them in place when you edit one.
