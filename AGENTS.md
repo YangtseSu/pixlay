@@ -265,7 +265,7 @@ versions**. Everything follows the latest stable release.
   different feature resolution, **199 s of the 902 s run** (measured 2026-09-27), to read two strings.
   Each job caches its own build tree (the entry's paragraph has the measurement: **902 s → 255 s**), and
   CI's own build keeps the release profile the release ships.
-  The one action moves with its major tag (`actions/checkout@v7`, `actions/cache@v4`) rather than being
+  The one action moves with its major tag (`actions/checkout@v7`, `actions/cache@v6`) rather than being
   pinned to a commit SHA: under this policy a pin is the thing that has to be justified
 - **Keeping the dependency set minimal** does not conflict with tracking the latest: few, but each
   one current.
@@ -620,7 +620,7 @@ policy: track the latest": latest stable only, no upper pin.
 |---|---|---|---|
 | `serde` + `serde_derive` 1.0.229 | `pixlay-core`, `pixlay` | `.pixlay` is JSON and every `CollageDoc` field has to round-trip; hand-written serialization means reimplementing format validation. `pixlay` derives the same way for the app's own settings file (S25, ruling 39: three fields) — one dependency for both files rather than a second, hand-written reader | Small, no system dependencies |
 | `serde_json` 1.0.151 | `pixlay-core`, `pixlay`, `pixlay-cli` (dev) | JSON read/write; `deny_unknown_fields` turns "misspelled field" into a load-time error. The settings file goes through the same crate (S25) and deliberately does **not** deny unknown fields: a settings file is not a document, and refusing one over a key a later version added would silently reset the settings that are known | Same |
-| `thiserror` 2.0.20 | `pixlay-core`, `pixlay-render` | core/render errors are typed errors (part of the contract); `anyhow` is allowed only in `pixlay-cli` | Pure macro, zero runtime |
+| `thiserror` 2.0.21 | `pixlay-core`, `pixlay-render` | core/render errors are typed errors (part of the contract); `anyhow` is allowed only in `pixlay-cli` | Pure macro, zero runtime |
 | `cairo-rs` 0.22.9 | `pixlay-render` | The only rendering backend; GTK4 already depends on cairo, so packaging is free | System cairo 1.18.4; the `png` feature is dev-only (golden image read/write) |
 | `png` 0.18.1 | `pixlay-imaging` | The PNG writer of the one-pass encoder (S6). `image`'s PNG writer cannot embed an ICC profile in the same pass as the pixels, and Cairo's emits no `iCCP` at all — and an sRGB file whose numbers are not labelled is a file whose colour depends on who opens it | Pure Rust; it was already in the tree through `image`, so the download set did not grow |
 | `jpeg-encoder` 0.7.1 | `pixlay-imaging` | The JPEG writer of the one-pass encoder (S6): `set_sampling_factor` (4:4:4 / 4:2:2 / 4:2:0) and `add_icc_profile` (`APP2`), which is exactly the "pixels + sampling + ICC in one pass" the constraint names (the JFIF density stays at the encoder's resolution-free default since S12d) | Pure Rust; already in the tree through `glycin-image-rs`. Measured against the previous writer (`image` = zune-jpeg): +1.1% bytes, −27% time on the S6 grid (14043 px, q90, 4:4:4) |
