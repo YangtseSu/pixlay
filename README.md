@@ -127,6 +127,4 @@ glance at an image.
 
 ## License
 
-GPL-3.0-or-later — the text is [`LICENSES/GPL-3.0-or-later.txt`](LICENSES/GPL-3.0-or-later.txt),
-and every file carries its own SPDX tags, so the tree is
-[REUSE](https://reuse.software/)-compliant.
+GPL-3.0-or-later — see [`LICENSES/GPL-3.0-or-later.txt`](LICENSES/GPL-3.0-or-later.txt).
