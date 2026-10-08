@@ -2406,9 +2406,11 @@ impl EditorWindow {
 
     /// The export a save dialog's answer becomes (S25, ruling 36).
     ///
-    /// The settings' format owns the name's extension: a path whose extension is not
-    /// that format's is refused with the same message the CLI's `--out` meets, because
-    /// a file that lies about itself is worse than a refusal. The path may not be one
+    /// The name's extension owns the format (S25c): a name whose extension is not one
+    /// this build writes is refused with the same message the CLI's `--out` meets,
+    /// because a file that lies about itself is worse than a refusal, and any other
+    /// extension this build writes is a format change rather than a refusal — the
+    /// settings' row is only the default the dialog was seeded with. The path may not be one
     /// of the document's own photos ([`EditorWindow::export_destination`], the rule
     /// `render` and `thumb` apply to the same path), and the folder it landed in is
     /// remembered in the settings before the export starts, so the next dialog opens
@@ -3204,6 +3206,7 @@ fn export_filter(format: pixlay_imaging::encode::Format) -> gtk::FileFilter {
     let filter = gtk::FileFilter::new();
     filter.set_name(Some(&gettext("Images")));
     for pattern in match format {
+        pixlay_imaging::encode::Format::Avif => ["*.avif", "*.AVIF"],
         pixlay_imaging::encode::Format::Jpeg => ["*.jpg", "*.jpeg"],
         pixlay_imaging::encode::Format::Png => ["*.png", "*.PNG"],
     } {

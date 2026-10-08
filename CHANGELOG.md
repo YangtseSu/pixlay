@@ -12,6 +12,17 @@ All notable changes to Pixlay are documented in this file. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **AVIF export, and it is the default.** The export's format row offers AVIF / JPEG / PNG
+  (`crates/pixlay/src/dialogs.rs`) and a fresh account exports AVIF: measured on the verification
+  project it is 2.4x smaller than the JPEG at 4000 px and 3.0x at 147.9 MP, at RMSE 0.013 against
+  the same render's PNG where the JPEG's is 0.005. libheif writes it through glycin's encoder API —
+  the same `glycin-heif` loader that reads AVIF and HEIC photos — so the sRGB profile goes into the
+  file's `colr` box in the same pass as the pixels, and AVIF costs no new dependency. The CLI
+  writes it too (`pixlay-render --out x.avif`; the extension has always decided the format), and a
+  machine without the heif loader is told what is missing rather than being written another format.
+
 ## [0.1.2] - 2026-09-27
 
 ### Fixed

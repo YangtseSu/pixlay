@@ -235,7 +235,8 @@ the canvas is **content** and the interface is **styling**, and the two must not
 10. **S25 additions: the settings surface and the export's one dialog** (rulings 36 and 39; the step's own
    Human line, and it joins the gate after S22–S24):
    - **the settings surface read at a glance**: `Ctrl+,` (or the menu's *Preferences*) opens a dialog titled
-     *Preferences* with one group of two rows — the format (JPEG/PNG) and the long edge in pixels. Is the
+     *Preferences* with one group of two rows — the format (AVIF / JPEG / PNG, in that order, and AVIF is
+     what a fresh account starts on since S34) and the long edge in pixels. Is the
      unit obvious without a screen reader, does either row wrap or truncate at the default window size, and
      does the row's own value read as the size an export will be (4000 px by default)?
    - **the export's flow**: `Ctrl+E` (or the header bar's button) opens the **platform's own save dialog**,
@@ -293,6 +294,17 @@ the canvas is **content** and the interface is **styling**, and the two must not
      and the copy reads well rather than merely being translated (the one thing no test can judge).
    - **both binaries are the package's**: `pixlay-render templates` lists what this build ships and a
      `render` writes the image — the machine surface is installed, not left behind in the build tree.
+
+13. **S34's addition: the third format, and the default** (the step's own Human line):
+   - **the default is AVIF**: on an account with no settings file, does the settings dialog's format row
+     read *AVIF*, and does the export's save dialog suggest a name ending in `.avif` — and is that a format
+     the person's other applications open (a viewer, a browser, a phone)?
+   - **the file at a glance**: export the verification project as AVIF and as JPEG at the same long edge.
+     The AVIF is about 2.4x smaller (566,985 against 1,359,606 bytes at 4000 px, measured 2026-10-08) — do
+     the two look the same on a screen, and does the AVIF's YCbCr 4:2:0 chroma show on the collage's hard
+     colour edges (RMSE 0.013 against the same render's PNG, where the JPEG's is 0.005)?
+   - **the missing loader**: on a machine without glycin's heif loader, does an AVIF export fail with a
+     sentence naming what is missing, rather than falling back to another format or saying nothing useful?
 
 ### The main path's scripted step list (the three-minute walk)
 

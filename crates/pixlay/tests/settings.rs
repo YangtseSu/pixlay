@@ -43,7 +43,7 @@ fn the_settings_surface_remembers_the_export_and_the_cli_ignores_the_file() {
     assert!(path.ends_with("pixlay/settings.json"), "{path:?}");
     assert!(!path.exists(), "a fresh account has no file: {path:?}");
     let defaults = window.settings();
-    assert_eq!(defaults.format, Format::Jpeg);
+    assert_eq!(defaults.format, Format::Avif);
     assert_eq!(defaults.long_edge, pixlay::window::DEFAULT_EXPORT_PX);
     assert_eq!(defaults.last_export_dir, None);
 
@@ -72,8 +72,8 @@ fn the_settings_surface_remembers_the_export_and_the_cli_ignores_the_file() {
 
     // A person moves both rows. Each change is the window's settings and the file's at
     // once: there is no *Save* to press, which is what a libadwaita preferences dialog
-    // does everywhere.
-    dialog.format_row().set_selected(1);
+    // does everywhere. The row's table is AVIF / JPEG / PNG since S34, so 2 is PNG.
+    dialog.format_row().set_selected(2);
     dialog.long_edge_row().set_value(1234.0);
     support::pump(Duration::from_millis(50));
     let stored = settings::Settings::read(&path);
@@ -143,7 +143,7 @@ fn the_settings_surface_remembers_the_export_and_the_cli_ignores_the_file() {
     support::pump(Duration::from_millis(50));
     assert_eq!(
         restarted_dialog.format_row().selected(),
-        1,
+        2,
         "PNG is the stored format"
     );
     assert_eq!(restarted_dialog.long_edge_row().value(), 1234.0);

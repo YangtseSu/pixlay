@@ -44,8 +44,8 @@ fn the_export_takes_the_settings_and_refuses_a_source_image_or_a_lying_name() {
         "the first export opens on the pictures directory"
     );
     assert!(
-        seed.name.ends_with(".jpg"),
-        "the suggested name carries the default format's extension, got {:?}",
+        seed.name.ends_with(".avif"),
+        "the suggested name carries the default format's extension — AVIF since S34 — got {:?}",
         seed.name
     );
 
@@ -143,6 +143,8 @@ fn the_export_takes_the_settings_and_refuses_a_source_image_or_a_lying_name() {
         ("holiday.JPEG", Some(Format::Jpeg)),
         ("holiday.png", Some(Format::Png)),
         ("holiday.PNG", Some(Format::Png)),
+        ("holiday.avif", Some(Format::Avif)),
+        ("holiday.AVIF", Some(Format::Avif)),
         ("holiday", None),
         ("holiday.2024", None),
     ] {
@@ -164,7 +166,7 @@ fn the_export_takes_the_settings_and_refuses_a_source_image_or_a_lying_name() {
     assert!(
         window
             .last_toast()
-            .is_some_and(|toast| toast.contains("expected .png, .jpg or .jpeg")),
+            .is_some_and(|toast| toast.contains("expected .png, .jpg, .jpeg or .avif")),
         "the toast says what this build writes, got {:?}",
         window.last_toast()
     );
@@ -199,6 +201,25 @@ fn the_export_takes_the_settings_and_refuses_a_source_image_or_a_lying_name() {
         Format::Jpeg,
         "the export did not rewrite the settings' format row"
     );
+
+    // The third format through the same flow (S34): an `.avif` name exports an AVIF
+    // from the window's own worker — the path a default export takes — and the
+    // settings' row still says JPEG, so the extension is what decided it here too.
+    let avif = support::out_dir().join("s25-avif.avif");
+    let _ = std::fs::remove_file(&avif);
+    window.export_to_chosen(&avif);
+    assert!(
+        window.wait_for_idle(support::WAIT),
+        "the AVIF export finished"
+    );
+    let bytes = std::fs::read(&avif).expect("the export landed");
+    assert_eq!(
+        &bytes[4..12],
+        b"ftypavif",
+        "the .avif name wrote an AVIF, whatever the settings' row said"
+    );
+    let decoded = pixlay_imaging::Source::decode(&avif).expect("the AVIF decodes");
+    assert_eq!(decoded.width(), 800, "at the settings' long edge");
 
     // ---- a file that is already there -------------------------------------
     // Since ruling 36 the *platform's* dialog confirms a replacement, so the app's own
@@ -280,5 +301,8 @@ fn the_export_takes_the_settings_and_refuses_a_source_image_or_a_lying_name() {
             path: unwritable,
         })
         .expect_err("a request writing to a name this build cannot write is refused");
-    assert!(error.contains("expected .png, .jpg or .jpeg"), "{error}");
+    assert!(
+        error.contains("expected .png, .jpg, .jpeg or .avif"),
+        "{error}"
+    );
 }

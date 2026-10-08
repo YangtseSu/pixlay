@@ -129,6 +129,7 @@ pub fn destination(path: &Path, sources: &[Option<PathBuf>]) -> Result<(), Strin
 /// The extension a format's files carry when the name does not say otherwise.
 pub fn extension(format: Format) -> &'static str {
     match format {
+        Format::Avif => "avif",
         Format::Jpeg => "jpg",
         Format::Png => "png",
     }

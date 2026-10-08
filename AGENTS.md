@@ -9,7 +9,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 A Linux-native collage tool. **The editor is the whole application**: open it, add 1–9 photos (a tenth
 and beyond are ignored with one report), pick a layout, adjust, export. Regular and irregular
 templates; per-slot framing (pan / zoom / rotation by any angle); a canvas frame (gap / corner radius /
-colour); export of high-resolution finished images as **PNG or JPEG** (a specified long edge
+colour); export of high-resolution finished images as **AVIF, PNG or JPEG** (a specified long edge
 in pixels).
 **The product is only a collage** (ruled 2026-09-22): it places photos and frames them. It has no colour
 grading, no text layer, no watermark and no date stamp — none of them is on the main path, and a text
@@ -304,7 +304,11 @@ code for one commits that change itself.
   reason as a second pass.
   Since S6 the encoder is `pixlay_imaging::encode`: PNG `iCCP`, JPEG `APP2` ICC + the `SOF0`
   sampling factors, which are 4:4:4 — each written while the pixels go out, never by
-  a second pass over the finished file, and the third format and every resolution stay unwritten
+  a second pass over the finished file — and since S34 AVIF is the third format, written by
+  libheif through glycin's encoder API with the profile in a `colr` box of type `prof`: the
+  same loader family (`glycin-heif`) that decodes the AVIF and HEIC sources the product opens,
+  which is also why a machine without it has no AVIF writer and is told so rather than being
+  written some other format. Every resolution stays unwritten for all three
   (no TIFF, no PNG `pHYs`, no JFIF density, no `--dpi`, no `canvas` field).
   The ICC rule and the per-format field list are in `docs/CONTRACT.md` §5.
 - **The evaluation order is frozen** and must not be reordered:
@@ -470,8 +474,9 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
   photos → pick a layout → compose) is a multi-step task, which HIG itself shapes as a navigable
   sequence (`AdwNavigationView` push/pop with Back) rather than as two modes to know about.*
 - **Not doing**: beauty retouching, levels / curves, online geocoding, RAW, brush marking, a
-  single-image retouch mode, **TIFF output and a JPEG chroma request** (S12c: two formats, one
-  sampling), **physical sizes and resolutions in any form** (S12d: an export is one long-edge
+  single-image retouch mode, **TIFF output and a JPEG chroma request** (S12c: one sampling, one
+  fixed quality; S34 added AVIF as the third format and it is the default — a fourth is a decision,
+  not a default), **physical sizes and resolutions in any form** (S12d: an export is one long-edge
   pixel count, and the file carries no resolution), **and flipping or mirroring a cell in any
   form** — ruled 2026-09-22: the
   per-cell capabilities are zoom, move and rotation by any angle.
@@ -488,7 +493,7 @@ every step that touches UI re-read them and update `docs/HIG-REVIEW.md`.
 ## Module boundaries
 
     pixlay-core     CollageDoc, templates, geometry, framing transforms, command history, the selection policy, the product's identity strings (the app-id and the gettext domain — here, in the crate with no GTK, because the packaging test reads them without a display). Must not depend on gtk / cairo
-    pixlay-imaging  decoding (glycin), resampling, EXIF, color spaces, preview thumbnails, encoding (PNG/JPEG). Must not depend on gtk or cairo
+    pixlay-imaging  decoding (glycin), resampling, EXIF, color spaces, preview thumbnails, encoding (PNG/JPEG, AVIF through glycin's own encoder). Must not depend on gtk or cairo
     pixlay-render   the single draw(doc, images, target), on Cairo. Must not depend on gtk
     pixlay-cli      windowless render entry point, automation and verification tooling, and the AI's operating surface. Must not depend on gtk4
     pixlay          gtk4 + libadwaita shell and interaction
@@ -628,8 +633,8 @@ policy: track the latest": latest stable only, no upper pin.
 | `cairo-rs` 0.22.9 | `pixlay-render` | The only rendering backend; GTK4 already depends on cairo, so packaging is free | System cairo 1.18.4; the `png` feature is dev-only (golden image read/write) |
 | `png` 0.18.1 | `pixlay-imaging` | The PNG writer of the one-pass encoder (S6). `image`'s PNG writer cannot embed an ICC profile in the same pass as the pixels, and Cairo's emits no `iCCP` at all — and an sRGB file whose numbers are not labelled is a file whose colour depends on who opens it | Pure Rust; it was already in the tree through `image`, so the download set did not grow |
 | `jpeg-encoder` 0.7.1 | `pixlay-imaging` | The JPEG writer of the one-pass encoder (S6): `set_sampling_factor` (4:4:4 / 4:2:2 / 4:2:0) and `add_icc_profile` (`APP2`), which is exactly the "pixels + sampling + ICC in one pass" the constraint names (the JFIF density stays at the encoder's resolution-free default since S12d) | Pure Rust; already in the tree through `glycin-image-rs`. Measured against the previous writer (`image` = zune-jpeg): +1.1% bytes, −27% time on the S6 grid (14043 px, q90, 4:4:4) |
-| `image` 0.25.10 | `pixlay-cli` (**dev only** since S6) | It was S1's encoder stand-in and S6 replaced it (`pixlay_imaging::encode` writes the ICC profile and the JPEG sampling factors that this crate's writers leave at their defaults; the resolutions left with S12d). What it is still for: the CLI's **tests** read renders back with `image::open` (PNG/JPEG) and write flat photos to render against, and `pixlay-cli/tests/fixtures/generate.py` produced the fixtures | Not a production dependency any more, so the shipped binary no longer links it |
-| `glycin` 4.0.0 | `pixlay-imaging` | The decoding backend, measured against the in-process alternative (S4): the sandboxed loader is the only one of the two that decodes HEIC and AVIF, and it works with an empty environment | Pulls `glib`/`gio` and, through `cfg(target_os = "linux")`, `libseccomp` / `bubblewrap` / `fontconfig` / the distro's loader packages — this is what S8's `depends` must name |
+| `image` 0.25.10 | `pixlay-cli` (**dev only** since S6) | It was S1's encoder stand-in and S6 replaced it (`pixlay_imaging::encode` writes the ICC profile and the JPEG sampling factors that this crate's writers leave at their defaults; the resolutions left with S12d). What it is still for: the CLI's **tests** read renders back with `image::open` (PNG/JPEG — an AVIF is read back through the product's own `Source::decode`, S34) and write flat photos to render against, and `pixlay-cli/tests/fixtures/generate.py` produced the fixtures | Not a production dependency any more, so the shipped binary no longer links it |
+| `glycin` 4.0.0 | `pixlay-imaging` | The decoding backend, measured against the in-process alternative (S4): the sandboxed loader is the only one of the two that decodes HEIC and AVIF, and it works with an empty environment. **Its encoder API is the AVIF writer too** (S34): libheif, reached through the `glycin-heif` loader, writes pixels, profile and quality in one call, so AVIF costs no new dependency — the loader AVIF and HEIC *sources* already need | Pulls `glib`/`gio` and, through `cfg(target_os = "linux")`, `libseccomp` / `bubblewrap` / `fontconfig` / the distro's loader packages — this is what S8's `depends` must name, together with `libheif` (S34: an AVIF export, the app's default format, needs the heif loader the same way an AVIF or HEIC photo does) |
 | `glib` 0.22 / `gio` 0.22 | `pixlay-imaging` | The decode is driven on a private `MainContext`: a glycin frame request only completes while one is iterated (measured: every frame hung under a plain executor until glycin's own 60 s limit). `glib`'s `futures` feature provides `MainContext::block_on`; `gio::File` is glycin's own input type | Already in the tree with `glycin`; named here because the API is used directly |
 |`gtk4` 0.11.5 + `libadwaita` 0.9.2|`pixlay`|The shell: the window, the header bar and its menu, the canvas's controls and the dialogs. `v4_12` is the level the window needs: `GtkCssProvider::load_from_string` (the app's one stylesheet, whose remaining rules are the layout band's) and `GdkSurface::layout` — GTK4's only "the window was resized" signal, which is what the canvas's own decode grid follows, so below it the build would compile and never resize the preview. Below that, `v4_10` carries `GtkFileDialog` and `GtkColorDialogButton` (4.10 dropped the deprecated chooser dialogs) and libadwaita's `v1_8` carries `AdwDialog` / `AdwToastOverlay` / `AdwShortcutsDialog`|System gtk4 4.24 / libadwaita 1.10 through pkg-config; GTK already depends on cairo, pango and gdk-pixbuf, so the download set grows by the bindings alone. Linked by `pixlay` only — the other four crates must not name it|
 |`gettext-rs` 0.8.0 (`gettext-system`)|`pixlay`|i18n, as the plan of 2026-09-20 decided before S7 (`docs/archive/2026-09-20-STEPS.md`): the same gettext toolchain GTK and libadwaita use for their own copy, so `.po`, the `.desktop` file and AppStream metainfo (S16) all go through one pipeline. `po/POTFILES` and `po/pixlay.pot` are committed|Tiny; `gettext-sys` links the system `libintl` rather than building a private copy. Only `pixlay` depends on it, which is what the language conventions require|

@@ -686,6 +686,7 @@ fn every_export_format_is_written_with_its_metadata() {
         ("out.png", "png"),
         ("out.jpg", "jpeg"),
         ("out.jpeg", "jpeg"),
+        ("out.avif", "avif"),
     ] {
         let out = dir.join(name);
         let output = run(&[
@@ -700,15 +701,21 @@ fn every_export_format_is_written_with_its_metadata() {
         assert_eq!(code(&output), 0, "{name}: {}", stderr(&output));
         assert_eq!(field(&output, "format"), format);
         // Decodable by another implementation, at the size the report claims.
-        let image = image::open(&out).expect("a readable image");
-        assert_eq!(
-            (image.width(), image.height()),
-            (
-                field(&output, "out_w").parse::<u32>().unwrap(),
-                field(&output, "out_h").parse::<u32>().unwrap()
-            ),
-            "{name}"
+        // AVIF's reader is the product's own decoder — `image` neither writes nor
+        // reads AVIF — and that is still the other half of the path: glycin reads
+        // back what libheif encoded.
+        let (out_w, out_h) = (
+            field(&output, "out_w").parse::<u32>().unwrap(),
+            field(&output, "out_h").parse::<u32>().unwrap(),
         );
+        let (got_w, got_h) = if format == "avif" {
+            let decoded = pixlay_imaging::Source::decode(&out).expect("a readable AVIF");
+            (decoded.width(), decoded.height())
+        } else {
+            let image = image::open(&out).expect("a readable image");
+            (image.width(), image.height())
+        };
+        assert_eq!((got_w, got_h), (out_w, out_h), "{name}");
         assert_eq!(
             std::fs::metadata(&out).expect("stat").len().to_string(),
             field(&output, "bytes"),
@@ -729,6 +736,19 @@ fn every_export_format_is_written_with_its_metadata() {
                 );
                 assert!(holds(b"iCCP"), "{name} carries no profile");
             }
+            "avif" => {
+                // An ISO base media file branded `avif`, with the profile in a
+                // `colr` box of type `prof` — the profile itself, verbatim, in the
+                // file's own bytes (S34).
+                assert_eq!(&bytes[4..8], b"ftyp", "{name} is not an ISOBMFF file");
+                assert_eq!(&bytes[8..12], b"avif", "{name} is not branded avif");
+                assert!(holds(b"colr"), "{name} carries no colour box");
+                let profile = pixlay_imaging::icc::srgb_profile();
+                assert!(
+                    bytes.windows(profile.len()).any(|window| window == profile),
+                    "{name} does not carry the sRGB profile"
+                );
+            }
             _ => {
                 assert!(holds(b"ICC_PROFILE"), "{name} carries no profile");
                 assert!(holds(b"JFIF"), "{name} is not JFIF");
@@ -746,7 +766,7 @@ fn every_export_format_is_written_with_its_metadata() {
     }
 
     // An extension nothing writes is a usage error, and the message names the
-    // formats this build has — two since S12c removed TIFF, so `.tif` is refused
+    // formats this build has — three since S34 added AVIF, so `.tif` is refused
     // like any other unknown extension rather than falling back to PNG.
     for extension in ["gif", "tif", "tiff"] {
         let out = dir.join(format!("out.{extension}"));
@@ -759,7 +779,7 @@ fn every_export_format_is_written_with_its_metadata() {
         ]);
         assert_eq!(code(&output), 1, "{extension}");
         assert!(
-            stderr(&output).contains(".png, .jpg or .jpeg"),
+            stderr(&output).contains(".png, .jpg, .jpeg or .avif"),
             "{extension}: {}",
             stderr(&output)
         );

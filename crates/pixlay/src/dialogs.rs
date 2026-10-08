@@ -60,12 +60,14 @@ const ROW_EPSILON: f64 = 1e-6;
 
 /// The formats the export's row offers, in the row's own order.
 ///
-/// The row's index *is* the index into this table, so the two cannot drift.
-const FORMATS: [Format; 2] = [Format::Jpeg, Format::Png];
+/// The row's index *is* the index into this table, so the two cannot drift. AVIF
+/// leads because it is the default a fresh account exports (S34, 2026-10-08); the
+/// order is the row's, not a ranking of the formats.
+const FORMATS: [Format; 3] = [Format::Avif, Format::Jpeg, Format::Png];
 
 /// The formats' names, which are identifiers and never translated (`AGENTS.md`,
 /// "Language conventions"): a user reads "PNG" and a file carries `.png`.
-const FORMAT_NAMES: [&str; 2] = ["JPEG", "PNG"];
+const FORMAT_NAMES: [&str; 3] = ["AVIF", "JPEG", "PNG"];
 
 /// The step the long edge moves in, in pixels: 100 is a round number a person can type
 /// over, and the bounds are the export's own (`MIN_EXPORT_PX` / `MAX_EXPORT_PX`).

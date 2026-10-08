@@ -36,9 +36,10 @@ is aimed at, the clipboard, or the command line (`pixlay a.jpg b.jpg`, in argume
   `Shift` and a click, or with `Ctrl+Shift` and an arrow key. One undo step.
 - **A canvas frame**: the gap between two photos, the corner radius and the colour. White, gapless
   and square-cornered by default, so an older project renders byte-identically.
-- **Export as PNG or JPEG** at a long edge you choose, through the platform's own
-  save dialog. The file carries its ICC profile and a JPEG is 4:4:4, written in the same pass as
-  the pixels.
+- **Export as AVIF, PNG or JPEG** at a long edge you choose, through the platform's own
+  save dialog — AVIF by default. The file carries its ICC profile (a JPEG is 4:4:4 as well),
+  written in the same pass as the pixels, and AVIF is written by the same loader family that
+  reads AVIF and HEIC photos.
 - **Undo and redo** across every edit, atomic saves, and a check before unsaved work is discarded.
 - **`.pixlay` projects**: JSON that embeds its own layout geometry, so a project keeps its pixels
   when the shipped library changes, and relative photo paths that travel with the file.
@@ -67,8 +68,9 @@ project's own.
 
 Every GitHub release carries the Linux binaries in two tarballs — `pixlay-<version>-linux-amd64.tar.gz`
 for x86_64 and `pixlay-<version>-linux-arm64.tar.gz` for aarch64 — each with its `.sha256`, beside the
-`x86_64` Arch package. The binaries link the system's GTK, libadwaita and glycin; HEIC and AVIF photos
-need `libheif` installed.
+`x86_64` Arch package. The binaries link the system's GTK, libadwaita and glycin; HEIC and AVIF
+photos — and an AVIF export, the app's default format — need `libheif` installed (glycin's heif
+loader is what writes and reads them).
 
 ### Any Linux, from a checkout
 

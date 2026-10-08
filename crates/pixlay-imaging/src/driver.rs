@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The one thread that talks to the decoder.
+//! The one thread that talks to glycin.
 //!
 //! A glycin frame request only completes while a `MainContext` is being
 //! iterated: the loader delivers its work back through the context, and a future
@@ -10,7 +10,9 @@
 //! simply never resolves — `glycin-builtin` hung on every file that way and was
 //! only stopped by glycin's own 60-second limit. So the pipeline owns exactly one
 //! thread, gives it its own `MainContext`, and drives each job with
-//! `MainContext::block_on`.
+//! `MainContext::block_on`. **It is the decoder's thread and the AVIF encoder's**
+//! (S34): an encode is a job like a decode, and one thread for both is what keeps
+//! the two from running at once against the same memory budget.
 //!
 //! Why not the global default context: in the GUI that context belongs to GTK's
 //! main loop, which runs on the main thread. A decode must not need it, must not
@@ -23,7 +25,7 @@
 //! decoding is the memory-heaviest stage (a 120 MP source is 960 MB as 16-bit
 //! linear), and the caller's budget is what decides how many sources may exist at
 //! once — see `docs/CONTRACT.md` §4's ladder. This thread never holds more than
-//! the one source a job is decoding.
+//! the one source a job is decoding, or the one image an AVIF job is encoding.
 
 use std::future::Future;
 use std::sync::mpsc::{Sender, channel};

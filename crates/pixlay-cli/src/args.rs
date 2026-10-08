@@ -106,7 +106,7 @@ RENDER OPTIONS:
     --template <name>   Render a template with no photos (see `templates`); with
                         --sketch, draw the template's geometry instead.
     --out <file>        Output file. Format comes from the extension:
-                        .png, .jpg, .jpeg. Required. An existing file is
+                        .png, .jpg, .jpeg, .avif. Required. An existing file is
                         replaced; a path that names one of the project's own
                         photos is refused (exit 1), because a source image is
                         never written to.
@@ -203,7 +203,7 @@ THUMB OPTIONS:
                         (what the window's 1:1 preview asks for), and a
                         smaller one is a fit of the rectangle. A rectangle
                         the photo does not contain is refused (exit 2).
-    --out <file>        Preview file, .png / .jpg / .jpeg.
+    --out <file>        Preview file, .png / .jpg / .jpeg / .avif.
                         Required (a screen-sized image). An existing file is
                         replaced; --photo itself is refused (exit 1).
 

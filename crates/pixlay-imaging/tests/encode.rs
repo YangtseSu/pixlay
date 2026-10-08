@@ -19,7 +19,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
-use pixlay_imaging::{Export, Format, Rgb8View, icc};
+use pixlay_imaging::{Export, Format, Rgb8View, Source, icc};
 
 const WIDTH: i32 = 96;
 const HEIGHT: i32 = 64;
@@ -79,6 +79,15 @@ fn be16(bytes: &[u8], at: usize) -> u16 {
 
 fn be32(bytes: &[u8], at: usize) -> u32 {
     u32::from_be_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]])
+}
+
+/// Where a box's four-character name sits in an AVIF's bytes.
+///
+/// The AVIF assertions read boxes rather than walk the tree: a `colr` or `ispe`
+/// box's name is unique in the files this encoder writes, so finding the name finds
+/// the box, and the assertions around it are what pin the structure.
+fn find_box(bytes: &[u8], name: &[u8; 4]) -> Option<usize> {
+    bytes.windows(name.len()).position(|window| window == name)
 }
 
 /// The PNG chunk stream, as `(name, data)`.
@@ -443,11 +452,96 @@ fn a_buffer_that_does_not_match_its_size_is_refused() {
 }
 
 #[test]
+fn the_avif_carries_its_profile_and_its_size() {
+    // The one format this build does not encode itself (S34): libheif writes it
+    // through glycin's encoder, and what has to hold is the same rule as the other
+    // two formats' — the profile goes into the file while the pixels do, and the
+    // file's own structure says so. The assertions read the AVIF container's boxes,
+    // which is where a second-pass metadata patch would show.
+    let dir = out_dir("avif");
+    let bytes = encode(&dir, "out.avif", Format::Avif);
+
+    // An ISO base media file whose major brand is `avif`: the `ftyp` box is the
+    // first thing in the file.
+    assert_eq!(&bytes[4..8], b"ftyp", "an ISOBMFF file");
+    assert_eq!(&bytes[8..12], b"avif", "branded avif");
+
+    // The profile, as a `colr` box of type `prof`: the type is the four bytes
+    // after the box name and the profile is the box's payload, verbatim.
+    let profile = icc::srgb_profile();
+    let at = find_box(&bytes, b"colr").expect("a colr box");
+    assert_eq!(&bytes[at + 4..at + 8], b"prof", "an ICC-based colour type");
+    assert_eq!(
+        &bytes[at + 8..at + 8 + profile.len()],
+        profile,
+        "the colr box holds the sRGB profile itself"
+    );
+
+    // The size, in the image spatial extents property. This is the file saying how
+    // big its picture is, independently of the pixels' own header.
+    let at = find_box(&bytes, b"ispe").expect("an ispe box");
+    assert_eq!(be32(&bytes, at + 8), WIDTH as u32);
+    assert_eq!(be32(&bytes, at + 12), HEIGHT as u32);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_avif_decodes_back_to_the_picture_it_was_written_from() {
+    // The other half of "the file is what it says": the product's own decoder —
+    // the same glycin loader family that writes it — reads the picture back at the
+    // size it was written at and within the fidelity a q90 AVIF has. Measured
+    // 2026-10-08 on this gradient: RMSE 1.3 of 255 (345 of 65535), against the
+    // threshold of 4.
+    let dir = out_dir("avif-roundtrip");
+    let path = dir.join("out.avif");
+    let pixels = gradient();
+    let export = Export {
+        format: Format::Avif,
+        image: Rgb8View {
+            width: WIDTH,
+            height: HEIGHT,
+            data: &pixels,
+        },
+    };
+    pixlay_imaging::encode::write(&path, &export).expect("the export is written");
+
+    let decoded = Source::decode(&path).expect("the AVIF decodes");
+    assert_eq!(
+        (decoded.width(), decoded.height()),
+        (WIDTH as u32, HEIGHT as u32)
+    );
+    // `Source::pixel` is 16-bit whatever the file carried (an 8-bit sample scaled by
+    // 257), so the reference goes the same way.
+    let mut sum = 0.0;
+    let mut count = 0.0;
+    for y in 0..HEIGHT as u32 {
+        for x in 0..WIDTH as u32 {
+            let got = decoded.pixel(x, y);
+            let at = (y as usize * WIDTH as usize + x as usize) * 3;
+            for channel in 0..3 {
+                let want = f64::from(pixels[at + channel]) * 257.0;
+                let difference = f64::from(got[channel]) - want;
+                sum += difference * difference;
+                count += 1.0;
+            }
+        }
+    }
+    let rmse = (sum / count).sqrt();
+    assert!(
+        rmse < 1028.0,
+        "the decoded AVIF is RMSE {rmse} of 65535 away"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn the_format_follows_the_extension() {
     for (name, expected) in [
         ("a.png", Some(Format::Png)),
         ("a.JPG", Some(Format::Jpeg)),
         ("a.jpeg", Some(Format::Jpeg)),
+        ("a.avif", Some(Format::Avif)),
+        ("a.AVIF", Some(Format::Avif)),
         ("a.tif", None),
         ("a.tiff", None),
         ("a.webp", None),
@@ -456,11 +550,12 @@ fn the_format_follows_the_extension() {
         assert_eq!(Format::from_path(Path::new(name)), expected, "{name}");
     }
     assert_eq!(Format::Png.name(), "png");
+    assert_eq!(Format::Avif.name(), "avif");
     // TIFF is not a format this build writes any more, so `.tif` is refused rather
     // than falling back to a format the caller did not ask for.
     assert_eq!(
         Format::EXTENSIONS,
-        ".png, .jpg or .jpeg",
+        ".png, .jpg, .jpeg or .avif",
         "the usage message lists what this build writes"
     );
 }

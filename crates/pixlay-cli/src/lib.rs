@@ -21,10 +21,10 @@
 //! pixlay-render init      --template <name> --out <file.pixlay>
 //! ```
 //!
-//! The output format follows `--out`'s extension (`.png`, `.jpg`, `.jpeg` — two
-//! formats since S12c, which removed TIFF), and the encoder writes the sRGB profile
-//! and the JPEG sampling factors in the same pass as the pixels
-//! (`pixlay_imaging::encode`).
+//! The output format follows `--out`'s extension (`.png`, `.jpg`, `.jpeg`,
+//! `.avif` — three formats since S34 added AVIF to S12c's two, which had removed
+//! TIFF), and the encoder writes the sRGB profile and the JPEG sampling factors in
+//! the same pass as the pixels (`pixlay_imaging::encode`).
 //!
 //! * stdout carries only the machine-readable result (sorted `key = value`
 //!   lines, or one JSON object with `--json`); diagnostics go to stderr.

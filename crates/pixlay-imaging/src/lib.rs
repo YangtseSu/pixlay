@@ -45,10 +45,11 @@
 //! for one slot, and [`resample`] is public because the tests measure it directly
 //! (the aliasing and RMSE criteria are about that one stage).
 //!
-//! The mirror image of the pipeline is the export: [`encode`] writes PNG or JPEG
-//! with the sRGB profile ([`icc`]) and the sampling factors in the same pass as the
-//! pixels. It lives here because it is pixels in and pixels out — no cairo, no gtk
-//! — and because both the CLI and the GUI export through it.
+//! The mirror image of the pipeline is the export: [`encode`] writes PNG, JPEG or
+//! AVIF with the sRGB profile ([`icc`]) and, for the formats that have them, the
+//! sampling factors in the same pass as the pixels. It lives here because it is
+//! pixels in and pixels out — no cairo, no gtk — and because both the CLI and the
+//! GUI export through it.
 
 pub mod decode;
 pub mod destination;

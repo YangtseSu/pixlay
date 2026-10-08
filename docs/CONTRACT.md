@@ -417,12 +417,12 @@ pixlay-render save      --project <file.pixlay> --out <file.pixlay> [--json]
 | a project that does not parse or validate (S15h, PIX-021) | the message names the file it was read from and keeps the reason: `<path>: project JSON: <serde's message>`, `<path>: document version <n> …`, `<path>: <validation reason>`. Only parse and validation failures are wrapped — they are the ones that do not know the file; an I/O failure already carries its path and is not wrapped, so nothing prints `path: path:` |
 | probe verdict not passed | **not "failed to produce a result"**: the numbers are the result, so stdout emits all the numbers as usual, with `status = failed` and `passed = false`, stderr emits a one-line summary, and the exit code is 2 |
 | probe lower bound | when `occupied = 0` (all empty slots) the verdict is **failed**: every question the probe asks is about some slot, and with no slot there is no conclusion. Previously it "passed vacuously" (status=ok, exit 0) |
-| output format | determined by the `--out` extension: `.png` / `.jpg` / `.jpeg`, anything else is a usage error (exit 1, stdout empty, the message names the formats this build writes). **Two formats since S12c** — TIFF left with the purity ruling, so `.tif` is refused like any other unknown extension rather than falling back to PNG |
+| output format | determined by the `--out` extension: `.png` / `.jpg` / `.jpeg` / `.avif`, anything else is a usage error (exit 1, stdout empty, the message names the formats this build writes). **Three formats since S34** (AVIF, 2026-10-08) on S12c's two — TIFF left with the purity ruling, so `.tif` is refused like any other unknown extension rather than falling back to PNG |
 | the destination may not be a source image (S15c) | `render` and `thumb` refuse an `--out` that names one of the document's own photos (`render`) or the photo being read (`thumb`), before a byte is decoded: `refusing to write <out>: it is the source image <photo>`, exit 1, nothing written. Four spellings are the same file and all four are refused — the literal path, a `..` form, a symbolic link and a hard link — by comparing the **normalized spelling** (lexical, no filesystem access) and the **file identity** (device and inode, which is what only the filesystem knows). `AGENTS.md`'s source images are read-only is the constraint; this is the surface that would have broken it. A *document* write (`init` / `edit` / `save`) is outside the rule: those write `.pixlay` only |
 | export size | `--long-edge n` (1..=30000) makes the long edge exactly n pixels and sizes the other edge from the template's aspect rounded half away from zero (at least 1 px). Absent the flag, `render` and `probe` use 4000 (`DEFAULT_LONG_EDGE_PX`) — a square grid of it is 16 MP, an eighth of the 200 MP budget, so the default never touches the limit |
-| per-format metadata (S6, resolutions removed by S12d) | PNG: **no `pHYs`**, `iCCP` with the profile (the `sRGB` chunk is **not** written next to it — the specification says the two should not both appear, and the profile is the one carrying the colorimetry). JPEG: JFIF `APP0` with the density unit **0** (square pixels, no resolution — the encoder's default), `APP2` `ICC_PROFILE` segments, and the frame's own sampling factors, which are **4:4:4** since S12c removed the request. There is no third format |
-| JPEG quality | **90, fixed** (not a flag): it is the S0–S6 baseline, so every measurement in §8 stays
-comparable, and `--quality` was deliberately not added — a knob nobody tests breaks quietly |
+| per-format metadata (S6, resolutions removed by S12d) | PNG: **no `pHYs`**, `iCCP` with the profile (the `sRGB` chunk is **not** written next to it — the specification says the two should not both appear, and the profile is the one carrying the colorimetry). JPEG: JFIF `APP0` with the density unit **0** (square pixels, no resolution — the encoder's default), `APP2` `ICC_PROFILE` segments, and the frame's own sampling factors, which are **4:4:4** since S12c removed the request. AVIF (S34): a `colr` box of type **`prof`** holding the profile itself; the pixels are YCbCr 4:2:0 at 8 bits, libheif's own encoder defaults, and no resolution is claimed. The file's boxes are the whole record — there is no resolution field for any of the three |
+| encoder quality | **JPEG 90 and AVIF 90, both fixed** (neither is a flag): the JPEG's is the S0–S6 baseline, so every measurement in §8 stays
+comparable, and the AVIF's is the same number for the same reason — measured (S34, 2026-10-08, a 3000x2000 photograph): a q90 AVIF is **185,877 B at RMSE 0.0066** where the JPEG's own q90 is 499,933 B at 0.0032 and its q50 234,977 B at 0.0068, so the AVIF is 2.7x smaller than the JPEG at its quality and at least as close to the source as the JPEG at half of it. `--quality` was deliberately not added — a knob nobody tests breaks quietly |
 | `--preview-px n` | n pixels on the long edge; the same `draw`, only `scale` changes. The **bitmaps are sized for the preview too** (S4): decoding and resampling a full A0 and letting Cairo shrink it would cost the export's time and memory for a thumbnail, and would do the shrinking with Cairo's filter instead of the pipeline's. The scaled grid is checked against the canvas pixel budget before the first decode (S15e, PIX-003). The report's `long_edge` is the edge the file was written at, not the export base the preview's grid was scaled from (S15h, PIX-019) |
 | `--sketch` (S21, S29) | draws the **template's geometry** instead of a document: its cells in paper, and every cell's outline plus the sheet's ground no cell covers in ink (S29: a layout whose cells leave a gutter between them draws the gutter as the gap it is, where paper read as one more cell) — `pixlay_render::sketch_rgb8`, the same normalized→pixel path `draw` places photos with. This is what the window's layout band shows for every candidate, so `render --template <n> --sketch` at the band's grid and with the band's own three parameters reproduces a candidate's pixels exactly — `crates/pixlay/tests/layout.rs` holds the two to **RMSE 0**. `--template` is required (`--project`, `--preview-px`, `--gap`/`--radius`/`--border-color` are refused, exit 1: a sketch has no document, no preview and no frame), `--long-edge` sizes it as it sizes a render (the sheet's aspect is the template's, and a sketch's grid has its shape), and `--paper`/`--ink` are `r,g,b` 0..=255 with defaults 255,255,255 / 0,0,0 while `--stroke` is a positive finite width in pixels defaulting to 1. A JPEG export is legal and shows the same two colours: the paper fills the surface, so a sketch is opaque everywhere. Its report is a *sketch* shape: `sketch = true`, `paper`, `ink`, `stroke`, `slots`, `long_edge`, `out_w`, `out_h`, `bytes` — and no `cells` / `occupied` / `gap` / `radius` / `border`, which are a document's |
 | `render`'s report | carries `long_edge` — the integer the output was **actually rendered at**, `max(out_w, out_h)` of the written file (S15h, PIX-019), so a preview render reports the preview's edge while `preview_px` stays the request — `cells` and `occupied`, next to the written file's facts |
@@ -463,7 +463,7 @@ comparable, and `--quality` was deliberately not added — a knob nobody tests b
 | shape | `dir`, `recursive`, `count`, `failed`, and one `file.<i>` row per photo: `path`, `status`, and either `mime` / `width` / `height` / `date` / `mtime`, or `reason`. `dir` and every `file.<i>.path` are **byte paths** — the path's own OS bytes, escaped by the rule above — so a filename with a newline cannot forge a line and a name that is not UTF-8 survives instead of becoming U+FFFD (S15h, PIX-018) | `format`, `mime`, `src_w`, `src_h`, `region`, `px`, `out_w`, `out_h`, `bytes` |
 | what it is for | what a caller needs from a folder, and the key S12's decode cache invalidates on: `mtime`, whole seconds since the Unix epoch | decode plus resample to a preview's size as a CLI number; `--stats` is the budget number S12's decisions were measured against |
 | size | `height`/`width` are the size **after EXIF rotation** (`ImageDetails`' early dimensions are a hint and are *not* post-rotation, which is why a full decode happens), so `image` and `scan` cannot disagree about a file | `--px n` is the exact long edge, 1..=**8192**; the other edge keeps the source's ratio (`round`, at least 1 px) — the photo's, or the `--region` rectangle's when one is given. The bound is the product's largest preview with room: a full-window 4K photo preview is 3840 px and a HiDPI one 7680, so past 8192 the caller wants `render --preview-px` |
-| candidates | files whose extension is in `PHOTO_EXTENSIONS` (`.jpg .jpeg .png .heic .heif .avif .jxl .webp .tif .tiff` — TIFF is still read even though it is no longer written), case-insensitively; **no recursion unless `--recursive`**, and only real directories are descended into (a symlink to a parent would never terminate). A non-photo extension is neither a row nor an error — the alternative is a folder's README becoming an error row | `--out`'s extension, the same two formats `render` writes (`.png` / `.jpg` / `.jpeg` — S12c removed TIFF) |
+| candidates | files whose extension is in `PHOTO_EXTENSIONS` (`.jpg .jpeg .png .heic .heif .avif .jxl .webp .tif .tiff` — TIFF is still read even though it is no longer written), case-insensitively; **no recursion unless `--recursive`**, and only real directories are descended into (a symlink to a parent would never terminate). A non-photo extension is neither a row nor an error — the alternative is a folder's README becoming an error row | `--out`'s extension, the same formats `render` writes (`.png` / `.jpg` / `.jpeg` / `.avif` — S12c removed TIFF, S34 added AVIF) |
 | refusal | a file with a photo extension that does not decode **is** a row (`status = failed`) with the decoder's own reason, and the command still exits **0**: the listing is the result. A `--dir` that is not a directory is exit **2** with the path named | a photo that does not decode, or an `--out` this build cannot write, is exit **2**; `--px` outside the range is exit **1**, and an `--out` that *is* `--photo` is exit **1** (the destination row above, asked before the decode). A `--region` is refused in two halves, and which one is which is the point: a malformed one (fewer or more than four numbers, a negative, a fractional, a width or height of 0) is a **usage** error (exit **1**) because the command as written is one this build never runs, while a well-formed rectangle the **photo does not contain** is exit **2** and names the file's own size (`the region 900,700 800x600 is not inside the 1600x1200 photo`) — only the decode knows that, so it cannot be a usage error |
 | pixels | — | the whole photo — or, with `--region x,y,w,h`, that rectangle of it, in the photo's own pixels (`pixlay_imaging::Rect`) — resampled once at the preview's own grid: the same `resample` (Lanczos3, linear light, kernel widened by the downscale ratio) and the same `over_white` + quantize as a slot, so a preview is not a second picture of the same file. **A region whose long edge is `--px` is a 1:1 resample** (S15j): the taps degenerate to the identity (`lanczos(0)` is 1, every other tap 0), so the output is that rectangle of the photo pixel for pixel — measured: `thumb --px 1600 --region 200,100,800,600` of the 1600x1200 fixture is byte-identical to the same crop of `thumb --px 1600`. The window's preview pane at 1:1 is this call, which is what makes the pane's pixels a number the CLI can reproduce |
 
@@ -590,7 +590,7 @@ Measurement rules (`AGENTS.md`): peak = `/proc/self/status`'s `VmHWM`; time = wa
 | template generator | **S2, landed** | `pixlay_core::templates` (`generator` recipes + the committed `frozen` data) and the `templates` / `init` subcommands; see §3 and §5 |
 | the image pipeline | **S4, landed**; the preview-grade reduction landed in **S12b**; the grading stage removed by **S12c** | `pixlay-imaging`: `Source::decode`, `resample`, `slot_bitmap`/`slot_bitmaps`, `probe`, and the preview's `Preview` caches + `reduce::PreviewSource`; the buffer ladder and the colour decisions are §4.1 |
 | command history / hit testing / project writing | **S6.5, landed**; `SetTemplate` added by **S7**; the grade/filter/text commands removed by **S12c**; the multi-cell arrival and the move added by **S23b** | `pixlay-core`: `Command` (one edit: source, framing, or the template; `PlacePhotos` for an arrival that points several cells at once and `MovePhoto` for a cut-then-paste — each one undo step, §9) and `History` (snapshot undo/redo; `apply` is all-or-nothing, answers whether the command was a **step** — one that changes nothing is not (S15d) — and the document has no mutable accessor; the GUI commits **one command per gesture**, §9), `Template::slot_at(point)` for hit testing, `CollageDoc::save` / `Project::save` / `Project::save_as` for writing a document. The CLI's `hit` and `save` are the machine surface of the first and the last; the command history is a test surface only, on purpose (§5) |
-| encoding and metadata | **S6, landed**; TIFF and the chroma request removed by **S12c**, resolutions by **S12d** | `pixlay_imaging::encode`: one pass per format writing pixels, sampling and the ICC profile (`icc`), for PNG / JPEG; the CLI's `--long-edge` and the per-format rules are §5, the profile is §4.1 |
+| encoding and metadata | **S6, landed**; TIFF and the chroma request removed by **S12c**, resolutions by **S12d**, AVIF added by **S34** | `pixlay_imaging::encode`: one pass per format writing pixels, sampling and the ICC profile (`icc`), for PNG / JPEG — and for AVIF, which libheif writes through glycin's encoder API (the same `glycin-heif` loader that decodes AVIF and HEIC sources, so a machine without it has no AVIF writer and is told so). The CLI's `--long-edge` and the per-format rules are §5, the profile is §4.1 |
 | the library and the selection | **S9, landed** | `pixlay_core::selection`: `Selection` (the ordered photo list, the clamp, `layouts()`), `last_photo` / `remove_last` — pure, no filesystem (the batch add-back left with S14b; the clamp's floor is 1 since S19). `pixlay_imaging::thumb`: `thumbnail(source, long_edge)`, the same `resample` at a preview grid. The CLI's `scan` / `thumb` / `init --photo` are the machine surface (the rules are §5) |
 
 ## 8. Measured (2026-09-20, this machine)
@@ -1069,6 +1069,41 @@ the rest of this page is measured in:
 
 **Not measured here**: a clean-chroot build. The install is the project's own now (§10).
 
+### S34 (2026-10-08, `--release`, this machine)
+
+AVIF joined PNG and JPEG as a third export format, and the app's default one (the step's record is
+`docs/steps/S34-avif-export-doing.md`). The fixture project
+(`crates/pixlay-cli/tests/fixtures/verify.pixlay`, eight photos) through `render --stats`, one format
+at a time, the same grid for all three:
+
+| 4000 px (4000x3000) | bytes | `encode_ms` | `ms` (decode + draw) | `peak_rss_mb` |
+|---|---|---|---|---|
+| AVIF | **566,985** | 303.5 | 732.2 | **186.6** |
+| JPEG | 1,359,606 | 157.5 | 655.0 | 163.5 |
+| PNG | 5,014,040 | 1633.5 | 658.8 | 163.8 |
+
+| 14043 px (14043x10532, 147.9 MP) | bytes | `encode_ms` | `ms` | `peak_rss_mb` |
+|---|---|---|---|---|
+| AVIF | **3,026,779** | 3089.3 | 6449.6 | **1913.0** |
+| JPEG | 9,157,670 | 1589.6 | 6073.4 | 1632.9 |
+
+- **Smaller file, slower write**: 2.4x smaller than the JPEG at 4000 px and 3.0x at A0, for about
+  twice the encode time. Both fit the product's budget: the A0 export peaks at **1.91 GB** against
+  the 2.5 GB `AGENTS.md` carries from S0.
+- **The extra peak is the pixel copy**: an AVIF encode is a job on the decoder thread, so the pixels
+  cross the thread boundary as one owned buffer (+283 MB at A0, +23 MB at 4000 px). The encoder
+  itself runs in the sandboxed loader process, whose own memory this number does not count.
+- **The fidelity is the chroma's, not the quantizer's**: against the same render's PNG the AVIF is
+  RMSE **0.0131** and the JPEG **0.0054**, and raising the AVIF's quality barely moves it — q95 is
+  899,743 B at 0.0130, q100 is 2,787,175 B at 0.0128 — because libheif's encoder writes YCbCr
+  **4:2:0** and a collage's hard colour edges are what that costs. 90 is the number where the
+  quantizer stops being the limit, and it is fixed there (`AVIF_QUALITY`).
+- **Deterministic**: the same pixels at the same quality write byte-identical files — the CLI's run
+  and a second process's are both `481da849…bcf72`, 566,985 bytes.
+- **The profile is in the file**: `heif-info` reports `color profile: prof`, and the `colr` box's
+  payload is `pixlay_imaging::icc::srgb_profile()` byte for byte
+  (`crates/pixlay-imaging/tests/encode.rs` holds it).
+
 ## 9. The window (S7), and the shell ruling 31 re-cut (S22)
 
 The GUI is the fifth consumer of the same document, and what it adds is interaction. Its
@@ -1349,7 +1384,8 @@ became the platform's. What a caller may rely on:
   file that is there, and the app adds no second question, which is why S15c's `AdwAlertDialog` is gone.
 - **The settings are the export's two parameters, and they are remembered** (S25, rulings 36 and 39): a file
   at `~/.config/pixlay/settings.json` under `XDG_CONFIG_HOME` (`crates/pixlay/src/settings.rs`) carrying
-  `format` (the encoder's own name: `png` / `jpeg`), `longEdge` (`MIN_EXPORT_PX`..`=MAX_EXPORT_PX`, the
+  `format` (the encoder's own name: `avif` / `jpeg` / `png`, and **AVIF is the default** since S34 — the
+  row's own order is AVIF / JPEG / PNG), `longEdge` (`MIN_EXPORT_PX`..`=MAX_EXPORT_PX`, the
   bounds the surface's row offers) and `lastExportDir` (left out until the first export of the account). It
   is read **once**, when a window is built; written through `pixlay_core::atomic::write_atomic` (S15c)
   whenever a row moves or an export remembers its folder; and **never read by the CLI** — `--long-edge` and
@@ -1367,7 +1403,7 @@ became the platform's. What a caller may rely on:
   (`Format::from_path`'s rule: both JPEG spellings, any case) — so with JPEG in the settings a `.png` name
   is a PNG at the settings' long edge, and the export does not rewrite the settings' row. A name with no
   extension, or with one this build does not write, is refused with a toast carrying the CLI's own message
-  (`<path>: expected .png, .jpg or .jpeg`), and `export::run` asks the same question again because it is the
+  (`<path>: expected .png, .jpg, .jpeg or .avif`), and `export::run` asks the same question again because it is the
   function that reaches the file. `export::Request` therefore has no `format` field: a request cannot name a
   format its file would lie about.
 - **One question is answered before an export starts (S15c)**: a path that names one of the document's own

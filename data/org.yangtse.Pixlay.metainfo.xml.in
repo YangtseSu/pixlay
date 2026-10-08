@@ -29,7 +29,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
       <li>Regular and irregular layouts for one to nine photos</li>
       <li>Pan, zoom and arbitrary rotation for the photo in each cell</li>
       <li>A frame with its own gap, corner radius and colour</li>
-      <li>Export to PNG or JPEG at a long edge of your choice</li>
+      <li>Export to AVIF, PNG or JPEG at a long edge of your choice</li>
     </ul>
   </description>
   <launchable type="desktop-id">org.yangtse.Pixlay.desktop</launchable>

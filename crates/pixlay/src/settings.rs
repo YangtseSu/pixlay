@@ -55,11 +55,14 @@ pub struct Settings {
 }
 
 impl Default for Settings {
-    /// The export's own defaults (S12d): the CLI's default format and the form's own
-    /// starting size, so a fresh account exports what a fresh window always exported.
+    /// The export's own defaults (S12d): the form's own starting size, and — since
+    /// S34 (2026-10-08) — **AVIF as the format a fresh account exports**, because it
+    /// is the format a collage's hard edges and flat colour survive best in for the
+    /// fewest bytes, and the one the human named as the default. The CLI has no
+    /// default to move: its format is the extension the caller wrote.
     fn default() -> Self {
         Self {
-            format: Format::Jpeg,
+            format: Format::Avif,
             long_edge: crate::window::DEFAULT_EXPORT_PX,
             last_export_dir: None,
         }
@@ -150,11 +153,11 @@ impl Settings {
 }
 
 /// The format's own spelling in the file: the encoder's `Format::name()` (`png` /
-/// `jpeg`), rather than a second vocabulary for the same two formats.
+/// `jpeg` / `avif`), rather than a second vocabulary for the same three formats.
 ///
 /// `serde` still does the reading and the refusing: a name that is not one of these is
 /// a parse error, which is what makes a hand-edited `"format": "tiff"` the defaults
-/// instead of a panic or a silent fallback to JPEG.
+/// instead of a panic or a silent fallback to AVIF.
 mod format_name {
     use super::Format;
     use serde::{Deserialize, Deserializer, Serializer};
@@ -170,7 +173,11 @@ mod format_name {
             // Both spellings of the JPEG extension are the JPEG format, which is the
             // rule `Format::from_path` applies to an output path.
             "jpg" | "jpeg" => Ok(Format::Jpeg),
-            other => Err(serde::de::Error::unknown_variant(other, &["png", "jpeg"])),
+            "avif" => Ok(Format::Avif),
+            other => Err(serde::de::Error::unknown_variant(
+                other,
+                &["avif", "png", "jpeg"],
+            )),
         }
     }
 }
@@ -245,7 +252,7 @@ mod tests {
         let dir = scratch("defaults");
         let path = dir.join("settings.json");
         assert_eq!(Settings::read(&path), Settings::default());
-        assert_eq!(Settings::default().format, Format::Jpeg);
+        assert_eq!(Settings::default().format, Format::Avif);
         assert_eq!(
             Settings::default().long_edge,
             crate::window::DEFAULT_EXPORT_PX
@@ -269,6 +276,12 @@ mod tests {
         assert_eq!(read.format, Format::Png);
         assert_eq!(read.long_edge, 800);
         assert_eq!(read.last_export_dir, None);
+
+        // AVIF is the third name the file accepts, and the default a fresh account
+        // starts from (S34).
+        std::fs::write(&path, "{\"format\": \"avif\", \"longEdge\": 800}")
+            .expect("the file is written");
+        assert_eq!(Settings::read(&path).format, Format::Avif);
     }
 
     #[test]
