@@ -25,6 +25,9 @@ L, which is the in-model cousin of Google's "Shapes": geometry that a sketch can
   `strip-9-9x1`, no hero, is 2.0. So the step measures a property (or a pair of them) that holds for
   every `-hero` member and no non-hero, asserts it if it finds one, and records the numbers either way;
   the census below holds by name in any case.
+- The target tranche: a `-hero` member at count 2, and at count 8 if `mosaic-8-s14` is not accepted as
+  its poster, plus three irregular members (counts 3, 5 and 7) — four to five new members, the library at
+  **41 or 42** against S35's 37.
 - **2–3 irregular members** (`Shape::Poly`): an L or T at counts 3, 5 and 7, against machinery that is
   already general (the clamp tests the outline's own vertices, the topology checks a concave slot, the
   sketch strokes any simple polygon). The risk is the *look* at the band's 128x96 (S21, S29 and S30 are

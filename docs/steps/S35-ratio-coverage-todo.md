@@ -28,6 +28,16 @@ machinery, no shell change — a `Recipe` plus a regenerated `frozen.rs`.
   - The 2-cell 4:3 member is a `grid-2-*`: the family of `grid-1-1x1`, so the first growth keeps the
     ratio *and* the family; the 2→3 step moves family (to `mosaic-3-hero`) and keeps 4:3, which is the
     aspect-first preference doing its job.
+  - **The target tranche is 10 new members** (2026-10-08): count 2 **+4:3** (`grid-2-2x1`, the default
+    chain's missing link), count 3 **+1:1**, count 4 **+3:4**, count 5 **+1:1** and **+3:4**, count 6
+    **+1:1**, count 7 **+3:4**, count 8 **+1:1** and **+3:4**, count 9 **+3:4**. The library lands at
+    **37 members / 200 slots**: every count 2 … 9 with four or five layouts over four or five ratios,
+    carrying 4:3, 1:1 and a portrait member each, and 3:4 with five members. The step may move a member
+    against the census but not the census.
+  - **No name carries its ratio** (`<family>-<slots>-<variant>`), so a member of a new ratio needs a
+    variant of its own: a *transposed* twin is already expressible (`grid-6-3x2` / `grid-6-2x3`,
+    `strip-2-2x1` / `strip-2-1x2`), but a symmetric variant — `2x2`, a hero — has no free twin name, and
+    the new member takes a distinct mnemonic instead.
 - **3:4 becomes the library's sixth ratio** — Xiaomi's page ratio and the **portrait** sheet: a ratio is
   written width:height, so 3:4 is 0.75, the portrait of the default 4:3 sheet (4:3 is 1.333) — with a
   small number of members (*proposed* here; the step's own ruling confirms or drops it). 9:16 and 4:5
