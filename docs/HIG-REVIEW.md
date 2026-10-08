@@ -305,6 +305,10 @@ the canvas is **content** and the interface is **styling**, and the two must not
      colour edges (RMSE 0.013 against the same render's PNG, where the JPEG's is 0.005)?
    - **the missing loader**: on a machine without glycin's heif loader, does an AVIF export fail with a
      sentence naming what is missing, rather than falling back to another format or saying nothing useful?
+     **The human walked this item on 2026-10-08 and passed it** — "没问题": AVIF stays the default, the
+     q90 4:2:0 output is the look the default is allowed to have, and needing `libheif` for it is
+     acceptable (the failure to find it names what is missing). The step's own ruling is
+     `docs/steps/S34-avif-export-done.md`.
 
 ### The main path's scripted step list (the three-minute walk)
 

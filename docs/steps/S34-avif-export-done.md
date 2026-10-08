@@ -6,8 +6,8 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # S34 · AVIF is the third format, and the default
 
-**Progress**: doing — implemented, measured and machine-checked; the human's walk (`Human`, below) is the
-gate. Nothing in the tree is waiting on a machine.
+**Progress**: done and passed (2026-10-08, human) → next: nothing scheduled; the plan's next step is
+written when the human names one. The work is in `944994e`, pushed to `main`.
 
 **Goal**: a collage can be exported as AVIF, and AVIF is what a fresh account exports — the format a
 collage's hard colour edges and flat colour survive in for the fewest bytes.
@@ -15,9 +15,7 @@ collage's hard colour edges and flat colour survive in for the fewest bytes.
 **Ruling (2026-10-08, human)**: "增加avif输出方式，并且作为默认。" — add AVIF output, and make it the
 default. Basis: AVIF is the modern format for exactly this content (a few large flat areas and hard
 edges at a high resolution), the third format is what the product's own export menu was missing, and the
-writer costs no new dependency (below). What the ruling does **not** fix, and this step leaves to the
-same human: the *quality* number, the *look* of a 4:2:0 AVIF on a collage, and whether a machine that
-needs `libheif` for its default export is acceptable (the `Human` line).
+writer costs no new dependency (below).
 
 **Work**
 
@@ -40,6 +38,9 @@ needs `libheif` for its default export is acceptable (the `Human` line).
   `thumb` row), §8 (the S34 numbers) and §9 (the settings file's `format` and the default);
   `AGENTS.md` (the one-pass constraint, the not-doing list, the module table, the `glycin` registry
   row with `libheif`); `README.md`; `CHANGELOG.md`; `docs/HIG-REVIEW.md` §2's walk.
+- `data/org.yangtse.Pixlay.metainfo.xml.in` — the feature line now names the three formats, so
+  `po/pixlay.pot` and `po/zh_CN.po` were regenerated (`./po/extract-pot`, `msgmerge -U`, the new
+  entry translated).
 
 **Machine-checkable exit**
 
@@ -55,8 +56,11 @@ needs `libheif` for its default export is acceptable (the `Human` line).
   `crates/pixlay/tests/settings.rs` (a fresh window holds AVIF; the row's index 2 is PNG),
   `crates/pixlay/tests/export.rs` (the seed suggests `.avif`, and a `.avif` name exports an AVIF
   through the window's own worker).
+- A machine with no glycin loaders at all: `XDG_DATA_DIRS=/nonexistent pixlay-render render … --out
+  x.avif` exits **2** with `cannot write AVIF: this machine has no AVIF encoder: glycin's heif loader
+  (with libheif) is what writes AVIF`, and writes nothing (checked by hand, 2026-10-08).
 - The verification entry: `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
-  `cargo test`, `reuse lint`.
+  `cargo test` (the GUI suite included, 359.67 s), `reuse lint` — all green, 2026-10-08.
 
 **Measured** (2026-10-08, `--release`, this machine; the fixture project's eight photos through
 `render --stats`; the full table is `docs/CONTRACT.md` §8, "S34"):
@@ -84,7 +88,14 @@ profile reaches the file in the same pass as the pixels (`colr`/`prof`, 664 byte
 `pixlay_imaging::icc` builds). What a machine must have is the `glycin-heif` loader with `libheif` —
 the same package an AVIF or HEIC *photo* already needs — and a machine without it is told so.
 
-**Human**: the walk of `docs/HIG-REVIEW.md` §2 item 13 — is AVIF the right default *look* (the 4:2:0
-chroma against the JPEG's 4:4:4 on a collage's hard colour edges), does a `.avif` export open in the
-person's other applications, and is a default that needs `libheif` installed acceptable? The step is
-`done` when that is answered and the progress line below says so.
+**Ruling (2026-10-08, human) — the gate**: passed — "没问题" (no problem) on the walk of
+`docs/HIG-REVIEW.md` §2 item 13. The ruling accepts three things the machine cannot judge, and they
+are the default's terms from here on: AVIF stays the format a fresh account exports; the q90
+**4:2:0** output (RMSE 0.0131 against the same render's PNG, where the JPEG's 4:4:4 is 0.0054) is the
+look the default is allowed to have; and a machine needing `libheif` for its default export is
+acceptable, the failure to find it being a sentence that names what is missing rather than a silent
+fallback. Nothing in `docs/CONTRACT.md`'s shapes changes with it — §5/§8/§9 already carry the format,
+the default, the quality and the numbers — so the gate closes with no further synchronization.
+
+**Human**: passed (2026-10-08) — `docs/HIG-REVIEW.md` §2 item 13, walked and accepted by the human on
+the same day the step was written.

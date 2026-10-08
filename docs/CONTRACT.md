@@ -1072,7 +1072,7 @@ the rest of this page is measured in:
 ### S34 (2026-10-08, `--release`, this machine)
 
 AVIF joined PNG and JPEG as a third export format, and the app's default one (the step's record is
-`docs/steps/S34-avif-export-doing.md`). The fixture project
+`docs/steps/S34-avif-export-done.md`). The fixture project
 (`crates/pixlay-cli/tests/fixtures/verify.pixlay`, eight photos) through `render --stats`, one format
 at a time, the same grid for all three:
 
