@@ -28,9 +28,10 @@ machinery, no shell change — a `Recipe` plus a regenerated `frozen.rs`.
   - The 2-cell 4:3 member is a `grid-2-*`: the family of `grid-1-1x1`, so the first growth keeps the
     ratio *and* the family; the 2→3 step moves family (to `mosaic-3-hero`) and keeps 4:3, which is the
     aspect-first preference doing its job.
-- **3:4 becomes the library's sixth ratio** — Xiaomi's page ratio, the portrait of the default 4:3 sheet
-  (*proposed* here; the step's own ruling confirms or drops it) — with a small number of members. 9:16
-  and 4:5 stay unbuilt (`docs/ROADMAP.md` records why).
+- **3:4 becomes the library's sixth ratio** — Xiaomi's page ratio and the **portrait** sheet: a ratio is
+  written width:height, so 3:4 is 0.75, the portrait of the default 4:3 sheet (4:3 is 1.333) — with a
+  small number of members (*proposed* here; the step's own ruling confirms or drops it). 9:16 and 4:5
+  stay unbuilt (`docs/ROADMAP.md` records why).
 - `frozen.rs` regenerated with `cargo run -p pixlay-core --bin pixlay-gen-templates` and reviewed as a
   diff; **no shipped template's name, version, aspect or coordinates move** (the regeneration diff and
   the fingerprint test are the guards).

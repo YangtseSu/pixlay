@@ -47,12 +47,12 @@ section holds the research they rest on and the directions they leave alone.
     insight — and the news that **border editing is in development there and shipped here**: the frame
     (gap, corner radius, colour) has been a document field since S11.
   - **Xiaomi Gallery** splits its 拼图 mode into three: **布局** (plain arrangements, further split by
-    canvas ratio — 1:1 and 3:4), **海报** (one photo dominant, the rest small) and **拼接** (photos joined
-    whole, edge to edge). This taxonomy is *structural*, and two of its three modes are already pixlay's
-    vocabulary: 布局 is the strip / grid / mosaic arrangements with **the canvas ratio as the first
-    filter**, and 海报 is the `mosaic-*-hero` family. 拼接 is a **behaviour** rather than a layout — it
-    needs fit-not-cover and a canvas derived from the inputs, which the frozen-aspect model does not
-    express — and it is a direction of its own below.
+    canvas ratio — 1:1 and 3:4, the latter the **portrait** sheet), **海报** (one photo dominant, the rest
+    small) and **拼接** (photos joined whole, edge to edge). This taxonomy is *structural*, and two of
+    its three modes are already pixlay's vocabulary: 布局 is the strip / grid / mosaic arrangements with
+    **the canvas ratio as the first filter**, and 海报 is the `mosaic-*-hero` family. 拼接 is a
+    **behaviour** rather than a layout — it needs fit-not-cover and a canvas derived from the inputs,
+    which the frozen-aspect model does not express — and it is a direction of its own below.
   - **Why Xiaomi's model is the one that maps**: Google keeps one flat list mixing ratios because its
     templates differ mostly in interior style, while a pixlay template's ratio *is* the sheet's shape (a
     template field, the document's canvas). So the reference for the layout stage is "ratio first, then
