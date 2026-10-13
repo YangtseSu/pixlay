@@ -50,3 +50,16 @@ the 139.5 MP render of `verify.pixlay` was the assistant's own addition to the e
 cost a release build plus that render on every change for a picture no machine reads — the fixture stays,
 because the windowless tests render it). So the push job is format, lint and the windowless crates' tests.
 The numbers above stay as this job's record: the **902 s / 255 s** pair is the pre-split composition's.
+
+**Amended 2026-10-13** (the S34 regression, found while handling dependabot's `glycin` bump — the
+windowless half, this time): from 2026-10-08 the push job was red, and not over the shell.
+`every_export_format_is_written_with_its_metadata` failed on `out.avif` with glycin's
+`UnsupportedFileType(Unspecified)`, reported from the `glycin-heif` loader's
+`heif_context_get_encoder_for_format`. S34 made AVIF the default export, while the install step had
+brought libheif's *decoders* only (`libde265` and `dav1d`, the third row above): Ubuntu's `libheif1`
+ships the shared library alone and every codec as a plugin package, so that libheif had no encoder at
+all — and the machine's own, which links libaom, is what kept the failure off this box for five days.
+Fixed by installing `libheif-plugin-aomenc` (the AV1 encoder over libaom, resolute's own package) in
+`ci.yml`, whose comment carries the same account; the requirement it exposed — `libheif` **with an AV1
+encoder** — is written for the machine in `AGENTS.md`'s `glycin` registry row, `README.md`,
+`CONTRIBUTING.md` and `CHANGELOG.md`'s AVIF entry.
