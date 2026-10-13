@@ -32,6 +32,11 @@ lto = "thin"
 codegen-units = 1
 debug = 1
 
+# Line tables only: backtraces still name file and line, without the debug
+# builds' full type/variable info (default debug = 2).
+[profile.dev]
+debug = "line-tables-only"
+
 # Dependencies are optimized in dev builds: the imaging pipeline is unusably
 # slow otherwise. Workspace members keep the default dev settings.
 [profile.dev.package."*"]
