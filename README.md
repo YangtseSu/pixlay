@@ -69,8 +69,9 @@ project's own.
 Every GitHub release carries the Linux binaries in two tarballs — `pixlay-<version>-linux-amd64.tar.gz`
 for x86_64 and `pixlay-<version>-linux-arm64.tar.gz` for aarch64 — each with its `.sha256`, beside the
 `x86_64` Arch package. The binaries link the system's GTK, libadwaita and glycin; HEIC and AVIF
-photos — and an AVIF export, the app's default format — need `libheif` installed (glycin's heif
-loader is what writes and reads them).
+photos — and an AVIF export, the app's default format — need `libheif` installed **with an AV1
+encoder** (glycin's heif loader is what writes and reads them; where a distribution splits libheif's
+codecs into plugins, that is its `aomenc` one — `libheif-plugin-aomenc` on Ubuntu).
 
 ### Any Linux, from a checkout
 

@@ -25,7 +25,10 @@ release — the app and the prebuilt tarballs are described in [`README.md`](REA
 ## Build and install
 
 Needs GTK 4.12+, libadwaita 1.8+, glycin 2, libseccomp, glib and gio (the runtime libraries), plus a
-Rust toolchain, meson, ninja and gettext. `meson setup` names anything that is missing:
+Rust toolchain, meson, ninja and gettext — and `libheif` **with an AV1 encoder**, which is what decodes
+the HEIC fixture and writes the AVIF one (where a distribution splits libheif's codecs into plugins,
+that is its `aomenc` one, `libheif-plugin-aomenc` on Ubuntu). `meson setup` names anything that is
+missing:
 
     meson setup build --prefix=/usr
     meson compile -C build

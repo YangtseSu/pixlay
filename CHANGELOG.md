@@ -21,7 +21,9 @@ All notable changes to Pixlay are documented in this file. The format follows
   the same `glycin-heif` loader that reads AVIF and HEIC photos — so the sRGB profile goes into the
   file's `colr` box in the same pass as the pixels, and AVIF costs no new dependency. The CLI
   writes it too (`pixlay-render --out x.avif`; the extension has always decided the format), and a
-  machine without the heif loader is told what is missing rather than being written another format.
+  machine without the heif loader is told what is missing rather than being written another format —
+  as is one whose `libheif` has no AV1 encoder (Arch links libaom; a distribution that splits
+  libheif's codecs into plugins needs the `aomenc` one, `libheif-plugin-aomenc` on Ubuntu).
 
 ## [0.1.2] - 2026-09-27
 
