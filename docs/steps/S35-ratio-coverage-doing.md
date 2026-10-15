@@ -6,7 +6,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # S35 · Every count has its canvases
 
-**Progress**: doing — implemented, measured and committed 2026-10-16 (this step's commit); **the Human walk
+**Progress**: doing — implemented, measured and committed 2026-10-16 (`08f16e8`); **the Human walk
 is what is left**: the band's legibility over the ten new candidates at its own 128x96
 (`docs/HIG-REVIEW.md` §2, the gallery item). Everything else on the exit list is green and its numbers are
 `docs/CONTRACT.md` §8, "S35".
