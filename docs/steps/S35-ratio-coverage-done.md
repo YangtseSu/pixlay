@@ -6,10 +6,10 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # S35 · Every count has its canvases
 
-**Progress**: doing — implemented, measured and committed 2026-10-16 (`08f16e8`); **the Human walk
-is what is left**: the band's legibility over the ten new candidates at its own 128x96
-(`docs/HIG-REVIEW.md` §2, the gallery item). Everything else on the exit list is green and its numbers are
-`docs/CONTRACT.md` §8, "S35".
+**Progress**: done and passed (2026-10-16, human) → next: **S36 — the sheet's ratio is a control**
+(`docs/steps/S36-ratio-row-todo.md`), in a new session, because a gate's next action is a new session
+(`AGENTS.md`, "Session and persistence discipline"). The work is in `08f16e8`, pushed to `main`; this
+gate is its own commit.
 
 **Goal**: every photo count from 2 to 9 offers the sheet shapes a person asks for — 4:3, 1:1, a portrait
 member and one more — so that the count rule can keep the sheet's shape while the collage grows, and the
@@ -108,10 +108,17 @@ is satisfiable only through the portrait-page members, since the counts that lac
 otherwise need five more members saying the same thing in 2:3. What the walk judges is the ratio itself;
 dropping it would be five recipes and a regeneration, nothing else.
 
+**Ruling (2026-10-16, human) — the gate**: passed — "可读" (readable) on the walk of
+`docs/HIG-REVIEW.md` §2's gallery item over the ten new candidates at the band's own grid (128x96, 96x96,
+72x96). The ten stand as shipped, `3:4`'s five members with them. No shape changes with the ruling:
+`docs/CONTRACT.md` §3 already carries the census, the chain and the ratio and §8 already carries the
+numbers, so the gate closes with that half of the synchronization already done, and the walk's own record
+is written into `docs/HIG-REVIEW.md` §2.
+
 **Human**
 
 - The band's legibility walk over the new candidates at the band's own 128x96 (`docs/HIG-REVIEW.md` §2,
   the gallery item): can two arrangements be told apart and a cell's shape read at that size. The step is
   data, but the strip is what that size judges.
-- **Pending** (2026-10-16): the ten candidates' sketches at `candidate_grid` are written out for it
-  (`/var/tmp/s35probe/sketches/`); the walk in the window is what closes the step.
+- **Passed** (2026-10-16): the human read the ten candidates and ruled them readable ("可读"); the ten
+  candidates' sketches at `candidate_grid` are at `/var/tmp/s35probe/sketches/`.

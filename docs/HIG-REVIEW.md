@@ -177,7 +177,11 @@ the canvas is **content** and the interface is **styling**, and the two must not
     failed for the guttered pair**: `grid-4-2x2g`'s gutter was drawn in the paper's colour, so its candidate
     could not be told from `grid-4-2x2`'s — finding 5 of that pass, fixed by S29, and the band as the window
     now draws it is `/var/tmp/pixlay-s7/layout-band-gutter.png` — **and the ink it was drawn with was too
-    dark** for the strip's own tiles: finding 6, fixed by S30, which dims the ink to a tone of the theme);
+    dark** for the strip's own tiles: finding 6, fixed by S30, which dims the ink to a tone of the theme.
+    **The human walked it again on 2026-10-16, over S35's ten new candidates, and passed it** — "可读"
+    (readable): every arrangement can be told from its neighbours and every cell's shape reads at the band's
+    own grid (128x96 for a 4:3 candidate, 96x96 for 1:1, 72x96 for 3:4). The step's own ruling is
+    `docs/steps/S35-ratio-coverage-done.md`);
    - the floating buttons: do they land where the hand expects, and does the frame look right at both ends of its radius range;
    - the dialogs: does the frame's group read as the three things the document holds — with its live rows
      making the canvas redraw behind it — and (S25's own Human line, item 10 below) does the app's one dialog

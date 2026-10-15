@@ -19,7 +19,7 @@ the assistant's suggestion, recorded for a decision nobody has made yet.
 
 ## More layouts in the library
 
-**Status: S35 landed (2026-10-16); S36 and S37 are the plan's next steps** — *asked for* (2026-09-27, extended 2026-10-08): the shipped library
+**Status: S35 landed and passed (2026-10-16); S36 and S37 are the plan's next steps** — *asked for* (2026-09-27, extended 2026-10-08): the shipped library
 should offer more layouts, and the references the human named organize theirs by category rather than as a
 flat list. The plan's first three steps are **S35, S36 and S37** under [`docs/steps/`](steps/); this
 section holds the research they rest on and the directions they leave alone.
@@ -74,8 +74,8 @@ section holds the research they rest on and the directions they leave alone.
   S30 are the record of how narrow that is: the ink's tone and the gutter's very existence were each
   findings there).
 - **The plan, in order** (each a step under [`docs/steps/`](steps/), written 2026-10-08):
-  1. **Ratio coverage at every count** (S35) — **landed 2026-10-16** (its Human walk is the step file's remaining
-     item), data only: ten new members, so every count 2 … 9 carries at least four layouts
+  1. **Ratio coverage at every count** (S35) — **landed and passed 2026-10-16** (the human's walk ruled
+     the ten candidates readable), data only: ten new members, so every count 2 … 9 carries at least four layouts
      over at least four aspect ratios, including **4:3**, **1:1** and a portrait member; **3:4 joined as
      the sixth ratio** (Xiaomi's page ratio, the portrait of the default 4:3 sheet) with five members; and
      the default growth chain keeps 4:3, which is the measured defect above closed.
