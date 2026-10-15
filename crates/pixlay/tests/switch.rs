@@ -86,19 +86,19 @@ fn a_layout_switch_is_measured_from_the_click() {
     // caches hold the document's own layout by the time anything is measured.)
     let _ = support::canvas_bitmaps(&first);
 
-    // Library order, so the candidates of the verification document are
-    // `mosaic-8-s14` (the one it is on), `strip-8-8x1` and `grid-8-4x2`: the two the
-    // band offers, and the two a click can produce.
+    // Library order, so the candidates of the verification document are every layout
+    // with eight slots: `mosaic-8-s14` (the one it is on) and the ones the band offers
+    // beside it — `strip-8-8x1`, `grid-8-4x2`, and, since S35, `mosaic-8-t4b4` and
+    // `grid-8-2x4`. Every candidate the band offers is a click this test measures.
     let targets: Vec<String> = first
         .candidate_templates()
         .into_iter()
         .map(|template| template.name)
         .filter(|name| *name != first.document().template.name)
         .collect();
-    assert_eq!(
-        targets.len(),
-        2,
-        "the eight-slot library offers two layouts beside the document's own"
+    assert!(
+        targets.len() >= 2,
+        "the eight-slot library offers layouts beside the document's own: {targets:?}"
     );
 
     let mut rows = Vec::new();
@@ -127,13 +127,14 @@ fn a_layout_switch_is_measured_from_the_click() {
         measure(&first, "mosaic-8-s14"),
     ));
 
-    // The two fresh rows start on the document's own layout (that is what makes them
-    // the CLI's experiment), and the third starts on the layout the first one moved to.
-    let expected = [
-        ("mosaic-8-s14", "strip-8-8x1"),
-        ("mosaic-8-s14", "grid-8-4x2"),
-        ("strip-8-8x1", "mosaic-8-s14"),
-    ];
+    // The fresh rows start on the document's own layout (that is what makes them the
+    // CLI's experiment), and the last row starts on the layout the first fresh one
+    // moved to.
+    let mut expected: Vec<(&str, &str)> = targets
+        .iter()
+        .map(|target| ("mosaic-8-s14", target.as_str()))
+        .collect();
+    expected.push((targets[0].as_str(), "mosaic-8-s14"));
     for ((label, switch), (from, target)) in rows.iter().zip(&expected) {
         assert_eq!(&switch.from, from, "{label}: the row's starting layout");
         assert_eq!(&switch.target, target, "{label}: the row's target");

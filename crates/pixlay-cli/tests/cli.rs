@@ -1830,6 +1830,9 @@ fn templates_lists_the_library_and_filters_by_aspect() {
         ("4:3", "mosaic-8-s14"),
         ("1:1", "grid-4-2x2"),
         ("16:9", "strip-3-3x1"),
+        // 3:4 joined the library in S35 as the portrait of the album page; the
+        // filter has to answer the ratio a person names for it.
+        ("3:4", "grid-8-2x4"),
     ] {
         let filtered = run(&["templates", "--aspect", ratio]);
         assert_eq!(code(&filtered), 0, "{ratio}: {}", stderr(&filtered));
@@ -1967,6 +1970,76 @@ fn templates_filters_by_slot_count_which_is_the_gallery_s_query() {
         "{}",
         stderr(&misplaced)
     );
+}
+
+#[test]
+fn every_layout_in_the_library_renders_with_a_photo() {
+    // S10's exit ("15/15 `init --photo` then `render --long-edge 800`, exit 0"),
+    // repeated for S35's ten members and kept as a standing check over the whole
+    // library: a layout a build ships has to render — its geometry accepted by the
+    // renderer, a real photo drawn through its clip, a file written — so a recipe
+    // whose slots the renderer refuses cannot sit in `frozen.rs`.
+    //
+    // One cell carries the photo, not every cell: the debug profile pays about
+    // 0.15 s per occupied slot (decode and resample), so all 200 slots of the
+    // library would cost ~30 s and this test alone would dominate the suite's wall
+    // time, while the *per-slot* work is what the sweeps in
+    // `pixlay-core/tests/framing.rs` and `pixlay-imaging/tests/layout.rs` already
+    // measure for every slot of every template. What is only checkable here is the
+    // whole path per shipped layout — decode, composite, encode — and the tranche's
+    // own run with a photo in every cell at 800 px is the measurement in
+    // `docs/CONTRACT.md` §8.
+    let dir = out_dir("library-renders");
+    let photo = fixture_dir().join("photos/square.png");
+    for name in templates::names() {
+        let slots = templates::get(name).expect("registered").slots.len();
+        let empty = dir.join(format!("{name}.pixlay"));
+        let output = run(&[
+            "init",
+            "--template",
+            name,
+            "--out",
+            empty.to_str().expect("utf-8 path"),
+        ]);
+        assert_eq!(code(&output), 0, "{name}: init: {}", stderr(&output));
+        assert_eq!(field(&output, "cells"), slots.to_string(), "{name}");
+
+        let project = dir.join(format!("{name}-photo.pixlay"));
+        let output = run(&[
+            "edit",
+            "--project",
+            empty.to_str().expect("utf-8 path"),
+            "--slot",
+            "0",
+            "--photo",
+            photo.to_str().expect("utf-8 path"),
+            "--out",
+            project.to_str().expect("utf-8 path"),
+        ]);
+        assert_eq!(code(&output), 0, "{name}: edit: {}", stderr(&output));
+
+        let out = dir.join(format!("{name}.png"));
+        let output = run(&[
+            "render",
+            "--project",
+            project.to_str().expect("utf-8 path"),
+            "--long-edge",
+            "800",
+            "--out",
+            out.to_str().expect("utf-8 path"),
+        ]);
+        assert_eq!(code(&output), 0, "{name}: render: {}", stderr(&output));
+        assert_eq!(
+            field(&output, "occupied"),
+            "1",
+            "{name}: the photo is drawn"
+        );
+        assert!(
+            std::fs::metadata(&out).expect("the render exists").len() > 0,
+            "{name}: the render is empty"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -3138,6 +3211,61 @@ fn edit_grows_and_shrinks_the_layout_one_cell_at_a_time() {
 }
 
 #[test]
+fn the_default_chain_keeps_the_albums_shape_as_the_collage_grows() {
+    // S35's own exit from the machine surface: the editor opens on `grid-1-1x1`
+    // (4:3), `--add-cell` walks the same `layout_for` the window's count control
+    // does, and the chain has to keep the album page's shape the whole way to nine.
+    // Before S35, count 2 was the only count with no 4:3 member, so the first added
+    // cell took the sheet to 3:2 (`strip-2-2x1`) and the second to 16:9
+    // (`strip-3-3x1`), where the rest of the growth stayed.
+    let dir = out_dir("edit-chain");
+    let mut project = dir.join("1.pixlay");
+    let output = run(&[
+        "init",
+        "--template",
+        "grid-1-1x1",
+        "--out",
+        project.to_str().expect("utf-8 path"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+
+    let chain = [
+        (2, "grid-2-2x1"),
+        (3, "mosaic-3-hero"),
+        (4, "mosaic-4-hero"),
+        (5, "mosaic-5-hero"),
+        (6, "mosaic-6-hero"),
+        (7, "mosaic-7-t4b3"),
+        (8, "mosaic-8-s14"),
+        (9, "mosaic-9-hero"),
+    ];
+    for (count, expected) in chain {
+        let next = dir.join(format!("{count}.pixlay"));
+        let output = run(&[
+            "edit",
+            "--project",
+            project.to_str().expect("utf-8 path"),
+            "--add-cell",
+            "--out",
+            next.to_str().expect("utf-8 path"),
+        ]);
+        assert_eq!(code(&output), 0, "{count} cells: {}", stderr(&output));
+        assert_eq!(field(&output, "cells"), count.to_string(), "{count} cells");
+        assert_eq!(field(&output, "template"), expected, "{count} cells");
+        // `edit` reports the template but not its aspect, so the shape is read out of
+        // the file it wrote: the exact ratio the recipe declares, not a label.
+        let doc = CollageDoc::load(&next).expect("the grown project loads");
+        assert_eq!(
+            doc.template.aspect,
+            4.0 / 3.0,
+            "{count} cells: the sheet's shape moved"
+        );
+        project = next;
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn edit_exchanges_two_cells_whole() {
     // S14b: "two photos must be swappable". The whole cell moves, so a photo keeps
     // the framing that made it look right where it was.
@@ -3288,9 +3416,9 @@ fn edit_appends_a_photo_and_grows_the_layout_with_the_count() {
         "the layout grew with the count"
     );
     assert_eq!(field(&output, "photos"), "3");
-    // `strip-2-2x1` is 3:2; the three-slot layouts are 16:9, 2:3 and 4:3, so the
-    // count rule keeps the *family* — this is the same `layout_for` the window
-    // uses, and the two are one implementation.
+    // `strip-2-2x1` is 3:2; the three-slot layouts are 16:9, 2:3, 4:3 and 1:1
+    // (S35), so the count rule keeps the *family* — this is the same `layout_for`
+    // the window uses, and the two are one implementation.
     assert_eq!(field(&output, "template"), "strip-3-3x1");
 
     let before = CollageDoc::load(&project).expect("loads");

@@ -123,8 +123,8 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
     let photos = window.photo_count();
     assert_eq!(photos, 8, "the verification project holds eight photos");
     // What the band is worth in the window's own pixels: a candidate cell, and the
-    // strip one cell tall whatever the layout's aspect (all three are fitted into
-    // the same box).
+    // strip one cell tall whatever the layout's aspect (every candidate is fitted
+    // into the same box).
     assert_eq!(
         gallery.cell("mosaic-8-s14").map(|cell| cell.height()),
         gallery.cell("strip-8-8x1").map(|cell| cell.height()),
@@ -283,8 +283,9 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
     // nothing for the canvas (S18's "keeps the edge" row), and every file the
     // counter moves for is the band's. It moves not at all — a sketch is a
     // template's geometry, and `decode::GalleryJob` carries no path.
-    // (`grid-4-2x2` and `grid-4-2x2g` are the library's only such pair; the
-    // eight-cell layouts are 4:3, 16:9 and 3:2.)
+    // (`grid-4-2x2` and `grid-4-2x2g` are the library's only two layouts with both
+    // the same aspect and the same cell count — every count carries its ratios
+    // once each since S35, so it is still the only such pair.)
     window.open_document(document_on("grid-4-2x2"));
     settle(&window);
     let before_band = window.decoded_sources();

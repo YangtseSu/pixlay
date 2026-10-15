@@ -160,7 +160,7 @@ fn the_main_path_can_be_walked() {
     let candidates = gallery.candidates();
     assert!(
         candidates.len() >= 3,
-        "every count has at least three layouts: {candidates:?}"
+        "every count carries several layouts (four or more since S35): {candidates:?}"
     );
     assert!(
         candidates.contains(&doc.template.name),

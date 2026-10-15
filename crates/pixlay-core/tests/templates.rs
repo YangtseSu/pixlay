@@ -27,7 +27,8 @@ use std::process::Command;
 
 use pixlay_core::templates::{SMOKE_TEMPLATE, TEMPLATE_VERSION, generator};
 use pixlay_core::{
-    CoreError, MAX_PHOTOS, MAX_SLOTS, MIN_SLOTS, Point, Polygon, Slot, Template, templates,
+    ASPECT_TOLERANCE, CoreError, MAX_PHOTOS, MAX_SLOTS, MIN_SLOTS, Point, Polygon, Slot, Template,
+    layout_for, templates,
 };
 
 /// Points sampled per axis when rasterizing a template. 512 per axis is 262144
@@ -525,15 +526,19 @@ fn every_slot_count_in_the_range_is_covered() {
 }
 
 #[test]
-fn every_count_from_two_up_carries_three_layouts_in_two_aspect_families() {
-    // S10's exit criterion (ruling 10): the gallery of S14 has to give a person a
-    // choice, so every photo count from two carries at least three layouts, spread
-    // over at least two aspect families. **Count 1 is the exception and the reason
-    // the range starts at two**: it has exactly one layout — the whole sheet, added
-    // by S19 — because three one-photo layouts would be three names for one
-    // geometry (ruling 34, a single photo is a legal collage). Nine is the ceiling,
-    // since S12c removed the ten-slot recipe.
+fn every_count_from_two_up_carries_four_layouts_over_four_aspects() {
+    // S10's rule (ruling 10) was "at least three layouts in at least two aspect
+    // families", because a gallery that offers one candidate is not a choice. S35
+    // deepened it: every count from two carries **at least four layouts over at
+    // least four aspect ratios, including the album page (4:3), the square (1:1) and
+    // a portrait member (2:3 or 3:4)** — the layout stage's ratio row (S36) has
+    // something to offer at every count, and the sheet a document was opened on can
+    // keep its shape while the collage grows. **Count 1 stays the exception**: it has
+    // exactly one layout — the whole sheet, added by S19 — because three one-photo
+    // layouts would be three names for one geometry (ruling 34, a single photo is a
+    // legal collage). Nine is the ceiling, since S12c removed the ten-slot recipe.
     let templates = templates_under_test();
+    let ratio_is = |aspect: f64, other: f64| (aspect - other).abs() <= ASPECT_TOLERANCE;
     let mut histogram = Vec::new();
     for count in 2..=MAX_PHOTOS {
         let layouts: Vec<&Template> = templates
@@ -543,17 +548,45 @@ fn every_count_from_two_up_carries_three_layouts_in_two_aspect_families() {
         let mut aspects: Vec<f64> = layouts.iter().map(|template| template.aspect).collect();
         aspects.sort_by(f64::total_cmp);
         aspects.dedup();
-        histogram.push((count, layouts.len(), aspects.len()));
+        histogram.push((
+            count,
+            layouts.len(),
+            aspects.len(),
+            aspects.iter().any(|&aspect| ratio_is(aspect, 4.0 / 3.0)),
+            aspects.iter().any(|&aspect| ratio_is(aspect, 1.0)),
+            aspects
+                .iter()
+                .any(|&aspect| ratio_is(aspect, 2.0 / 3.0) || ratio_is(aspect, 3.0 / 4.0)),
+        ));
     }
-    // The histogram as (photos, layouts, aspect families). One assertion over it,
-    // so a failure reports the shape of the whole library rather than one row, and
-    // a reader can check the same numbers against `pixlay-render templates`.
+    // The histogram as (photos, layouts, ratios, has 4:3, has 1:1, has a portrait
+    // member). One assertion over it, so a failure reports the shape of the whole
+    // library rather than one row, and a reader can check the same numbers against
+    // `pixlay-render templates`.
     assert!(
-        histogram
-            .iter()
-            .all(|&(_, layouts, families)| layouts >= 3 && families >= 2),
-        "every count from 2 to {MAX_PHOTOS} needs at least three layouts in at least two \
-         aspect families; the histogram is {histogram:?}"
+        histogram.iter().all(
+            |&(_, layouts, ratios, album, square, portrait)| layouts >= 4
+                && ratios >= 4
+                && album
+                && square
+                && portrait
+        ),
+        "every count from 2 to {MAX_PHOTOS} needs at least four layouts over at least four \
+         ratios, carrying 4:3, 1:1 and a portrait member; the histogram as (photos, layouts, \
+         ratios, 4:3, 1:1, portrait) is {histogram:?}"
+    );
+
+    // 3:4 joined as the library's sixth ratio in S35 and is not a single member
+    // standing in for a shape: it is the portrait page, the shape a direction asks
+    // for (`docs/ROADMAP.md`), and a ratio with one member has nothing to choose
+    // between.
+    let portrait_page = templates
+        .iter()
+        .filter(|template| ratio_is(template.aspect, 3.0 / 4.0))
+        .count();
+    assert!(
+        portrait_page >= 2,
+        "3:4 has {portrait_page} members; a ratio that is a shape of its own needs a choice"
     );
 
     let one: Vec<&str> = templates
@@ -565,6 +598,61 @@ fn every_count_from_two_up_carries_three_layouts_in_two_aspect_families() {
         one,
         ["grid-1-1x1"],
         "one photo is the sheet and the sheet alone (S19, ruling 34)"
+    );
+}
+
+#[test]
+fn the_default_growth_chain_keeps_the_albums_shape() {
+    // S35's own criterion, and the defect the step started from: the window opens on
+    // `grid-1-1x1` (4:3) and `AddCell` hands every growth to `selection::layout_for`
+    // with the document's own aspect and family — the same call the window's count
+    // control and the CLI's `edit --add-cell` make. Before S35, count 2 was the only
+    // count with no 4:3 member, so the first added photo took the sheet to 3:2
+    // (`strip-2-2x1`) and the second to 16:9 (`strip-3-3x1`), where the rest of the
+    // growth stayed.
+    //
+    // The walk is literally what the command does — at each count the next template
+    // is `layout_for`'s answer for the aspect the document then carries — and the
+    // chain it produces is written down, because "the sheet keeps its shape" is a
+    // product promise and a recipe edit that quietly moved the chain has to show up
+    // here rather than in someone's document.
+    let mut current = templates::get("grid-1-1x1").expect("the opening template is registered");
+    let mut chain = vec![current.name.clone()];
+    for count in 2..=MAX_PHOTOS {
+        let next = layout_for(count, current.aspect, current.family())
+            .unwrap_or_else(|| panic!("no layout for {count} photos"));
+        assert_eq!(
+            next.slots.len(),
+            count,
+            "{}: the count the chain asked for",
+            next.name
+        );
+        assert!(
+            (next.aspect - current.aspect).abs() <= ASPECT_TOLERANCE,
+            "the sheet's shape moved at {count} photos: {} → {} ({} → {})",
+            current.name,
+            next.name,
+            current.aspect,
+            next.aspect
+        );
+        chain.push(next.name.clone());
+        current = next;
+    }
+    assert_eq!(
+        chain,
+        [
+            "grid-1-1x1",
+            "grid-2-2x1",
+            "mosaic-3-hero",
+            "mosaic-4-hero",
+            "mosaic-5-hero",
+            "mosaic-6-hero",
+            "mosaic-7-t4b3",
+            "mosaic-8-s14",
+            "mosaic-9-hero",
+        ],
+        "the album page's growth chain moved; it is what `+` walks from the document the \
+         editor opens on"
     );
 }
 

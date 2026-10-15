@@ -338,11 +338,21 @@ fn the_count_rule_picks_the_layout_that_follows_the_document() {
         named(3, 1.5, Some(Family::Strip)),
         Some("strip-3-3x1".to_string())
     );
-    // Within one family the nearer aspect wins: 1:1 is 0.33 away from
-    // `grid-6-2x3` (2:3) and 0.5 away from `grid-6-3x2` (3:2).
+    // The aspect rung outranks the family one: `grid-2-2x1` is the library's only
+    // 4:3 two-slot layout (S35), so a 4:3 document keeps its shape even when the
+    // strip family asks — which is what makes the album page survive a photo being
+    // added.
     assert_eq!(
-        named(6, 1.0, Some(Family::Grid)),
-        Some("grid-6-2x3".to_string())
+        named(2, thirds, Some(Family::Strip)),
+        Some("grid-2-2x1".to_string())
+    );
+    // Within one family the nearer aspect wins, and a candidate of another family is
+    // not considered even when it is nearer: at 1.2 the grids are 0.3 (`grid-6-3x2`)
+    // and 0.533 (`grid-6-2x3`) away while `mosaic-6-hero` is 0.133 away, and the
+    // family rung decides before the distance does.
+    assert_eq!(
+        named(6, 1.2, Some(Family::Grid)),
+        Some("grid-6-3x2".to_string())
     );
     // And a family the count has no member of falls through to the aspect: no
     // five-slot grid exists, so the 4:3 mosaic is chosen for a 4:3 count.
@@ -355,11 +365,12 @@ fn the_count_rule_picks_the_layout_that_follows_the_document() {
     //    two square four-slot grids, and the earlier recipe is the answer.
     assert_eq!(named(4, 1.1, None), Some("grid-4-2x2".to_string()));
 
-    // 4. Library order breaks a tie the three rungs above leave standing: 1.25 is
-    //    exactly as far from 3:2 as from 1:1, so the earlier recipe is chosen.
+    // 4. Library order breaks a tie the three rungs above leave standing: 0.875 is
+    //    exactly as far from 1:1 as from 3:4 — the two five-slot layouts S35 gave the
+    //    portrait shapes — so the earlier recipe, the square one, is chosen.
     assert_eq!(
-        named(2, 1.25, None),
-        Some("strip-2-2x1".to_string()),
+        named(5, 0.875, None),
+        Some("mosaic-5-t2b3".to_string()),
         "a tie on the aspect keeps library order"
     );
 

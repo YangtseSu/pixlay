@@ -6,8 +6,10 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # S35 · Every count has its canvases
 
-**Progress**: todo — written 2026-10-08 as the plan's first step (`docs/ROADMAP.md`, "More layouts in the
-library"); nothing is implemented and no template has been authored yet.
+**Progress**: doing — implemented, measured and committed 2026-10-16 (this step's commit); **the Human walk
+is what is left**: the band's legibility over the ten new candidates at its own 128x96
+(`docs/HIG-REVIEW.md` §2, the gallery item). Everything else on the exit list is green and its numbers are
+`docs/CONTRACT.md` §8, "S35".
 
 **Goal**: every photo count from 2 to 9 offers the sheet shapes a person asks for — 4:3, 1:1, a portrait
 member and one more — so that the count rule can keep the sheet's shape while the collage grows, and the
@@ -66,8 +68,50 @@ machinery, no shell change — a `Recipe` plus a regenerated `frozen.rs`.
 - `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test`,
   `reuse lint` green.
 
+**Implemented as** (2026-10-16) — the ten members, in recipe order, each with the arrangement it carries:
+
+| count | ratio | name | arrangement |
+|---|---|---|---|
+| 2 | 4:3 | `grid-2-2x1` | two equal columns — the default chain's missing link, in `grid-1-1x1`'s own family |
+| 3 | 1:1 | `mosaic-3-t1b2` | a wide top panel over two square ones — `mosaic-3-hero` turned on its side |
+| 4 | 3:4 | `mosaic-4-t1b3` | a wide top panel over three — `mosaic-4-hero` on its side, its splits 5/16 · 6/16 · 5/16 |
+| 5 | 1:1 | `mosaic-5-t2b3` | two square panes over three — no equal tiling of a square holds five |
+| 5 | 3:4 | `mosaic-5-t1b4` | a wide top panel over four — `mosaic-5-hero` on its side |
+| 6 | 1:1 | `mosaic-6-t3b3` | two rows of three, splitting 5/6/5 over 6/5/5 — the count's three-by-two read |
+| 7 | 3:4 | `mosaic-7-l4r3` | the transpose of `mosaic-7-t4b3`: four panes down the left, three down the right |
+| 8 | 1:1 | `mosaic-8-t4b4` | two rows of four, the lower row splitting 5/3/3/5 |
+| 8 | 3:4 | `grid-8-2x4` | the transposed twin of `grid-8-4x2`, two columns of four |
+| 9 | 3:4 | `mosaic-9-l4r5` | four panes down the left and five down the right, the middle of the five the tallest |
+
+The names follow the step's own rule — no name carries its ratio — as a transposed twin where one is
+expressible (`grid-8-2x4`) and a distinct mnemonic where the arrangement is its own transpose or its
+variant word is taken (`t<b>b<b>`, `l<l>r<r>`); `docs/CONTRACT.md` §3 now states that rule.
+
+**Result** (2026-10-16): the ten members are recipes in `crates/pixlay-core/src/templates/generator.rs`,
+`frozen.rs` is regenerated (**127 insertions, 0 deletions** — no shipped byte moved, and the 14043 px
+verification render is `cmp`-identical to the build before the step), and the library is **37 templates /
+200 slots** over six ratios, with **4:3, 1:1 and a portrait member at every count 2 … 9**. The default
+growth chain is 4:3 at every step. Two tests carry the census and the chain
+(`crates/pixlay-core/tests/templates.rs`), a CLI test walks the chain from `grid-1-1x1` to nine cells
+(`crates/pixlay-cli/tests/cli.rs`), and one renders every shipped layout with a photo
+(13.6 s in the debug profile — the per-slot cost is why it draws one cell, not every cell). Two tests
+that had pinned the older library moved with it: the switch measurement now walks **every** candidate the
+band offers (count 8 has five since S35), and the history walk's round-trip assertion is gated on **both**
+keys the count rule reads — the aspect *and* the family — because a 1:1 grid document's walk leaves the
+family at three cells and comes back as the grid the library lists first. Every number is
+`docs/CONTRACT.md` §8, "S35"; the whole entry — `cargo fmt --check`, `clippy`, `cargo test`,
+`reuse lint` — is green.
+
+**3:4 stands as the library's sixth ratio, with five members** (counts 4, 5, 7, 8, 9): the step wrote it
+as *proposed* and left it to this step's ruling, and the exit it wrote — "3:4 has at least two members" —
+is satisfiable only through the portrait-page members, since the counts that lack a portrait shape would
+otherwise need five more members saying the same thing in 2:3. What the walk judges is the ratio itself;
+dropping it would be five recipes and a regeneration, nothing else.
+
 **Human**
 
 - The band's legibility walk over the new candidates at the band's own 128x96 (`docs/HIG-REVIEW.md` §2,
   the gallery item): can two arrangements be told apart and a cell's shape read at that size. The step is
   data, but the strip is what that size judges.
+- **Pending** (2026-10-16): the ten candidates' sketches at `candidate_grid` are written out for it
+  (`/var/tmp/s35probe/sketches/`); the walk in the window is what closes the step.

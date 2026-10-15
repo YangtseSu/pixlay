@@ -24,6 +24,13 @@ All notable changes to Pixlay are documented in this file. The format follows
   machine without the heif loader is told what is missing rather than being written another format —
   as is one whose `libheif` has no AV1 encoder (Arch links libaom; a distribution that splits
   libheif's codecs into plugins needs the `aomenc` one, `libheif-plugin-aomenc` on Ubuntu).
+- **Ten more layouts, and the sheet keeps its shape.** Every photo count from two to nine now offers
+  at least four layouts over at least four shapes, including the album page (4:3), the square and a
+  portrait one; **3:4 joins as the sixth sheet ratio** (the portrait of the album page). The library
+  is 37 layouts and 200 cells, and a layout that shipped keeps its geometry — nothing an existing
+  project points at moved. The window opens on a 4:3 sheet and a first photo used to turn it 3:2 and
+  the second 16:9; the new `grid-2-2x1` closes that chain, so the sheet keeps its shape from one
+  photo to nine.
 
 ## [0.1.2] - 2026-09-27
 

@@ -36,9 +36,12 @@
 //! A `g` suffix marks a **gutter** — a strip or a grid whose panes stop short of
 //! each other, so the slots do not tile the canvas and their areas sum to less
 //! than 1.0 (`grid-4-2x2g`, `strip-2-2x1g`). Since S10 every photo count from 2
-//! to 9 carries at least three layouts, in at least two aspect families; nine is
-//! the ceiling, because S12c removed the ten-slot recipe that used to sit above
-//! it. Count 1 has exactly one member since S19 — `grid-1-1x1`, the whole sheet —
+//! to 9 carries at least three layouts, in at least two aspect families; since S35
+//! it carries **at least four layouts over at least four aspect ratios, including
+//! the album page (4:3), the square (1:1) and a portrait member** (2:3 or 3:4), so
+//! the count rule can keep the sheet's shape while the collage grows. Nine is the
+//! ceiling, because S12c removed the ten-slot recipe that used to sit above it.
+//! Count 1 has exactly one member since S19 — `grid-1-1x1`, the whole sheet —
 //! because one photo is a legal collage (ruling 34) and a second one-slot layout
 //! would be the same geometry under another name.
 //!

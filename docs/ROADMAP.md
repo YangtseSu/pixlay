@@ -19,23 +19,24 @@ the assistant's suggestion, recorded for a decision nobody has made yet.
 
 ## More layouts in the library
 
-**Status: planned (2026-10-08)** — *asked for* (2026-09-27, extended 2026-10-08): the shipped library
+**Status: S35 landed (2026-10-16); S36 and S37 are the plan's next steps** — *asked for* (2026-09-27, extended 2026-10-08): the shipped library
 should offer more layouts, and the references the human named organize theirs by category rather than as a
 flat list. The plan's first three steps are **S35, S36 and S37** under [`docs/steps/`](steps/); this
 section holds the research they rest on and the directions they leave alone.
 
-- **What it holds today** (`pixlay-render templates`, 2026-10-08): **27 templates, 143 slots** over cell
-  counts 1 … 9 — one layout at count 1 (`grid-1-1x1`, which is `DEFAULT_TEMPLATE`), then three, three,
-  four, three, four, three, three and three — and over five aspects: **4:3** (8), **16:9** (7), **1:1**
-  (5), **3:2** (4), **2:3** (3). A two-to-four-photo collage, which is what the main path mostly is,
-  picks from three or four candidates, and a one-photo document has nothing to choose.
-- **The measured defect the plan starts from** (2026-10-08, `pixlay-render edit --add-cell`): the window
-  opens on `grid-1-1x1` (4:3), **count 2 is the only count with no 4:3 layout**, and so the first added
-  photo takes the sheet to 3:2 (`strip-2-2x1`) and the second to 16:9 (`strip-3-3x1`), where the rest of
-  the growth stays. The 4:3 chain already exists at 1 and 3 … 9 and every growth lands on it — the aspect
-  rank is `layout_for`'s first preference — so one 4:3 two-cell member is what makes the sheet keep its
-  shape from photo one to nine. Portrait coverage is counts 2, 3 and 6 only; count 2 carries no 16:9;
-  1:1 is missing at 3, 5, 6 and 8.
+- **What it holds today** (`pixlay-render templates --json`, 2026-10-16): **37 templates, 200 slots** over cell
+  counts 1 … 9 — one layout at count 1 (`grid-1-1x1`, which is `DEFAULT_TEMPLATE`), then four, four,
+  five, five, five, four, five and four — and over six aspects: **4:3** (9), **1:1** (9), **16:9** (7),
+  **3:4** (5), **3:2** (4), **2:3** (3). A two-to-four-photo collage, which is what the main path mostly is,
+  picks from four or five candidates, and every count carries the album page, the square and a portrait
+  shape — the four-ratio floor S35's exit asserts (`docs/CONTRACT.md` §3).
+- **The measured defect S35 closed** (measured 2026-10-08, closed 2026-10-16): the window
+  opens on `grid-1-1x1` (4:3), **count 2 was the only count with no 4:3 layout**, and so the first added
+  photo took the sheet to 3:2 (`strip-2-2x1`) and the second to 16:9 (`strip-3-3x1`), where the rest of
+  the growth stayed. The 4:3 chain already existed at 1 and 3 … 9 — the aspect
+  rank is `layout_for`'s first preference — so one 4:3 two-cell member (`grid-2-2x1`) is what makes the sheet keep its
+  shape from photo one to nine, and the chain is a test now (`docs/CONTRACT.md` §8, "S35"). Portrait
+  coverage was counts 2, 3 and 6 only and is now every count; 1:1 was missing at 3, 5, 6 and 8.
 - **How the two references organize their templates** (*asked for*, 2026-10-08 — the human named both).
   - **Google Photos** is reorganizing a collage's flat template list into at least nine named categories
     — Featured, Grid, Film, Classic, Love, Celebration, Floral, Decoration, Shapes — with border editing
@@ -72,12 +73,12 @@ section holds the research they rest on and the directions they leave alone.
   exactly 1.0, simple outlines) and has to stay legible as a sketch at the band's own 128x96 (S21, S29 and
   S30 are the record of how narrow that is: the ink's tone and the gutter's very existence were each
   findings there).
-- **The plan, in order** (each a step under [`docs/steps/`](steps/), written 2026-10-08, status `todo`):
-  1. **Ratio coverage at every count** (S35) — data only. Every count 2 … 9 carries at least four layouts
-     over at least four aspect ratios, including **4:3**, **1:1** and a portrait member; **3:4 joins as
-     the sixth ratio** (Xiaomi's page ratio, the portrait of the default 4:3 sheet) with a small number
-     of members; and the default growth chain keeps 4:3. This is the measured defect above, and it goes
-     first because it is the cheapest and because everything else is worth more once the ratios exist.
+- **The plan, in order** (each a step under [`docs/steps/`](steps/), written 2026-10-08):
+  1. **Ratio coverage at every count** (S35) — **landed 2026-10-16** (its Human walk is the step file's remaining
+     item), data only: ten new members, so every count 2 … 9 carries at least four layouts
+     over at least four aspect ratios, including **4:3**, **1:1** and a portrait member; **3:4 joined as
+     the sixth ratio** (Xiaomi's page ratio, the portrait of the default 4:3 sheet) with five members; and
+     the default growth chain keeps 4:3, which is the measured defect above closed.
   2. **The ratio becomes a control** (S36) — the band gains a **ratio row** ahead of the strip, the
      document's own ratio marked; choosing one re-lays the document through the same preference the count
      rule uses (cells kept, one undo step) and the strip narrows to that ratio's candidates;

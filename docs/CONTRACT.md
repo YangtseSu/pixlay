@@ -207,17 +207,31 @@ limit that is not in this table is a contract gap.
   A `g` suffix marks a **gutter** in either family (`grid-4-2x2g`, `strip-2-2x1g`): the panes stop short of each other, so the template
   does not tile its canvas and its areas sum to less than 1.0. S19's one-slot member is `grid-1-1x1`: a 1x1 tiling, the whole
   sheet as one cell, 4:3.
+  **No name carries its ratio** (S35): the same arrangement at another shape takes a name of its own — a transposed twin where the
+  name is one (`grid-6-3x2` / `grid-6-2x3`, `strip-2-2x1` / `strip-2-1x2`, `grid-8-4x2` / `grid-8-2x4`), and a distinct mnemonic
+  where the arrangement is its own transpose or its variant word is taken (a `2x2`, or a hero transcribed as `t1b2` / `l4r5`:
+  top band of two, left band of four over a right band of five). The six ratios the library ships are 1:1, 4:3, 3:2, 16:9, 2:3 and
+  3:4 — the last the portrait of the album page, added by S35.
 - **Geometry version and document version are separate**: `template.version` follows the template family, `docVersion` follows the format.
-- **The library covers every slot count from 1 to 9**: counts 2..=9 carry at least three layouts each in at least two aspect families (S10), and count 1 carries exactly one — `grid-1-1x1`, the whole sheet (S19, ruling 34), because one photo is a legal collage and a second one-slot layout would be the same geometry under another name. The CLI's `templates` reports the matrix and filters it by aspect ratio. `strip-10-10x1` was the only member above nine and left with S12c.
-- **The library's range is deeper than one layout** (S10, ruling 10): every count from 2 to 9 carries **at least three
-  layouts, in at least two aspect families** — 27 templates and 143 slots in all since S19 added the one-slot
-  sheet, which `pixlay-render templates` reports
-  and `crates/pixlay-core/tests/templates.rs` asserts as a histogram over `2..=MAX_PHOTOS` plus the
-  one-layout rule for count 1.
-- **A shipped name keeps its geometry and its `templateVersion` forever**: S10 added 15 layouts and moved none, and that is a
-  test as well as a regeneration diff — `crates/pixlay-core/tests/templates.rs` pins a fingerprint of the geometry every
-  template that had shipped before S10 still has, because the determinism test alone cannot see a recipe edit that was
-  regenerated with it.
+- **The library covers every slot count from 1 to 9**: counts 2..=9 carry at least four layouts each over at least four aspect
+  ratios, including the album page (4:3), the square (1:1) and a portrait member (2:3 or 3:4) — the S35 rule, deepening S10's
+  "at least three layouts in at least two aspect families" — and count 1 carries exactly one, `grid-1-1x1`, the whole sheet
+  (S19, ruling 34), because one photo is a legal collage and a second one-slot layout would be the same geometry under another
+  name. The CLI's `templates` reports the matrix and filters it by aspect ratio. `strip-10-10x1` was the only member above nine
+  and left with S12c.
+- **The sheet keeps its shape as the collage grows** (S35): `selection::layout_for`'s first preference is the document's own
+  aspect, and every count now has a 4:3 member, so the chain the window opens on — `grid-1-1x1`, the count control from 1 to 9 —
+  is 4:3 at every step (`grid-2-2x1`, then the `mosaic-*-hero` chain and `mosaic-8-s14`). Before S35 count 2 had no 4:3 layout:
+  the first added photo turned the album page 3:2 and the second 16:9, where the rest of the growth stayed. The chain is a test
+  (`crates/pixlay-core/tests/templates.rs`), not a hope.
+- **The library's range is deeper than one layout** (S10, ruling 10): every count from 2 to 9 carries **at least four layouts over
+  at least four aspect ratios that include 4:3, 1:1 and a portrait member** (S35) — **37 templates and 200 slots** in all, which
+  `pixlay-render templates` reports and `crates/pixlay-core/tests/templates.rs` asserts as a histogram over `2..=MAX_PHOTOS` plus
+  the one-layout rule for count 1 and `3:4`'s two-member floor (a ratio is a shape of its own, not one member standing in for it).
+- **A shipped name keeps its geometry and its `templateVersion` forever**: S10 added 15 layouts and moved none, and S35 added
+  ten and moved none, which is a test as well as a regeneration diff — `crates/pixlay-core/tests/templates.rs` pins a
+  fingerprint of the geometry every template that had shipped before S10 still has, because the determinism test alone cannot
+  see a recipe edit that was regenerated with it.
 
 ## 4. Rendering: `draw(doc, images, target)`
 
@@ -1103,6 +1117,24 @@ at a time, the same grid for all three:
 - **The profile is in the file**: `heif-info` reports `color profile: prof`, and the `colr` box's
   payload is `pixlay_imaging::icc::srgb_profile()` byte for byte
   (`crates/pixlay-imaging/tests/encode.rs` holds it).
+
+### S35 (2026-10-16, `--release`, this machine)
+
+Ten layouts joined the library and not one shipped layout moved: **37 templates and 200 slots** over six
+ratios, and the album page keeps its shape from the first photo to the ninth. The library numbers are
+`pixlay-render templates --json`'s, the chain is `edit --add-cell`'s from the document the window opens on,
+and the renders are the fixture photos at 800 px (`/var/tmp/s35probe/`).
+
+| Item | Value |
+|---|---|
+| the library | **37 templates, 200 slots** (S34: 27 and 143) · 4:3 **9** · 1:1 **9** · 16:9 **7** · 3:4 **5** · 3:2 **4** · 2:3 **3** · layouts per count 1 → 1, 2 → 4, 3 → 4, 4 → 5, 5 → 5, 6 → 5, 7 → 4, 8 → 5, 9 → 4 — every count 2 … 9 at four layouts or more over four ratios or more |
+| the growth chain (`edit --add-cell` from `grid-1-1x1`) | `grid-2-2x1` → `mosaic-3-hero` → `mosaic-4-hero` → `mosaic-5-hero` → `mosaic-6-hero` → `mosaic-7-t4b3` → `mosaic-8-s14` → `mosaic-9-hero`, **4:3 at every step**; before S35 the first step was `strip-2-2x1` (3:2) and the second `strip-3-3x1` (16:9) |
+| the shipped geometry | `frozen.rs` **21,771 bytes**; the regeneration diff is **127 insertions, 0 deletions**, and a document embeds its own geometry: the 14043 px verification render of `verify.pixlay` is **byte-identical** (`cmp`) between the commit before the step and this one, both 9,157,639 bytes — so the step moves no pixel of any project |
+| the S2 invariants over the grown library | 262,144 samples per template: **0 overlapping pairs**; **0 uncovered samples** in the **35** cut templates; the two guttered ones leave a gutter the border reaches (**0 sealed samples**); every cut template's declared areas sum to **exactly 1.0** — `cargo test -p pixlay-core --test templates`, 19 tests |
+| the ten new layouts render | 10/10 `init --photo` (one photo per slot, the fixture photos) then `render --long-edge 800` exit 0 — **253,598–456,994 bytes**, `ms` 74.2–251.4, `encode_ms` 71.6–139.0, `peak_rss_mb` 24.5–31.9 |
+| the sketch at the band's own grid | the ten at `candidate_grid(aspect)` — 128x96 (4:3), 96x96 (1:1), 72x96 (3:4) — every cell's shape readable and no two arrangements alike (`/var/tmp/s35probe/sketches/`); the human's walk is the gate |
+| unchanged by this step | the JPEG render above: `ms` 6464.2 + `encode_ms` 1986.9, `peak_rss_mb` **1630.8**, `occupied = 8`, `gap = radius = 0` — S34's record of the same document is 9,157,670 bytes, **31 bytes** apart, which is the `glycin` 4.0.1 → 4.0.2 bump (`ffb9e26`, 2026-10-09) and not this step |
+| the test suite | `cargo test`: **green**, the GUI suite included, **415.66 s** wall (S34's record of the same command: 359.67 s); `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings` and `reuse lint` (178 files) green |
 
 ## 9. The window (S7), and the shell ruling 31 re-cut (S22)
 

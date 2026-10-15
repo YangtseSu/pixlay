@@ -116,10 +116,11 @@ fn a_layout_change_keeps_the_photos_it_takes_off_the_sheet() {
     );
 
     // `+`: the photo is back in its own cell, with its framing. The *layout* follows
-    // the count rule (`layout_for`, S14b) — there is no 4:3 two-cell layout in the
-    // library, so this three-cell 4:3 document comes back on a 16:9 three-cell strip
-    // — and that is the count rule's own answer, not the retention's. What the
-    // retention promises is the cells, and the section below is the exact inverse.
+    // the count rule (`layout_for`, S14b) rather than the retention — `−` lands on
+    // `grid-2-2x1` and `+` on `mosaic-3-hero`, both 4:3 since S35, so the sheet keeps
+    // its shape on the way down and back — and that is the count rule's own answer.
+    // What the retention promises is the cells, and the section below is the exact
+    // inverse.
     window.add_photo();
     settle(&window);
     assert_eq!(

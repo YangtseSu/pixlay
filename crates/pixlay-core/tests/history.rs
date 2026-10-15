@@ -895,16 +895,25 @@ fn no_layout_change_loses_a_cell_whatever_the_sequence_is() {
             let mut history = History::new(start.clone()).expect("a valid document");
             // `layout_for` picks each intermediate layout by the aspect the walk is
             // then carrying, and the library does not have every aspect at every
-            // count (there is no 4:3 two-cell layout, so a 4:3 three-cell document
-            // comes back on a 16:9 strip). The cells below are what the retention
-            // promises; the layout comes back exactly where the aspect survived the
-            // walk, which is the count rule's own answer (S14b) and not this step's.
-            let mut aspect_kept = true;
+            // count (a 16:9 document steps down to 3:2 at two cells, for instance).
+            // The cells below are what the retention promises; the layout comes back
+            // exactly where the walk kept **both keys the rule reads** — the aspect
+            // and the family — which is the count rule's own answer (S14b) and not
+            // this step's. Since S35 the library carries 4:3, 1:1 and a portrait
+            // member at every count, so more walks keep their aspect; the keys are
+            // read together because the family is the second rung, and a document
+            // whose family the walk leaves comes back as the layout that rung names
+            // (a 1:1 *grid* lands on S35's 1:1 mosaic at three cells and returns as
+            // the grid the library lists first — the rule cannot tell two twins of
+            // one aspect and family apart).
+            let mut keys_kept = true;
             for _ in 0..k {
                 history
                     .apply(Command::RemoveLastCell)
                     .expect("there is a cell to take off");
-                aspect_kept &= history.doc().template.aspect == start.template.aspect;
+                let now = &history.doc().template;
+                keys_kept &=
+                    now.aspect == start.template.aspect && now.family() == start.template.family();
             }
             assert_eq!(history.doc().cells.len(), cells - k, "{name}: k = {k}");
             assert_eq!(history.doc().kept.len(), k, "{name}: k = {k}");
@@ -919,10 +928,10 @@ fn no_layout_change_loses_a_cell_whatever_the_sequence_is() {
                 "{name}: `−` × {k} then `+` × {k} is the document's own cells"
             );
             assert!(doc.kept.is_empty(), "{name}: k = {k}");
-            if aspect_kept {
+            if keys_kept {
                 assert_eq!(
                     doc.template.name, start.template.name,
-                    "{name}: k = {k}, with the aspect kept at every step"
+                    "{name}: k = {k}, with the aspect and the family kept at every step"
                 );
             }
         }
