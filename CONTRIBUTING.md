@@ -37,11 +37,13 @@ missing:
 ## The verification entry
 
 Every change the product can see — code, shipped data, a template, a constant the render reads —
-runs these three:
+runs these three, and every change at all runs `reuse lint`, the fourth command, which reads every
+file's header:
 
     cargo fmt --check
     cargo clippy --workspace --all-targets -- -D warnings
     cargo test
+    reuse lint
 
 `cargo test` renders real images of its own: `crates/pixlay-cli/tests/cli.rs` and `preview.rs` run the
 `pixlay-render` binary on the fixtures, which cover eight photos (JPEG, PNG, 16-bit PNG, HEIC, EXIF

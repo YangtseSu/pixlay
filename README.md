@@ -27,9 +27,10 @@ is aimed at, the clipboard, or the command line (`pixlay a.jpg b.jpg`, in argume
 
 - **One to nine photos.** A single photo is a legal collage; a selection or a drop past nine is
   trimmed to the first nine, with one report saying how many were not used.
-- **Layouts for every count**: cell counts one … nine over five sheet aspects (4:3, 16:9, 1:1, 3:2,
-  2:3), regular and irregular — `pixlay-render templates` lists this build's own. The layout band
-  draws each candidate as a *sketch* of its geometry, not a render of your photos.
+- **Layouts for every count**: cell counts one … nine over six sheet aspects (4:3, 16:9, 1:1, 3:2,
+  2:3 and 3:4), regular and irregular — `pixlay-render templates` lists this build's own. The layout
+  band draws each candidate as a *sketch* of its geometry, not a render of your photos, and the
+  shape comes first: the ratio row picks the sheet, the strip under it its arrangements.
 - **Framing per cell**: pan, zoom and rotation by any angle. The clamp follows the exact angle, so
   the cell stays covered; `Ctrl+0` resets the framing.
 - **Swap any two cells** whole — photo and framing both — by dragging one onto the other, with
@@ -125,8 +126,8 @@ product is held to; [`docs/steps/`](docs/steps/) holds the work, one file per st
 
 "Looks right" is not a criterion here. A change the product can see runs the verification entry
 before it is committed — `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
-`cargo test` — and a claim about pixels becomes a number through `pixlay-render probe` rather than a
-glance at an image.
+`cargo test` and `reuse lint` — and a claim about pixels becomes a number through `pixlay-render
+probe` rather than a glance at an image.
 
 ## License
 
