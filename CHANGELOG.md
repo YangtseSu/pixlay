@@ -12,6 +12,8 @@ All notable changes to Pixlay are documented in this file. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-16
+
 ### Added
 
 - **AVIF export, and it is the default.** The export's format row offers AVIF / JPEG / PNG
@@ -117,7 +119,8 @@ The first release.
   catalogs; an Arch PKGBUILD that wraps it; and a GitHub release carrying the amd64 binaries and
   the `x86_64` package.
 
-[Unreleased]: https://github.com/YangtseSu/pixlay/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/YangtseSu/pixlay/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/YangtseSu/pixlay/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/YangtseSu/pixlay/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/YangtseSu/pixlay/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/YangtseSu/pixlay/releases/tag/v0.1.0
