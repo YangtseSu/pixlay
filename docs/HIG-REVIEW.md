@@ -214,26 +214,29 @@ the canvas is **content** and the interface is **styling**, and the two must not
      at the band's grid, that either is distinguishable from its rectangular neighbour, or that a poster
      reads as a poster. The basis, the legibility risk it leaves open and the trigger to reopen it are
      `docs/steps/S37-arrangement-depth-done.md`'s ruling block;
-   - **the portrait and square sets (S38)**: every count 2 … 9 now offers a whole set of arrangements at
-     3:4 and at 1:1, and the row leads with those two shapes — this is whether **the sets read as sets**:
-     does one shape's strip read as *the arrangements of that shape* rather than as a pile (the count 2
-     square and the count 7 portrait page hold **seven and eight** candidates, so the band's scroller is
-     what a person swipes), does the row's leading pair read as "the usual ones" rather than as "the only
-     ones", and are the near twins distinguishable in a sketch — an equal pair against a hero pair
-     (`strip-2-1x2-3x4`'s two halves against `mosaic-2-hero-top-3x4`'s 11/5), a plain pair against the
-     brick whose lower row mirrors it (`mosaic-4-brick-3x4`), and a nine-grid against its wide-middle twin
-     (`grid-9-3x3-wide-middle-3x4`, one lattice step wider and taller in the middle — 8 px at the band's
-     own grid). The L/T members S37 added stay (ruled 2026-10-17; `docs/ROADMAP.md`) — and the sets' walk
-     asked for the count-7 one to sit **last** in its cell rather than second, which it does now. The
-     machine-checkable
-     half is `crates/pixlay/tests/layout.rs` as above — the band's own pixels against
-     `pixlay-render render --sketch` at `candidate_grid(aspect)`, RMSE 0 — and **the human walked the sets
-     on 2026-10-17 and gave six findings**, all taken: the obviously symmetric 6-photo pairs
-     (left-3-right-3, top-3-bottom-3) now **align**; every proportion the list leaves unnamed is the
-     **2:3** split; `mosaic-7-elbow` is last in its cell; count 9 gained the **5-and-4** bands; the
+   - **the portrait and square sets (S38) and every sheet's set (S39)**: every count 1 … 9 now offers all
+     six sheet shapes — 1:1, 3:4, 4:3, 2:3, 3:2 and 16:9 — each carrying the same arrangements, and the row
+     leads with 3:4 and 1:1. This is whether **the sets read as sets**: does one shape's strip read as *the
+     arrangements of that shape* rather than as a pile (a count's cells hold four to eight candidates and
+     the count 7 portrait page holds **eight**, so the band's scroller is what a person swipes), does the
+     row read as six sheet shapes rather than as a pile of buttons, and are the near twins distinguishable
+     in a sketch — an equal pair against the 2:3 pair (`strip-2-1x2-3x4`'s two halves against
+     `mosaic-2-hero-top-3x4`'s 77/51), a plain pair against the brick whose lower row mirrors it
+     (`mosaic-4-brick-3x4`), a nine-grid against its wide-middle twin (`grid-9-3x3-wide-middle-3x4`, one
+     lattice step wider and taller in the middle — 8 px at the band's own grid), and sheet against sheet
+     (the same arrangement drawn at 128x96, 96x96 and 72x96 — the S39 question is whether the *strip reads
+     the same way* on each). The L/T members S37 added stay (ruled 2026-10-17; `docs/ROADMAP.md`) and sit
+     **last** in their cells since S39. The machine-checkable half is `crates/pixlay/tests/layout.rs` as
+     above — the band's own pixels against `pixlay-render render --sketch` at `candidate_grid(aspect)`,
+     RMSE 0, now per (count, sheet) cell — plus `crates/pixlay-core/tests/templates.rs`'s order assertion.
+     **The human walked the sets on 2026-10-17 and gave six findings**, all taken: the obviously symmetric
+     6-photo pairs (left-3-right-3, top-3-bottom-3) now **align**; every proportion the list leaves unnamed
+     is the **2:3** split; `mosaic-7-elbow` is last in its cell; count 9 gained the **5-and-4** bands; the
      nine-grid gained an **even** member (43/42/43 of a 128 lattice); and the 1→2 growth now lands on the
-     **3:4** portrait page (`DEFAULT_TEMPLATE`). **The re-check of those six is S38's open gate**; the
-     findings' record and the shapes are `docs/steps/S38-portrait-and-square-sets-doing.md`;
+     **3:4** portrait page (`DEFAULT_TEMPLATE`). **S39's band walk — the six-sheet row and the ordering —
+     is the open gate**, and it folds the re-check of those six in; the findings' record and the shapes are
+     `docs/steps/S38-portrait-and-square-sets-doing.md` and
+     `docs/steps/S39-every-sheet-gets-its-set-doing.md`;
    - the floating buttons: do they land where the hand expects, and does the frame look right at both ends of its radius range;
    - the dialogs: does the frame's group read as the three things the document holds — with its live rows
      making the canvas redraw behind it — and (S25's own Human line, item 10 below) does the app's one dialog

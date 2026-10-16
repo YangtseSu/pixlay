@@ -596,15 +596,22 @@ fn every_count_from_two_up_carries_four_layouts_over_four_aspects() {
         .filter(|template| template.slots.len() == 1)
         .map(|template| template.name.as_str())
         .collect();
-    // One photo is the sheet and the sheet alone (S19, ruling 34) — and since S38
-    // there is one such sheet per shape the product is mostly used at, because the
-    // sheet's shape *is* the canvas: the 4:3 album page, the 3:4 portrait page (the
-    // window's default since the walk of 2026-10-17) and the 1:1 square.
+    // One photo is the sheet and the sheet alone (S19, ruling 34) — and since S39
+    // there is one such sheet per shape the library has, because the sheet's shape
+    // *is* the canvas. They are the library's first six members, in the row's order
+    // (the 4:3 member is the one whose own name predates the tagging rule).
     assert_eq!(
         one,
-        ["grid-1-1x1", "grid-1-1x1-3x4", "grid-1-1x1-1x1"],
-        "one photo is the sheet and the sheet alone (S19, ruling 34; S38 added the \
-         two most-used shapes)"
+        [
+            "grid-1-1x1-3x4",
+            "grid-1-1x1-1x1",
+            "grid-1-1x1-2x3",
+            "grid-1-1x1",
+            "grid-1-1x1-3x2",
+            "grid-1-1x1-16x9",
+        ],
+        "one photo is the sheet and the sheet alone (S19, ruling 34; S39 gave every \
+         sheet its member)"
     );
 }
 
@@ -832,13 +839,114 @@ fn the_ratio_row_lists_each_counts_own_shapes_in_order() {
                 template.name
             );
         }
-        // S35's floor, seen from the row: every count but one offers four shapes —
-        // and count 1 offers three since S38 (one sheet per most-used shape).
+        // S35's floor, seen from the row: every count offers at least four shapes —
+        // and since S39 every count 1 … 9 offers all six, count 1 included.
         if count >= 2 {
             assert!(row.len() >= 4, "{count} cells offer only {}", row.len());
-        } else {
-            assert_eq!(row.len(), 3, "one cell offers the three sheets (S38)");
         }
+        assert_eq!(
+            row.len(),
+            6,
+            "{count} cells offer {} shapes where the library has six since S39",
+            row.len()
+        );
+    }
+}
+
+#[test]
+fn every_sheet_of_a_count_holds_the_arrangements_in_one_order() {
+    // S39's ruling — every ratio's members in one order, the irregular cells last —
+    // asserted over the library: every count offers all six sheets; each of a count's
+    // six cells lists its arrangements in the same order (the order the library lists
+    // them, which is the human's list first, the members the list does not name after
+    // it, and the irregular cells last); one arrangement's members — one geometry,
+    // authored at several sheets — follow the row's own sheet order; and the
+    // irregular members come after the rectangular ones in their count.
+    let templates = templates_under_test();
+    assert_eq!(
+        templates::ratios_for(2).len(),
+        6,
+        "the library ships six sheets"
+    );
+    let signature = |template: &Template| -> Vec<Vec<(f64, f64)>> {
+        template
+            .slots
+            .iter()
+            .map(|slot| {
+                slot.outline
+                    .points
+                    .iter()
+                    .map(|point| (point.x, point.y))
+                    .collect()
+            })
+            .collect()
+    };
+    for count in MIN_SLOTS..=MAX_PHOTOS {
+        let row = templates::ratios_for(count);
+        assert_eq!(row.len(), 6, "{count} cells offer {} sheets", row.len());
+        let in_count: Vec<&Template> = templates
+            .iter()
+            .filter(|template| template.slots.len() == count)
+            .collect();
+        // The arrangements, in the order the library lists them.
+        let mut arrangements: Vec<Vec<Vec<(f64, f64)>>> = Vec::new();
+        for template in &in_count {
+            if !arrangements.contains(&signature(template)) {
+                arrangements.push(signature(template));
+            }
+        }
+        // Every cell lists them in that order...
+        for ratio in &row {
+            let cell: Vec<usize> = in_count
+                .iter()
+                .filter(|template| (template.aspect - ratio).abs() <= ASPECT_TOLERANCE)
+                .map(|template| {
+                    arrangements
+                        .iter()
+                        .position(|arrangement| arrangement == &signature(template))
+                        .expect("the arrangement was collected")
+                })
+                .collect();
+            assert!(!cell.is_empty(), "{count} cells on {ratio} hold nothing");
+            assert!(
+                cell.windows(2).all(|pair| pair[0] < pair[1]),
+                "{count} cells on {ratio} are out of the canonical order: {cell:?}"
+            );
+        }
+        // ... one arrangement's own sheets follow the row's order...
+        for arrangement in &arrangements {
+            let sheets: Vec<usize> = in_count
+                .iter()
+                .filter(|template| &signature(template) == arrangement)
+                .map(|template| {
+                    row.iter()
+                        .position(|ratio| (template.aspect - ratio).abs() <= ASPECT_TOLERANCE)
+                        .expect("its sheet is one of the row's")
+                })
+                .collect();
+            assert!(
+                sheets.windows(2).all(|pair| pair[0] < pair[1]),
+                "{count}: one arrangement's sheets are out of order: {sheets:?}"
+            );
+        }
+        // ... and the irregular members are last in their count.
+        let flags: Vec<bool> = in_count
+            .iter()
+            .map(|template| {
+                template
+                    .slots
+                    .iter()
+                    .any(|slot| slot.outline.points.len() > 4)
+            })
+            .collect();
+        assert!(
+            flags.windows(2).all(|pair| !(pair[0] && !pair[1])),
+            "{count}: an irregular member is not last: {:?}",
+            in_count
+                .iter()
+                .map(|template| template.name.as_str())
+                .collect::<Vec<_>>()
+        );
     }
 }
 
@@ -887,11 +995,11 @@ fn the_default_growth_chain_keeps_the_portrait_shape() {
             "strip-2-1x2-3x4",
             "strip-3-1x3-3x4",
             "strip-4-1x4-3x4",
-            "mosaic-5-t1b4",
+            "mosaic-5-l3r2-3x4",
             "mosaic-6-t2b4-3x4",
-            "mosaic-7-l4r3",
+            "mosaic-7-t4b3-3x4",
             "mosaic-8-t3m2b3-3x4",
-            "mosaic-9-l4r5",
+            "mosaic-9-l5r4-3x4",
         ],
         "the portrait page's growth chain moved; it is what `+` walks from the document \
          the editor opens on"

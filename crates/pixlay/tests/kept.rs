@@ -116,9 +116,10 @@ fn a_layout_change_keeps_the_photos_it_takes_off_the_sheet() {
     );
 
     // `+`: the photo is back in its own cell, with its framing. The *layout* follows
-    // the count rule (`layout_for`, S14b) rather than the retention — `−` lands on
-    // `grid-2-2x1` and `+` on `mosaic-3-hero`, both 4:3 since S35, so the sheet keeps
-    // its shape on the way down and back — and that is the count rule's own answer.
+    // the count rule (`layout_for`, S14b) rather than the retention — the count's
+    // cells hold the whole set since S39, so each landing is the canonical order's
+    // first member of the shape and family the step kept, and the sheet's shape is
+    // what survives either way — and that is the count rule's own answer.
     // What the retention promises is the cells, and the section below is the exact
     // inverse.
     window.add_photo();
@@ -162,9 +163,10 @@ fn a_layout_change_keeps_the_photos_it_takes_off_the_sheet() {
         "and the second undo is the shrink's own inverse"
     );
 
-    // Where the counts share an aspect, `+` restores the layout too: `mosaic-4-hero`
-    // and `mosaic-3-hero` are both 4:3, so this pair is the one whose round trip is
-    // the document itself.
+    // Where the counts share an aspect, `+` restores the cells too; the layout is the
+    // count rule's own answer for the keys the walk kept (S39: a count's cells hold
+    // the whole set, so it is the canonical order's first member of that shape and
+    // family, and the document's own layout need not come back).
     let mut four = document_on("mosaic-4-hero");
     four.cells[3].crop = CropTransform {
         zoom: 1.3,
@@ -181,10 +183,22 @@ fn a_layout_change_keeps_the_photos_it_takes_off_the_sheet() {
     window.add_photo();
     settle(&window);
     assert_eq!(
-        window.document(),
-        four_before,
-        "the shrink and the growth are inverses, layout included"
+        window.document().cells,
+        four_before.cells,
+        "the shrink and the growth are inverses, cell for cell"
     );
+    assert_eq!(
+        window.document().template.name,
+        pixlay_core::layout_for(
+            4,
+            four_before.template.aspect,
+            four_before.template.family()
+        )
+        .expect("four cells have a layout")
+        .name,
+        "and the layout is the count rule's own answer"
+    );
+    assert!(window.document().kept.is_empty(), "and nothing is waiting");
 
     // A delete is the other half of the rule, and a different control: `Delete` on a
     // cell loses its photo, and no later growth brings it back.

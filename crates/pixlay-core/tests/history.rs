@@ -631,7 +631,10 @@ fn adding_photos_fills_empty_cells_before_it_grows_the_layout() {
         .expect("a fifth photo fits");
     let doc = history.doc();
     assert_eq!(doc.cells.len(), 5, "the layout grew with the count");
-    assert_eq!(doc.template.name, "mosaic-5-hero", "4:3 stays 4:3");
+    // 4:3 stays 4:3: the count rule's aspect rung, and library order after it — the
+    // canonical order's first five-slot 4:3 arrangement is `mosaic-5-l3r2-4x3`
+    // since S39.
+    assert_eq!(doc.template.name, "mosaic-5-l3r2-4x3", "4:3 stays 4:3");
     assert_eq!(
         doc.cells[..4],
         survived[..],
@@ -731,7 +734,9 @@ fn the_count_control_moves_the_layout_and_keeps_what_it_takes_off() {
         .expect("four cells can drop to three");
     let doc = history.doc();
     assert_eq!(doc.cells.len(), 3);
-    assert_eq!(doc.template.name, "mosaic-3-hero", "4:3 stays 4:3");
+    // The count rule answers the canonical order's first 4:3 arrangement of the
+    // count, `mosaic-3-t1b2-4x3` since S39.
+    assert_eq!(doc.template.name, "mosaic-3-t1b2-4x3", "4:3 stays 4:3");
     assert_eq!(
         doc.cells[..3],
         framed.cells[..3],
@@ -758,7 +763,15 @@ fn the_count_control_moves_the_layout_and_keeps_what_it_takes_off() {
         framed.cells,
         "the document is the one it was"
     );
-    assert_eq!(history.doc().template.name, framed.template.name);
+    // The *layout* is the count rule's own answer for the keys the walk kept (S39
+    // gave every count its whole set, so the answer is the canonical order's first
+    // member of that shape and family — which need not be the layout it started on).
+    assert_eq!(
+        history.doc().template.name,
+        layout_for(4, framed.template.aspect, framed.template.family())
+            .expect("four cells have a layout")
+            .name
+    );
     assert!(history.doc().kept.is_empty(), "and nothing is waiting");
 
     // Undo takes the returned cell off the sheet again, keeping it: the step is the
@@ -810,11 +823,13 @@ fn the_count_control_moves_the_layout_and_keeps_what_it_takes_off() {
 
     let mut two = History::new(occupied("strip-2-2x1")).expect("a valid document");
     // Since S19 the floor is one cell (ruling 34): a two-cell layout drops to the
-    // one-slot sheet, and only *its* removal is refused.
+    // one-slot sheet, and only *its* removal is refused. The sheet is the 3:2 one
+    // since S39 — every shape has its one-slot member, and this document's own
+    // aspect is 3:2 (`strip-2-2x1`).
     two.apply(Command::RemoveLastCell)
         .expect("two cells can drop to one");
     assert_eq!(two.doc().cells.len(), 1);
-    assert_eq!(two.doc().template.name, "grid-1-1x1");
+    assert_eq!(two.doc().template.name, "grid-1-1x1-3x2");
     let refused = two
         .apply(Command::RemoveLastCell)
         .expect_err("no zero-cell layout");

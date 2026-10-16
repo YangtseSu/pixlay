@@ -14,22 +14,24 @@ All notable changes to Pixlay are documented in this file. The format follows
 
 ### Added
 
-- **The portrait and square sets.** Every photo count from two to nine now carries a whole set of layouts
-  at **3:4** and at **1:1** — the two shapes a phone produces: the equal and unequal pairs, the band
-  splits, the strips, the brick (running-bond) pairs, the three-band layouts and the two nine-grids — 83
-  new members in all, the library at **125 templates / 657 slots**. A member of a set is named after its
-  sheet (`strip-2-1x2-3x4`, `mosaic-2-hero-top-1x1`); nothing that shipped before moved. The sets' walk
-  (2026-10-17) also gave count 9 the 5-and-4 bands, the nine-grid an **even** member whose cells differ by
-  under a percent (exact thirds are not dyadic), and count 1 the one-slot **3:4 and 1:1 sheets** beside the
-  4:3 album page.
+- **Every sheet gets its set.** All six sheet shapes — 1:1, 3:4, 4:3, 2:3, 3:2 and 16:9 — now carry the same
+  arrangements (the equal and unequal pairs, the band splits, the strips, the brick pairs, the three-band
+  layouts, the nine-grids and the 5-and-4 bands), and every photo count from one to nine offers all six: the
+  library is **287 templates / 1522 slots**, generated from one *arrangement × sheets* matrix rather than one
+  recipe per member. Count 1 carries one sheet per shape, so a single photo can be framed on any of them.
+- **One order across a count's six cells**: the user's list first, then the members the list does not name,
+  then the irregular (L/T) cells last — so a strip shows the same sequence whichever sheet is clicked, and
+  `crates/pixlay-core/tests/templates.rs` asserts it over the whole library.
 
 ### Changed
 
 - **A new collage opens on the 3:4 portrait page** (`DEFAULT_TEMPLATE`), and growing it keeps that shape:
   the 1→2 switch lands on the portrait page's own layout rather than the album page's, and the ratio row
-  leads with 3:4 and 1:1 at every count. Two refinements the sets' walk asked for: an obviously symmetric
-  arrangement's seams line up (the aligned 6-photo `3+3` pairs) and every proportion not named in the walk
-  is the **2:3** split; `mosaic-7-elbow` moved to the end of its cell's strip.
+  leads with 3:4 and 1:1 at every count. The sets' walk (2026-10-17) also aligned the obviously symmetric
+  6-photo pairs, set every proportion the list leaves unnamed to the **2:3** split, gave the nine-grid an
+  **even** member (exact thirds are not dyadic) and put `mosaic-7-elbow` last in its cell.
+- **The thin sheets are no longer thin**: 2:3, 3:2, 4:3 and 16:9 stop offering a single layout at the counts
+  they cover — each of their cells holds the count's whole set.
 
 ## [0.2.0] - 2026-10-16
 

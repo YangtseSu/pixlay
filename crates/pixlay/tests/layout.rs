@@ -175,21 +175,23 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
 
     // ---- the ratio row (S36) ----------------------------------------------
     // The row lists exactly the shapes this count offers, in the documented order
-    // (ascending by ratio: portrait, square, landscape), with the document's own
-    // marked — and one button per shape, named by its ratio.
+    // (the two most-used first: 3:4 then 1:1, the rest ascending by ratio), with the
+    // document's own marked — and one button per shape, named by its ratio.
     let row = gallery.ratios();
     assert_eq!(
         row,
         templates::ratios_for(photos),
         "the row lists the count's shapes"
     );
-    assert!(
-        row.windows(2).all(|pair| pair[0] < pair[1]),
-        "the row's order is ascending: {row:?}"
+    assert_eq!(
+        (row[0], row[1]),
+        (3.0 / 4.0, 1.0),
+        "and the two most-used shapes lead it: {row:?}"
     );
-    assert!(
-        row.len() >= 4,
-        "every count from two carries four shapes (S35): {row:?}"
+    assert_eq!(
+        row.len(),
+        6,
+        "every count offers all six shapes since S39: {row:?}"
     );
     assert!(
         gallery.ratios_visible(),
@@ -428,13 +430,24 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
         rgb(style.paper),
         rgb(style.ink),
     );
-    // And back to the document's own shape, which the sections below start from.
+    // And back to the document's own shape, which the sections below start from: the
+    // landing is the ratio query's own answer for the count and shape (S39's order
+    // decides which member of a shape answers, and the walk left the document on
+    // another of the count's layouts).
+    let family = window.document().template.family();
     window.select_ratio(shape);
     settle(&window);
     assert_eq!(
         window.document().template.name,
-        "mosaic-8-s14",
-        "the walk ends where it started"
+        layout_with_aspect(8, shape, family)
+            .expect("the document's own shape has a layout")
+            .name,
+        "the walk ends on the query's answer for the document's shape"
+    );
+    assert_eq!(
+        window.document().template.aspect,
+        shape,
+        "which is the shape it started on"
     );
 
     // ---- the band costs no decode, because a sketch names no file -----------
@@ -722,14 +735,18 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
     );
 
     // `+` gives the layout one cell back **and places the kept cell again**: the
-    // document is the one it was, photo and framing, not one with an empty cell.
+    // document is the one it was, cell for cell; the *layout* is the count rule's own
+    // answer for the keys the walk kept (S39: the canonical order's first member of
+    // that shape and family, which need not be the layout it started on).
     window.add_photo();
     settle(&window);
     assert_eq!(window.document().cells.len(), 8, "eight cells again");
     assert_eq!(
         window.document().template.name,
-        "mosaic-8-s14",
-        "and the same layout the document was on"
+        pixlay_core::layout_for(8, removed.template.aspect, removed.template.family())
+            .expect("eight cells have a layout")
+            .name,
+        "and the count rule's own answer for the document's shape"
     );
     assert_eq!(
         window.document().cells[7],
@@ -959,12 +976,13 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
         vec!["grid-1-1x1".to_string()],
         "and the document's own shape has the one member"
     );
-    // Since S38 a one-slot count offers three shapes — the sheet as 4:3, 3:4 and 1:1
-    // — so the row is drawn even at one cell, with the document's own shape marked.
+    // Since S39 a one-slot count offers all six sheets — the same row every other
+    // count has — so the row is drawn even at one cell, with the document's own
+    // shape marked.
     assert_eq!(
         gallery.ratios().len(),
-        3,
-        "the sheet offers three shapes: {:?}",
+        6,
+        "the sheet offers six shapes: {:?}",
         gallery.ratios()
     );
     assert!(gallery.ratios_visible(), "so the row is drawn at one cell");
@@ -1001,8 +1019,8 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
     );
     assert_eq!(
         gallery.ratios().len(),
-        5,
-        "which is five of them: 3:4 and 1:1 lead, then 2:3, 4:3, 3:2 (S38)"
+        6,
+        "which is all six: 3:4 and 1:1 lead, then 2:3, 4:3, 3:2, 16:9 (S39)"
     );
     assert!(gallery.ratios_visible(), "so the row is drawn");
     assert_eq!(
@@ -1022,7 +1040,9 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
     }
     window.remove_photo();
     settle(&window);
-    assert_eq!(window.document().template.name, "grid-1-1x1");
+    // The floor is one cell: the two-cell 3:2 layout drops to the sheet, and since S39
+    // every shape has one — this document's own is `grid-1-1x1-3x2`.
+    assert_eq!(window.document().template.name, "grid-1-1x1-3x2");
     assert_eq!(
         window.photo_count(),
         1,
@@ -1255,10 +1275,10 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
     );
     assert_eq!(
         cli.doc().template.name,
-        layout_with_aspect(8, square, None)
+        layout_with_aspect(8, square, cli.doc().template.family())
             .expect("eight cells have a square layout")
             .name,
-        "and both are the core query's answer"
+        "and both are the core query's answer, the document's own family preferred"
     );
     assert!(
         support::same_document(&gui, &cli),
@@ -1347,63 +1367,68 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
     probe_window.close();
     manager.set_color_scheme(adw::ColorScheme::ForceDark);
 
-    // ---- every member of the library, one document each ----------------------
-    // S37 walked its five new members this way; S38 put 73 more in the library, at
-    // two cells through nine and at two shapes, so the walk is the **whole library**
-    // now: each member gets a document of its own count and shape — the only
-    // document whose strip holds it — and the band's own pixels are compared with
-    // `render --sketch` at the band's grid, RMSE 0. The band as the window draws it
-    // is written out per member, because the S38 sets' question — do a set's
-    // arrangements read as arrangements at 128x96, and are the near twins
-    // distinguishable — is the Human line's and not a machine's.
+    // ---- every count × sheet cell, one document each -------------------------
+    // S37 walked its five new members this way; S38 made the walk the whole library;
+    // S39 gives every count all six sheets, so it is a **per-cell** walk now: one
+    // document per (count, sheet) cell — the only document whose strip holds that
+    // cell — and every candidate of the cell is compared inside it. The band's own
+    // pixels are compared with `render --sketch` at the band's grid, RMSE 0, and the
+    // band as the window draws it is written out per member: whether an arrangement
+    // reads as one at 128x96, and whether the near twins are distinguishable, is the
+    // Human line's question and not a machine's.
     let style = gallery.sketch_style();
-    for template in templates::all() {
-        let name = template.name.as_str();
-        let grid = templates::candidate_grid(template.aspect);
-        window.open_document(pixlay_core::CollageDoc::new(template.clone()));
-        settle(&window);
-        assert_eq!(
-            gallery.count_label().label(),
-            template.slots.len().to_string(),
-            "{name}: the band's count is the member's own"
-        );
-        assert!(
-            gallery.candidates().contains(&name.to_string()),
-            "{name} is no candidate of its own document: {:?}",
-            gallery.candidates()
-        );
-        assert_eq!(
-            gallery.selected().as_deref(),
-            Some(name),
-            "and the document is on it"
-        );
-        let (width, height, pixels) = gallery
-            .sketch(name)
-            .unwrap_or_else(|| panic!("{name} has no sketch"));
-        assert_eq!(
-            (width, height),
-            (grid.width, grid.height),
-            "{name}: the band drew it at another grid than its shape's"
-        );
-        let cli = cli_sketch(name, style);
-        assert_eq!(
-            (width, height),
-            (cli.0, cli.1),
-            "{name}: the strip and the CLI must draw the same pixel grid"
-        );
-        let difference = support::rmse(&(width, height, pixels), &cli);
-        assert_eq!(
-            difference, 0.0,
-            "{name} diverged from the CLI: RMSE {difference}"
-        );
-        let picture = support::artifact(&format!("layout-band-{name}.png"));
-        support::save_png(&picture, &support::snapshot(&gallery.root()));
-        eprintln!(
-            "{name}: {} slots, its sketch {width}x{height} at the band's grid, the band's own \
-             pixels in {}",
-            template.slots.len(),
-            picture.display()
-        );
+    for count in 1..=9 {
+        for ratio in templates::ratios_for(count) {
+            let members = templates::with_slots_and_aspect(count, ratio);
+            let first = members.first().expect("every cell has a member");
+            window.open_document(pixlay_core::CollageDoc::new(first.clone()));
+            settle(&window);
+            assert_eq!(
+                gallery.count_label().label(),
+                count.to_string(),
+                "the band's count is the cell's own"
+            );
+            assert_eq!(
+                gallery.candidates(),
+                members.iter().map(|t| t.name.clone()).collect::<Vec<_>>(),
+                "the strip holds the cell's members, in library order"
+            );
+            assert_eq!(
+                gallery.selected().as_deref(),
+                Some(first.name.as_str()),
+                "the document's own layout is the marked one"
+            );
+            for template in &members {
+                let name = template.name.as_str();
+                let grid = templates::candidate_grid(template.aspect);
+                let (width, height, pixels) = gallery
+                    .sketch(name)
+                    .unwrap_or_else(|| panic!("{name} has no sketch"));
+                assert_eq!(
+                    (width, height),
+                    (grid.width, grid.height),
+                    "{name}: the band drew it at another grid than its shape's"
+                );
+                let cli = cli_sketch(name, style);
+                assert_eq!(
+                    (width, height),
+                    (cli.0, cli.1),
+                    "{name}: the strip and the CLI must draw the same pixel grid"
+                );
+                let difference = support::rmse(&(width, height, pixels), &cli);
+                assert_eq!(
+                    difference, 0.0,
+                    "{name} diverged from the CLI: RMSE {difference}"
+                );
+                let picture = support::artifact(&format!("layout-band-{name}.png"));
+                support::save_png(&picture, &support::snapshot(&gallery.root()));
+            }
+            eprintln!(
+                "count {count} on {}: {} members, the band's own pixels in the walk's files",
+                ratio_label(ratio),
+                members.len()
+            );
+        }
     }
 }
 

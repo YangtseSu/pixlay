@@ -146,13 +146,19 @@ fn a_layout_switch_is_measured_from_the_click() {
             measure(&window, *ratio, target),
         ));
     }
-    // And the same session's **second** click, back to the shape it opened on: the
-    // row the CLI cannot model (its process is one session with one history). Since S21
-    // the band shares nothing with the canvas — a candidate is a sketch, not a render —
-    // so what this row costs is the canvas's own work on a warm session.
+    // And the same session's **second** click, to the shape it opened on: the landing
+    // is the rule's own answer for that shape and the family the session now carries
+    // (S39's order decides which of the shape's members answers, and the document's
+    // own layout is not necessarily the first any more).
+    let back = {
+        let doc = first.document();
+        layout_with_aspect(doc.cells.len(), home_shape, doc.template.family())
+            .expect("the home shape has a layout")
+            .name
+    };
     rows.push((
         "second click, same session".to_string(),
-        measure(&first, home_shape, &home_name),
+        measure(&first, home_shape, &back),
     ));
 
     // The fresh rows start on the document's own shape (that is what makes them the
@@ -162,7 +168,7 @@ fn a_layout_switch_is_measured_from_the_click() {
         .iter()
         .map(|(_, target)| (home_name.as_str(), target.as_str()))
         .collect();
-    expected.push((targets[0].1.as_str(), home_name.as_str()));
+    expected.push((targets[0].1.as_str(), back.as_str()));
     for ((label, switch), (from, target)) in rows.iter().zip(&expected) {
         assert_eq!(&switch.from, from, "{label}: the row's starting layout");
         assert_eq!(&switch.target, target, "{label}: the row's target");

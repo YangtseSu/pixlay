@@ -314,54 +314,56 @@ fn the_count_rule_picks_the_layout_that_follows_the_document() {
     };
     let thirds = 4.0 / 3.0;
 
-    // 1. The same aspect wins, whatever the family asks for: `mosaic-5-hero` is
-    //    the library's only 4:3 five-slot layout.
+    // 1. The same aspect outranks the family, and library order settles which of
+    //    its members answers: count 5's 4:3 cell holds five members since S39 and
+    //    none of them is a strip, so the aspect rung answers with the canonical
+    //    order's first — `mosaic-5-l3r2-4x3`.
     assert_eq!(
         named(5, thirds, Some(Family::Strip)),
-        Some("mosaic-5-hero".to_string())
+        Some("mosaic-5-l3r2-4x3".to_string())
     );
+    // The same shape with a family that does have members of it: the mosaic family's
+    // 16:9 members start at the canonical order's first arrangement too.
     assert_eq!(
         named(5, 16.0 / 9.0, Some(Family::Mosaic)),
-        Some("strip-5-5x1".to_string())
+        Some("mosaic-5-l3r2-16x9".to_string())
     );
     // The aspect comparison is the library's own tolerance, so a ratio that only
     // prints approximately still matches.
     assert_eq!(
         named(5, 1.3333333333333333, Some(Family::Mosaic)),
-        Some("mosaic-5-hero".to_string())
+        Some("mosaic-5-l3r2-4x3".to_string())
     );
 
     // 2. With no aspect match, the family decides — *before* the distance does:
-    //    1.5 is 0.833 away from `strip-3-1x3` (2:3) and only 0.167 away from
-    //    `mosaic-3-hero` (4:3), and the strip is still chosen for a strip.
+    //    count 6's only strip is 16:9 (0.578 away from 1.2) while the nearest shape
+    //    overall is 1:1 (0.2 away), and the strip is still chosen for a strip.
     assert_eq!(
-        named(3, 1.5, Some(Family::Strip)),
-        Some("strip-3-3x1".to_string())
+        named(6, 1.2, Some(Family::Strip)),
+        Some("strip-6-6x1".to_string())
     );
     // The aspect rung outranks the family one: a 4:3 document keeps its shape even
     // when the strip family asks, which is what makes the album page survive a photo
-    // being added. Count 2 has carried two 4:3 members since S37 (`grid-2-2x1` and
-    // `mosaic-2-hero`), so the family rung — which neither of them satisfies for a
-    // strip — leaves the two tied and library order answers with `grid-2-2x1`, the
-    // member S35 added and the layout the growth chain walks through.
+    // being added. Count 2's 4:3 cell carries six members since S39 and the strip
+    // family has one of them — `strip-2-1x2-4x3`, the family rung's own answer.
     assert_eq!(
         named(2, thirds, Some(Family::Strip)),
-        Some("grid-2-2x1".to_string())
+        Some("strip-2-1x2-4x3".to_string())
     );
     // Within one family the nearer aspect wins, and a candidate of another family is
-    // not considered even when it is nearer: at 1.2 the grids are 0.2 away
-    // (`grid-6-2x3-1x1`, the square tiling S38 aligned) and 0.3 (`grid-6-3x2`) while
-    // `mosaic-6-hero` is 0.133 away, and the family rung decides before the distance
-    // does.
+    // not considered even when it is nearer: at 1.2 the nearest grid is the 4:3
+    // member (0.133 away, `grid-6-2x3-4x3`) — the count's grids have every shape
+    // since S39 — while the square member `grid-6-2x3-1x1` is 0.2 away and
+    // `mosaic-6-hero`, of the other family, is 0.133 away too.
     assert_eq!(
         named(6, 1.2, Some(Family::Grid)),
-        Some("grid-6-2x3-1x1".to_string())
+        Some("grid-6-2x3-4x3".to_string())
     );
     // And a family the count has no member of falls through to the aspect: no
-    // five-slot grid exists, so the 4:3 mosaic is chosen for a 4:3 count.
+    // five-slot grid exists, so the 4:3 answer is the aspect rung's own.
     assert_eq!(
         named(5, thirds, Some(Family::Grid)),
-        Some("mosaic-5-hero".to_string())
+        Some("mosaic-5-l3r2-4x3".to_string())
     );
 
     // 3. The nearest aspect, when nothing above it decided: 1.1 is closest to the
@@ -369,12 +371,12 @@ fn the_count_rule_picks_the_layout_that_follows_the_document() {
     assert_eq!(named(4, 1.1, None), Some("grid-4-2x2".to_string()));
 
     // 4. Library order breaks a tie the three rungs above leave standing: 0.875 is
-    //    exactly as far from 1:1 as from 3:4 — shapes carrying several five-slot
-    //    members since S38 — so the earliest recipe of the tied ones, the square
-    //    one, is chosen.
+    //    exactly as far from 1:1 as from 3:4 — both shapes carry the count's whole
+    //    set since S39 — and the canonical order's first member of either is
+    //    `mosaic-5-l3r2-3x4`.
     assert_eq!(
         named(5, 0.875, None),
-        Some("mosaic-5-t2b3".to_string()),
+        Some("mosaic-5-l3r2-3x4".to_string()),
         "a tie on the aspect keeps library order"
     );
 
@@ -423,39 +425,37 @@ fn the_ratio_query_answers_the_shape_asked_for_or_nothing() {
     };
     let thirds = 4.0 / 3.0;
 
-    // A shape with one member at that count: the library's answer and the count
-    // rule's agree, because there is nothing else to pick.
-    assert_eq!(named(5, thirds, None), Some("mosaic-5-hero".to_string()));
-    assert_eq!(named(8, thirds, None), Some("mosaic-8-s14".to_string()));
-    assert_eq!(named(9, thirds, None), Some("mosaic-9-hero".to_string()));
+    // The query answers the canonical order's first member of the shape (S39): a
+    // cell holds the list's arrangements first and the members the list does not
+    // name after them, so the 4:3 cell of a count starts with the list's own.
+    assert_eq!(
+        named(5, thirds, None),
+        Some("mosaic-5-l3r2-4x3".to_string())
+    );
+    assert_eq!(named(8, thirds, None), Some("grid-8-2x4-4x3".to_string()));
+    assert_eq!(named(9, thirds, None), Some("grid-9-3x3-4x3".to_string()));
 
-    // The refusal, which is the whole difference: 16:9 is a shape the library has
-    // and count 2 has none of it, where the count rule answers the nearest shape
-    // instead. `layout_for` is asserted beside it so the two answers are visibly
-    // different rules rather than one rule twice. (S38 gave count 2 six 3:4 members,
-    // so this contrast used to be that shape and is 16:9 now.)
-    let widescreen = 16.0 / 9.0;
+    // The refusal, which is the whole difference: a shape no template declares is
+    // `None` — where the count rule answers the nearest shape instead. `layout_for`
+    // is asserted beside it so the two answers are visibly different rules rather
+    // than one rule twice. (Every count 1 … 9 carries all six sheets since S39, so
+    // the contrast is a shape outside the library and not a count that lacks one.)
+    let nine_sixteen = 9.0 / 16.0;
     assert_eq!(
-        named(2, widescreen, None),
+        named(2, nine_sixteen, None),
         None,
-        "count 2 has no 16:9 layout"
+        "no template declares 9:16"
     );
     assert_eq!(
-        layout_for(2, widescreen, None).map(|template| template.name),
-        Some("strip-2-2x1".to_string()),
-        "the count rule's nearest-shape answer, which this query must not give"
+        layout_for(2, nine_sixteen, None).map(|template| template.name),
+        Some("strip-2-1x2".to_string()),
+        "the count rule's nearest-shape answer (2:3), which this query must not give"
     );
-    // 16:9 is absent at counts 1 and 2, 3:2 at 1, 3, 4, 7 and 9: the query refuses
-    // each of them where the count rule would have landed on something.
-    for (count, aspect) in [
-        (1, 16.0 / 9.0),
-        (2, 16.0 / 9.0),
-        (1, 3.0 / 2.0),
-        (3, 3.0 / 2.0),
-        (9, 3.0 / 2.0),
-    ] {
-        assert_eq!(named(count, aspect, None), None, "{count} at {aspect}");
-    }
+    assert_eq!(
+        named(5, 1.25, None),
+        None,
+        "no template declares 5:4 either"
+    );
     // Outside the product's range there is nothing at all, as for the count rule.
     for count in [0, 10] {
         assert_eq!(named(count, thirds, None), None, "{count} cells");
@@ -466,12 +466,12 @@ fn the_ratio_query_answers_the_shape_asked_for_or_nothing() {
     // not that group — the boundary is `ASPECT_TOLERANCE`, not a distance.
     assert_eq!(
         named(8, 1.3333333333333333, None),
-        Some("mosaic-8-s14".to_string())
+        Some("grid-8-2x4-4x3".to_string())
     );
     assert_eq!(named(8, thirds + 20.0 * ASPECT_TOLERANCE, None), None);
     assert_eq!(
         named(8, thirds + 0.5 * ASPECT_TOLERANCE, None),
-        Some("mosaic-8-s14".to_string())
+        Some("grid-8-2x4-4x3".to_string())
     );
 
     // Where a count carries several layouts of one shape (count 4's square pair, and

@@ -186,7 +186,7 @@ fn the_main_path_can_be_walked() {
     assert_eq!(
         gallery.ratios(),
         pixlay_core::templates::ratios_for(4),
-        "four cells offer four shapes"
+        "four cells offer the library's six shapes since S39"
     );
     assert_eq!(
         gallery.selected_ratio(),

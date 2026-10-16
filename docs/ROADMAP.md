@@ -19,24 +19,25 @@ the assistant's suggestion, recorded for a decision nobody has made yet.
 
 ## More layouts in the library
 
-**Status: S35, S36, S37 and S38 landed (2026-10-16, 2026-10-17) — S37's on a waiver: its sketch walk was
+**Status: S35 … S39 landed (2026-10-16, 2026-10-17) — S37's on a waiver: its sketch walk was
 ruled passed without being walked, so the look it asks about stands unjudged
-(`docs/steps/S37-arrangement-depth-done.md`); S38's band walk is its open gate
-(`docs/steps/S38-portrait-and-square-sets-doing.md`)** — *asked for* (2026-09-27, extended 2026-10-08): the shipped library
+(`docs/steps/S37-arrangement-depth-done.md`); S38's six findings are built and S39 is doing, its band walk the open gate
+(`docs/steps/S39-every-sheet-gets-its-set-doing.md`)** — *asked for* (2026-09-27, extended 2026-10-08): the shipped library
 should offer more layouts, and the references the human named organize theirs by category rather than as a
-flat list. The plan's first four steps are **S35 … S38** under [`docs/steps/`](steps/); this
+flat list. The plan's first five steps are **S35 … S39** under [`docs/steps/`](steps/); this
 section holds the research they rest on and the directions they leave alone.
 
-- **What it holds today** (`pixlay-render templates --json`, 2026-10-17, after S38's walk): **125 templates, 657
-  slots** over cell counts 1 … 9 — three layouts at count 1 (the one-slot **sheets** on 4:3, 3:4 and 1:1), then
-  seventeen, sixteen, fifteen, fourteen, seventeen, eighteen, eleven and fourteen — over six aspects: **3:4**
-  (48), **1:1** (51), **4:3** (12), **16:9** (7), **3:2** (4), **2:3** (3) — with a **poster** at every
-  count 2 … 9 and an **irregular cell** at counts 3, 5, 7 and 8. S38's **portrait and square sets** are
-  why: every count 2 … 9 carries a whole set of arrangements at 3:4 and at 1:1 — the two shapes a phone
-  produces — so the ratio row leads with those two (`templates::ratios_for`), the window opens on the 3:4
-  sheet, and a shape a count lacks is the exception rather than the rule. One shape's strip holds up to
-  **eight** candidates (count 7 at 3:4, twice S37's largest cell); the four-ratio floor S35's exit asserts
-  still holds (`docs/CONTRACT.md` §3), and the row's leading order is S38's.
+- **What it holds today** (`pixlay-render templates --json`, 2026-10-17, after S39): **287 templates, 1522
+  slots** over cell counts 1 … 9 — six layouts at count 1 (the one-slot **sheets**, one per shape), then
+  thirty-eight, thirty-seven, thirty-eight, twenty-eight, thirty-eight, forty-one, twenty-seven and
+  thirty-four — over six sheets, and **every count 1 … 9 carries all six** since S39: **3:4** (48), **1:1**
+  (51), **2:3** (44), **4:3** (51), **3:2** (44), **16:9** (49) — with a **poster** at every count 2 … 9 and
+  an **irregular cell** at counts 3, 5, 7 and 8. S39's ruling is why: every arrangement exists at every
+  sheet ("全都配齐"), one arrangement order across a count's six cells with the irregular ones last
+  ("按照一个顺序来；异形的放到最后"), and the library is one arrangement × six sheets rather than six
+  near-copies. One shape's strip holds up to **eight** candidates (count 7 at 3:4, twice S37's largest cell);
+  the four-ratio floor S35's exit asserts still holds (`docs/CONTRACT.md` §3), and the row's leading order
+  is S38's.
 - **The measured defect S35 closed** (measured 2026-10-08, closed 2026-10-16): the window
   opens on `grid-1-1x1` (4:3), **count 2 was the only count with no 4:3 layout**, and so the first added
   photo took the sheet to 3:2 (`strip-2-2x1`) and the second to 16:9 (`strip-3-3x1`), where the rest of
@@ -123,9 +124,18 @@ section holds the research they rest on and the directions they leave alone.
      of a 128 lattice — exact thirds are not dyadic); and the one-slot **3:4 and 1:1 sheets** at count 1,
      with `DEFAULT_TEMPLATE` moved to the 3:4 one so the 1→2 growth lands on the portrait page. The numbers
      are `docs/CONTRACT.md` §3 and §8's "S38".
+  5. **Every sheet gets its set** (S39, 2026-10-17) — **landed, its gate open**: the human ruled "全都配齐。
+     调整每个里面的顺序，所有的比例内的模板，按照一个顺序来。异形的放到最后" after the thin-sheet question, and
+     the four thin sheets (2:3, 3:2, 4:3, 16:9) got the arrangements 3:4 and 1:1 already had — the library is
+     **287 templates / 1522 slots**, one arrangement × six sheets, and the generator's data model is the
+     matrix (`Arrangement` × sheets) rather than one recipe per member. Every count 1 … 9 now carries all
+     six sheets; the count's six cells list the same arrangements in one order (the human's list, then the
+     members the list does not name, then the irregular cells); and the walk covers every (count, sheet)
+     cell. The numbers are `docs/CONTRACT.md` §3 and §8's "S39".
 - **Not adopted, so a later session does not re-litigate**: Google's themed categories (style, above);
-  category tabs in general — **S38 crossed the threshold this bullet recorded**: a count × ratio cell now
-  holds up to **eight** candidates (2/1:1, 4/1:1, 6/1:1 and 7/1:1 at seven, **7/3:4 at eight**), the strip
+  category tabs in general — **S38 crossed the threshold this bullet recorded and S39 deepens it**: a count ×
+  sheet cell now holds up to **eight** candidates (eleven cells above six: 2/1:1, 2/4:3, 3/4:3, 4/1:1, 4/4:3,
+  6/1:1, 6/16:9, 7/1:1, 7/4:3, 7/16:9 at seven, **7/3:4 at eight**), the strip
   scrolls horizontally, and the revisit (tabs, or a curated "Featured" row) waits for a person to say the
   strip is hard to scan; **the L/T-cell layouts stay** (ruled 2026-10-17, human: the first message of S38
   asked for the four concave members to be cut and the human withdrew it — "不想删，都别删了。留着吧" —

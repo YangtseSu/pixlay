@@ -1938,27 +1938,31 @@ fn templates_filters_by_slot_count_which_is_the_gallery_s_query() {
         assert_eq!(listed, expected, "{slots} slots");
     }
 
-    // Count 1 is the exception to the "at least three layouts" rule and the reason
-    // the loop above starts at two: since S19 a single photo is a legal collage and
-    // its layouts are the sheet itself, and since S38 the filter answers with the
-    // three sheets — the 4:3 album page and the 3:4 / 1:1 ones the sets added
-    // (ruling 34, and the walk's ruling 8).
+    // Count 1 is the exception to the "at least four shapes" rule and the reason the
+    // loop above starts at two: since S19 a single photo is a legal collage and its
+    // layouts are the sheet itself, and since S39 the filter answers with one sheet
+    // per shape the library has — all six of them.
     let one = run(&["templates", "--slots", "1"]);
     assert_eq!(code(&one), 0, "{}", stderr(&one));
     assert_eq!(field(&one, "slots"), "1");
-    assert_eq!(field(&one, "count"), "3");
-    assert_eq!(field(&one, "template.0.name"), "grid-1-1x1");
-    assert_eq!(field(&one, "template.0.aspect"), "4:3");
-    assert_eq!(field(&one, "template.1.name"), "grid-1-1x1-3x4");
-    assert_eq!(field(&one, "template.1.aspect"), "3:4");
-    assert_eq!(field(&one, "template.2.name"), "grid-1-1x1-1x1");
-    assert_eq!(field(&one, "template.2.aspect"), "1:1");
+    assert_eq!(field(&one, "count"), "6");
+    assert_eq!(field(&one, "template.0.name"), "grid-1-1x1-3x4");
+    assert_eq!(field(&one, "template.0.aspect"), "3:4");
+    assert_eq!(field(&one, "template.1.name"), "grid-1-1x1-1x1");
+    assert_eq!(field(&one, "template.2.name"), "grid-1-1x1-2x3");
+    assert_eq!(field(&one, "template.3.name"), "grid-1-1x1");
+    assert_eq!(field(&one, "template.3.aspect"), "4:3");
+    assert_eq!(field(&one, "template.4.name"), "grid-1-1x1-3x2");
+    assert_eq!(field(&one, "template.5.name"), "grid-1-1x1-16x9");
+    assert_eq!(field(&one, "template.5.aspect"), "16:9");
 
-    // The two filters combine, and the shape filter is still the library's own.
+    // The two filters combine, and the shape filter is still the library's own. Count
+    // 5's 4:3 cell holds five members since S39 (the list's four plus the hero), and
+    // the canonical order's first answers.
     let both = run(&["templates", "--slots", "5", "--aspect", "4:3"]);
     assert_eq!(code(&both), 0, "{}", stderr(&both));
-    assert_eq!(field(&both, "count"), "1");
-    assert_eq!(field(&both, "template.0.name"), "mosaic-5-hero");
+    assert_eq!(field(&both, "count"), "5");
+    assert_eq!(field(&both, "template.0.name"), "mosaic-5-l3r2-4x3");
 
     // A count outside the format's range is a usage error with an empty stdout: no
     // layout has zero slots, and ten left the library with S12c.
@@ -3169,7 +3173,8 @@ fn edit_grows_and_shrinks_the_layout_one_cell_at_a_time() {
     );
 
     // The floor: the two-cell layout drops to the one-cell sheet, and only that
-    // refuses — one cell is the smallest layout the library has since S19.
+    // refuses — one cell is the smallest layout the library has since S19, and since
+    // S39 every shape has its sheet, so a 3:2 document lands on `grid-1-1x1-3x2`.
     let floor = dir.join("floor.pixlay");
     let output = run(&[
         "edit",
@@ -3181,7 +3186,7 @@ fn edit_grows_and_shrinks_the_layout_one_cell_at_a_time() {
     ]);
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     assert_eq!(field(&output, "cells"), "1");
-    assert_eq!(field(&output, "template"), "grid-1-1x1");
+    assert_eq!(field(&output, "template"), "grid-1-1x1-3x2");
 
     let refused = dir.join("refused.pixlay");
     let output = run(&[
@@ -3238,13 +3243,13 @@ fn the_album_pages_chain_keeps_its_shape_as_the_collage_grows() {
 
     let chain = [
         (2, "grid-2-2x1"),
-        (3, "mosaic-3-hero"),
-        (4, "mosaic-4-hero"),
-        (5, "mosaic-5-hero"),
-        (6, "mosaic-6-hero"),
+        (3, "mosaic-3-t1b2-4x3"),
+        (4, "mosaic-4-t1b3-4x3"),
+        (5, "mosaic-5-l3r2-4x3"),
+        (6, "mosaic-6-t2b4-4x3"),
         (7, "mosaic-7-t4b3"),
-        (8, "mosaic-8-s14"),
-        (9, "mosaic-9-hero"),
+        (8, "mosaic-8-t3m2b3-4x3"),
+        (9, "mosaic-9-l5r4-4x3"),
     ];
     for (count, expected) in chain {
         let next = dir.join(format!("{count}.pixlay"));
@@ -3423,10 +3428,10 @@ fn edit_appends_a_photo_and_grows_the_layout_with_the_count() {
         "the layout grew with the count"
     );
     assert_eq!(field(&output, "photos"), "3");
-    // `strip-2-2x1` is 3:2; the three-slot layouts are 16:9, 2:3, 4:3 and 1:1
-    // (S35), so the count rule keeps the *family* — this is the same `layout_for`
-    // the window uses, and the two are one implementation.
-    assert_eq!(field(&output, "template"), "strip-3-3x1");
+    // `strip-2-2x1` is 3:2; the count's three-slot layouts carry every shape since
+    // S39, and the strip family's own 3:2 member is `strip-3-1x3-3x2` — this is the
+    // same `layout_for` the window uses, and the two are one implementation.
+    assert_eq!(field(&output, "template"), "strip-3-1x3-3x2");
 
     let before = CollageDoc::load(&project).expect("loads");
     let after = CollageDoc::load(&out).expect("loads");
@@ -3461,7 +3466,9 @@ fn edit_appends_a_photo_and_grows_the_layout_with_the_count() {
     ]);
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     assert_eq!(field(&output, "cells"), "4");
-    assert_eq!(field(&output, "template"), "strip-4-4x1");
+    // The count's strips carry every shape since S39; the 3:2 document's own 3:2
+    // strip is the canonical order's first — `strip-4-1x4-3x2`.
+    assert_eq!(field(&output, "template"), "strip-4-1x4-3x2");
 
     let missing = dir.join("missing.pixlay");
     let output = run(&[
@@ -3538,7 +3545,11 @@ fn edit_shrinks_the_layout_one_cell_at_a_time() {
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     assert_eq!(field(&output, "cells"), "3");
     assert_eq!(field(&output, "photos"), "3");
-    assert_eq!(field(&output, "template"), "strip-3-3x1", "16:9 stays 16:9");
+    assert_eq!(
+        field(&output, "template"),
+        "strip-3-1x3-16x9",
+        "16:9 stays 16:9, and the canonical order's first strip of it answers"
+    );
     let after = CollageDoc::load(&out).expect("loads");
     assert_eq!(
         after.cells,
@@ -3559,7 +3570,9 @@ fn edit_shrinks_the_layout_one_cell_at_a_time() {
         two.to_str().expect("utf-8"),
     ]);
     assert_eq!(code(&output), 0, "{}", stderr(&output));
-    assert_eq!(field(&output, "template"), "strip-2-2x1");
+    // The 16:9 document's strips carry the shape too since S39, so the canonical
+    // order's first 16:9 strip answers.
+    assert_eq!(field(&output, "template"), "strip-2-1x2-16x9");
 
     let holed = dir.join("holed.pixlay");
     let output = run(&[
@@ -3589,7 +3602,8 @@ fn edit_shrinks_the_layout_one_cell_at_a_time() {
     ]);
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     assert_eq!(field(&output, "cells"), "1");
-    assert_eq!(field(&output, "template"), "grid-1-1x1");
+    // The 16:9 document's one-slot sheet, since S39 gives every shape one.
+    assert_eq!(field(&output, "template"), "grid-1-1x1-16x9");
     assert_eq!(
         field(&output, "photos"),
         "1",
@@ -3873,25 +3887,26 @@ fn edit_switches_the_sheet_shape_the_ratio_row_chooses() {
         "a shape change keeps every surviving cell whole"
     );
 
-    // A shape the count has **no** member of refuses: exit 2 (the request is valid
+    // A shape the library has **no** member of refuses: exit 2 (the request is valid
     // but the library cannot answer it), stdout empty, nothing written, and the
-    // message names the count and the ratio. Two cells carry no 16:9 — and the count
-    // rule would have answered the nearest shape (3:2), which is exactly what this
-    // query must not do.
+    // message names the count and the ratio. Every count carries all six sheets since
+    // S39, so the contrast is a shape outside the library (9:16) — and the count rule
+    // would have answered the nearest shape, which is exactly what this query must
+    // not do.
     let bad = dir.join("bad.pixlay");
     let output = run(&[
         "edit",
         "--project",
         path,
         "--aspect",
-        "16:9",
+        "9:16",
         "--out",
         bad.to_str().expect("utf-8"),
     ]);
     assert_eq!(code(&output), 2, "{}", stderr(&output));
     assert!(stdout(&output).is_empty(), "the refusal wrote to stdout");
     assert!(!bad.exists(), "the refusal wrote a file");
-    for wanted in ["2-cell", "16:9"] {
+    for wanted in ["2-cell", "9:16"] {
         assert!(
             stderr(&output).contains(wanted),
             "the refusal does not name {wanted}: {}",
@@ -4022,10 +4037,21 @@ fn edit_keeps_the_cells_a_layout_change_takes_away() {
     assert_eq!(field(&output, "photos"), "4");
     assert_eq!(field(&output, "kept"), "0");
     assert_eq!(
-        CollageDoc::load(&grown).expect("loads"),
-        before,
-        "the shrink and the growth are inverses"
+        CollageDoc::load(&grown).expect("loads").cells,
+        before.cells,
+        "the shrink and the growth are inverses, cell for cell"
     );
+    // The layout is the count rule's own answer for the keys the walk kept (S39: a
+    // count's cells hold the whole set, so it is the canonical order's first member
+    // of that shape and family, and the document's own layout need not come back).
+    let grown_doc = CollageDoc::load(&grown).expect("loads");
+    assert_eq!(
+        grown_doc.template.name,
+        pixlay_core::layout_for(4, before.template.aspect, before.template.family())
+            .expect("four cells have a layout")
+            .name
+    );
+    assert!(grown_doc.kept.is_empty());
 
     // A kept cell counts against the ceiling without being placed: eight on the
     // sheet and one kept is nine, and an arrival still lands — in a cell of its own,
@@ -5980,8 +6006,8 @@ fn switch_measures_a_layout_change_at_the_canvas_box() {
     let narrowed = templates::with_slots_and_aspect(2, shape);
     assert_eq!(
         narrowed.len(),
-        1,
-        "the 2:3 shape holds one two-cell arrangement"
+        6,
+        "the 2:3 shape holds the count's whole set since S39"
     );
     assert!(
         templates::with_slots(2).len() > narrowed.len(),
