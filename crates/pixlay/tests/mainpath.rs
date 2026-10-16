@@ -44,6 +44,20 @@ fn the_main_path_can_be_walked() {
     // an empty cell — whose own `+` is the pointer's way in.
     let opening = window.document();
     assert_eq!(opening.cells.len(), 1, "a new collage is one cell");
+    // The sheet it opens on is the **3:4 portrait page** since the walk of
+    // 2026-10-17 (`window::DEFAULT_TEMPLATE`): the shape the ratio row leads with,
+    // and the shape the first added photo then keeps — the 1→2 switch used to land
+    // on the 4:3 album page.
+    assert_eq!(
+        opening.template.name,
+        pixlay::window::DEFAULT_TEMPLATE,
+        "a new collage opens on the default sheet"
+    );
+    assert_eq!(
+        opening.template.aspect,
+        3.0 / 4.0,
+        "which is the portrait page"
+    );
     assert!(
         opening.cells[0].source.is_none(),
         "and that cell is empty, waiting for its photo"
@@ -84,6 +98,15 @@ fn the_main_path_can_be_walked() {
     window.add_photos(photos.clone());
     let doc = window.document();
     assert_eq!(doc.cells.len(), 4, "the layout grew to a cell per photo");
+    // And the sheet kept its shape on the way: 1 → 4 cells stays on the 3:4 portrait
+    // page (`layout_for`'s first preference, `docs/CONTRACT.md` §3), which is the
+    // walk's own finding — the growth used to land on the album page.
+    assert_eq!(
+        doc.template.aspect,
+        3.0 / 4.0,
+        "the growth kept the portrait page: {}",
+        doc.template.name
+    );
     assert!(
         doc.cells
             .iter()

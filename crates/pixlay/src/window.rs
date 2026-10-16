@@ -72,13 +72,16 @@ use crate::workers::{Down, Kind as WorkerKind, Workers};
 type Boundary = Rc<dyn Fn(&EditorWindow)>;
 type Saved = Rc<dyn Fn(&EditorWindow, &Path)>;
 
-/// The template a new document starts from: the sheet itself, one cell (S19).
+/// The template a new document starts from: the whole sheet, one cell (S19).
 ///
 /// Ruling 34 made one photo a legal collage, so a new document opens on the layout
-/// of one photo — 4:3, the album page `mosaic-5-hero` was authored for — and the
-/// cell's own `+` asks for the photo that goes in it. Growing is the count
-/// control's job, and `layout_for` picks the layout each count lands on.
-pub const DEFAULT_TEMPLATE: &str = "grid-1-1x1";
+/// of one photo, and the cell's own `+` asks for the photo that goes in it. Growing
+/// is the count control's job, and `layout_for` picks the layout each count lands
+/// on. The sheet is the **3:4 portrait page** since the walk of 2026-10-17: the
+/// shape a phone's photos mostly are, the one the ratio row leads with, and the
+/// shape `layout_for` then keeps as the collage grows — before, the one-slot member
+/// was the 4:3 album page and the 1→2 growth landed there.
+pub const DEFAULT_TEMPLATE: &str = "grid-1-1x1-3x4";
 
 /// The long edge an export starts at, in pixels: the one size parameter (S12d), shared
 /// with the CLI's own default (`render --long-edge`, `docs/CONTRACT.md` §5).

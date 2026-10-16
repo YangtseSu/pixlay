@@ -349,12 +349,13 @@ fn the_count_rule_picks_the_layout_that_follows_the_document() {
         Some("grid-2-2x1".to_string())
     );
     // Within one family the nearer aspect wins, and a candidate of another family is
-    // not considered even when it is nearer: at 1.2 the grids are 0.3 (`grid-6-3x2`)
-    // and 0.533 (`grid-6-2x3`) away while `mosaic-6-hero` is 0.133 away, and the
-    // family rung decides before the distance does.
+    // not considered even when it is nearer: at 1.2 the grids are 0.2 away
+    // (`grid-6-2x3-1x1`, the square tiling S38 aligned) and 0.3 (`grid-6-3x2`) while
+    // `mosaic-6-hero` is 0.133 away, and the family rung decides before the distance
+    // does.
     assert_eq!(
         named(6, 1.2, Some(Family::Grid)),
-        Some("grid-6-3x2".to_string())
+        Some("grid-6-2x3-1x1".to_string())
     );
     // And a family the count has no member of falls through to the aspect: no
     // five-slot grid exists, so the 4:3 mosaic is chosen for a 4:3 count.

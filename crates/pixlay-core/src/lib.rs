@@ -127,8 +127,9 @@ pub const MAX_TEMPLATE_ASPECT: f64 = 10.0;
 /// Smallest and largest slot count a template may declare.
 ///
 /// The floor was 2 until S19 and is 1 since: a single photo is a legal collage
-/// (ruling 34), the library gains the one-slot sheet `grid-1-1x1` for it, and the
-/// frame is what gives that one photo its border. The ceiling was 10 while
+/// (ruling 34), the library gains the one-slot **sheets** for it — `grid-1-1x1`
+/// (4:3) from S19, and the 3:4 and 1:1 ones S38 added beside it — and the frame is
+/// what gives that one photo its border. The ceiling was 10 while
 /// `strip-10-10x1` shipped; S12c removed that recipe, so the format's cap and
 /// [`MAX_PHOTOS`] are the same number again.
 pub const MIN_SLOTS: usize = 1;

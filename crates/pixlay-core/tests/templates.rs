@@ -37,8 +37,10 @@ use pixlay_core::{
 const SAMPLES: usize = 512;
 
 /// The lattice the geometry is authored on: every coordinate is a multiple of
-/// this. See the module comment for why the tests depend on it.
-const LATTICE: f64 = 32.0;
+/// this. See the module comment for why the tests depend on it. 32 was the finest
+/// grid until S38; the even nine-grid and the 2:3 splits read 128, so the checked
+/// lattice is the finest one the library uses.
+const LATTICE: f64 = 128.0;
 
 fn templates_under_test() -> Vec<Template> {
     let templates = templates::all();
@@ -594,10 +596,15 @@ fn every_count_from_two_up_carries_four_layouts_over_four_aspects() {
         .filter(|template| template.slots.len() == 1)
         .map(|template| template.name.as_str())
         .collect();
+    // One photo is the sheet and the sheet alone (S19, ruling 34) — and since S38
+    // there is one such sheet per shape the product is mostly used at, because the
+    // sheet's shape *is* the canvas: the 4:3 album page, the 3:4 portrait page (the
+    // window's default since the walk of 2026-10-17) and the 1:1 square.
     assert_eq!(
         one,
-        ["grid-1-1x1"],
-        "one photo is the sheet and the sheet alone (S19, ruling 34)"
+        ["grid-1-1x1", "grid-1-1x1-3x4", "grid-1-1x1-1x1"],
+        "one photo is the sheet and the sheet alone (S19, ruling 34; S38 added the \
+         two most-used shapes)"
     );
 }
 
@@ -825,31 +832,33 @@ fn the_ratio_row_lists_each_counts_own_shapes_in_order() {
                 template.name
             );
         }
-        // S35's floor, seen from the row: every count but one offers four shapes.
+        // S35's floor, seen from the row: every count but one offers four shapes —
+        // and count 1 offers three since S38 (one sheet per most-used shape).
         if count >= 2 {
             assert!(row.len() >= 4, "{count} cells offer only {}", row.len());
         } else {
-            assert_eq!(row.len(), 1, "one cell is one shape (ruling 34)");
+            assert_eq!(row.len(), 3, "one cell offers the three sheets (S38)");
         }
     }
 }
 
 #[test]
-fn the_default_growth_chain_keeps_the_albums_shape() {
-    // S35's own criterion, and the defect the step started from: the window opens on
-    // `grid-1-1x1` (4:3) and `AddCell` hands every growth to `selection::layout_for`
-    // with the document's own aspect and family — the same call the window's count
-    // control and the CLI's `edit --add-cell` make. Before S35, count 2 was the only
-    // count with no 4:3 member, so the first added photo took the sheet to 3:2
-    // (`strip-2-2x1`) and the second to 16:9 (`strip-3-3x1`), where the rest of the
-    // growth stayed.
+fn the_default_growth_chain_keeps_the_portrait_shape() {
+    // S35's own criterion, moved to the shape the window now opens on: `AddCell`
+    // hands every growth to `selection::layout_for` with the document's own aspect
+    // and family — the same call the window's count control and the CLI's
+    // `edit --add-cell` make. The document starts on the 3:4 sheet since the walk of
+    // 2026-10-17 (`pixlay`'s `DEFAULT_TEMPLATE`, which also names the same template),
+    // so the promise is that the portrait page survives growing from one photo to
+    // nine; before S35 count 2 was the only count with no 4:3 member and the first
+    // added photo moved the album page, which is the defect that step closed.
     //
     // The walk is literally what the command does — at each count the next template
     // is `layout_for`'s answer for the aspect the document then carries — and the
     // chain it produces is written down, because "the sheet keeps its shape" is a
     // product promise and a recipe edit that quietly moved the chain has to show up
     // here rather than in someone's document.
-    let mut current = templates::get("grid-1-1x1").expect("the opening template is registered");
+    let mut current = templates::get("grid-1-1x1-3x4").expect("the opening template is registered");
     let mut chain = vec![current.name.clone()];
     for count in 2..=MAX_PHOTOS {
         let next = layout_for(count, current.aspect, current.family())
@@ -874,18 +883,18 @@ fn the_default_growth_chain_keeps_the_albums_shape() {
     assert_eq!(
         chain,
         [
-            "grid-1-1x1",
-            "grid-2-2x1",
-            "mosaic-3-hero",
-            "mosaic-4-hero",
-            "mosaic-5-hero",
-            "mosaic-6-hero",
-            "mosaic-7-t4b3",
-            "mosaic-8-s14",
-            "mosaic-9-hero",
+            "grid-1-1x1-3x4",
+            "strip-2-1x2-3x4",
+            "strip-3-1x3-3x4",
+            "strip-4-1x4-3x4",
+            "mosaic-5-t1b4",
+            "mosaic-6-t2b4-3x4",
+            "mosaic-7-l4r3",
+            "mosaic-8-t3m2b3-3x4",
+            "mosaic-9-l4r5",
         ],
-        "the album page's growth chain moved; it is what `+` walks from the document the \
-         editor opens on"
+        "the portrait page's growth chain moved; it is what `+` walks from the document \
+         the editor opens on"
     );
 }
 

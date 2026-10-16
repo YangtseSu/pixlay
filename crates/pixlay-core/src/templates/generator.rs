@@ -67,7 +67,10 @@ struct Recipe {
     /// Aspect ratio (`width / height`) the geometry was authored for; the
     /// library is grouped by it and `templates --aspect` queries it.
     aspect: f64,
-    /// Lattice resolution. A power of two keeps every coordinate exact.
+    /// Lattice resolution. A power of two keeps every coordinate exact. Most
+    /// recipes are laid out on 16 or 32; S38's even nine-grid and its 2:3 splits
+    /// need 128 (exact thirds and exact 3:5 do not exist on a dyadic lattice, so
+    /// the finer grid is how close the geometry gets).
     grid: u32,
     slots: &'static [Shape],
 }
@@ -97,12 +100,16 @@ const R_3_4: f64 = 3.0 / 4.0;
 ///
 /// Since S10 the counts 2..=9 carry **at least three layouts per count, in at
 /// least two aspect families**, because a gallery that offers one candidate is not
-/// a choice (asserted by `crates/pixlay-core/tests/templates.rs`). Count 1 has
-/// exactly one member since S19: `grid-1-1x1`, the whole sheet, because three
-/// one-photo layouts would be three names for one geometry (ruling 34 — a single
-/// photo is a legal collage). Since S12c the library stops at nine slots:
-/// `strip-10-10x1` was the only member above the format's cap, and it left with
-/// the purity ruling, so `MAX_SLOTS` and `MAX_PHOTOS` are one number.
+/// a choice (asserted by `crates/pixlay-core/tests/templates.rs`). Count 1 had
+/// exactly one member from S19 to S38 — `grid-1-1x1`, the whole sheet (ruling 34: a
+/// single photo is a legal collage) — and since S38 it carries one **sheet** per
+/// shape the product is mostly used at: the 4:3 album page, the 3:4 portrait page
+/// and the 1:1 square. A one-slot layout at another shape is not "one geometry
+/// under three names" — the sheet's shape *is* the product's canvas — and the
+/// window's default is now the 3:4 sheet (`DEFAULT_TEMPLATE`, the walk of
+/// 2026-10-17: the 1→2 growth has to land on 3:4). Since S12c the library stops at
+/// nine slots: `strip-10-10x1` was the only member above the format's cap, and it
+/// left with the purity ruling, so `MAX_SLOTS` and `MAX_PHOTOS` are one number.
 ///
 /// Since S35 the counts 2..=9 carry **at least four layouts over at least four
 /// aspect ratios**, including the album page (4:3), the square (1:1) and a
@@ -131,11 +138,14 @@ const R_3_4: f64 = 3.0 / 4.0;
 ///
 /// Since S38 the library carries **the portrait and square sets**: the human's list of 2026-10-17 asked
 /// for one set per sheet shape at every count 2..=9, and the two shapes a phone produces — the portrait
-/// page (3:4) and the square (1:1) — are the ones it named as the most used. 38 members joined at 3:4
-/// and 35 at 1:1. A member added for one sheet shape carries that shape as a suffix (`-3x4`, `-1x1`),
-/// because a layout's natural name is already taken by the shape that first asked for it
-/// (`strip-2-1x2` is 2:3, `grid-2-2x1` is 4:3). Every one is appended after its count's existing
-/// members, so the growth chain and `layout_for`'s library-order rung are unmoved. The ratio row does
+/// page (3:4) and the square (1:1) — are the ones it named as the most used. 83 members joined in all —
+/// the 73 the first round built at 3:4 and 1:1, plus the ten the walk of 2026-10-17 asked for: the three
+/// 5-and-4 layouts at count 9, an even nine-grid (see below), and the one-slot 3:4 and 1:1 sheets at
+/// count 1. A member added for one sheet shape carries that shape as a suffix (`-3x4`, `-1x1`), because
+/// a layout's natural name is already taken by the shape that first asked for it (`strip-2-1x2` is 2:3,
+/// `grid-2-2x1` is 4:3). Every one is appended after its count's existing members — the one exception is
+/// `mosaic-7-elbow`, which the walk moved after count 7's block so the L is not the second thing a person
+/// sees — and `layout_for`'s library-order rung is unmoved by every placement. The ratio row does
 /// move: `ratios_for` leads with 3:4 and 1:1 before the rest ascending, because those are the shapes a
 /// person reaches for first (`templates/mod.rs`).
 static RECIPES: &[Recipe] = &[
@@ -143,13 +153,34 @@ static RECIPES: &[Recipe] = &[
     // the floor became one photo (ruling 34): a single photo is a legal collage,
     // and its template is the sheet itself — the frame is what gives it a border,
     // which is why this layout's whole canvas is one slot. 4:3, the album page
-    // `mosaic-5-hero` was authored for, so a new document opens on the shape the
-    // editor used to start at. `grid-` rather than `strip-` or `mosaic-`: a
-    // 1x1 tiling is the plainest rectangular one.
+    // `mosaic-5-hero` was authored for: the shape the editor used to start at, and
+    // a member still — S38 added the two sheets below and the window's default
+    // moved to the 3:4 one. `grid-` rather than `strip-` or `mosaic-`: a 1x1
+    // tiling is the plainest rectangular one.
     Recipe {
         name: "grid-1-1x1",
         version: 1,
         aspect: R_4_3,
+        grid: 16,
+        slots: &[rect(0, 0, 16, 16)],
+    },
+    // The same sheet on the portrait page: count 1's second member (S38), and the
+    // window's default since the walk of 2026-10-17 — the sheet a person's photos
+    // mostly are, and the one the 1→2 growth then keeps (`layout_for`'s first
+    // preference is the document's own shape, and every count 2..=9 carries 3:4).
+    Recipe {
+        name: "grid-1-1x1-3x4",
+        version: 1,
+        aspect: R_3_4,
+        grid: 16,
+        slots: &[rect(0, 0, 16, 16)],
+    },
+    // ... and on the square: the two shapes the product is mostly used at, beside
+    // the album page the one-slot member has always been.
+    Recipe {
+        name: "grid-1-1x1-1x1",
+        version: 1,
+        aspect: R_1_1,
         grid: 16,
         slots: &[rect(0, 0, 16, 16)],
     },
@@ -245,39 +276,41 @@ static RECIPES: &[Recipe] = &[
         grid: 16,
         slots: &[rect(0, 0, 8, 16), rect(8, 0, 16, 16)],
     },
-    // The poster pair with the big cell on top: 11/16 over 5/16, the hero's own
-    // split with its side turned (`mosaic-2-hero` is the same pair, wide).
+    // The unequal pair with the big cell on top, and the split the walk of
+    // 2026-10-17 asked for wherever a proportion is not named: **2:3**, i.e. the
+    // big cell 0.6 of the sheet. Exact 3:5 is not dyadic, so this reads 77:51 on
+    // the 128 lattice (0.6016 against 0.3984, 1.51:1), where `mosaic-2-hero` keeps
+    // its own frozen 11:5.
     Recipe {
         name: "mosaic-2-hero-top-3x4",
         version: 1,
         aspect: R_3_4,
-        grid: 16,
-        slots: &[rect(0, 0, 16, 11), rect(0, 11, 16, 16)],
+        grid: 128,
+        slots: &[rect(0, 0, 128, 77), rect(0, 77, 128, 128)],
     },
     // The same pair inverted: the bottom cell is the big one.
     Recipe {
         name: "mosaic-2-hero-bottom-3x4",
         version: 1,
         aspect: R_3_4,
-        grid: 16,
-        slots: &[rect(0, 0, 16, 5), rect(0, 5, 16, 16)],
+        grid: 128,
+        slots: &[rect(0, 0, 128, 51), rect(0, 51, 128, 128)],
     },
-    // The hero on the left of the portrait page: the pair `mosaic-2-hero`
-    // carries on the album page, at 3:4.
+    // ... big cell on the left, the same 2:3 split of the width.
     Recipe {
         name: "mosaic-2-hero-left-3x4",
         version: 1,
         aspect: R_3_4,
-        grid: 16,
-        slots: &[rect(0, 0, 11, 16), rect(11, 0, 16, 16)],
+        grid: 128,
+        slots: &[rect(0, 0, 77, 128), rect(77, 0, 128, 128)],
     },
-    // And on the right.
+    // ... and on the right.
     Recipe {
         name: "mosaic-2-hero-right-3x4",
         version: 1,
         aspect: R_3_4,
-        grid: 16,
-        slots: &[rect(0, 0, 5, 16), rect(5, 0, 16, 16)],
+        grid: 128,
+        slots: &[rect(0, 0, 51, 128), rect(51, 0, 128, 128)],
     },
     // The square's two equal rows.
     Recipe {
@@ -296,37 +329,38 @@ static RECIPES: &[Recipe] = &[
         grid: 16,
         slots: &[rect(0, 0, 8, 16), rect(8, 0, 16, 16)],
     },
-    // The square's poster pair, big cell on top.
+    // The square's unequal pair, big cell on top: the same 2:3 the 3:4 members
+    // carry (77:51 on the 128 lattice).
     Recipe {
         name: "mosaic-2-hero-top-1x1",
         version: 1,
         aspect: R_1_1,
-        grid: 16,
-        slots: &[rect(0, 0, 16, 11), rect(0, 11, 16, 16)],
+        grid: 128,
+        slots: &[rect(0, 0, 128, 77), rect(0, 77, 128, 128)],
     },
     // ... on the bottom.
     Recipe {
         name: "mosaic-2-hero-bottom-1x1",
         version: 1,
         aspect: R_1_1,
-        grid: 16,
-        slots: &[rect(0, 0, 16, 5), rect(0, 5, 16, 16)],
+        grid: 128,
+        slots: &[rect(0, 0, 128, 51), rect(0, 51, 128, 128)],
     },
     // ... on the left.
     Recipe {
         name: "mosaic-2-hero-left-1x1",
         version: 1,
         aspect: R_1_1,
-        grid: 16,
-        slots: &[rect(0, 0, 11, 16), rect(11, 0, 16, 16)],
+        grid: 128,
+        slots: &[rect(0, 0, 77, 128), rect(77, 0, 128, 128)],
     },
     // ... on the right.
     Recipe {
         name: "mosaic-2-hero-right-1x1",
         version: 1,
         aspect: R_1_1,
-        grid: 16,
-        slots: &[rect(0, 0, 5, 16), rect(5, 0, 16, 16)],
+        grid: 128,
+        slots: &[rect(0, 0, 51, 128), rect(51, 0, 128, 128)],
     },
     // Three columns, unequal: 5/16, 6/16, 5/16. Unequal spans are what makes a
     // strip a layout rather than a repeated pane.
@@ -618,18 +652,19 @@ static RECIPES: &[Recipe] = &[
             rect(12, 0, 16, 16),
         ],
     },
-    // The running-bond brick: two equal rows, the top split 11/5 and the
-    // bottom mirrored 5/11, so no seam lines up.
+    // The running-bond brick: two equal rows, the top split 77/51 — the walk's
+    // 2:3 where a proportion is not named — and the bottom mirrored 51/77, so no
+    // seam lines up.
     Recipe {
         name: "mosaic-4-brick-3x4",
         version: 1,
         aspect: R_3_4,
-        grid: 16,
+        grid: 128,
         slots: &[
-            rect(0, 0, 11, 8),
-            rect(11, 0, 16, 8),
-            rect(0, 8, 5, 16),
-            rect(5, 8, 16, 16),
+            rect(0, 0, 77, 64),
+            rect(77, 0, 128, 64),
+            rect(0, 64, 51, 128),
+            rect(51, 64, 128, 128),
         ],
     },
     // A band over three columns on the square: `mosaic-4-t1b3`'s own
@@ -690,12 +725,12 @@ static RECIPES: &[Recipe] = &[
         name: "mosaic-4-brick-1x1",
         version: 1,
         aspect: R_1_1,
-        grid: 16,
+        grid: 128,
         slots: &[
-            rect(0, 0, 11, 8),
-            rect(11, 0, 16, 8),
-            rect(0, 8, 5, 16),
-            rect(5, 8, 16, 16),
+            rect(0, 0, 77, 64),
+            rect(77, 0, 128, 64),
+            rect(0, 64, 51, 128),
+            rect(51, 64, 128, 128),
         ],
     },
     // A hero panel down the left half with four stacked panels beside it. Every
@@ -1008,12 +1043,13 @@ static RECIPES: &[Recipe] = &[
             rect(11, 8, 16, 16),
         ],
     },
-    // Six cells: the two three-and-three splits and the four bands whose counts
-    // differ (`mosaic-6-t3b3` already ships the square's three-over-three).
-    // Three panes beside three, the columns' rows splitting 5/6/5 and 6/5/5:
-    // the transposed reading of `mosaic-6-t3b3`, whose bands do the same.
+    // Six cells: the two three-and-three splits — **aligned**, the walk of
+    // 2026-10-17: an obviously symmetric arrangement's seams have to line up, so
+    // both columns split 5/6/5, unlike `mosaic-6-t3b3`, whose rows are frozen
+    // staggered — and the four bands whose counts differ.
+    // Three panes beside three, the same rows in both columns.
     Recipe {
-        name: "mosaic-6-l3r3-3x4",
+        name: "grid-6-2x3-3x4",
         version: 1,
         aspect: R_3_4,
         grid: 16,
@@ -1021,15 +1057,15 @@ static RECIPES: &[Recipe] = &[
             rect(0, 0, 8, 5),
             rect(0, 5, 8, 11),
             rect(0, 11, 8, 16),
-            rect(8, 0, 16, 6),
-            rect(8, 6, 16, 11),
+            rect(8, 0, 16, 5),
+            rect(8, 5, 16, 11),
             rect(8, 11, 16, 16),
         ],
     },
-    // Three over three on the portrait page, the rows split the way
-    // `mosaic-6-t3b3`'s bands are.
+    // Three over three on the portrait page, aligned the same way: both rows
+    // split 5/6/5.
     Recipe {
-        name: "mosaic-6-t3b3-3x4",
+        name: "grid-6-3x2-3x4",
         version: 1,
         aspect: R_3_4,
         grid: 16,
@@ -1037,8 +1073,8 @@ static RECIPES: &[Recipe] = &[
             rect(0, 0, 5, 8),
             rect(5, 0, 11, 8),
             rect(11, 0, 16, 8),
-            rect(0, 8, 6, 16),
-            rect(6, 8, 11, 16),
+            rect(0, 8, 5, 16),
+            rect(5, 8, 11, 16),
             rect(11, 8, 16, 16),
         ],
     },
@@ -1102,10 +1138,10 @@ static RECIPES: &[Recipe] = &[
             rect(8, 8, 16, 16),
         ],
     },
-    // The square's three beside three: its three-over-three already ships as
-    // `mosaic-6-t3b3`, and this is the same reading turned on its side.
+    // The square's three beside three, aligned: both columns split 5/6/5, unlike
+    // the frozen `mosaic-6-t3b3` beside it.
     Recipe {
-        name: "mosaic-6-l3r3-1x1",
+        name: "grid-6-2x3-1x1",
         version: 1,
         aspect: R_1_1,
         grid: 16,
@@ -1113,9 +1149,25 @@ static RECIPES: &[Recipe] = &[
             rect(0, 0, 8, 5),
             rect(0, 5, 8, 11),
             rect(0, 11, 8, 16),
-            rect(8, 0, 16, 6),
-            rect(8, 6, 16, 11),
+            rect(8, 0, 16, 5),
+            rect(8, 5, 16, 11),
             rect(8, 11, 16, 16),
+        ],
+    },
+    // ... and the square's aligned three over three, which the frozen
+    // `mosaic-6-t3b3` is not.
+    Recipe {
+        name: "grid-6-3x2-1x1",
+        version: 1,
+        aspect: R_1_1,
+        grid: 16,
+        slots: &[
+            rect(0, 0, 5, 8),
+            rect(5, 0, 11, 8),
+            rect(11, 0, 16, 8),
+            rect(0, 8, 5, 16),
+            rect(5, 8, 11, 16),
+            rect(11, 8, 16, 16),
         ],
     },
     // The square's band of two over a band of four.
@@ -1275,31 +1327,6 @@ static RECIPES: &[Recipe] = &[
             rect(12, 11, 16, 16),
         ],
     },
-    // The portrait page's irregular cell, and the second elbow: the same L as
-    // `mosaic-3-elbow` down the left, with the three small panes stacked in its
-    // bite and three more filling the right column. It came with the same step
-    // because the sketch is what decides whether an L reads at all — at 3:4 the
-    // candidate is drawn 72x96, the band's narrowest box, and the bite is 4/16 of
-    // the width there. The elbow is 0.3125 of the sheet against a median of
-    // 0.15625, exactly 2.0x, so this member satisfies the poster property *and*
-    // carries an irregular cell: the two questions are independent, which is what
-    // measuring rather than naming shows, and `mosaic-3-elbow` is the irregular one
-    // that is not a poster.
-    Recipe {
-        name: "mosaic-7-elbow",
-        version: 1,
-        aspect: R_3_4,
-        grid: 16,
-        slots: &[
-            Shape::Poly(&[(0, 0), (8, 0), (8, 4), (4, 4), (4, 16), (0, 16)]),
-            rect(4, 4, 8, 8),
-            rect(4, 8, 8, 12),
-            rect(4, 12, 8, 16),
-            rect(8, 0, 16, 5),
-            rect(8, 5, 16, 11),
-            rect(8, 11, 16, 16),
-        ],
-    },
     // Seven cells: the two four-over-three bands, the three band layouts whose
     // middle band differs, and the offset twin the human's list asked for
     // beside the plain one (ruling 2026-10-17: two layouts, the second with its
@@ -1385,21 +1412,23 @@ static RECIPES: &[Recipe] = &[
             rect(8, 11, 16, 16),
         ],
     },
-    // The same bands with their outer rows split 11/5 and 5/11: the brick
-    // reading of the two-three-two, its seams running the other way.
+    // The same bands with their outer rows split for the 2:1 the human's list names
+    // — 85:43 on the 128 lattice (1.977:1), the closest dyadic to exactly two —
+    // and mirrored: the brick reading of the two-three-two, its seams running the
+    // other way.
     Recipe {
         name: "mosaic-7-t2m3b2-brick-3x4",
         version: 1,
         aspect: R_3_4,
-        grid: 16,
+        grid: 128,
         slots: &[
-            rect(0, 0, 11, 5),
-            rect(11, 0, 16, 5),
-            rect(0, 5, 5, 11),
-            rect(5, 5, 11, 11),
-            rect(11, 5, 16, 11),
-            rect(0, 11, 5, 16),
-            rect(5, 11, 16, 16),
+            rect(0, 0, 85, 40),
+            rect(85, 0, 128, 40),
+            rect(0, 40, 40, 88),
+            rect(40, 40, 88, 88),
+            rect(88, 40, 128, 88),
+            rect(0, 88, 43, 128),
+            rect(43, 88, 128, 128),
         ],
     },
     // The square's four over three.
@@ -1482,20 +1511,45 @@ static RECIPES: &[Recipe] = &[
             rect(8, 11, 16, 16),
         ],
     },
-    // The square's two-three-two offset twin.
+    // The square's two-three-two offset twin, at the same 2:1.
     Recipe {
         name: "mosaic-7-t2m3b2-brick-1x1",
         version: 1,
         aspect: R_1_1,
+        grid: 128,
+        slots: &[
+            rect(0, 0, 85, 40),
+            rect(85, 0, 128, 40),
+            rect(0, 40, 40, 88),
+            rect(40, 40, 88, 88),
+            rect(88, 40, 128, 88),
+            rect(0, 88, 43, 128),
+            rect(43, 88, 128, 128),
+        ],
+    },
+    // The portrait page's irregular cell, and the library's second elbow: the same L
+    // as `mosaic-3-elbow` down the left, with the three small panes stacked in its
+    // bite and three more filling the right column. It is **last in its cell** since
+    // the walk of 2026-10-17, which ruled an L a thing to find when wanted and not
+    // the second sketch in the strip. At 3:4 the candidate is drawn 72x96, the band's
+    // narrowest box, and the bite is 4/16 of the width there. The elbow is 0.3125 of
+    // the sheet against a median of 0.15625, exactly 2.0x, so this member satisfies
+    // the poster property *and* carries an irregular cell: the two questions are
+    // independent, which is what measuring rather than naming shows, and
+    // `mosaic-3-elbow` is the irregular one that is not a poster.
+    Recipe {
+        name: "mosaic-7-elbow",
+        version: 1,
+        aspect: R_3_4,
         grid: 16,
         slots: &[
-            rect(0, 0, 11, 5),
-            rect(11, 0, 16, 5),
-            rect(0, 5, 5, 11),
-            rect(5, 5, 11, 11),
-            rect(11, 5, 16, 11),
-            rect(0, 11, 5, 16),
-            rect(5, 11, 16, 16),
+            Shape::Poly(&[(0, 0), (8, 0), (8, 4), (4, 4), (4, 16), (0, 16)]),
+            rect(4, 4, 8, 8),
+            rect(4, 8, 8, 12),
+            rect(4, 12, 8, 16),
+            rect(8, 0, 16, 5),
+            rect(8, 5, 16, 11),
+            rect(8, 11, 16, 16),
         ],
     },
     // The template S1 froze: `AGENTS.md`'s per-round verification command names
@@ -1778,24 +1832,26 @@ static RECIPES: &[Recipe] = &[
             rect(8, 13, 16, 16),
         ],
     },
-    // Nine cells: the nine-grid and its wide-middle twin (`grid-9-3x3` already
-    // ships the square's own nine-grid).
-    // `grid-9-3x3`'s splits (6/5/5 each way) at the portrait page.
+    // Nine cells: the even nine-grid — the walk of 2026-10-17 asked for a
+    // nine-grid with nothing to choose between its cells — its wide-middle twin,
+    // and the 5-and-4 bands. Exact thirds are not dyadic, so the even one reads
+    // 43/42/43 on the **128** lattice: cell edges within 0.8% of a third, where
+    // the frozen `grid-9-3x3` reads 6/5/5 (a fifth between them).
     Recipe {
         name: "grid-9-3x3-3x4",
         version: 1,
         aspect: R_3_4,
-        grid: 16,
+        grid: 128,
         slots: &[
-            rect(0, 0, 6, 6),
-            rect(6, 0, 11, 6),
-            rect(11, 0, 16, 6),
-            rect(0, 6, 6, 11),
-            rect(6, 6, 11, 11),
-            rect(11, 6, 16, 11),
-            rect(0, 11, 6, 16),
-            rect(6, 11, 11, 16),
-            rect(11, 11, 16, 16),
+            rect(0, 0, 43, 43),
+            rect(43, 0, 85, 43),
+            rect(85, 0, 128, 43),
+            rect(0, 43, 43, 85),
+            rect(43, 43, 85, 85),
+            rect(85, 43, 128, 85),
+            rect(0, 85, 43, 128),
+            rect(43, 85, 85, 128),
+            rect(85, 85, 128, 128),
         ],
     },
     // The nine-grid with its middle row and column a little wider (5/6/5).
@@ -1832,6 +1888,135 @@ static RECIPES: &[Recipe] = &[
             rect(0, 11, 5, 16),
             rect(5, 11, 11, 16),
             rect(11, 11, 16, 16),
+        ],
+    },
+    // The square's even nine-grid: `grid-9-3x3`'s own 6/5/5 stays frozen beside it,
+    // and this is the one the walk asked for — 43/42/43 of the 128 lattice.
+    Recipe {
+        name: "grid-9-3x3-1x1",
+        version: 1,
+        aspect: R_1_1,
+        grid: 128,
+        slots: &[
+            rect(0, 0, 43, 43),
+            rect(43, 0, 85, 43),
+            rect(85, 0, 128, 43),
+            rect(0, 43, 43, 85),
+            rect(43, 43, 85, 85),
+            rect(85, 43, 128, 85),
+            rect(0, 85, 43, 128),
+            rect(43, 85, 85, 128),
+            rect(85, 85, 128, 128),
+        ],
+    },
+    // The 5-and-4 bands the walk of 2026-10-17 asked for: the five-cell band splits
+    // 3/3/4/3/3 exactly as `mosaic-9-l4r5`'s five-row column does, so the tallest
+    // pane sits in the middle either way.
+    Recipe {
+        name: "mosaic-9-l5r4-3x4",
+        version: 1,
+        aspect: R_3_4,
+        grid: 16,
+        slots: &[
+            rect(0, 0, 8, 3),
+            rect(0, 3, 8, 6),
+            rect(0, 6, 8, 10),
+            rect(0, 10, 8, 13),
+            rect(0, 13, 8, 16),
+            rect(8, 0, 16, 4),
+            rect(8, 4, 16, 8),
+            rect(8, 8, 16, 12),
+            rect(8, 12, 16, 16),
+        ],
+    },
+    // ... its transpose, five over four.
+    Recipe {
+        name: "mosaic-9-t5b4-3x4",
+        version: 1,
+        aspect: R_3_4,
+        grid: 16,
+        slots: &[
+            rect(0, 0, 3, 8),
+            rect(3, 0, 6, 8),
+            rect(6, 0, 10, 8),
+            rect(10, 0, 13, 8),
+            rect(13, 0, 16, 8),
+            rect(0, 8, 4, 16),
+            rect(4, 8, 8, 16),
+            rect(8, 8, 12, 16),
+            rect(12, 8, 16, 16),
+        ],
+    },
+    // ... and four over five.
+    Recipe {
+        name: "mosaic-9-t4b5-3x4",
+        version: 1,
+        aspect: R_3_4,
+        grid: 16,
+        slots: &[
+            rect(0, 0, 4, 8),
+            rect(4, 0, 8, 8),
+            rect(8, 0, 12, 8),
+            rect(12, 0, 16, 8),
+            rect(0, 8, 3, 16),
+            rect(3, 8, 6, 16),
+            rect(6, 8, 10, 16),
+            rect(10, 8, 13, 16),
+            rect(13, 8, 16, 16),
+        ],
+    },
+    // The square's five-left-four-right.
+    Recipe {
+        name: "mosaic-9-l5r4-1x1",
+        version: 1,
+        aspect: R_1_1,
+        grid: 16,
+        slots: &[
+            rect(0, 0, 8, 3),
+            rect(0, 3, 8, 6),
+            rect(0, 6, 8, 10),
+            rect(0, 10, 8, 13),
+            rect(0, 13, 8, 16),
+            rect(8, 0, 16, 4),
+            rect(8, 4, 16, 8),
+            rect(8, 8, 16, 12),
+            rect(8, 12, 16, 16),
+        ],
+    },
+    // ... five over four.
+    Recipe {
+        name: "mosaic-9-t5b4-1x1",
+        version: 1,
+        aspect: R_1_1,
+        grid: 16,
+        slots: &[
+            rect(0, 0, 3, 8),
+            rect(3, 0, 6, 8),
+            rect(6, 0, 10, 8),
+            rect(10, 0, 13, 8),
+            rect(13, 0, 16, 8),
+            rect(0, 8, 4, 16),
+            rect(4, 8, 8, 16),
+            rect(8, 8, 12, 16),
+            rect(12, 8, 16, 16),
+        ],
+    },
+    // ... and four over five.
+    Recipe {
+        name: "mosaic-9-t4b5-1x1",
+        version: 1,
+        aspect: R_1_1,
+        grid: 16,
+        slots: &[
+            rect(0, 0, 4, 8),
+            rect(4, 0, 8, 8),
+            rect(8, 0, 12, 8),
+            rect(12, 0, 16, 8),
+            rect(0, 8, 3, 16),
+            rect(3, 8, 6, 16),
+            rect(6, 8, 10, 16),
+            rect(10, 8, 13, 16),
+            rect(13, 8, 16, 16),
         ],
     },
 ];

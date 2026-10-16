@@ -27,16 +27,16 @@ should offer more layouts, and the references the human named organize theirs by
 flat list. The plan's first four steps are **S35 … S38** under [`docs/steps/`](steps/); this
 section holds the research they rest on and the directions they leave alone.
 
-- **What it holds today** (`pixlay-render templates --json`, 2026-10-17, after S38): **115 templates, 586
-  slots** over cell counts 1 … 9 — one layout at count 1 (`grid-1-1x1`, which is `DEFAULT_TEMPLATE`), then
-  seventeen, sixteen, fifteen, fourteen, sixteen, eighteen, eleven and seven — over six aspects: **3:4**
-  (44), **1:1** (45), **4:3** (12), **16:9** (7), **3:2** (4), **2:3** (3) — with a **poster** at every
+- **What it holds today** (`pixlay-render templates --json`, 2026-10-17, after S38's walk): **125 templates, 657
+  slots** over cell counts 1 … 9 — three layouts at count 1 (the one-slot **sheets** on 4:3, 3:4 and 1:1), then
+  seventeen, sixteen, fifteen, fourteen, seventeen, eighteen, eleven and fourteen — over six aspects: **3:4**
+  (48), **1:1** (51), **4:3** (12), **16:9** (7), **3:2** (4), **2:3** (3) — with a **poster** at every
   count 2 … 9 and an **irregular cell** at counts 3, 5, 7 and 8. S38's **portrait and square sets** are
   why: every count 2 … 9 carries a whole set of arrangements at 3:4 and at 1:1 — the two shapes a phone
-  produces — so the ratio row leads with those two (`templates::ratios_for`) and a shape a count lacks is
-  the exception rather than the rule. One shape's strip now holds up to **eight** candidates (count 7 at
-  3:4, twice S37's largest cell), the four-ratio floor S35's exit asserts still holds (`docs/CONTRACT.md`
-  §3), and the row's leading order is S38's.
+  produces — so the ratio row leads with those two (`templates::ratios_for`), the window opens on the 3:4
+  sheet, and a shape a count lacks is the exception rather than the rule. One shape's strip holds up to
+  **eight** candidates (count 7 at 3:4, twice S37's largest cell); the four-ratio floor S35's exit asserts
+  still holds (`docs/CONTRACT.md` §3), and the row's leading order is S38's.
 - **The measured defect S35 closed** (measured 2026-10-08, closed 2026-10-16): the window
   opens on `grid-1-1x1` (4:3), **count 2 was the only count with no 4:3 layout**, and so the first added
   photo took the sheet to 3:2 (`strip-2-2x1`) and the second to 16:9 (`strip-3-3x1`), where the rest of
@@ -116,16 +116,22 @@ section holds the research they rest on and the directions they leave alone.
      unequal pairs, the band splits, the strips, the bricks, the three-band layouts and the two nine-grids.
      A member of a set carries its sheet as a suffix (`strip-2-1x2-3x4`, `mosaic-2-hero-top-1x1`), and the
      ratio row now leads with 3:4 then 1:1, the rest ascending. Nothing left the library: the human
-     withdrew the first message's request to cut the L/T-cell layouts (below). The numbers are
-     `docs/CONTRACT.md` §3 and §8's "S38".
+     withdrew the first message's request to cut the L/T-cell layouts (below). **Its walk ran on
+     2026-10-17 and gave six findings, all taken**: the obviously symmetric 6-photo pairs (left-3-right-3,
+     top-3-bottom-3) aligned; every unnamed proportion set to the 2:3 split; `mosaic-7-elbow` put last in
+     its cell; the 5-and-4 bands added at count 9 (six members); an **even nine-grid** at 3:4 and 1:1 (43/42/43
+     of a 128 lattice — exact thirds are not dyadic); and the one-slot **3:4 and 1:1 sheets** at count 1,
+     with `DEFAULT_TEMPLATE` moved to the 3:4 one so the 1→2 growth lands on the portrait page. The numbers
+     are `docs/CONTRACT.md` §3 and §8's "S38".
 - **Not adopted, so a later session does not re-litigate**: Google's themed categories (style, above);
   category tabs in general — **S38 crossed the threshold this bullet recorded**: a count × ratio cell now
-  holds up to **eight** candidates (2/1:1, 4/1:1 and 7/1:1 at seven, **7/3:4 at eight**), the strip
+  holds up to **eight** candidates (2/1:1, 4/1:1, 6/1:1 and 7/1:1 at seven, **7/3:4 at eight**), the strip
   scrolls horizontally, and the revisit (tabs, or a curated "Featured" row) waits for a person to say the
   strip is hard to scan; **the L/T-cell layouts stay** (ruled 2026-10-17, human: the first message of S38
   asked for the four concave members to be cut and the human withdrew it — "不想删，都别删了。留着吧" —
   so `mosaic-3-elbow`, `mosaic-5-tee`, `mosaic-7-elbow` and `mosaic-8-s14` are geometry the product
-  offers, and this question is closed); the
+  offers, and this question is closed — the walk's only request about them was where the count-7 one sits,
+  and it is last now); the
   "Featured" ordering (library order is deterministic and a person scanning sketches does not need
   curation at these set sizes); the 9:16 and 4:5 ratios (the same cheap recipe work the day someone asks).
   **`mosaic-7-hero`'s name** is the one piece of the library the measurement found wanting and did not fix:

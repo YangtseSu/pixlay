@@ -41,9 +41,12 @@
 //! the album page (4:3), the square (1:1) and a portrait member** (2:3 or 3:4), so
 //! the count rule can keep the sheet's shape while the collage grows. Nine is the
 //! ceiling, because S12c removed the ten-slot recipe that used to sit above it.
-//! Count 1 has exactly one member since S19 — `grid-1-1x1`, the whole sheet —
-//! because one photo is a legal collage (ruling 34) and a second one-slot layout
-//! would be the same geometry under another name.
+//! Count 1 had exactly one member from S19 to S38 — `grid-1-1x1`, the whole sheet
+//! — because one photo is a legal collage (ruling 34). Since S38 it carries one
+//! **sheet** per shape the product is mostly used at (the 4:3 album page, the 3:4
+//! portrait page and the 1:1 square): a one-slot layout at another shape is not
+//! "one geometry under three names", the sheet's shape *is* the canvas, and the
+//! window opens on the 3:4 one (`DEFAULT_TEMPLATE`) since the walk of 2026-10-17.
 //!
 //! `mosaic-8-s14` predates the scheme: it is the template S1 froze and the name
 //! `AGENTS.md`'s verification command uses, so its name, version, aspect, slot
@@ -143,14 +146,15 @@ pub fn with_slots_and_aspect(slots: usize, aspect: f64) -> Vec<Template> {
 /// (S36; the leading pair since S38).
 ///
 /// This is the ratio row's content: the band lists exactly these, and a count that
-/// offers one shape offers no choice to make (count 1 is the case), which is why the
-/// caller reads the length and not the row. Ordering by the ratio itself rather than
+/// offers one shape offers no choice to make — count 1 did until S38, when the
+/// one-slot sheets of the two most-used shapes joined it and its row appeared.
+/// Ordering by the ratio itself rather than
 /// by recipe order keeps the row's positions stable across counts — the shapes a
 /// count does not have are simply absent from a fixed sequence — and it is the order
 /// the row reads in: **3:4, 1:1** (the portrait page and the square, which S38 moved
 /// to the front because the human named them the most used), then **2:3, 4:3, 3:2,
 /// 16:9**. S36's whole rule was the ascending order; S38 put the two a person reaches
-/// for first ahead of it, and every count 2 … 9 carries both, so the row starts the
+/// for first ahead of it, and every count 1 … 9 carries them, so the row starts the
 /// same way wherever a collage stands.
 pub fn ratios_for(slots: usize) -> Vec<f64> {
     let mut ratios: Vec<f64> = Vec::new();

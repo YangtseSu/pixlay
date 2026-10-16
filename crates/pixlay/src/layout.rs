@@ -303,7 +303,8 @@ impl Gallery {
     }
 
     /// The ratios the row holds, in the row's own order — which is the library's
-    /// (`templates::ratios_for`, ascending). A count that offers one shape has a
+    /// (`templates::ratios_for`: the two most-used shapes first, then ascending; S36
+    /// had the ascending order alone). A count that offers one shape has a
     /// one-button row, and the row is not drawn at all while there is nothing to
     /// choose (the widget's visibility is the caller's question, not this list's).
     pub fn ratios(&self) -> Vec<f64> {

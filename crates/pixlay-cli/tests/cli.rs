@@ -1940,14 +1940,19 @@ fn templates_filters_by_slot_count_which_is_the_gallery_s_query() {
 
     // Count 1 is the exception to the "at least three layouts" rule and the reason
     // the loop above starts at two: since S19 a single photo is a legal collage and
-    // its layout is the sheet itself, so the filter answers with exactly one name
-    // (ruling 34).
+    // its layouts are the sheet itself, and since S38 the filter answers with the
+    // three sheets — the 4:3 album page and the 3:4 / 1:1 ones the sets added
+    // (ruling 34, and the walk's ruling 8).
     let one = run(&["templates", "--slots", "1"]);
     assert_eq!(code(&one), 0, "{}", stderr(&one));
     assert_eq!(field(&one, "slots"), "1");
-    assert_eq!(field(&one, "count"), "1");
+    assert_eq!(field(&one, "count"), "3");
     assert_eq!(field(&one, "template.0.name"), "grid-1-1x1");
     assert_eq!(field(&one, "template.0.aspect"), "4:3");
+    assert_eq!(field(&one, "template.1.name"), "grid-1-1x1-3x4");
+    assert_eq!(field(&one, "template.1.aspect"), "3:4");
+    assert_eq!(field(&one, "template.2.name"), "grid-1-1x1-1x1");
+    assert_eq!(field(&one, "template.2.aspect"), "1:1");
 
     // The two filters combine, and the shape filter is still the library's own.
     let both = run(&["templates", "--slots", "5", "--aspect", "4:3"]);
@@ -3211,13 +3216,15 @@ fn edit_grows_and_shrinks_the_layout_one_cell_at_a_time() {
 }
 
 #[test]
-fn the_default_chain_keeps_the_albums_shape_as_the_collage_grows() {
-    // S35's own exit from the machine surface: the editor opens on `grid-1-1x1`
-    // (4:3), `--add-cell` walks the same `layout_for` the window's count control
-    // does, and the chain has to keep the album page's shape the whole way to nine.
-    // Before S35, count 2 was the only count with no 4:3 member, so the first added
-    // cell took the sheet to 3:2 (`strip-2-2x1`) and the second to 16:9
-    // (`strip-3-3x1`), where the rest of the growth stayed.
+fn the_album_pages_chain_keeps_its_shape_as_the_collage_grows() {
+    // S35's own exit from the machine surface, and still the 4:3 document's: a
+    // project opened on `grid-1-1x1` (the album page — the window's own default is
+    // the 3:4 sheet since S38, so this is the shape a person chose), `--add-cell`
+    // walks the same `layout_for` the window's count control does, and the chain has
+    // to keep the album page's shape the whole way to nine. Before S35, count 2 was
+    // the only count with no 4:3 member, so the first added cell took the sheet to
+    // 3:2 (`strip-2-2x1`) and the second to 16:9 (`strip-3-3x1`), where the rest of
+    // the growth stayed.
     let dir = out_dir("edit-chain");
     let mut project = dir.join("1.pixlay");
     let output = run(&[

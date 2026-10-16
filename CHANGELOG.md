@@ -16,14 +16,20 @@ All notable changes to Pixlay are documented in this file. The format follows
 
 - **The portrait and square sets.** Every photo count from two to nine now carries a whole set of layouts
   at **3:4** and at **1:1** — the two shapes a phone produces: the equal and unequal pairs, the band
-  splits, the strips, the brick (running-bond) pairs, the three-band layouts and the two nine-grids — 73
-  new members (38 + 35), the library at **115 templates / 586 slots**. A member of a set is named after its
-  sheet (`strip-2-1x2-3x4`, `mosaic-2-hero-top-1x1`); nothing that shipped before moved.
+  splits, the strips, the brick (running-bond) pairs, the three-band layouts and the two nine-grids — 83
+  new members in all, the library at **125 templates / 657 slots**. A member of a set is named after its
+  sheet (`strip-2-1x2-3x4`, `mosaic-2-hero-top-1x1`); nothing that shipped before moved. The sets' walk
+  (2026-10-17) also gave count 9 the 5-and-4 bands, the nine-grid an **even** member whose cells differ by
+  under a percent (exact thirds are not dyadic), and count 1 the one-slot **3:4 and 1:1 sheets** beside the
+  4:3 album page.
 
 ### Changed
 
-- **The ratio row leads with 3:4 and 1:1**, then the rest ascending (2:3, 4:3, 3:2, 16:9): the two shapes
-  most collages are made at are the first two buttons at every count 2 … 9.
+- **A new collage opens on the 3:4 portrait page** (`DEFAULT_TEMPLATE`), and growing it keeps that shape:
+  the 1→2 switch lands on the portrait page's own layout rather than the album page's, and the ratio row
+  leads with 3:4 and 1:1 at every count. Two refinements the sets' walk asked for: an obviously symmetric
+  arrangement's seams line up (the aligned 6-photo `3+3` pairs) and every proportion not named in the walk
+  is the **2:3** split; `mosaic-7-elbow` moved to the end of its cell's strip.
 
 ## [0.2.0] - 2026-10-16
 

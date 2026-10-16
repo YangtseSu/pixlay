@@ -957,19 +957,21 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
     assert_eq!(
         gallery.candidates(),
         vec!["grid-1-1x1".to_string()],
-        "and the sheet is the only one"
+        "and the document's own shape has the one member"
     );
-    // One shape is no choice: the row holds the single shape and is **not drawn**
-    // (S36), because a one-button radio set is a control that cannot do anything.
+    // Since S38 a one-slot count offers three shapes — the sheet as 4:3, 3:4 and 1:1
+    // — so the row is drawn even at one cell, with the document's own shape marked.
     assert_eq!(
         gallery.ratios().len(),
-        1,
-        "the sheet offers one shape: {:?}",
+        3,
+        "the sheet offers three shapes: {:?}",
         gallery.ratios()
     );
-    assert!(
-        !gallery.ratios_visible(),
-        "so the row is hidden at one cell"
+    assert!(gallery.ratios_visible(), "so the row is drawn at one cell");
+    assert_eq!(
+        gallery.selected_ratio(),
+        Some(one.template.aspect),
+        "with the document's own shape marked"
     );
     window.remove_photo();
     assert_eq!(
