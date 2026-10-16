@@ -19,7 +19,9 @@ the assistant's suggestion, recorded for a decision nobody has made yet.
 
 ## More layouts in the library
 
-**Status: S35, S36 and S37 landed (2026-10-16); S37's work is done and its Human walk is what is left** — *asked for* (2026-09-27, extended 2026-10-08): the shipped library
+**Status: S35, S36 and S37 landed and passed (2026-10-16) — S37's on a waiver: its sketch walk was ruled
+passed without being walked, so the look it asks about stands unjudged
+(`docs/steps/S37-arrangement-depth-done.md`)** — *asked for* (2026-09-27, extended 2026-10-08): the shipped library
 should offer more layouts, and the references the human named organize theirs by category rather than as a
 flat list. The plan's first three steps are **S35, S36 and S37** under [`docs/steps/`](steps/); this
 section holds the research they rest on and the directions they leave alone.
@@ -93,10 +95,12 @@ section holds the research they rest on and the directions they leave alone.
      --band` measures the narrowed rebuild. It came second because a count's candidates had grown past
      HIG's "small sets only" for a radio strip, and because the row is the reference's own model (布局's
      ratio split) while a pixlay template's ratio *is* the sheet's shape.
-  3. **Arrangement depth** (S37) — **landed 2026-10-16, its Human walk (the sketch walk) is what is
-     left**: the poster family at the two counts that lacked one and the first irregular cells beyond
-     `mosaic-8-s14`'s single L — the in-model cousin of Google's "Shapes", and the depth of kind after the
-     depth of ratios. Five members: `mosaic-2-hero` (a poster at two cells), `mosaic-7-l1r6` (count 7's
+  3. **Arrangement depth** (S37) — **landed 2026-10-16 and passed on a waiver**: the human ruled the gate
+     without walking the sketches, so whether an L or a T reads at the band's own 128x96 is **unjudged**
+     (`docs/steps/S37-arrangement-depth-done.md`). It is the poster family at the two counts that lacked
+     one and the first irregular cells beyond `mosaic-8-s14`'s single L — the in-model cousin of Google's
+     "Shapes", and the depth of kind after the depth of ratios. Five members:
+     `mosaic-2-hero` (a poster at two cells), `mosaic-7-l1r6` (count 7's
      poster, added because the measurement showed `mosaic-7-hero` is **not** one: its two largest cells
      tie, 1.2x the median where a poster is at least 2x), and three irregular cells — an L at count 3, a T
      at count 5 and an L at count 7. The step's whole measurement, and the reason the census is asserted

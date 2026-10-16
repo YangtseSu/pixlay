@@ -206,9 +206,14 @@ the canvas is **content** and the interface is **styling**, and the two must not
      dominant with a mass of small ones (`mosaic-2-hero`, `mosaic-7-l1r6`)? The machine-checkable half is
      `crates/pixlay/tests/layout.rs`, which opens a document of each new member's own count and shape and
      compares the band's own pixels with `pixlay-render render --sketch` at `candidate_grid(aspect)`, RMSE 0,
-     and writes each member's band to `/var/tmp/pixlay-s7/layout-band-<name>.png`; the CLI's five sketches at
-     the band's grid are `/var/tmp/s37probe/s37-sketches.png`, and the step's own file is
-     `docs/steps/S37-arrangement-depth-doing.md`;
+     and writes each member's band to `/var/tmp/pixlay-s7/layout-band-<name>.png` (the windowless stand-in
+     for the same drawing is `pixlay-render render --template <name> --sketch --long-edge <grid>`, with the
+     theme's two colours and the stroke the test prints). **The human ruled this item on 2026-10-16 without
+     walking it** — the walk was put to them in terms they could not follow ("看不懂你想做什么") — so what
+     stands here is a closed gate and an **unjudged look**: no person has said that an L or a T reads as one
+     at the band's grid, that either is distinguishable from its rectangular neighbour, or that a poster
+     reads as a poster. The basis, the legibility risk it leaves open and the trigger to reopen it are
+     `docs/steps/S37-arrangement-depth-done.md`'s ruling block;
    - the floating buttons: do they land where the hand expects, and does the frame look right at both ends of its radius range;
    - the dialogs: does the frame's group read as the three things the document holds — with its live rows
      making the canvas redraw behind it — and (S25's own Human line, item 10 below) does the app's one dialog

@@ -6,10 +6,14 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # S37 · Arrangement depth: the poster family and irregular cells
 
-**Progress**: doing — implemented, measured and committed 2026-10-16 (this step's commit); **the Human walk
-is what is left**: the sketch walk (`docs/HIG-REVIEW.md` §2's arrangement-depth item — does an L or a T read
-at the band's own 128x96, is it distinguishable from its rectangular neighbour, and does a poster read as a
-poster). Everything else on the exit list is green and its numbers are `docs/CONTRACT.md` §8, "S37".
+**Progress**: done and passed (2026-10-16, human) — **on a waiver, not a walk**: the human ruled the step
+passed while saying the walk's own instructions were something they could not follow ("看不懂你想做什么，
+都算通过吧"), so the gate is closed and `docs/HIG-REVIEW.md` §2's arrangement-depth item stands
+**unjudged** (the ruling block under `**Result**` carries the words, the basis and the trigger to reopen
+it). The work is `c7f8ca2`, which is on `origin/main` — local `main` tracks it with nothing ahead — and this
+gate is its own commit. **→ next: nothing is scheduled** under `docs/steps/`; the library's next directions
+— template editing, the artifact format and packs — are `docs/ROADMAP.md`'s and unscheduled. Everything on
+the exit list is green and its numbers are `docs/CONTRACT.md` §3 and §8, "S37".
 
 **Goal**: the library grows in kinds, not only in counts — the poster arrangement (one photo dominant,
 Xiaomi's 海报) wherever a count lacks one, and the first irregular cells beyond `mosaic-8-s14`'s single
@@ -109,9 +113,37 @@ with a photo in every cell (265–409 KB, `ms` 75.0–147.5) and their sketches 
 `/var/tmp/s37probe/s37-sketches.png`. The numbers are `docs/CONTRACT.md` §8, "S37", the definitions §3, the
 walk `docs/HIG-REVIEW.md` §2, and the library's own census `docs/ROADMAP.md`. The entry is green —
 `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test` (the GUI suite
-included) and `reuse lint` (178 files) — and **the Human walk is the only thing left on this step**.
+included) and `reuse lint` (178 files). The five band pictures the walk rests on were re-written after this
+step landed — `cargo test -p pixlay --test layout
+the_layout_band_offers_every_layout_with_the_photos_own_count` (107.07 s, green), because `/var/tmp` does
+not travel between machines — and this gate is its own commit.
+
+**Ruling (2026-10-16, human) — the gate**: **passed, on a waiver** — the human ruled the step passed without
+walking the sketches; their words were "看不懂你想做什么，都算通过吧" (*I cannot tell what you are asking
+for; pass it all*), said after a summary of the pictures and of the four questions the walk asks. **The basis
+is recorded as it stood, because two different claims hide under "passed"**: the gate **is closed** (the step
+is done and ruled, and a gate's next action is a new session), and §2's arrangement-depth item **is
+unjudged** — no person has yet said that an L or a T reads at the band's own 128x96, that either is
+distinguishable from its rectangular neighbour, or that a poster reads as a poster. What makes the waiver
+safe to record rather than to paper over: nothing on the exit list depends on the look — the poster
+property, the irregular census, the invariants, the framing sweeps and the band-versus-CLI RMSE 0 are all
+machine-checkable and green — so what stays open is a **legibility** risk at that size (the band's candidate
+box is 128x96, the width S21, S29 and S30 are the record of) and not a correctness one. **The trigger to
+reopen it** is a person reading an irregular candidate as something other than its outline; the material is
+the five pictures
+`/var/tmp/pixlay-s7/layout-band-{mosaic-2-hero,mosaic-3-elbow,mosaic-5-tee,mosaic-7-l1r6,mosaic-7-elbow}.png`,
+which `crates/pixlay/tests/layout.rs` writes and the command above re-writes. **No shape changes with the
+ruling**: the poster property, the two irregular words and both censuses are `docs/CONTRACT.md` §3 with the
+numbers in §8, "S37", so the gate's fourth part was already done and this ruling synchronized nothing.
 
 **Human**
 
 - The sketch walk: an irregular cell at the band's 128x96 — is its shape readable, is it distinguishable
-  from its rectangular neighbour, and does a poster read as a poster.
+  from its rectangular neighbour, and does a poster read as a poster. Plainly: each of the five pictures is
+  the band's own drawing of one layout — every cell filled in the theme's foreground, every outline and the
+  sheet's ground between the cells in the dimmed ink — so the question is whether the *shape* of the cells is
+  visible at that size, and whether a sheet with one dominant cell reads as one at a glance.
+- **Passed on a waiver** (2026-10-16): the human ruled it passed without walking it, the walk having been put
+  to them in terms they could not follow. This line therefore records **a closed gate and an unjudged look**,
+  not a judgement of the pictures; the ruling block above carries the basis, the risk and the trigger to
+  reopen it.

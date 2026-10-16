@@ -7,7 +7,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 # S36 · The sheet's ratio is a control
 
 **Progress**: done and passed (2026-10-16, human) → next: **S37 — Arrangement depth: the poster family
-and irregular cells** (`docs/steps/S37-arrangement-depth-todo.md`), in a new session, because a gate's next
+and irregular cells** (`docs/steps/S37-arrangement-depth-done.md`), in a new session, because a gate's next
 action is a new session (`AGENTS.md`, "Session and persistence discipline"). The work is in `66b60bc` (the
 dependency defect it exposed is fixed in `9c68b0a`); both are **local, not pushed**; this gate is its own
 commit.
