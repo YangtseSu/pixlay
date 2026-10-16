@@ -19,7 +19,7 @@ the assistant's suggestion, recorded for a decision nobody has made yet.
 
 ## More layouts in the library
 
-**Status: S35 landed and passed (2026-10-16); S36 and S37 are the plan's next steps** — *asked for* (2026-09-27, extended 2026-10-08): the shipped library
+**Status: S35 landed and passed (2026-10-16); S36's work has landed (2026-10-16) with its walk as the gate; S37 is the plan's next step** — *asked for* (2026-09-27, extended 2026-10-08): the shipped library
 should offer more layouts, and the references the human named organize theirs by category rather than as a
 flat list. The plan's first three steps are **S35, S36 and S37** under [`docs/steps/`](steps/); this
 section holds the research they rest on and the directions they leave alone.
@@ -79,18 +79,22 @@ section holds the research they rest on and the directions they leave alone.
      over at least four aspect ratios, including **4:3**, **1:1** and a portrait member; **3:4 joined as
      the sixth ratio** (Xiaomi's page ratio, the portrait of the default 4:3 sheet) with five members; and
      the default growth chain keeps 4:3, which is the measured defect above closed.
-  2. **The ratio becomes a control** (S36) — the band gains a **ratio row** ahead of the strip, the
-     document's own ratio marked; choosing one re-lays the document through the same preference the count
-     rule uses (cells kept, one undo step) and the strip narrows to that ratio's candidates;
-     `edit --aspect` is the CLI's half, and a ratio the count has no layout for is a refusal rather than
-     a fallback. It comes second because a count's candidates have grown past HIG's "small sets only"
-     for a radio strip, and because the row is the reference's own model (布局's ratio split) while a
-     pixlay template's ratio *is* the sheet's shape.
+  2. **The ratio becomes a control** (S36) — **landed 2026-10-16, its walk is the gate**: the band has a
+     **ratio row** ahead of the strip (`templates::ratios_for`, ascending, the document's own shape
+     marked, hidden where a count offers one shape), choosing one re-lays the document through
+     `selection::layout_with_aspect` — the count's member of **exactly** that shape, the document's own
+     family preferred, cells kept and one undo step — and the strip narrows to
+     `templates::with_slots_and_aspect`, that shape's candidates. `edit --aspect` is the CLI's half
+     (refusing a shape the count has none of, exit 2, rather than landing on a near miss), and `switch
+     --band` measures the narrowed rebuild. It came second because a count's candidates had grown past
+     HIG's "small sets only" for a radio strip, and because the row is the reference's own model (布局's
+     ratio split) while a pixlay template's ratio *is* the sheet's shape.
   3. **Arrangement depth** (S37) — the poster family at the counts that lack one and the first irregular
      cells beyond `mosaic-8-s14`'s single L: the in-model cousin of Google's "Shapes", and the depth of
      kind after the depth of ratios.
 - **Not adopted, so a later session does not re-litigate**: Google's themed categories (style, above);
-  category tabs in general — a count × ratio cell holds one to three candidates, and the threshold for
+  category tabs in general — a count × ratio cell holds **one or two** candidates (count 4's two square
+  grids are the only pair, and S36 is what made the cell the unit), and the threshold for
   revisiting is a cell above **six** candidates or the day template packs and user templates land; a
   "Featured" ordering (library order is deterministic and a person scanning sketches does not need
   curation at these set sizes); the 9:16 and 4:5 ratios (the same cheap recipe work the day someone asks).

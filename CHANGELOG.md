@@ -31,6 +31,16 @@ All notable changes to Pixlay are documented in this file. The format follows
   project points at moved. The window opens on a 4:3 sheet and a first photo used to turn it 3:2 and
   the second 16:9; the new `grid-2-2x1` closes that chain, so the sheet keeps its shape from one
   photo to nine.
+- **The sheet's shape is the layout stage's first choice.** The band gains a **ratio row**: the shapes
+  the current photo count offers — 2:3, 3:4, 1:1, 4:3, 3:2 and 16:9, whichever the count carries — with
+  the document's own shape marked, and the layout strip under it narrowed to that shape's arrangements.
+  Choosing a shape re-lays the document in one undo step, keeping every photo and its framing, and a
+  count that offers one shape (a single-photo collage) draws no row. This is the reference's own model
+  — the shape first, then how its cells are arranged — and it is what keeps a count's list of layouts
+  navigable as the library grows. The CLI's half is `pixlay-render edit --aspect 1:1`; a shape the
+  count has no layout for is refused (exit 2, naming the shapes the count does offer) rather than
+  answered with the nearest one, which is where the shape's own report field (`edit`'s `aspect`) comes
+  from too — a template's name does not carry its ratio.
 
 ## [0.1.2] - 2026-09-27
 

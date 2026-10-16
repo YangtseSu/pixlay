@@ -15,6 +15,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 use pixlay_core::{Command as Edit, CropTransform, History, PixelSize, Project, canvas_grid};
+use pixlay_core::{layout_with_aspect, templates};
 use pixlay_imaging::destination::refuse_source_alias;
 use pixlay_imaging::preview::GESTURE_STEP_DEG;
 use pixlay_imaging::{Export, Format, Preview, Rgb8View, SlotBitmap, gesture_grid, icc};
@@ -188,7 +189,7 @@ fn save_project(args: SaveArgs) -> Result<u8, Failure> {
     report.text("command", "save");
     report.text("template", doc.template.name.clone());
     report.int("version", i64::from(doc.template.version));
-    report.text("aspect", ratio_label(doc.template.aspect));
+    report.text("aspect", templates::ratio_label(doc.template.aspect));
     report.int("cells", doc.cells.len() as i64);
     report.int("bytes", bytes as i64);
     emit(&report, args.json);
@@ -247,6 +248,27 @@ fn edit_project(args: EditArgs) -> Result<u8, Failure> {
                 pixlay_core::templates::names().join(", ")
             ))
         })?;
+        apply(&mut history, Edit::SetTemplate { template })?;
+    }
+    // `--aspect` is the layout band's ratio row (S36) said from the outside: the
+    // same `Command::SetTemplate` as `--template`, with the layout chosen by the
+    // sheet's shape — `layout_with_aspect`, the one function the window's row also
+    // calls, so the two land on the same layout for the same document.
+    if let Some(aspect) = args.aspect {
+        let doc = history.doc();
+        let count = doc.cells.len();
+        let template =
+            layout_with_aspect(count, aspect, doc.template.family()).ok_or_else(|| {
+                let offered: Vec<String> = pixlay_core::templates::ratios_for(count)
+                    .iter()
+                    .map(|ratio| templates::ratio_label(*ratio))
+                    .collect();
+                Failure::Failed(format!(
+                    "no {count}-cell layout has a {} sheet; the count offers {}",
+                    templates::ratio_label(aspect),
+                    offered.join(", ")
+                ))
+            })?;
         apply(&mut history, Edit::SetTemplate { template })?;
     }
     // The layout's own count control, before any photo lands: `--add-cell` takes
@@ -368,6 +390,11 @@ fn edit_project(args: EditArgs) -> Result<u8, Failure> {
     report.text("command", "edit");
     report.text("template", doc.template.name.clone());
     report.int("version", i64::from(doc.template.version));
+    // The document's sheet shape, in the same `W:H` form `init`, `save`,
+    // `templates` and `render` report theirs: **a template's name does not carry
+    // its ratio** (S35), so `--aspect`'s answer is only readable from the report
+    // this field gives (S36).
+    report.text("aspect", templates::ratio_label(doc.template.aspect));
     report.int("cells", doc.cells.len() as i64);
     report.int(
         "photos",
@@ -426,19 +453,20 @@ fn apply(history: &mut History, command: Edit) -> Result<(), Failure> {
 fn list_templates(args: TemplatesArgs) -> Result<u8, Failure> {
     // The filters are the library's own queries, so `templates --aspect 4:3`,
     // `templates --slots 5` and the layout stage cannot disagree about what "the same
-    // aspect" or "the layouts with that count" mean.
-    let mut listed = match args.aspect {
-        Some(aspect) => pixlay_core::templates::of_aspect(aspect),
-        None => pixlay_core::templates::all(),
+    // aspect" or "the layouts with that count" mean — and the two together are the
+    // layout band's own list (S36), because the band narrows the strip to the
+    // document's ratio.
+    let listed = match (args.aspect, args.slots) {
+        (Some(aspect), Some(slots)) => templates::with_slots_and_aspect(slots, aspect),
+        (Some(aspect), None) => templates::of_aspect(aspect),
+        (None, Some(slots)) => templates::with_slots(slots),
+        (None, None) => templates::all(),
     };
-    if let Some(slots) = args.slots {
-        listed.retain(|template| template.slots.len() == slots);
-    }
     let mut report = Report::new();
     report.text("status", "ok");
     report.text("command", "templates");
     if let Some(aspect) = args.aspect {
-        report.text("aspect", ratio_label(aspect));
+        report.text("aspect", templates::ratio_label(aspect));
     }
     if let Some(slots) = args.slots {
         report.int("slots", slots as i64);
@@ -447,7 +475,10 @@ fn list_templates(args: TemplatesArgs) -> Result<u8, Failure> {
         let prefix = report.row("template", index);
         report.text(&format!("{prefix}.name"), template.name.clone());
         report.int(&format!("{prefix}.slots"), template.slots.len() as i64);
-        report.text(&format!("{prefix}.aspect"), ratio_label(template.aspect));
+        report.text(
+            &format!("{prefix}.aspect"),
+            templates::ratio_label(template.aspect),
+        );
         report.int(&format!("{prefix}.version"), i64::from(template.version));
     }
     report.int("count", listed.len() as i64);
@@ -523,7 +554,7 @@ fn init_project(args: InitArgs) -> Result<u8, Failure> {
     report.text("command", "init");
     report.text("template", doc.template.name.clone());
     report.int("version", i64::from(doc.template.version));
-    report.text("aspect", ratio_label(doc.template.aspect));
+    report.text("aspect", templates::ratio_label(doc.template.aspect));
     report.int("cells", doc.cells.len() as i64);
     // `photos` is what was asked for, `cells` is what the template has: they are
     // equal for a project with photos, and 0 against N for the photo-free one.
@@ -581,32 +612,6 @@ fn stored_source(photo: &Path, project: &Path) -> PathBuf {
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
     pixlay_core::relative_to(dir, &photo).unwrap_or(photo)
-}
-
-/// `W:H` when the ratio is one a person would name, a decimal otherwise.
-///
-/// The recipes declare ratios as divisions of small integers (`4/3` is
-/// `1.3333333333333333`), and a caller comparing `--aspect` values by hand reads
-/// `4:3` far more easily. Matching is on the numeric value, so a ratio that only
-/// prints approximately stays usable.
-fn ratio_label(aspect: f64) -> String {
-    // Small-integer ratios cover every canvas shape the product has a name for.
-    for (width, height) in [
-        (1, 1),
-        (4, 3),
-        (3, 2),
-        (16, 9),
-        (2, 3),
-        (3, 4),
-        (9, 16),
-        (2, 1),
-        (1, 2),
-    ] {
-        if (f64::from(width) / f64::from(height) - aspect).abs() <= 1e-12 {
-            return format!("{width}:{height}");
-        }
-    }
-    format!("{aspect:.6}")
 }
 
 fn render(args: RenderArgs) -> Result<u8, Failure> {
@@ -1381,14 +1386,19 @@ fn switch(args: SwitchArgs) -> Result<u8, Failure> {
     if args.band {
         let band_step = stats::Stopwatch::start();
         // What the window's band does on the same click (S21): every candidate of
-        // the new cell count is a **sketch** at the band's thumbnail grid — the
-        // template's own geometry, drawn — so there is no `Preview` here and no
-        // decode: the band no longer touches the document's photos at all. The
-        // colours are the renderer's defaults where the window passes its
+        // the new cell count **and the new sheet shape** — the strip is narrowed to
+        // the document's ratio since S36, so the band's rebuild is the sketches of
+        // that group and not of the whole count — is a **sketch** at the band's
+        // thumbnail grid, the template's own geometry, drawn, so there is no
+        // `Preview` here and no decode: the band no longer touches the document's
+        // photos at all. The ratio row's own rebuild is widgets rather than pixels
+        // and is not measured here; what it changes is *which* group this loop
+        // draws. The colours are the renderer's defaults where the window passes its
         // theme's; the values do not change the work, and this ruler measures
         // time.
         let style = pixlay_render::Sketch::default();
-        let listed = pixlay_core::templates::with_slots(doc.cells.len());
+        let listed =
+            pixlay_core::templates::with_slots_and_aspect(doc.cells.len(), doc.template.aspect);
         for listed_template in &listed {
             let candidate_grid = pixlay_core::templates::candidate_grid(listed_template.aspect);
             pixlay_render::sketch_rgb8(listed_template, candidate_grid, &style)

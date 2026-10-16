@@ -224,6 +224,20 @@ limit that is not in this table is a contract gap.
   is 4:3 at every step (`grid-2-2x1`, then the `mosaic-*-hero` chain and `mosaic-8-s14`). Before S35 count 2 had no 4:3 layout:
   the first added photo turned the album page 3:2 and the second 16:9, where the rest of the growth stayed. The chain is a test
   (`crates/pixlay-core/tests/templates.rs`), not a hope.
+- **The sheet's ratio is a control** (S36): the layout band's first choice is the sheet's shape, not the arrangement.
+  `templates::ratios_for(slots)` is the ratio row's content — the shapes a count offers, **ascending by ratio**
+  (2:3, 3:4, 1:1, 4:3, 3:2, 16:9), the shapes a count lacks simply absent, so a shape keeps its place as the count moves —
+  and a count that offers one shape (count 1) shows no row, because a one-button radio set is a control that cannot do
+  anything. The strip under the row is `templates::with_slots_and_aspect(slots, aspect)`: the count's members of **that one
+  shape**, so a count's layouts are read shape by shape and the two controls cannot offer the same decision twice.
+  Activating a shape switches the document to `selection::layout_with_aspect(count, aspect, family)` — **the layout with this
+  count and exactly this shape**, preferring the document's own recipe family where the shape has several members and library
+  order where nothing separates, and `None` when the count has no member of that shape. The refusal is the point: a request
+  names a shape, so an absent one must not land on the nearest (`layout_for` keeps that fallback, because it answers about a
+  *count* — it is what the count control and the growth chain use). The window's row, the CLI's `edit --aspect` and
+  `switch --band` read this one query, and the document is the authority for the row's mark, as it is for the strip's
+  highlight: an undo, a project load or a count change cannot leave it lying. A ratio is written `W:H` by
+  `templates::ratio_label` — a bare ratio and **not copy**: no translation, and no noun.
 - **The library's range is deeper than one layout** (S10, ruling 10): every count from 2 to 9 carries **at least four layouts over
   at least four aspect ratios that include 4:3, 1:1 and a portrait member** (S35) — **37 templates and 200 slots** in all, which
   `pixlay-render templates` reports and `crates/pixlay-core/tests/templates.rs` asserts as a histogram over `2..=MAX_PHOTOS` plus
@@ -411,7 +425,7 @@ pixlay-render templates [--aspect <ratio>] [--slots <n>] [--json]
 pixlay-render init      --template <name> --out <file.pixlay> [--photo <p>...]
 pixlay-render edit      --project <file.pixlay> --out <file.pixlay> --slot <i> --rotate <deg> --zoom <z> --offset <x>,<y> --clear
 pixlay-render edit      --project <file.pixlay> --out <file.pixlay> --slot <i> --photo <file>
-pixlay-render edit      --project <file.pixlay> --out <file.pixlay> --template <name> --add-cell --remove-cell --add-photo <file> --swap <i>,<j>
+pixlay-render edit      --project <file.pixlay> --out <file.pixlay> --template <name> --aspect <ratio> --add-cell --remove-cell --add-photo <file> --swap <i>,<j>
 pixlay-render edit      --project <file.pixlay> --out <file.pixlay> --gap <rel> --radius <rel> --border-color <r,g,b>
 pixlay-render hit       --project <file.pixlay> --at <x>,<y> [--json]
 pixlay-render hit       --template <name> --at <x>,<y> [--json]
@@ -464,7 +478,7 @@ comparable, and the AVIF's is the same number for the same reason — measured (
 | Item | `templates` | `init` |
 |---|---|---|
 | shape | `template.<i>.{name,slots,aspect,version}` plus `count` (and `aspect`, when filtering) | `template`, `version`, `aspect`, `cells`, `bytes` |
-| `--aspect` / `--slots` | the only flags it takes (S14 added the second): `--aspect` accepts `W:H` (`4:3`) or a decimal, matched against the template's declared ratio within `ASPECT_TOLERANCE` (the same `templates::of_aspect` query the window's band uses), and `--slots` filters by slot count (`Selection::layouts`, the gallery's query). A ratio or a count nothing was authored for is `count = 0` and exit 0 | — |
+| `--aspect` / `--slots` | the only flags it takes (S14 added the second): `--aspect` accepts `W:H` (`4:3`) or a decimal, matched against the template's declared ratio within `ASPECT_TOLERANCE` (the same `templates::of_aspect` query the window's band uses), and `--slots` filters by slot count (`Selection::layouts`, the gallery's query). **Both together are the band's own narrowed list** (S36): `templates::with_slots_and_aspect`, the count's members of one shape — which is what the strip holds. A ratio or a count nothing was authored for is `count = 0` and exit 0 | — |
 | `--template` / `--out` | — | both required; `--out` must end in `.pixlay` |
 | refusal | any other flag (`--long-edge`, `--project`, …) is a usage error (exit 1) | same; and an existing `--out` path is a **failure** (exit 2) because `init` never overwrites a project. The refusal is the creation itself (`create_new`), not a check followed by a write: two `init`s that race leave exactly one winner, and a symbolic link at the path — dangling or not — is a file that is already there rather than a name to write through (S15c, PIX-015) |
 | unknown template | — | usage error (exit 1), stderr lists the names this build knows |
@@ -508,7 +522,7 @@ three on both commands, and the difference between them is scope:
 | what `edit` stores | **the fit** of what was asked for, not the request: a crop is a request and what is drawn is what covers it, so the written file says what it draws. A cell with no photo has no photo aspect to fit against and keeps the numbers as given |
 | idempotence | fitting a fit returns it bit for bit, so `edit` applied twice to the same project writes the same bytes — asserted on a rotation that has to be paid for *and* a pan that has to be clamped. A frame is likewise idempotent |
 | writing | through `Project::save_as`, the same call `save` makes: atomic, and relative photo paths are rebased when the copy lands in another directory. Since S15d it **returns the project it wrote** — the rebased copy — so a caller that keeps the document in memory (the window) adopts the file's own spellings rather than keeping the old ones. `--out` may be `--project` (edit in place) |
-| what `edit` reports | `template`, `version`, `cells`, `photos`, `kept` (the cells a layout change took off the sheet, S28: `cells + kept` is the number §2's ceiling bounds), the frame's three fields, `bytes`, and — when `--slot` was given — `slot`, `occupied`, `zoom`, `offset`, `rotation_deg` |
+| what `edit` reports | `template`, `version`, `aspect` (the document's sheet shape, in the same `W:H` form the other commands report — a template's **name does not carry its ratio**, S35, so this is where `--aspect`'s answer is readable, S36), `cells`, `photos`, `kept` (the cells a layout change took off the sheet, S28: `cells + kept` is the number §2's ceiling bounds), the frame's three fields, `bytes`, and — when `--slot` was given — `slot`, `occupied`, `zoom`, `offset`, `rotation_deg` |
 | no `--long-edge` | an edit changes a cell's framing, the document's frame, its layout and the photos it holds; how big an export is another command's question. `--photo` joined the framing flags in S14 (`edit --slot <i> --photo <file>`), with the rules S14 added further down |
 
 **S12 added one subcommand and no flags to the others.** `gesture` is the ruler for what one step of a live
@@ -542,6 +556,7 @@ operations the band performs:
 |---|---|
 | `templates --slots <n>` | only the templates with exactly `n` slots, `1..=9` (exit 1 outside, and the same bound the format's slot limit gives). This is `Selection::layouts` — the gallery's own query — seen from the outside, so a caller can list a photo count's candidates; the two filters combine with `--aspect`. The report echoes `slots` beside `aspect`. Count 1 answers with `grid-1-1x1` alone (S19) |
 | `edit --template <name>` | switches the document to another layout, keeping the surviving cells' photos and framing (`Command::SetTemplate`'s retention). Since S28 the count need not match at all: a layout with fewer slots **keeps** the tail it cannot place and one with more **places those cells again** (photo and framing), then appends empty ones — so a shrink and a growth are inverses on the document, not only on the layout. An unknown name is exit 1 with the library listed |
+| `edit --aspect <ratio>` | switches the document to the layout **of this sheet shape** (S36): the same `Command::SetTemplate`, with the layout chosen by `selection::layout_with_aspect` — the query the window's ratio row also calls — so the two land on the same layout for the same document. `W:H` or a decimal, the vocabulary `templates --aspect` takes (one parser, `parse_aspect`). Mutually exclusive with `--template` (exit 1): they are both layout switches, and both in one edit would leave which of them wins to the order of two `if`s. A shape the document's cell count has no member of is exit **2** with the count, the shape and the shapes the count does offer named on stderr, stdout empty and nothing written: the request names a shape, so a near miss (`layout_for`'s fallback) would be a different document than the one asked for |
 | `edit --add-cell` | takes the layout with one cell more (`Command::AddCell`, the window's `+`). A cell a layout change kept is placed again first — that is how a kept photo comes back (S28) — otherwise the new cell is empty: an edit *about the layout*, so it moves the count without placing a photo. The cell the user wants filled is the one that shows a `+`, and clicking that is what asks for the file (S14b) |
 | `edit --remove-cell` | takes the layout with one cell fewer (`Command::RemoveLastCell`, the window's `−`). The last cell leaves the sheet **whole and kept**, not deleted (S28, ruling 43): it waits in `kept` and a later growth places it again, so a photo leaves the collage only through `--slot <i> --clear`, a replace or a cut. Exit 2 at one cell (`a collage's layout has at least 1 cell`) — the floor is the layout's, not the photo count's, and it is one cell since S19 (ruling 34). The mirror image of `--add-cell`, and refused together with it (exit 1): they are opposites, and one edit is one intent |
 | `edit --swap <i>,<j>` | exchanges two cells **whole** — photo and framing both (`Command::SwapCells`), because the framing is what makes a photo look right in *that* cell. Exit 2 for the same cell twice (`slot i cannot be swapped with itself`) and for a cell the layout does not have; a malformed pair is exit 1. The window's own paths are the four ruling 33 gave it (S23, plus S27's marked press): a `Shift`+drag from one cell onto another, a `Shift`+click on another cell, the strip's swap control plus `Return` — or plus a press on the target cell (S27) — and `Ctrl+Shift+Arrow` (S14b), which names the neighbour geometrically (`Template::neighbour`) and stays |
@@ -1136,6 +1151,22 @@ and the renders are the fixture photos at 800 px (`/var/tmp/s35probe/`).
 | unchanged by this step | the JPEG render above: `ms` 6464.2 + `encode_ms` 1986.9, `peak_rss_mb` **1630.8**, `occupied = 8`, `gap = radius = 0` — S34's record of the same document is 9,157,670 bytes, **31 bytes** apart, which is the `glycin` 4.0.1 → 4.0.2 bump (`ffb9e26`, 2026-10-09) and not this step |
 | the test suite | `cargo test`: **green**, the GUI suite included, **415.66 s** wall (S34's record of the same command: 359.67 s); `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings` and `reuse lint` (178 files) green |
 
+### S36 (2026-10-16, `--release`, this machine)
+
+The sheet's shape became a control: the band's ratio row is the first choice and the strip is the chosen
+shape's arrangements. Measured with the ratio row in place, so the band's rebuild is the **narrowed** loop
+(`switch --band`, three runs each, default canvas box 1100x575).
+
+| Item | Value |
+|---|---|
+| the band's rebuild, 8 cells, 4:3 → 1:1 (`mosaic-8-s14` → `mosaic-8-t4b4`) | `band_candidates` **1**, `band_ms` **0.0913 / 0.0938 / 0.1031** — the shape has one arrangement |
+| the band's rebuild, 4 cells, the 1:1 pair (`grid-4-2x2` → `grid-4-2x2g`) | `band_candidates` **2**, `band_ms` **0.1077 / 0.1214 / 0.1447** — the only count × shape cell in the library with two members, and the band's rebuild is what S18's ruler measures beside the switch: `switch_ms` on the same project is **27.9 / 27.8 / 43.0** (`sources_ms` ~0.003 — the shape's pair shares its edge — and `composite_ms` the rest), so the band is ~0.4% of the click |
+| what the row holds | `templates::ratios_for(slots)`: 1 shape at count 1 (the row is not drawn), **4 or 5** at every count 2 … 9, ascending — 2:3, 3:4, 1:1, 4:3, 3:2, 16:9 (shapes per count 1 → 1, 2 → 4, 3 → 4, 4 → 4, 5 → 5, 6 → 5, 7 → 4, 8 → 5, 9 → 4), and **one count × shape cell carries two members**: 4 at 1:1 (`grid-4-2x2`, `grid-4-2x2g`), every other cell one |
+| the row's own geometry | five shapes in **359x36**: the row is homogeneous and packed at its column's start, so every shape is one size — buttons **73 px apart**, i.e. a 67 px painted button plus the row's 6 px spacing — and a button's painted size is the **widest label's natural** (`measure`), not `width()`, which reports the *content* box: the `4:3` button's content box is its label (**31 px**) inside a 67 px button, so the theme's padding lives outside what the accessor returns and HIG's 24 px target has to be read from `measure` (measured 2026-10-16; the first reading of `width()` against the target was the false alarm, and `tests/hig.rs::check_gallery` reads `measure` plus the label's own fit for that reason) |
+| unchanged by this step | the library: **37 templates, 200 slots** (`frozen.rs` untouched — no recipe moved); the S35 growth chain is S35's, still 4:3 at every step |
+| the test suite | `cargo test`: **green**, the GUI suite included, **378 s** wall (S35's record of the same command: 415.66 s) — the band's own test 71.4 s of it; `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings` and `reuse lint` green |
+| a dependency defect this step exposed | serde_json's default `f64` parser is 1 ULP off for values needing 17 significant digits: a crop written as `3.7586652467163644` came back as `3.758665246716365`, so a saved document was **not equal** to the one that was written and a save → load → save was not byte-identical. Fixed where it belongs, in the dependency and not in a shim: `serde_json` 1.0.154 with its **`float_roundtrip`** feature — the same numbers for `4/3`, `0.1 + 0.2`, `1e-7`, and `crates/pixlay-core/tests/project.rs`'s `document()` now carries the measured 17-digit crop so the round trip is asserted |
+
 ## 9. The window (S7), and the shell ruling 31 re-cut (S22)
 
 The GUI is the fifth consumer of the same document, and what it adds is interaction. Its
@@ -1173,13 +1204,23 @@ machine surface of and which §8's "S21" measures.
 What the layout band is, as of S14b (`crates/pixlay/src/layout.rs`, `canvas.rs`), and what a caller may
 rely on:
 
-- **The candidates are the layouts with the document's cell count, and only those** (ruling 25, 2026-09-23;
-  S14b moved the count from the *photo* count to the *cell* count): `templates::with_slots()`, the one
-  function the CLI's `templates --slots` and `Selection::layouts()` are expressed in. Each candidate is a
+- **The candidates are the layouts with the document's cell count *and its sheet shape*, and only those**
+  (ruling 25, 2026-09-23; S14b moved the count from the *photo* count to the *cell* count, and S36 narrowed
+  it to the shape): `templates::with_slots_and_aspect()`, the one function the CLI's `templates --slots
+  --aspect` and `switch --band` are expressed in. **S36 put the shape's own choice above it**: the band's
+  *ratio row* lists `templates::ratios_for(cells)` — the shapes this count offers, ascending, one toggle
+  button each in a radio group, the document's own shape carrying the strip's `.picked` accent border — and
+  activating one is one `Command::SetTemplate` to `selection::layout_with_aspect(cells, shape, family)`,
+  which is the layout with that count and **exactly** that shape (the document's own recipe family
+  preferred, library order otherwise, and nothing when the count has no member of it). The strip then holds
+  that shape's arrangements alone, and a count offering one shape (count 1) draws no row, because a
+  one-member set is no choice. Which cell is marked is read from the **document** on every refresh, like
+  the strip's highlight, so an undo, a project opened or a count change cannot leave it lying. Each
+  candidate is a
   **sketch of that template's geometry** (S21, ruling 32): its cells in paper, every cell's outline and the
   sheet's ground no cell covers in ink (S29, so a layout whose cells leave a gutter between them draws it as
   the gap it is), drawn by `pixlay_render::sketch_rgb8` at the largest grid inside the band's own `CANDIDATE_BOX`
-  — so a candidate of another aspect is drawn at its own shape and the sheet's shape changes with the
+  — so a candidate of another shape is drawn at its own shape and the sheet's shape changes with the
   click, and a candidate is a complete account of a template, which carries geometry and no style. The
   strip follows the layout rather than the photo count because `+` can leave a cell empty: a three-cell
   document with two photos in it is still a three-cell document, and a strip filtered to the photos would

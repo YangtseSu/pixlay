@@ -2,8 +2,9 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The layout band: every candidate layout of the current photo count, drawn as a
-//! sketch of its geometry, plus the count control that decides what that count is.
+//! The layout band: the sheet shapes the current count offers, every candidate
+//! layout **of the chosen shape**, drawn as a sketch of its geometry, and the count
+//! control that decides what that count is.
 //!
 //! The layout step of the main path (`AGENTS.md`: `open → add photos → pick a
 //! layout → adjust → export`), and **a band on the document's page rather than a
@@ -15,7 +16,9 @@
 //! # The candidates are sketches
 //!
 //! The list is [`crate::window::EditorWindow::candidate_templates`] — every template
-//! with exactly the document's cell count, in library order — and each candidate is
+//! with exactly the document's cell count **and its sheet shape**, in library order
+//! (the shape is the ratio row's choice, so the strip is the *arrangements* of the
+//! sheet the user is looking at) — and each candidate is
 //! drawn by `pixlay_render::sketch_rgb8`: its cells in paper, every cell's outline
 //! and the sheet's ground between the cells in ink (ruling 32 of the plan of
 //! 2026-09-25; S21, S29). A template carries geometry and nothing else, so a sketch
@@ -31,6 +34,22 @@
 //! to, and [`Gallery::sketch_style`] reads them back through
 //! `GtkWidget::color()` — public, non-deprecated API, and the colours themselves
 //! stay in CSS where the rest of the app's colours live.
+//!
+//! # The ratio row
+//!
+//! Ahead of the strip sits the **ratio row** (S36): the sheet shapes the current
+//! cell count offers, as a radio set — the document's own shape is the one marked,
+//! exactly as the strip marks the document's own template, and a count that offers
+//! a single shape shows no row because there is nothing to choose. Activating one
+//! switches the document to that shape's layout ([`EditorWindow::select_ratio`],
+//! `Command::SetTemplate`, one undo step) and the strip then lists only that
+//! shape's candidates: the reference's own model (Xiaomi's 布局 band), where a
+//! person says "square" or "portrait" and then picks among that shape's
+//! arrangements.
+//!
+//! A ratio button is a ratio — `4:3`, `16:9` — and there is no other text on it:
+//! a ratio is not copy and goes through no translation
+//! (`pixlay_core::templates::ratio_label`).
 //!
 //! # The strip
 //!
@@ -50,8 +69,8 @@ use gtk4 as gtk;
 use gtk4::glib;
 use gtk4::prelude::*;
 
-use pixlay_core::templates::CANDIDATE_BOX;
-use pixlay_core::{MAX_PHOTOS, MIN_PHOTOS, Rgba8};
+use pixlay_core::templates::{CANDIDATE_BOX, ratio_label};
+use pixlay_core::{ASPECT_TOLERANCE, MAX_PHOTOS, MIN_PHOTOS, Rgba8};
 use pixlay_render::{Rgb8Image, Sketch};
 
 use crate::a11y;
@@ -78,7 +97,8 @@ pub struct Candidate {
     pub image: Rgb8Image,
 }
 
-/// The band: the count control, the strip, and the state the strip is showing.
+/// The band: the count control, the ratio row, the strip, and the state the strip
+/// is showing.
 pub struct Gallery {
     /// The band's own root, which the editor page appends.
     root: gtk::Box,
@@ -87,6 +107,15 @@ pub struct Gallery {
     minus: gtk::Button,
     plus: gtk::Button,
     count: gtk::Label,
+    /// The ratio row: the sheet shapes the current count offers, as a radio set
+    /// (S36). Hidden while the count offers one shape, because there is nothing to
+    /// choose.
+    ratios: gtk::Box,
+    /// The row's buttons with the ratio each stands for, in the row's own order.
+    ratio_buttons: RefCell<Vec<(f64, gtk::ToggleButton)>>,
+    /// The ratios the row is currently built for, so a rebuild happens when the
+    /// count changes the set — and not on every refresh.
+    ratio_order: RefCell<Vec<f64>>,
     /// The strip's scroller, whose vertical policy is `Never`.
     strip: gtk::ScrolledWindow,
     /// The candidate cells, in library order.
@@ -149,9 +178,34 @@ impl Gallery {
             .build();
         a11y::label(&strip, &gettext("Layouts"));
 
+        // The ratio row (S36), above the strip in its own column: the count control
+        // is to the left of both, and the row is drawn only while the count offers
+        // a choice.
+        let ratios = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        // One size for every shape — a radio set reads as a set — and packed at the
+        // **start** of its column rather than stretched across it: a homogeneous box
+        // fills the width it is given, and a row of five shapes spread over the band
+        // is a segmented control, not a radio set (measured 2026-10-16: 974 px of
+        // buttons before `halign`, 359 px after — five buttons of 67 px, which is the
+        // widest of their labels plus the theme's own padding).
+        ratios.set_homogeneous(true);
+        ratios.set_halign(gtk::Align::Start);
+        ratios.set_margin_top(6);
+        ratios.set_margin_start(6);
+        ratios.set_margin_end(6);
+        ratios.set_visible(false);
+
+        let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        // The column takes the band's width, so the **strip** still fills it (S14: a
+        // wide library scrolls sideways rather than being clipped) while the row
+        // above stays its own natural width (`ratios` packs at the start).
+        column.set_hexpand(true);
+        column.append(&ratios);
+        column.append(&strip);
+
         let root = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         root.append(&control);
-        root.append(&strip);
+        root.append(&column);
 
         // The two colour probes: invisible labels whose only job is to carry the
         // classes `style.css` defines the sketch's colours with. They are never
@@ -168,6 +222,9 @@ impl Gallery {
             minus,
             plus,
             count,
+            ratios,
+            ratio_buttons: RefCell::new(Vec::new()),
+            ratio_order: RefCell::new(Vec::new()),
             strip,
             cells,
             placeholder,
@@ -243,6 +300,43 @@ impl Gallery {
         let pictures = self.pictures.borrow();
         let picture = pictures.get(template)?;
         Some((picture.width(), picture.height(), picture.bytes().to_vec()))
+    }
+
+    /// The ratios the row holds, in the row's own order — which is the library's
+    /// (`templates::ratios_for`, ascending). A count that offers one shape has a
+    /// one-button row, and the row is not drawn at all while there is nothing to
+    /// choose (the widget's visibility is the caller's question, not this list's).
+    pub fn ratios(&self) -> Vec<f64> {
+        self.ratio_order.borrow().clone()
+    }
+
+    /// Whether the row is drawn: false while the count offers a single shape.
+    pub fn ratios_visible(&self) -> bool {
+        self.ratios.is_visible()
+    }
+
+    /// The row's own widget: the geometry a caller measures it by.
+    pub fn ratio_row(&self) -> gtk::Box {
+        self.ratios.clone()
+    }
+
+    /// The row's button for `aspect`, which is how the tests choose a shape.
+    pub fn ratio_button(&self, aspect: f64) -> Option<gtk::ToggleButton> {
+        self.ratio_buttons
+            .borrow()
+            .iter()
+            .find(|(ratio, _)| (ratio - aspect).abs() <= ASPECT_TOLERANCE)
+            .map(|(_, button)| button.clone())
+    }
+
+    /// The ratio the row has marked, if any: the document's own shape while the row
+    /// is showing.
+    pub fn selected_ratio(&self) -> Option<f64> {
+        self.ratio_buttons
+            .borrow()
+            .iter()
+            .find(|(_, button)| button.is_active())
+            .map(|(ratio, _)| *ratio)
     }
 
     /// The cell bound to a candidate, for the tests and the HIG checks.
@@ -324,6 +418,68 @@ impl Gallery {
             // state is the button's, the reading is the theme's accent
             // (`style.css`, `.layout-cell.picked`).
             if current {
+                button.add_css_class("picked");
+            } else {
+                button.remove_css_class("picked");
+            }
+        }
+        self.syncing.set(false);
+    }
+
+    /// Writes the ratio row: the shapes `ratios` offers, with `current` marked.
+    ///
+    /// The buttons are rebuilt only when the **set** changes — a count change, or a
+    /// project opened on another count — so the common case (a layout switch, an
+    /// undo, a count that keeps its shapes) costs one pass over the buttons and no
+    /// widget churn. The document is the authority here too: `current` comes from
+    /// the document and not from the click (`highlight_ratios`).
+    ///
+    /// The row hides itself while there is nothing to choose: a count that offers a
+    /// single shape has no ratio decision in it, and a one-button radio set would be
+    /// a control that cannot do anything (count 1 is the case, and it is the count
+    /// the window opens on).
+    pub fn show_ratios(&self, window: &EditorWindow, ratios: &[f64], current: f64) {
+        let changed = {
+            let order = self.ratio_order.borrow();
+            order.len() != ratios.len()
+                || order
+                    .iter()
+                    .zip(ratios)
+                    .any(|(now, wanted)| (now - wanted).abs() > ASPECT_TOLERANCE)
+        };
+        if changed {
+            self.syncing.set(true);
+            while let Some(child) = self.ratios.first_child() {
+                self.ratios.remove(&child);
+            }
+            let mut buttons = self.ratio_buttons.borrow_mut();
+            buttons.clear();
+            let mut first: Option<gtk::ToggleButton> = None;
+            for &aspect in ratios {
+                let button = ratio_cell(window, aspect, first.as_ref(), &self.syncing);
+                self.ratios.append(&button);
+                if first.is_none() {
+                    first = Some(button.clone());
+                }
+                buttons.push((aspect, button));
+            }
+            drop(buttons);
+            self.ratio_order.replace(ratios.to_vec());
+            self.ratios.set_visible(ratios.len() > 1);
+            self.syncing.set(false);
+        }
+        self.highlight_ratios(current);
+    }
+
+    /// Marks the ratio the document is on, and only it — the row's half of
+    /// [`highlight`](Self::highlight), written from the same document on the same
+    /// refreshes.
+    pub fn highlight_ratios(&self, current: f64) {
+        self.syncing.set(true);
+        for (ratio, button) in self.ratio_buttons.borrow().iter() {
+            let picked = (ratio - current).abs() <= ASPECT_TOLERANCE;
+            button.set_active(picked);
+            if picked {
                 button.add_css_class("picked");
             } else {
                 button.remove_css_class("picked");
@@ -456,6 +612,61 @@ fn candidate_cell(
                 if let Some(gallery) = window.gallery() {
                     let current = window.current_template();
                     gallery.highlight(Some(&current));
+                }
+            }
+        }
+    ));
+    button
+}
+
+/// One ratio: the toggle that chooses a sheet shape, as one member of a radio set.
+///
+/// A `GtkToggleButton` carrying its own label, with `group` set for every member
+/// after the first: GTK's own radio behaviour is what makes the row a
+/// single-choice set (HIG `patterns/controls/radio-buttons`), so a click on one
+/// shape unchecks the shape that was marked and the platform's checked look does
+/// the reading. The label is a ratio — `4:3` — and a ratio is not copy: it is the
+/// same text in every language, and GTK announces a text button by its text
+/// (`crate::a11y`'s own doctrine), so this control needs no accessible name set by
+/// hand.
+fn ratio_cell(
+    window: &EditorWindow,
+    aspect: f64,
+    group: Option<&gtk::ToggleButton>,
+    syncing: &Rc<Cell<bool>>,
+) -> gtk::ToggleButton {
+    let label = ratio_label(aspect);
+    let button = gtk::ToggleButton::with_label(&label);
+    button.add_css_class("ratio-cell");
+    button.set_widget_name(&label);
+    if let Some(group) = group {
+        button.set_group(Some(group));
+    }
+    button.connect_toggled(glib::clone!(
+        #[weak]
+        window,
+        #[strong]
+        syncing,
+        #[strong]
+        aspect,
+        move |button| {
+            if syncing.get() {
+                // The row writing its own mark is not a user choosing a shape.
+                return;
+            }
+            if button.is_active() {
+                window.select_ratio(aspect);
+            } else if let Some(gallery) = window.gallery() {
+                // There is no "no shape" state to be in, so the mark is restored
+                // from the document — but **only when the row is unmarked**.
+                // GTK's group bookkeeping deactivates the member that was marked
+                // *before* it emits the new one's own toggled, so a re-mark here
+                // would switch the row straight back to the document's old shape
+                // and the click would do nothing; a plain click on the marked
+                // member takes the row to no active member at all, which is the
+                // case this answers.
+                if gallery.selected_ratio().is_none() {
+                    gallery.highlight_ratios(window.document().template.aspect);
                 }
             }
         }

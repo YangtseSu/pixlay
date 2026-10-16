@@ -118,6 +118,85 @@ pub fn with_slots(slots: usize) -> Vec<Template> {
         .collect()
 }
 
+/// The layouts with exactly `slots` slots **and** the sheet shape `aspect`, in
+/// library order (S36).
+///
+/// The layout band's own list: since S36 the ratio is the band's first choice, so
+/// the strip is narrowed to the ratio the document is on, and the window's
+/// `candidate_templates`, the CLI's `switch --band` and `templates --slots
+/// --aspect` are one query rather than three expressions of it. Matching is
+/// [`of_aspect`]'s — within [`ASPECT_TOLERANCE`](crate::ASPECT_TOLERANCE), so a
+/// ratio a caller rounded still finds its group, and a shape the library does not
+/// have answers with nothing rather than with a near miss.
+pub fn with_slots_and_aspect(slots: usize, aspect: f64) -> Vec<Template> {
+    frozen::TEMPLATES
+        .iter()
+        .filter(|entry| {
+            entry.slots.len() == slots && (entry.aspect - aspect).abs() <= ASPECT_TOLERANCE
+        })
+        .map(thaw)
+        .collect()
+}
+
+/// The sheet shapes the library offers at `slots`, in the **documented order**:
+/// ascending by ratio — portrait first, then the square, then the landscape shapes
+/// (S36).
+///
+/// This is the ratio row's content: the band lists exactly these, and a count that
+/// offers one shape offers no choice to make (count 1 is the case), which is why
+/// the caller reads the length and not the row. Ordering by the ratio itself
+/// rather than by recipe order keeps the row's positions stable across counts — the
+/// shapes a count does not have are simply absent from a fixed sequence — and it is
+/// the order `ratio_label` reads in (2:3, 3:4, 1:1, 4:3, 3:2, 16:9).
+pub fn ratios_for(slots: usize) -> Vec<f64> {
+    let mut ratios: Vec<f64> = Vec::new();
+    for entry in frozen::TEMPLATES
+        .iter()
+        .filter(|entry| entry.slots.len() == slots)
+    {
+        if !ratios
+            .iter()
+            .any(|ratio| (ratio - entry.aspect).abs() <= ASPECT_TOLERANCE)
+        {
+            ratios.push(entry.aspect);
+        }
+    }
+    ratios.sort_by(f64::total_cmp);
+    ratios
+}
+
+/// `W:H` when the ratio is one a person would name, a decimal otherwise.
+///
+/// The recipes declare ratios as divisions of small integers (`4/3` is
+/// `1.3333333333333333`), and a caller comparing `--aspect` values by hand reads
+/// `4:3` far more easily. Matching is on the numeric value, so a ratio that only
+/// prints approximately stays usable.
+///
+/// It lives here since S36, when the ratio became a control: the layout band's row
+/// names each choice with it, and the CLI's reports and refusals carry the same
+/// text. It is a **bare ratio and not copy** — no translation, no noun: a ratio
+/// reads the same in every language the app speaks (`AGENTS.md`, "Language
+/// conventions").
+pub fn ratio_label(aspect: f64) -> String {
+    // Small-integer ratios cover every canvas shape the product has a name for.
+    for (width, height) in [
+        (1, 1),
+        (4, 3),
+        (3, 2),
+        (16, 9),
+        (2, 3),
+        (3, 4),
+        (9, 16),
+        (2, 1),
+        (1, 2),
+    ] {
+        if (f64::from(width) / f64::from(height) - aspect).abs() <= 1e-12 {
+            return format!("{width}:{height}");
+        }
+    }
+    format!("{aspect:.6}")
+}
+
 /// The box one layout candidate is drawn in, in logical pixels.
 ///
 /// The layout band's own surface — and S18's `switch --band` measures that same

@@ -602,6 +602,75 @@ fn every_count_from_two_up_carries_four_layouts_over_four_aspects() {
 }
 
 #[test]
+fn the_ratio_row_lists_each_counts_own_shapes_in_order() {
+    // S36's row, as a query: the shapes a count offers, ascending, one entry per
+    // shape, and each entry with at least one layout behind it — a row that offered
+    // a shape the strip cannot fill would be a button that switches to nowhere (the
+    // strip is `with_slots_and_aspect`, the same shape's members). The row is what a
+    // person picks first, so this is the band's own coverage rule beside S35's.
+    let ratio_is = |one: f64, other: f64| (one - other).abs() <= ASPECT_TOLERANCE;
+    for count in MIN_SLOTS..=MAX_PHOTOS {
+        let row = templates::ratios_for(count);
+        assert!(!row.is_empty(), "{count} cells offer no shape at all");
+        assert!(
+            row.windows(2).all(|pair| pair[0] < pair[1]),
+            "{count} cells' row is not ascending: {row:?}"
+        );
+        // One entry per shape: the library's members of that count, deduped.
+        let mut expected: Vec<f64> = templates_under_test()
+            .iter()
+            .filter(|template| template.slots.len() == count)
+            .map(|template| template.aspect)
+            .collect();
+        expected.sort_by(f64::total_cmp);
+        expected.dedup();
+        assert_eq!(row.len(), expected.len(), "{count} cells: {row:?}");
+        for (offered, wanted) in row.iter().zip(&expected) {
+            assert!(ratio_is(*offered, *wanted), "{count} cells: {row:?}");
+        }
+        // Every shape the row offers has a layout behind it, and every one of those
+        // is that shape — which is what makes a row click safe.
+        for ratio in &row {
+            let members = templates::with_slots_and_aspect(count, *ratio);
+            assert!(
+                !members.is_empty(),
+                "{count} cells: the row offers {ratio} with no layout"
+            );
+            for template in &members {
+                assert!(
+                    ratio_is(template.aspect, *ratio),
+                    "{count} cells: {} is in {ratio}'s group and is not that shape",
+                    template.name
+                );
+            }
+        }
+        // The count's own members are all reachable from the row: nothing the strip
+        // could show is filtered out by the row's query.
+        let reachable: Vec<String> = row
+            .iter()
+            .flat_map(|ratio| templates::with_slots_and_aspect(count, *ratio))
+            .map(|template| template.name)
+            .collect();
+        for template in templates_under_test()
+            .iter()
+            .filter(|template| template.slots.len() == count)
+        {
+            assert!(
+                reachable.contains(&template.name),
+                "{} is no shape the row offers",
+                template.name
+            );
+        }
+        // S35's floor, seen from the row: every count but one offers four shapes.
+        if count >= 2 {
+            assert!(row.len() >= 4, "{count} cells offer only {}", row.len());
+        } else {
+            assert_eq!(row.len(), 1, "one cell is one shape (ruling 34)");
+        }
+    }
+}
+
+#[test]
 fn the_default_growth_chain_keeps_the_albums_shape() {
     // S35's own criterion, and the defect the step started from: the window opens on
     // `grid-1-1x1` (4:3) and `AddCell` hands every growth to `selection::layout_for`

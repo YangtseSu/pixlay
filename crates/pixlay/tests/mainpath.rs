@@ -152,46 +152,73 @@ fn the_main_path_can_be_walked() {
     );
 
     // ---- pick a layout ----------------------------------------------------
-    // The band under the canvas lists every layout with four slots and choosing one
-    // is a document edit that keeps the cells that survive (S14, ruled 25).
+    // The band under the canvas is the layout step, and since S36 it is two
+    // controls: the **ratio row** picks the sheet's shape and the strip lists that
+    // shape's arrangements. The walk makes the choice the way a person does — shape
+    // first — and choosing one is a document edit that keeps the cells that survive
+    // (S14, ruled 25).
     let gallery = window.gallery().expect("the editor has a layout band");
     assert!(window.wait_for_gallery(support::WAIT), "the band was built");
     assert_eq!(gallery.count_label().label(), "4");
+    assert_eq!(
+        gallery.ratios(),
+        pixlay_core::templates::ratios_for(4),
+        "four cells offer four shapes"
+    );
+    assert_eq!(
+        gallery.selected_ratio(),
+        Some(doc.template.aspect),
+        "and the document's own shape is marked"
+    );
     let candidates = gallery.candidates();
     assert!(
-        candidates.len() >= 3,
-        "every count carries several layouts (four or more since S35): {candidates:?}"
-    );
-    assert!(
-        candidates.contains(&doc.template.name),
-        "the document's own layout is one of the candidates: {candidates:?}"
+        !candidates.is_empty() && candidates.contains(&doc.template.name),
+        "the strip holds the document's own shape's arrangements: {candidates:?}"
     );
     assert_eq!(
         gallery.selected().as_deref(),
         Some(doc.template.name.as_str()),
         "and the band highlights it"
     );
-    let chosen = candidates
-        .iter()
-        .find(|name| name.as_str() != doc.template.name)
-        .expect("a second candidate");
-    window.select_layout(chosen);
+    // A shape the document is not on, with its landing already known: the core query
+    // the row and `edit --aspect` share. `16:9` at four cells is `strip-4-4x1`, whose
+    // family is the strip the count control below then keeps at three cells.
+    let widescreen = 16.0 / 9.0;
+    let chosen = pixlay_core::layout_with_aspect(4, widescreen, doc.template.family())
+        .expect("four cells have a 16:9 layout");
+    gallery
+        .ratio_button(widescreen)
+        .expect("the row offers 16:9")
+        .set_active(true);
     assert!(
         window.wait_for_idle(support::WAIT) && window.wait_for_gallery(support::WAIT),
         "the new layout rendered"
     );
     let relaid = window.document();
-    assert_eq!(relaid.template.name, *chosen);
+    assert_eq!(relaid.template.name, chosen.name);
+    assert_eq!(
+        gallery.selected_ratio(),
+        Some(widescreen),
+        "the row's mark followed the document"
+    );
+    assert_eq!(
+        gallery.candidates(),
+        pixlay_core::templates::with_slots_and_aspect(4, widescreen)
+            .into_iter()
+            .map(|template| template.name)
+            .collect::<Vec<_>>(),
+        "and the strip is the new shape's arrangements"
+    );
     assert_eq!(relaid.cells.len(), 4, "one cell per slot");
     for slot in 0..4 {
         assert_eq!(
             relaid.cells[slot].source, doc.cells[slot].source,
-            "cell {slot} kept its photo across the layout change"
+            "cell {slot} kept its photo across the shape change"
         );
     }
     assert_eq!(
         gallery.selected().as_deref(),
-        Some(chosen.as_str()),
+        Some(chosen.name.as_str()),
         "the band highlights the layout the document is on"
     );
 
@@ -478,6 +505,23 @@ fn the_main_path_can_be_walked() {
     );
     assert!(!window.is_dirty(), "Ctrl+S's action wrote the document");
     let written_again = CollageDoc::load(&project).expect("the saved project loads");
+    {
+        // TEMP diff
+        let a = format!("{written_again:?}");
+        let b = format!("{:?}", window.document());
+        let at = a
+            .bytes()
+            .zip(b.bytes())
+            .position(|(x, y)| x != y)
+            .unwrap_or_else(|| a.len().min(b.len()));
+        eprintln!(
+            "DIFF at {at} (file {} bytes, memory {} bytes)\n file: {}\n mem:  {}",
+            a.len(),
+            b.len(),
+            &a[at.saturating_sub(60)..(at + 160).min(a.len())],
+            &b[at.saturating_sub(60)..(at + 160).min(b.len())],
+        );
+    }
     assert_eq!(
         written_again,
         window.document(),

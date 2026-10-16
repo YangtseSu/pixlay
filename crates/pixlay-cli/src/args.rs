@@ -251,11 +251,16 @@ SWITCH OPTIONS:
                         a 4:3 sheet and 980x551 for a 16:9 one, so the switch's
                         preview-grade copies are for another edge.
     --band              Measure the layout band's rebuild with the switch: every
-                        candidate of the new cell count, drawn as a *sketch* of
-                        its geometry at the grid the window draws a candidate at
+                        candidate the strip holds after the click — the new cell
+                        count's members of the **new sheet shape** (S36: the ratio
+                        row is what narrows the strip) — drawn as a *sketch* of its
+                        geometry at the grid the window draws a candidate at
                         (S21; the window's own band does the same with its
                         theme's colours). Its share is `band_ms`, so `with and
-                        without the band` is two runs of this command.
+                        without the band` is two runs of this command. The ratio
+                        row's own rebuild is widgets rather than pixels and is not
+                        part of the number; what it decides is which group this
+                        loop draws.
     `switch` measures the layout change the window's click produces, on a project
     already open on another layout: `template_ms` (the SetTemplate step and the new
     grid), `sources_ms` (the preview-grade copies — one decode per file whose copy
@@ -353,6 +358,18 @@ EDIT OPTIONS:
                         fewer slots keeps the tail it cannot place, and one with
                         more places the kept cells again and then appends empty
                         ones (S28, ruling 43).
+    --aspect <ratio>    Switch the document to the layout of this **sheet shape**
+                        (S36) — `W:H` like `4:3`, or a decimal, the vocabulary
+                        `templates --aspect` takes — keeping the surviving cells'
+                        photos and framing, exactly as `--template` does. The
+                        layout is this document's cell count's member of that
+                        shape, preferring the document's own recipe family where
+                        the shape has several; `--template` and `--aspect` are
+                        both layout switches and are mutually exclusive. A shape
+                        the count has no member of is a failure (exit 2, the
+                        count and the ratio named, nothing written): the request
+                        names a shape, so a near miss would be a different
+                        document than the one asked for.
     --rotate <deg>      Set the cell's rotation to any finite angle, clockwise
                         on screen. It is stored wrapped into -180..=180 and is
                         never reduced by the clamp; the zoom is raised to
@@ -364,7 +381,7 @@ EDIT OPTIONS:
     --clear             Empty the cell: no photo, and its framing back to its
                         default. Exclusive with the framing flags and with
                         --photo.
-    The edit is applied in the order --template, --add-cell/--remove-cell, the
+    The edit is applied in the order --template/--aspect, --add-cell/--remove-cell, the
     --swap, --add-photo, --slot/--photo and then the framing, so the framing is
     fitted against the document the earlier flags produced. The stored `crop` is
     the *fit* of what was asked for (a crop is a request; what is drawn is what
@@ -511,6 +528,9 @@ pub struct EditArgs {
     pub swap: Option<(usize, usize)>,
     /// Switch the layout, keeping the surviving cells (`--template`).
     pub template: Option<String>,
+    /// Switch to the layout of this sheet shape (`--aspect`): the layout band's
+    /// ratio row, as a ratio (`W:H` or a decimal) rather than as a template name.
+    pub aspect: Option<f64>,
     pub rotate: Option<f64>,
     pub zoom: Option<f64>,
     pub offset: Option<(f64, f64)>,
@@ -714,6 +734,7 @@ fn first_rejected(name: &str, flags: &Flags) -> Option<(&'static str, &'static s
             "remove-cell",
             "swap",
             "template",
+            "aspect",
             "rotate",
             "zoom",
             "offset",
@@ -1253,17 +1274,27 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                         .to_string(),
                 ));
             }
+            // `--template` and `--aspect` are both layout switches: one names the
+            // layout, the other names the shape and lets the library pick. Both in
+            // one edit would leave which of them wins to the order of two `if`s.
+            if flags.template.is_some() && flags.aspect.is_some() {
+                return Err(Failure::Usage(
+                    "--template names the layout and --aspect asks for the shape; give one"
+                        .to_string(),
+                ));
+            }
             let changes = framing
                 || !flags.photos.is_empty()
                 || !flags.add_photos.is_empty()
                 || flags.add_cell
                 || flags.remove_cell
                 || flags.swap.is_some()
-                || flags.template.is_some();
+                || flags.template.is_some()
+                || flags.aspect.is_some();
             if !changes && !flags.frame_any() {
                 return Err(Failure::Usage(
                     "edit needs something to change: --slot with a framing flag, --photo, \
-                     --add-photo, --add-cell, --remove-cell, --swap, --template, or \
+                     --add-photo, --add-cell, --remove-cell, --swap, --template, --aspect, or \
                      --gap/--radius/--border-color"
                         .to_string(),
                 ));
@@ -1287,6 +1318,7 @@ pub fn parse(argv: &[OsString]) -> Result<Command, Failure> {
                 remove_cell: flags.remove_cell,
                 swap: flags.swap,
                 template: flags.template.take(),
+                aspect: flags.aspect,
                 rotate: flags.rotate,
                 zoom: flags.zoom,
                 offset: flags.offset,

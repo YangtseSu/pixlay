@@ -11,7 +11,7 @@
 //! layout stage (S14) and the CLI's `init --photo` share one implementation
 //! instead of three that agree by luck.
 //!
-//! Three rules live here:
+//! Four rules live here:
 //!
 //! * **the floor and the ceiling.** A collage needs `1..=9` photos: one since S19
 //!   (ruling 34 — a single photo is a legal collage), nine since S12c. The floor is
@@ -31,6 +31,12 @@
 //!   obvious" (same aspect, then same recipe family, then the nearest aspect, then
 //!   library order), so the composition's count control and the CLI's
 //!   `edit --add-cell` / `--remove-photo` cannot disagree about it (S14).
+//! * **the ratio query.** S36 made the sheet's shape the layout stage's first
+//!   choice, and [`layout_with_aspect`] is its answer: the layout with this count
+//!   *and exactly this ratio*, or nothing — [`layout_for`] with its nearest-aspect
+//!   fallback removed, because a person who asked for a square has to be told when
+//!   the count has none rather than be handed a 4:3 sheet. The window's ratio row
+//!   and the CLI's `edit --aspect` read it, so the two land on the same layout.
 //!
 //! What is *not* here any more: S14's batch control dropped the last photo and
 //! brought it back by remembering the cell it took (LIFO). S14b removed the
@@ -237,6 +243,35 @@ pub fn layout_for(count: usize, aspect: f64, family: Option<Family>) -> Option<T
         }
     }
     best.map(|(_, _, _, template)| template)
+}
+
+/// The one layout with `count` slots and this sheet shape, or nothing (S36).
+///
+/// The ratio row's answer: a person says "square" or "portrait" and the document
+/// takes that shape's layout. It is [`layout_for`]'s answer **narrowed to an exact
+/// aspect match** — the query is a *request* for a shape, so a ratio the count does
+/// not offer has to refuse rather than silently land on another one, which is the
+/// difference between this function and the count rule's nearest-aspect fallback.
+///
+/// `family` is the same second preference [`layout_for`] uses, as `Option` and in
+/// the same sense: a count may carry several layouts of one ratio (count 4 has two
+/// square grids), and a document that switches to a ratio it is partly already in
+/// stays in its own kind of layout where that kind has a member. Among candidates
+/// nothing separates, **library order** decides — `templates::with_slots_and_aspect`,
+/// so the CLI's `edit --aspect` and the window's row land on the same layout.
+///
+/// `None` when the count offers no layout of that shape, which is every count
+/// outside `MIN_PHOTOS..=MAX_PHOTOS` and every ratio the library does not author
+/// for that count (`docs/CONTRACT.md` §3's census is what the library holds).
+pub fn layout_with_aspect(count: usize, aspect: f64, family: Option<Family>) -> Option<Template> {
+    let candidates = templates::with_slots_and_aspect(count, aspect);
+    let wanted =
+        |template: &Template| family.is_some_and(|family| template.family() == Some(family));
+    candidates
+        .iter()
+        .find(|template| wanted(template))
+        .or_else(|| candidates.first())
+        .cloned()
 }
 
 /// Clears the last occupied cell and says which one it was.

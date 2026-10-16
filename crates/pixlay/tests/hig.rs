@@ -30,6 +30,7 @@ use libadwaita::prelude::*;
 
 use pixlay::{app, canvas, i18n, window::EditorWindow};
 use pixlay_core::APP_ID;
+use pixlay_core::templates::ratio_label;
 
 /// The accelerator combinations HIG `reference/keyboard` requires *for the
 /// features this product has*: quit, close, open, save, save as, undo, redo, the
@@ -363,11 +364,94 @@ fn check_gallery(window: &EditorWindow, failures: &mut Vec<String>) {
         return;
     };
     let photos = window.photo_count();
-    if window.candidate_templates().len() < 3 {
+    // What the band offers is two things since S36, and both have to be there: the
+    // count's **shapes** (the ratio row) and, inside the shape the document is on,
+    // the **arrangements** of that shape (the strip). A count of two or more carries
+    // four or more shapes (S35), and the strip is never empty — the document's own
+    // layout is one of its own shape's candidates, by construction.
+    if window.candidate_templates().is_empty() {
+        failures.push(format!("{photos} photos have no layout to choose from"));
+    }
+    let shapes = gallery.ratios();
+    if photos >= 2 && shapes.len() < 4 {
         failures.push(format!(
-            "{photos} photos have only {} layouts to choose from",
-            window.candidate_templates().len()
+            "{photos} photos offer only {} sheet shapes to choose from: {shapes:?}",
+            shapes.len()
         ));
+    }
+    if gallery.ratios_visible() != (shapes.len() > 1) {
+        failures.push(format!(
+            "the ratio row is {} with {} shapes to choose from",
+            if gallery.ratios_visible() {
+                "drawn"
+            } else {
+                "hidden"
+            },
+            shapes.len()
+        ));
+    }
+    let mut row_size = None;
+    for ratio in &shapes {
+        let Some(button) = gallery.ratio_button(*ratio) else {
+            failures.push(format!("the row offers {ratio} with no button"));
+            continue;
+        };
+        let widget = button.clone().upcast::<gtk4::Widget>();
+        let _ = support::allocated(&widget, window);
+        // The row's buttons are text buttons, and **what `width()` reports is the
+        // content box**, not the painted button: measured 2026-10-16, a `4:3` button's
+        // content box is its label (31 px) while the button it is painted as is 67 px
+        // wide — the theme's padding lives outside what the accessor returns. So the
+        // target is read from `measure`, the theme's own request, which the row's
+        // homogeneous packing only ever grows (each shape is given the widest of
+        // them: 67 px for the five the verification document offers). The label's own
+        // width is checked beside it: a text button whose label does not fit is the
+        // failure this pair is for.
+        let (_, natural, _, _) = button.measure(gtk4::Orientation::Horizontal, -1);
+        let (_, natural_h, _, _) = button.measure(gtk4::Orientation::Vertical, -1);
+        if natural < MIN_TARGET || natural_h < MIN_TARGET {
+            failures.push(format!(
+                "the {} button measures {natural}x{natural_h}, below the {MIN_TARGET} px target",
+                ratio_label(*ratio)
+            ));
+        }
+        if let Some(label) = button
+            .child()
+            .and_then(|child| child.downcast::<gtk4::Label>().ok())
+        {
+            let (_, text, _, _) = label.measure(gtk4::Orientation::Horizontal, -1);
+            if label.width() < text {
+                failures.push(format!(
+                    "the {} button's label is {} px wide where the text asks for {text}",
+                    ratio_label(*ratio),
+                    label.width()
+                ));
+            }
+        }
+        if !support::has_accessible_name(&widget) {
+            failures.push(format!("the {ratio} button has no accessible name"));
+        }
+        if !button.is_focusable() {
+            failures.push(format!(
+                "the {ratio} button cannot be reached with the keyboard"
+            ));
+        }
+        row_size.get_or_insert((natural, natural_h));
+    }
+    if let Some((width, height)) = row_size {
+        eprintln!(
+            "the ratio row: {} shapes, each button {width}x{height} painted ({} px of which is its \
+             label), the row itself {}x{}",
+            shapes.len(),
+            gallery
+                .ratios()
+                .first()
+                .and_then(|ratio| gallery.ratio_button(*ratio))
+                .map(|button| button.width())
+                .unwrap_or(0),
+            gallery.ratio_row().width(),
+            gallery.ratio_row().height(),
+        );
     }
     let candidates = gallery.candidates();
     if candidates.len() != window.candidate_templates().len() {

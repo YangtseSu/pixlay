@@ -32,7 +32,8 @@ use gtk4::prelude::*;
 use libadwaita as adw;
 use pixlay::canvas;
 use pixlay::i18n::{fill, gettext, ngettext};
-use pixlay_core::{CropTransform, Project, Rgba8, templates};
+use pixlay_core::templates::{CANDIDATE_BOX, ratio_label};
+use pixlay_core::{ASPECT_TOLERANCE, CropTransform, Project, Rgba8, layout_with_aspect, templates};
 use pixlay_imaging::Source;
 
 /// A colour as `r,g,b`: the spelling `render --paper` / `--ink` take.
@@ -122,13 +123,20 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
     // ---- the candidate set -------------------------------------------------
     let photos = window.photo_count();
     assert_eq!(photos, 8, "the verification project holds eight photos");
-    // What the band is worth in the window's own pixels: a candidate cell, and the
-    // strip one cell tall whatever the layout's aspect (every candidate is fitted
-    // into the same box).
+    // What the band is worth in the window's own pixels: a candidate is one
+    // [`CANDIDATE_BOX`] however wide or tall the layout it draws is, so the band's
+    // height comes from the box and not from the sheet — which is what keeps the
+    // canvas's share of the page the same as the document moves (S14). The strip now
+    // holds one shape's candidates at a time (S36), so the *cross-shape* half of the
+    // claim is measured at the other documents this test opens: the eight-cell 3:2 one
+    // and the four-cell 1:1 one below, against this number.
+    let cell_height = gallery
+        .cell("mosaic-8-s14")
+        .expect("the document's own layout is a candidate")
+        .height();
     assert_eq!(
-        gallery.cell("mosaic-8-s14").map(|cell| cell.height()),
-        gallery.cell("strip-8-8x1").map(|cell| cell.height()),
-        "a 4:3 candidate and a 16:9 one are the same cell"
+        cell_height, CANDIDATE_BOX.1,
+        "a candidate cell is the band's box, whatever the layout's aspect"
     );
 
     let expected: Vec<String> = window
@@ -136,12 +144,16 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
         .into_iter()
         .map(|template| template.name)
         .collect();
-    assert!(expected.len() >= 3, "{photos} photos have {expected:?}");
+    assert!(
+        !expected.is_empty(),
+        "{photos} photos have no candidate at all"
+    );
     assert_eq!(
         gallery.candidates(),
         expected,
         "the strip lists the library's own query, in library order"
     );
+    let shape = window.document().template.aspect;
     for name in &expected {
         let template = templates::get(name).unwrap_or_else(|| panic!("template {name}"));
         assert_eq!(
@@ -149,7 +161,189 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
             photos,
             "{name} has a slot count the photo count does not"
         );
+        // S36: the strip is the *document's own shape's* arrangements — the shape is
+        // the ratio row's choice, two steps above this list.
+        assert!(
+            (template.aspect - shape).abs() <= ASPECT_TOLERANCE,
+            "{name} is not the document's own {shape} sheet"
+        );
     }
+    assert!(
+        expected.contains(&window.current_template()),
+        "the document's own layout is one of its shape's candidates: {expected:?}"
+    );
+
+    // ---- the ratio row (S36) ----------------------------------------------
+    // The row lists exactly the shapes this count offers, in the documented order
+    // (ascending by ratio: portrait, square, landscape), with the document's own
+    // marked — and one button per shape, named by its ratio.
+    let row = gallery.ratios();
+    assert_eq!(
+        row,
+        templates::ratios_for(photos),
+        "the row lists the count's shapes"
+    );
+    assert!(
+        row.windows(2).all(|pair| pair[0] < pair[1]),
+        "the row's order is ascending: {row:?}"
+    );
+    assert!(
+        row.len() >= 4,
+        "every count from two carries four shapes (S35): {row:?}"
+    );
+    assert!(
+        gallery.ratios_visible(),
+        "eight cells have shapes to choose"
+    );
+    for ratio in &row {
+        let button = gallery
+            .ratio_button(*ratio)
+            .unwrap_or_else(|| panic!("no button for {ratio}"));
+        assert_eq!(
+            button.label().as_deref(),
+            Some(ratio_label(*ratio).as_str()),
+            "the button is named by its ratio, with no other text"
+        );
+    }
+    assert_eq!(
+        gallery.selected_ratio(),
+        Some(shape),
+        "the document's own shape is the one marked"
+    );
+
+    // The row's own geometry with the row in place (S36), which is the number the
+    // walk's "placement and size against the canvas" starts from: the row is drawn
+    // **above** the strip, the count control is to the row's left, and the shapes are
+    // one size — measured 2026-10-16, five buttons 73 px apart (67 px of painted
+    // button plus the row's own 6 px spacing) filling a 359 px row. What `width()`
+    // reports is the *content* box (the label, 31 px inside that 67), which is why
+    // `tests/hig.rs::check_gallery` reads the target size from `measure` instead.
+    let row_widget = gallery.ratio_row().upcast::<gtk4::Widget>();
+    let strip_box = gallery.strip().upcast::<gtk4::Widget>();
+    let control = gallery.minus_button().upcast::<gtk4::Widget>();
+    let row_corner = corner(&row_widget, 0.0, 0.0).expect("the row is in the page's space");
+    let strip_corner = corner(&strip_box, 0.0, 0.0).expect("the strip is in the page's space");
+    let control_corner = corner(&control, 0.0, 0.0).expect("the `-` is in the page's space");
+    assert!(
+        row_corner.1 < strip_corner.1,
+        "the row ({:.0}) is not above the strip ({:.0})",
+        row_corner.1,
+        strip_corner.1
+    );
+    assert!(
+        control_corner.0 < row_corner.0,
+        "the count control ({:.0}) is not left of the row ({:.0})",
+        control_corner.0,
+        row_corner.0
+    );
+    let origins: Vec<f32> = gallery
+        .ratios()
+        .iter()
+        .filter_map(|ratio| gallery.ratio_button(*ratio))
+        .filter_map(|button| {
+            button
+                .clone()
+                .upcast::<gtk4::Widget>()
+                .compute_point(&page, &gtk4::graphene::Point::new(0.0, 0.0))
+                .map(|point| point.x())
+        })
+        .collect();
+    assert_eq!(
+        origins.len(),
+        gallery.ratios().len(),
+        "one origin per shape: {origins:?}"
+    );
+    let strides: Vec<f32> = origins.windows(2).map(|pair| pair[1] - pair[0]).collect();
+    assert!(
+        strides
+            .windows(2)
+            .all(|pair| (pair[0] - pair[1]).abs() < 0.5),
+        "the shapes are not one size: {strides:?}"
+    );
+    assert!(
+        strides.iter().all(|stride| *stride >= 30.0),
+        "a shape is smaller than the HIG target: {strides:?}"
+    );
+    let last = origins.last().copied().unwrap_or(row_corner.0);
+    assert!(
+        last < row_corner.0 + row_widget.width() as f32,
+        "the row's buttons run past its own width"
+    );
+    eprintln!(
+        "the ratio row: {}x{} at {:.0},{:.0}; {} shapes {} px apart, the strip starts at {:.0}, \
+         the count control at {:.0}",
+        row_widget.width(),
+        row_widget.height(),
+        row_corner.0,
+        row_corner.1,
+        origins.len(),
+        strides.first().copied().unwrap_or(0.0),
+        strip_corner.1,
+        control_corner.0,
+    );
+
+    // A click on another shape is one `Command::SetTemplate`: the core query's
+    // answer for (count, shape, family), every surviving cell kept whole, and the
+    // strip then holding only that shape's candidates. `1:1` is the shape this test
+    // uses — eight cells have one square member — and the undo half is asserted
+    // right after.
+    let before_shape = window.document();
+    let square = 1.0;
+    let landing = layout_with_aspect(
+        before_shape.cells.len(),
+        square,
+        before_shape.template.family(),
+    )
+    .expect("eight cells have a square layout");
+    let button = gallery.ratio_button(square).expect("the square is offered");
+    button.set_active(true);
+    settle(&window);
+    let after_shape = window.document();
+    assert_eq!(
+        after_shape.template.name,
+        landing.name,
+        "the click landed on the core query's answer for (8, 1:1, {family:?})",
+        family = before_shape.template.family()
+    );
+    assert_eq!(
+        gallery.selected_ratio(),
+        Some(square),
+        "and the mark followed the document"
+    );
+    assert_eq!(
+        gallery.candidates(),
+        layouts_of(&after_shape),
+        "the strip narrowed to the new shape's candidates"
+    );
+    assert_eq!(
+        after_shape.cells, before_shape.cells,
+        "every surviving cell kept its photo and framing"
+    );
+    assert!(after_shape.kept.is_empty(), "and nothing was kept");
+    // **One** `Ctrl+Z`, and the document is the one it was: template, photos and the
+    // row's mark.
+    window.undo();
+    settle(&window);
+    assert_eq!(
+        window.document().template.name,
+        before_shape.template.name,
+        "one undo restores the previous template"
+    );
+    assert_eq!(
+        window.document().cells,
+        before_shape.cells,
+        "and the photos and framing with it"
+    );
+    assert_eq!(
+        gallery.selected_ratio(),
+        Some(shape),
+        "and the row's mark followed the undo"
+    );
+    assert_eq!(
+        gallery.candidates(),
+        layouts_of(&before_shape),
+        "as did the strip"
+    );
     assert_eq!(
         gallery.selected().as_deref(),
         Some(window.current_template().as_str()),
@@ -171,47 +365,77 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
     // picture and `pixlay-render render --template <name> --sketch` at the same
     // grid and with the same three parameters are the *same pixels* — RMSE 0, not
     // "below a threshold": both sides call `pixlay_render::sketch_rgb8`.
+    //
+    // S36 makes it a walk over the row: the strip holds one shape's candidates at a
+    // time, so every shape the row offers is visited in turn and every candidate of
+    // it is compared. Two things are asserted per candidate — the CLI parity below
+    // and the caption's absence right after — because the strip is rebuilt as the
+    // walk moves and the cells of a shape it has left are gone.
     let style = gallery.sketch_style();
-    for name in &expected {
-        let (width, height, pixels) = gallery
-            .sketch(name)
-            .unwrap_or_else(|| panic!("{name} has no sketch"));
-        let cli = cli_sketch(name, style);
-        assert_eq!(
-            (width, height),
-            (cli.0, cli.1),
-            "{name}: the strip and the CLI must draw the same pixel grid"
+    let mut checked = 0;
+    for ratio in gallery.ratios() {
+        if (ratio - window.document().template.aspect).abs() > ASPECT_TOLERANCE {
+            gallery
+                .ratio_button(ratio)
+                .expect("a button per shape the row offers")
+                .set_active(true);
+            settle(&window);
+        }
+        let candidates = gallery.candidates();
+        assert!(
+            !candidates.is_empty(),
+            "the strip is empty on the {} sheet",
+            ratio_label(ratio)
         );
-        let difference = support::rmse(&(width, height, pixels), &cli);
-        assert_eq!(
-            difference, 0.0,
-            "{name} diverged from the CLI: RMSE {difference}"
-        );
+        for name in &candidates {
+            let (width, height, pixels) = gallery
+                .sketch(name)
+                .unwrap_or_else(|| panic!("{name} has no sketch"));
+            let cli = cli_sketch(name, style);
+            assert_eq!(
+                (width, height),
+                (cli.0, cli.1),
+                "{name}: the strip and the CLI must draw the same pixel grid"
+            );
+            let difference = support::rmse(&(width, height, pixels), &cli);
+            assert_eq!(
+                difference, 0.0,
+                "{name} diverged from the CLI: RMSE {difference}"
+            );
+
+            // ---- the caption is gone (ruling 40) ---------------------------
+            // A candidate is its sketch and nothing else: no label under a cell, so no
+            // template name is text a user reads. (The cell's *accessible* name is the
+            // positional `Layout 3 of 5` — GTK 4.24 exposes no getter for an accessible
+            // name, only "it has one", which `tests/hig.rs::check_gallery` checks.)
+            let cell = gallery.cell(name).unwrap_or_else(|| panic!("{name} cell"));
+            let labels: Vec<String> = support::descendants(&cell.clone().upcast::<gtk4::Widget>())
+                .iter()
+                .filter_map(|widget| widget.downcast_ref::<gtk4::Label>())
+                .map(|label| label.label().to_string())
+                .collect();
+            assert!(
+                labels.is_empty(),
+                "{name}: the cell still draws a caption: {labels:?}"
+            );
+            checked += 1;
+        }
     }
     eprintln!(
-        "the band's {} candidates are the CLI's own sketches (RMSE 0), paper {} ink {}",
-        expected.len(),
+        "the band's {checked} candidates over {} shapes are the CLI's own sketches (RMSE 0), \
+         paper {} ink {}",
+        gallery.ratios().len(),
         rgb(style.paper),
         rgb(style.ink),
     );
-
-    // ---- the caption is gone (ruling 40) -----------------------------------
-    // A candidate is its sketch and nothing else: no label under a cell, so no
-    // template name is text a user reads. (The cell's *accessible* name is the
-    // positional `Layout 3 of 5` — GTK 4.24 exposes no getter for an accessible
-    // name, only "it has one", which `tests/hig.rs::check_gallery` checks.)
-    for name in &expected {
-        let cell = gallery.cell(name).unwrap_or_else(|| panic!("{name} cell"));
-        let labels: Vec<String> = support::descendants(&cell.clone().upcast::<gtk4::Widget>())
-            .iter()
-            .filter_map(|widget| widget.downcast_ref::<gtk4::Label>())
-            .map(|label| label.label().to_string())
-            .collect();
-        assert!(
-            labels.is_empty(),
-            "{name}: the cell still draws a caption: {labels:?}"
-        );
-    }
+    // And back to the document's own shape, which the sections below start from.
+    window.select_ratio(shape);
+    settle(&window);
+    assert_eq!(
+        window.document().template.name,
+        "mosaic-8-s14",
+        "the walk ends where it started"
+    );
 
     // ---- the band costs no decode, because a sketch names no file -----------
     // S21's criterion, in the counter that remains: `decoded_sources` counts the
@@ -254,6 +478,14 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
         gallery.selected().as_deref(),
         Some("grid-8-4x2"),
         "and the highlight follows the document"
+    );
+    // The band's height does not move with the sheet's shape: a 3:2 candidate is the
+    // same cell as the 4:3 one above was (S36 narrowed the strip to one shape, so
+    // this is the cross-shape half of that claim).
+    assert_eq!(
+        gallery.cell("grid-8-4x2").map(|cell| cell.height()),
+        Some(cell_height),
+        "a 3:2 candidate is the same cell as the 4:3 one"
     );
     let after_layout = window.decoded_sources() - decoded;
     assert!(
@@ -304,15 +536,29 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
         "the band's rebuild decoded files: a sketch names no file"
     );
     let band_decodes = window.decoded_sources() - before_band;
+    // The third shape of the walk, and the same box: a 1:1 candidate is the cell the
+    // 4:3 and 3:2 ones were, and the row marks the shape the document is on.
+    assert_eq!(
+        gallery.cell("grid-4-2x2g").map(|cell| cell.height()),
+        Some(cell_height),
+        "a 1:1 candidate is the same cell as the 4:3 and 3:2 ones"
+    );
+    assert_eq!(
+        gallery.selected_ratio(),
+        Some(1.0),
+        "the row marks the square the document is on"
+    );
 
     // The same parity on the unusual geometry: this document's candidates are the
-    // library's four 4-cell layouts, and `grid-4-2x2g` is the one whose cells leave
-    // a gap — the case S29's rule draws, and the case the eight-cell loop above
-    // cannot reach (none of the eight-cell layouts has a gutter).
+    // library's **two square four-cell layouts** — the strip is the shape's, and
+    // count 4's 1:1 pair is the only pair a count has of one shape since S35 — and
+    // `grid-4-2x2g` is the one whose cells leave a gap: the case S29's rule draws,
+    // and the case the eight-cell loop above cannot reach (the eight-cell 4:3 shape
+    // has one member).
     let four = gallery.candidates();
     assert!(
         four.iter().any(|name| name == "grid-4-2x2g"),
-        "the guttered layout is one of the four-cell candidates: {four:?}"
+        "the guttered layout is one of the square four-cell candidates: {four:?}"
     );
     for name in &four {
         let (width, height, pixels) = gallery
@@ -347,6 +593,20 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
     window
         .open_path(&project)
         .expect("the verification project opens again");
+    settle(&window);
+    // A project opened on another count and another shape: the row's set is the new
+    // count's, and its mark is the document's own shape (S36) — read from the
+    // document rather than remembered, so a load cannot leave a stale mark.
+    assert_eq!(
+        gallery.ratios(),
+        templates::ratios_for(8),
+        "the row holds the opened document's count's shapes"
+    );
+    assert_eq!(
+        gallery.selected_ratio(),
+        Some(window.document().template.aspect),
+        "and marks the shape it was opened on"
+    );
     window.select_layout("grid-8-4x2");
     settle(&window);
 
@@ -440,13 +700,25 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
         hint.contains(&kept_name),
         "the `+`'s hint names {kept_name:?}: {hint:?}"
     );
-    // The strip follows the layout, so the candidates are the seven-cell layouts.
+    // The strip follows the layout, so the candidates are the seven-cell 4:3
+    // layouts, and the row is the seven-cell count's shapes — a count change moves
+    // the row's *content*, and the mark stays the document's shape (S36).
     assert_eq!(
         gallery.candidates(),
         layouts_of(&removed),
         "the strip lists the layouts with the *new* cell count"
     );
     assert_eq!(gallery.count_label().label(), "7");
+    assert_eq!(
+        gallery.ratios(),
+        templates::ratios_for(7),
+        "the row holds the seven-cell count's shapes"
+    );
+    assert_eq!(
+        gallery.selected_ratio(),
+        Some(removed.template.aspect),
+        "and the document's own shape is still the one marked"
+    );
 
     // `+` gives the layout one cell back **and places the kept cell again**: the
     // document is the one it was, photo and framing, not one with an empty cell.
@@ -480,6 +752,18 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
     assert!(
         !after.contains(&kept_name),
         "the hint no longer names the photo: {after:?}"
+    );
+    // The other half of the count control's row: the growth moved the count back, so
+    // the row holds eight cells' shapes again with the same shape marked.
+    assert_eq!(
+        gallery.ratios(),
+        templates::ratios_for(8),
+        "the row followed the growth"
+    );
+    assert_eq!(
+        gallery.selected_ratio(),
+        Some(window.document().template.aspect),
+        "and the mark is the document's own shape"
     );
 
     // The empty cell is what asks for a photo, and it is a real control over the
@@ -674,6 +958,18 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
         vec!["grid-1-1x1".to_string()],
         "and the sheet is the only one"
     );
+    // One shape is no choice: the row holds the single shape and is **not drawn**
+    // (S36), because a one-button radio set is a control that cannot do anything.
+    assert_eq!(
+        gallery.ratios().len(),
+        1,
+        "the sheet offers one shape: {:?}",
+        gallery.ratios()
+    );
+    assert!(
+        !gallery.ratios_visible(),
+        "so the row is hidden at one cell"
+    );
     window.remove_photo();
     assert_eq!(
         window.last_toast().as_deref(),
@@ -694,6 +990,18 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
         gallery.candidates(),
         layouts_of(&two),
         "the band lists the two-cell layouts"
+    );
+    assert_eq!(
+        gallery.ratios(),
+        templates::ratios_for(2),
+        "the row lists the two-cell count's shapes"
+    );
+    assert_eq!(gallery.ratios().len(), 4, "which is four of them");
+    assert!(gallery.ratios_visible(), "so the row is drawn");
+    assert_eq!(
+        gallery.selected_ratio(),
+        Some(two.template.aspect),
+        "with the opened document's own shape marked"
     );
     for name in gallery.candidates() {
         assert_eq!(
@@ -899,6 +1207,58 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
         cli.doc().template.name
     );
 
+    // ---- the ratio row's click is `edit --aspect` (S36) --------------------
+    // The same document, the same shape, the same landing: the window's click on a
+    // ratio and the CLI's `--aspect` both end in `layout_with_aspect`, so the two
+    // documents have to be one. The shape is `1:1` on the eight-cell project — the
+    // click the band test above already made, and the flag whose name it is.
+    window
+        .open_path(&project)
+        .expect("the verification project opens again");
+    settle(&window);
+    let square = 1.0;
+    gallery
+        .ratio_button(square)
+        .expect("the eight-cell row offers the square")
+        .set_active(true);
+    settle(&window);
+    let from_ratio = window.document().template.name.clone();
+    let gui_shape = dir.join("ratio-gui.pixlay");
+    window
+        .save_to(&gui_shape)
+        .expect("the window saves the document its row switched");
+    let cli_shape = dir.join("ratio-cli.pixlay");
+    let status = pixlay_cli::cli::run(&argv(&[
+        "edit",
+        "--project",
+        path(&project),
+        "--aspect",
+        "1:1",
+        "--out",
+        path(&cli_shape),
+    ]))
+    .expect("the CLI switches the shape");
+    assert_eq!(status, 0, "edit --aspect succeeds");
+    let gui = Project::load(&gui_shape).expect("the window's project loads");
+    let cli = Project::load(&cli_shape).expect("the CLI's project loads");
+    assert_eq!(
+        cli.doc().template.name,
+        from_ratio,
+        "edit --aspect landed where the row's click did"
+    );
+    assert_eq!(
+        cli.doc().template.name,
+        layout_with_aspect(8, square, None)
+            .expect("eight cells have a square layout")
+            .name,
+        "and both are the core query's answer"
+    );
+    assert!(
+        support::same_document(&gui, &cli),
+        "the row and `edit --aspect` produced different documents:\n{gui:?}\n{cli:?}"
+    );
+    eprintln!("the ratio click and `edit --aspect 1:1` both land on {from_ratio}");
+
     // ---- the sketch's ink is a tone of the theme, not its ground (S30) ------
     // The human's finding of 2026-09-26: with the view background as the ink, a
     // candidate's gap was the one near-black thing in the strip, where the band's
@@ -1053,12 +1413,12 @@ fn read_image(path: &Path) -> support::Image {
     (width, height, data)
 }
 
-/// The names of the layouts a document's photo count has.
 /// The strip's own query for a document: every layout with the document's **cell**
-/// count, in library order (S14b — the strip follows the layout, not the photo
-/// count, so `+` can leave a cell empty without the strip moving).
+/// count **and its sheet shape**, in library order (S14b for the count — the strip
+/// follows the layout and not the photo count, so `+` can leave a cell empty without
+/// the strip moving; S36 for the shape, which the ratio row chooses).
 fn layouts_of(doc: &pixlay_core::CollageDoc) -> Vec<String> {
-    templates::with_slots(doc.cells.len())
+    templates::with_slots_and_aspect(doc.cells.len(), doc.template.aspect)
         .into_iter()
         .map(|template| template.name)
         .collect()

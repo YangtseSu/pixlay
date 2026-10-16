@@ -47,8 +47,8 @@ use gtk4::prelude::*;
 use libadwaita as adw;
 
 use pixlay_core::{
-    CollageDoc, Command, CoreError, CropTransform, Frame, MAX_PHOTOS, MIN_PHOTOS, PixelSize,
-    Project, Template, templates,
+    ASPECT_TOLERANCE, CollageDoc, Command, CoreError, CropTransform, Frame, MAX_PHOTOS, MIN_PHOTOS,
+    PixelSize, Project, Template, layout_with_aspect, templates,
 };
 use pixlay_imaging::gesture_grid;
 use pixlay_render::Images;
@@ -1654,7 +1654,7 @@ impl EditorWindow {
     }
 
     /// The layouts the gallery lists: every template with the document's own **cell**
-    /// count, in library order.
+    /// count **and its sheet shape**, in library order.
     ///
     /// The strip follows the layout rather than the photo count (S14b): `+` takes
     /// the layout with one cell more and leaves it empty, so a three-cell document
@@ -1663,11 +1663,19 @@ impl EditorWindow {
     /// user's own next click would then move the sheet somewhere they were not
     /// looking.
     ///
-    /// [`templates::with_slots`] is the same query the CLI's `templates --slots`
-    /// answers with and the one `Selection::layouts` is expressed in, so the three
-    /// cannot disagree about what "the layouts with that count" means.
+    /// **Since S36 it is also narrowed to the document's ratio**, because the ratio
+    /// is what the band's row chooses first: the strip is the arrangements *of the
+    /// shape the user picked*, and a strip that still offered the other shapes
+    /// would be a second, unordered control for the same decision. The ratio itself
+    /// is still the document's field — a project opens on the shape it was saved
+    /// with, and the strip follows.
+    ///
+    /// [`templates::with_slots_and_aspect`] is the same query the CLI's `templates
+    /// --slots --aspect` and `switch --band` answer with, so the three cannot
+    /// disagree about what "the layouts for this count and this shape" means.
     pub fn candidate_templates(&self) -> Vec<Template> {
-        templates::with_slots(self.document().cells.len())
+        let doc = self.document();
+        templates::with_slots_and_aspect(doc.cells.len(), doc.template.aspect)
     }
 
     /// Switches the document to the layout `name`.
@@ -1698,6 +1706,39 @@ impl EditorWindow {
         if let Some(gallery) = self.imp().gallery.get() {
             let current = self.current_template();
             gallery.highlight(Some(&current));
+            gallery.highlight_ratios(self.document().template.aspect);
+        }
+    }
+
+    /// Switches the document to the layout of the sheet shape `aspect` (S36): the
+    /// ratio row's click.
+    ///
+    /// The row's answer is [`layout_with_aspect`]'s — the layout with this cell
+    /// count and *exactly* this shape, preferring the document's own recipe family
+    /// where the shape has several (count 4 carries two square grids) — and it is
+    /// the same call the CLI's `edit --aspect` makes, so the two land on the same
+    /// layout. A shape the count does not offer is not a shape the row lists, so
+    /// there is no click to refuse.
+    ///
+    /// One `Command::SetTemplate`, so a click is one undo step and every surviving
+    /// cell keeps its photo and its framing — the count does not change (the count's
+    /// own control is what moves it), so nothing is kept and nothing is placed.
+    pub fn select_ratio(&self, aspect: f64) {
+        let doc = self.document();
+        if (doc.template.aspect - aspect).abs() <= ASPECT_TOLERANCE {
+            // The shape the document is already in: not an edit, and an undo step
+            // that changes nothing is a step the user has to press `Ctrl+Z` through.
+            self.highlight_gallery();
+            return;
+        }
+        let Some(template) = layout_with_aspect(doc.cells.len(), aspect, doc.template.family())
+        else {
+            return;
+        };
+        let before = self.document();
+        let cells = template.slots.len();
+        if self.apply(Command::SetTemplate { template }).is_ok() {
+            self.report_kept(&before, cells);
         }
     }
 
@@ -2926,7 +2967,17 @@ impl EditorWindow {
     /// per-cell clear, and since S28 the photos a layout change kept).
     fn update_gallery_control(&self) {
         if let Some(gallery) = self.imp().gallery.get() {
-            gallery.update_control(self.document().cells.len(), self.kept_hint().as_deref());
+            let doc = self.document();
+            gallery.update_control(doc.cells.len(), self.kept_hint().as_deref());
+            // The ratio row follows the document the same way: the count decides
+            // which shapes there are to offer, and the mark is the document's own
+            // (`Gallery::show_ratios`), so an undo, a project opened or a count
+            // change cannot leave it lying (S36).
+            gallery.show_ratios(
+                self,
+                &templates::ratios_for(doc.cells.len()),
+                doc.template.aspect,
+            );
         }
     }
 

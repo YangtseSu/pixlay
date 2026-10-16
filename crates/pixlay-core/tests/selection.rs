@@ -19,7 +19,7 @@ use std::path::PathBuf;
 
 use pixlay_core::{
     ASPECT_TOLERANCE, Cell, CollageDoc, CropTransform, Family, MAX_PHOTOS, MIN_PHOTOS, Selection,
-    SelectionError, last_photo, layout_for, remove_last, templates,
+    SelectionError, last_photo, layout_for, layout_with_aspect, remove_last, templates,
 };
 
 fn photo(name: &str) -> PathBuf {
@@ -402,6 +402,107 @@ fn the_count_rule_picks_the_layout_that_follows_the_document() {
             (chosen.aspect - template.aspect).abs() <= ASPECT_TOLERANCE,
             "{}: {} was chosen over a template of the same aspect",
             chosen.name,
+            template.name
+        );
+    }
+}
+
+#[test]
+fn the_ratio_query_answers_the_shape_asked_for_or_nothing() {
+    // S36's query, and the one thing that separates it from the count rule above:
+    // it is **exact**. A caller naming a shape is asking about that shape — the
+    // layout band's ratio row lists the shapes the count offers, and `edit --aspect`
+    // refuses the ones it does not — so a ratio the count has no member of must
+    // answer `None` rather than the nearest shape `layout_for` would have chosen.
+    let named = |count: usize, aspect: f64, family: Option<Family>| {
+        layout_with_aspect(count, aspect, family).map(|template| template.name)
+    };
+    let thirds = 4.0 / 3.0;
+    let portrait = 3.0 / 4.0;
+
+    // A shape with one member at that count: the library's answer and the count
+    // rule's agree, because there is nothing else to pick.
+    assert_eq!(named(5, thirds, None), Some("mosaic-5-hero".to_string()));
+    assert_eq!(named(8, thirds, None), Some("mosaic-8-s14".to_string()));
+    assert_eq!(named(9, thirds, None), Some("mosaic-9-hero".to_string()));
+
+    // The refusal, which is the whole difference: 3:4 is a shape the library has
+    // (counts 4, 5, 7, 8 and 9) and count 2 has none of it, where the count rule
+    // answers the nearest shape instead. `layout_for` is asserted beside it so the
+    // two answers are visibly different rules rather than one rule twice.
+    assert_eq!(named(2, portrait, None), None, "count 2 has no 3:4 layout");
+    assert_eq!(
+        layout_for(2, portrait, None).map(|template| template.name),
+        Some("strip-2-1x2".to_string()),
+        "the count rule's nearest-shape answer, which this query must not give"
+    );
+    // 16:9 is absent at counts 1 and 2, 3:2 at 1, 3, 4, 7 and 9: the query refuses
+    // each of them where the count rule would have landed on something.
+    for (count, aspect) in [
+        (1, 16.0 / 9.0),
+        (2, 16.0 / 9.0),
+        (1, 3.0 / 2.0),
+        (3, 3.0 / 2.0),
+        (9, 3.0 / 2.0),
+    ] {
+        assert_eq!(named(count, aspect, None), None, "{count} at {aspect}");
+    }
+    // Outside the product's range there is nothing at all, as for the count rule.
+    for count in [0, 10] {
+        assert_eq!(named(count, thirds, None), None, "{count} cells");
+    }
+
+    // The match is the library's own tolerance, as `of_aspect`'s is: the ratio a
+    // caller rounds still finds its group, and a ratio that is merely *near* one is
+    // not that group — the boundary is `ASPECT_TOLERANCE`, not a distance.
+    assert_eq!(
+        named(8, 1.3333333333333333, None),
+        Some("mosaic-8-s14".to_string())
+    );
+    assert_eq!(named(8, thirds + 20.0 * ASPECT_TOLERANCE, None), None);
+    assert_eq!(
+        named(8, thirds + 0.5 * ASPECT_TOLERANCE, None),
+        Some("mosaic-8-s14".to_string())
+    );
+
+    // Where a count carries two layouts of one shape (count 4's square pair), the
+    // family is the tie-break `layout_for` uses, and library order is what is left
+    // when the family has no member of that shape either. Count 4's two 1:1 layouts
+    // are both grids, so both rows answer the earlier recipe.
+    assert_eq!(named(4, 1.0, None), Some("grid-4-2x2".to_string()));
+    assert_eq!(
+        named(4, 1.0, Some(Family::Grid)),
+        Some("grid-4-2x2".to_string())
+    );
+    assert_eq!(
+        named(4, 1.0, Some(Family::Mosaic)),
+        Some("grid-4-2x2".to_string()),
+        "no 1:1 mosaic exists at four cells, so library order decides"
+    );
+
+    // The family preference is honoured wherever the count *can* honour it — the
+    // shipped library exercises it only where a shape has several members, so the
+    // claim is asserted over the whole library: for every template, the query with
+    // its own count, shape and family answers that template unless an earlier
+    // library-order member has the same shape *and* family.
+    for template in templates::all() {
+        let count = template.slots.len();
+        let chosen = layout_with_aspect(count, template.aspect, template.family())
+            .unwrap_or_else(|| panic!("{}: its own shape has no answer", template.name));
+        assert!(
+            (chosen.aspect - template.aspect).abs() <= ASPECT_TOLERANCE,
+            "{}: {} is not the shape asked for",
+            template.name,
+            chosen.name
+        );
+        assert_eq!(chosen.slots.len(), count, "{}", chosen.name);
+        let same = templates::with_slots_and_aspect(count, template.aspect)
+            .into_iter()
+            .find(|other| other.family() == template.family())
+            .expect("the template itself is one of the count's members of that shape");
+        assert_eq!(
+            chosen.name, same.name,
+            "{}: the family's own member of the shape was not preferred",
             template.name
         );
     }

@@ -15,8 +15,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 use pixlay_core::{
-    Cell, CollageDoc, CropTransform, PixelSize, Point, Polygon, Project, Selection, Slot, Template,
-    templates,
+    Cell, CollageDoc, CropTransform, Family, PixelSize, Point, Polygon, Project, Selection, Slot,
+    Template, layout_with_aspect, templates,
 };
 
 /// `CARGO_BIN_EXE_<name>` is set by Cargo for integration tests.
@@ -3785,6 +3785,151 @@ fn edit_switches_the_layout_and_sets_one_cell_s_photo() {
 }
 
 #[test]
+fn edit_switches_the_sheet_shape_the_ratio_row_chooses() {
+    // S36: the layout band's ratio row, as a flag. `--aspect` is the same
+    // `Command::SetTemplate` as `--template`, with the layout chosen by the sheet's
+    // **shape** — `pixlay_core::layout_with_aspect`, the query the window's own row
+    // calls — so the two land on the same layout for the same document, and the
+    // refusal is exact: a shape the count has no member of is not a near miss.
+    let dir = out_dir("edit-aspect");
+    let project = framing_project(&dir, "a.pixlay");
+    let path = project.to_str().expect("utf-8");
+    let before = CollageDoc::load(&project).expect("loads");
+    assert_eq!(before.cells.len(), 2, "the helper's document is two cells");
+
+    // A shape the count has: `1:1` at two cells is `strip-2-2x1g`, the guttered
+    // square — the landing is read from the core query rather than written down, so
+    // a library change cannot make this test pass while the two disagree.
+    let landing = layout_with_aspect(2, 1.0, Some(Family::Strip)).expect("two cells, 1:1");
+    let square = dir.join("square.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        path,
+        "--aspect",
+        "1:1",
+        "--out",
+        square.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "template"), landing.name);
+    assert_eq!(
+        field(&output, "aspect"),
+        "1:1",
+        "the report carries the shape a template name does not (S35)"
+    );
+    assert_eq!(field(&output, "cells"), "2");
+    assert_eq!(field(&output, "photos"), "2");
+    let after = CollageDoc::load(&square).expect("loads");
+    assert_eq!(after.template.name, landing.name);
+    assert_eq!(
+        after.cells, before.cells,
+        "a shape change keeps every surviving cell whole"
+    );
+    assert!(after.kept.is_empty(), "and the count did not move");
+
+    // A decimal is the same query as the ratio it names, as on `templates --aspect`.
+    let decimal = dir.join("decimal.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        path,
+        "--aspect",
+        "1.0",
+        "--out",
+        decimal.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "template"), landing.name);
+
+    // A shape the count has **no** member of refuses: exit 2 (the request is valid
+    // but the library cannot answer it), stdout empty, nothing written, and the
+    // message names the count and the ratio. Two cells carry no 3:4 — and the count
+    // rule would have answered the nearest shape, which is exactly what this query
+    // must not do.
+    let bad = dir.join("bad.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        path,
+        "--aspect",
+        "3:4",
+        "--out",
+        bad.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 2, "{}", stderr(&output));
+    assert!(stdout(&output).is_empty(), "the refusal wrote to stdout");
+    assert!(!bad.exists(), "the refusal wrote a file");
+    for wanted in ["2-cell", "3:4"] {
+        assert!(
+            stderr(&output).contains(wanted),
+            "the refusal does not name {wanted}: {}",
+            stderr(&output)
+        );
+    }
+    eprintln!("the refusal: {}", stderr(&output).trim());
+
+    // Same for a shape outside the count's set but inside the library's.
+    let output = run(&[
+        "edit",
+        "--project",
+        path,
+        "--aspect",
+        "16:9",
+        "--out",
+        bad.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 2, "{}", stderr(&output));
+    assert!(!bad.exists());
+
+    // The switch is one edit with the framing flags, and the framing is fitted
+    // against the document the switch produced — the order `--template` already has.
+    let framed = dir.join("framed.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        path,
+        "--aspect",
+        "1:1",
+        "--slot",
+        "0",
+        "--zoom",
+        "1.5",
+        "--out",
+        framed.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let framed_doc = CollageDoc::load(&framed).expect("loads");
+    assert_eq!(framed_doc.template.name, landing.name);
+    assert!(
+        framed_doc.cells[0].crop.zoom >= 1.5 - 1e-9,
+        "the zoom survived the fit: {:?}",
+        framed_doc.cells[0].crop
+    );
+
+    // Idempotent like every other edit: the same command twice writes the same
+    // bytes, because the second run asks for the shape the document already has.
+    let again = dir.join("again.pixlay");
+    let output = run(&[
+        "edit",
+        "--project",
+        square.to_str().expect("utf-8"),
+        "--aspect",
+        "1:1",
+        "--out",
+        again.to_str().expect("utf-8"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let first_bytes = std::fs::read(&square).expect("read");
+    let second_bytes = std::fs::read(&again).expect("read");
+    assert_eq!(
+        first_bytes, second_bytes,
+        "asking for the shape it already has changed the file"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn edit_keeps_the_cells_a_layout_change_takes_away() {
     // S28 (ruling 43): a layout change does not drop a photo. The tail leaves the
     // sheet whole, the report's `kept` counts it, and the next growth places it
@@ -4319,6 +4464,37 @@ fn edit_keeps_the_usage_and_locale_rules() {
             "--out",
             &out_path,
             "--clear",
+        ],
+        // `--template` and `--aspect` are both layout switches, and a malformed
+        // ratio is a usage error like every other malformed value (S36).
+        vec![
+            "edit",
+            "--project",
+            path,
+            "--out",
+            &out_path,
+            "--template",
+            "strip-2-2x1",
+            "--aspect",
+            "1:1",
+        ],
+        vec![
+            "edit",
+            "--project",
+            path,
+            "--out",
+            &out_path,
+            "--aspect",
+            "4:0",
+        ],
+        vec![
+            "edit",
+            "--project",
+            path,
+            "--out",
+            &out_path,
+            "--aspect",
+            "0",
         ],
     ] {
         let output = run(&args);
@@ -5762,12 +5938,14 @@ fn switch_measures_a_layout_change_at_the_canvas_box() {
     );
     assert_eq!(field(&kept, "open_decodes"), "2");
 
-    // The band's own rebuild, when it is asked for: every candidate of the new cell
-    // count, at the grid the window draws a candidate at. Since S21 a candidate is
-    // a *sketch* — its cells in paper, inked where no cell is — so the band's loop
-    // names no photo and decodes nothing; what the row above says about `decodes`
-    // is therefore the canvas's own, and this run's `decodes` is the same number
-    // with the band's rebuild included.
+    // The band's own rebuild, when it is asked for: every candidate the strip holds
+    // after the click. **S36 narrowed that to the document's own sheet shape** — the
+    // ratio row picks the shape before the strip shows it, so the band's loop is the
+    // new count's members of the *new* shape and not the whole count's list. Since
+    // S21 a candidate is a *sketch* — its cells in paper, inked where no cell is — so
+    // the band's loop names no photo and decodes nothing; what the row above says
+    // about `decodes` is therefore the canvas's own, and this run's `decodes` is the
+    // same number with the band's rebuild included.
     let banded = run(&[
         "switch",
         "--project",
@@ -5780,9 +5958,21 @@ fn switch_measures_a_layout_change_at_the_canvas_box() {
         "--stats",
     ]);
     assert_eq!(code(&banded), 0, "{}", stderr(&banded));
+    let shape = templates::get("strip-2-1x2").expect("registered").aspect;
+    let narrowed = templates::with_slots_and_aspect(2, shape);
+    assert_eq!(
+        narrowed.len(),
+        1,
+        "the 2:3 shape holds one two-cell arrangement"
+    );
+    assert!(
+        templates::with_slots(2).len() > narrowed.len(),
+        "and the count holds more than that shape's members"
+    );
     assert_eq!(
         field(&banded, "band_candidates"),
-        templates::with_slots(2).len().to_string()
+        narrowed.len().to_string(),
+        "the band rebuilds the shape's candidates, not the count's"
     );
     assert!(
         stdout(&banded).contains("band_ms = "),

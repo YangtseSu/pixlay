@@ -18,9 +18,13 @@
 //! part of that window for a frame of its own prints a smaller box — the rows below say
 //! which box they were measured at, not which toolkit measured them).
 //!
-//! **One row per candidate the band offers**, each clicked in a **fresh session** that
-//! has just opened the document — which is what a one-shot `pixlay-render switch` models,
-//! so those rows are the same experiment the CLI runs rather than two histories. A second
+//! **One row per click the band offers on the verification document**, each made in a
+//! **fresh session** that has just opened the document — which is what a one-shot
+//! `pixlay-render switch` models, so those rows are the same experiment the CLI runs
+//! rather than two histories. Since S36 the band's first click is the **ratio row's**:
+//! the strip is the chosen sheet shape's arrangements, and an eight-cell 4:3 document
+//! has one of them, so the shapes beside it are what the row offers and what these rows
+//! click. A second
 //! session is a second window ([`support::second_window`]): the caches of a layout switch
 //! are the *session's* (`Preview` is one editing session, S12b). A third row measures the
 //! **same session's second click**, back to the layout it opened on: the CLI cannot model
@@ -48,6 +52,8 @@ use gtk4::prelude::*;
 
 use pixlay::EditorWindow;
 use pixlay::canvas;
+use pixlay_core::templates::ratio_label;
+use pixlay_core::{ASPECT_TOLERANCE, layout_with_aspect};
 
 /// One switch, as it was measured.
 struct Switch {
@@ -85,24 +91,43 @@ fn a_layout_switch_is_measured_from_the_click() {
     // in. (`canvas_bitmaps` also waits for the background pipeline, so the session's
     // caches hold the document's own layout by the time anything is measured.)
     let _ = support::canvas_bitmaps(&first);
+    // The ratio row is written by the window's own refresh, and the band's build is
+    // what the row's buttons arrive with: the reads below are of widgets.
+    assert!(first.wait_for_gallery(support::WAIT), "the band was built");
 
-    // Library order, so the candidates of the verification document are every layout
-    // with eight slots: `mosaic-8-s14` (the one it is on) and the ones the band offers
-    // beside it — `strip-8-8x1`, `grid-8-4x2`, and, since S35, `mosaic-8-t4b4` and
-    // `grid-8-2x4`. Every candidate the band offers is a click this test measures.
-    let targets: Vec<String> = first
-        .candidate_templates()
-        .into_iter()
-        .map(|template| template.name)
-        .filter(|name| *name != first.document().template.name)
-        .collect();
+    // The document's own shape and layout, read once: the walk below moves the window
+    // the project was opened in (the first fresh row), so the shape it started on has
+    // to be remembered before the first click rather than read after it.
+    let home_shape = first.document().template.aspect;
+    let home_name = first.document().template.name.clone();
+
+    // The band's own clicks on the verification document are the **ratio row's**
+    // (S36): the strip is the chosen shape's arrangements, and an eight-cell 4:3
+    // document has one of those, so the shape is what a user clicks first. The
+    // shapes the row offers beside the document's own are read from the row itself,
+    // and each is a `select_ratio` click whose landing this test derives from
+    // `layout_with_aspect` rather than writing down.
+    let targets: Vec<(f64, String)> = {
+        let gallery = first.gallery().expect("the editor has a layout band");
+        let doc = first.document();
+        gallery
+            .ratios()
+            .into_iter()
+            .filter(|ratio| (ratio - doc.template.aspect).abs() > ASPECT_TOLERANCE)
+            .map(|ratio| {
+                let template = layout_with_aspect(doc.cells.len(), ratio, doc.template.family())
+                    .unwrap_or_else(|| panic!("the row offers a shape with no layout"));
+                (ratio, template.name)
+            })
+            .collect()
+    };
     assert!(
         targets.len() >= 2,
-        "the eight-slot library offers layouts beside the document's own: {targets:?}"
+        "the eight-cell row offers shapes beside the document's own: {targets:?}"
     );
 
     let mut rows = Vec::new();
-    for (index, target) in targets.iter().enumerate() {
+    for (index, (ratio, target)) in targets.iter().enumerate() {
         // One session per row: the first click happens in the window the application
         // opened, and the second in a window of its own that has just opened the same
         // project — the state `pixlay-render switch` starts its process in.
@@ -116,25 +141,28 @@ fn a_layout_switch_is_measured_from_the_click() {
             let _ = support::canvas_bitmaps(&window);
             window
         };
-        rows.push(("fresh session".to_string(), measure(&window, target)));
+        rows.push((
+            format!("fresh session, {} → {target}", ratio_label(*ratio)),
+            measure(&window, *ratio, target),
+        ));
     }
-    // And the same session's **second** click, back to the layout it opened on: the
+    // And the same session's **second** click, back to the shape it opened on: the
     // row the CLI cannot model (its process is one session with one history). Since S21
     // the band shares nothing with the canvas — a candidate is a sketch, not a render —
     // so what this row costs is the canvas's own work on a warm session.
     rows.push((
         "second click, same session".to_string(),
-        measure(&first, "mosaic-8-s14"),
+        measure(&first, home_shape, &home_name),
     ));
 
-    // The fresh rows start on the document's own layout (that is what makes them the
-    // CLI's experiment), and the last row starts on the layout the first fresh one
+    // The fresh rows start on the document's own shape (that is what makes them the
+    // CLI's experiment), and the last row starts on the shape the first fresh one
     // moved to.
     let mut expected: Vec<(&str, &str)> = targets
         .iter()
-        .map(|target| ("mosaic-8-s14", target.as_str()))
+        .map(|(_, target)| (home_name.as_str(), target.as_str()))
         .collect();
-    expected.push((targets[0].as_str(), "mosaic-8-s14"));
+    expected.push((targets[0].1.as_str(), home_name.as_str()));
     for ((label, switch), (from, target)) in rows.iter().zip(&expected) {
         assert_eq!(&switch.from, from, "{label}: the row's starting layout");
         assert_eq!(&switch.target, target, "{label}: the row's target");
@@ -198,7 +226,8 @@ fn a_layout_switch_is_measured_from_the_click() {
     }
     eprintln!(
         "the CLI measures the same click in a fresh process: pixlay-render switch \
-         --project <verify.pixlay> --template <target> --canvas {}x{} --stats",
+         --project <verify.pixlay> --template <target> --canvas {}x{} --stats (the row's \
+         click is the same `SetTemplate`, which `edit --aspect <ratio>` also performs)",
         rows[0].1.canvas_box.0, rows[0].1.canvas_box.1,
     );
 }
@@ -223,28 +252,29 @@ fn wait_for(window: &EditorWindow, mut ready: impl FnMut() -> bool) -> bool {
     }
 }
 
-/// The click on `target`'s candidate, timed.
-fn measure(window: &EditorWindow, target: &str) -> Switch {
+/// The click on `ratio`'s button in the band, timed: the row's click, which lands on
+/// the layout of the document's own count and `ratio` (S36).
+fn measure(window: &EditorWindow, ratio: f64, target: &str) -> Switch {
     let from = window.document().template.name.clone();
     let from_grid = window.images().0;
     let area = window.canvas_widget();
     let canvas_box = (area.width(), area.height());
     let window_box = (window.width(), window.height());
 
-    // The click, through the band's own cell: `set_active` is what a click leaves
+    // The click, through the band's own button: `set_active` is what a click leaves
     // behind on a `GtkToggleButton`, and the handler it runs is the window's own
-    // `select_layout`.
+    // `select_ratio`.
     let gallery = window.gallery().expect("the editor has a layout band");
-    let cell = gallery
-        .cell(target)
-        .unwrap_or_else(|| panic!("the band lists {target}"));
+    let button = gallery
+        .ratio_button(ratio)
+        .unwrap_or_else(|| panic!("the row offers {ratio}"));
     // The worker's counts *before* the click: the band's rebuild goes out with the same
     // click, and on a fast machine it can have landed before the canvas's reply is even
     // read, so the conditions have to be counts taken here.
     let builds_before = window.gallery_builds();
     let decodes_before = window.decoded_sources();
     let started = Instant::now();
-    cell.set_active(true);
+    button.set_active(true);
     // The request is synchronous (`refresh_document` → `request_decode`), and a grid in
     // flight is what says the new bitmaps are not in hand yet.
     assert!(
@@ -284,6 +314,13 @@ fn measure(window: &EditorWindow, target: &str) -> Switch {
         window.gallery().and_then(|band| band.selected()).as_deref(),
         Some(target),
         "the band highlights the layout the document is on"
+    );
+    // And the row's own mark: the shape the click asked for, written from the
+    // document rather than from the click (S36).
+    assert_eq!(
+        window.gallery().and_then(|band| band.selected_ratio()),
+        Some(ratio),
+        "the row marks the shape the document is on"
     );
     let to_grid = window.images().0;
     let expected = canvas::preferred_grid(

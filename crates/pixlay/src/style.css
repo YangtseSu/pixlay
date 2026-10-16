@@ -39,6 +39,22 @@
   border-color: var(--accent-bg-color);
 }
 
+/* The band's ratio row (S36): the sheet shapes the current count offers, one
+ * toggle button each. The same reading as a candidate cell — the shape the
+ * document is on carries the accent border — because the two are the one choice
+ * the band makes, split in two steps (the shape, then the arrangement inside it).
+ * A ratio button is a text button, so it is sized by its label rather than by the
+ * band's cell box, and the row is hidden while the count offers one shape. */
+.ratio-cell {
+  margin: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+}
+
+.ratio-cell.picked {
+  border-color: var(--accent-bg-color);
+}
+
 /* The sketch's two colours (S21; the ink's tone is S30), which the band reads back
  * through `GtkWidget::color()` on the two invisible probes the band builds
  * (`crates/pixlay/src/layout.rs`). A candidate is a small *sheet*: its cells are
