@@ -6,11 +6,11 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # S36 · The sheet's ratio is a control
 
-**Progress**: doing — implemented, measured and committed 2026-10-16 (`66b60bc`); **the Human walk
-is what is left**: the band's new form (`docs/HIG-REVIEW.md` §2's ratio-row item — the row's placement and
-size against the canvas, the count control and the row reading as one stage, the selected pair legible, and
-the row read as a radio set). Everything else on the exit list is green and its numbers are
-`docs/CONTRACT.md` §8, "S36".
+**Progress**: done and passed (2026-10-16, human) → next: **S37 — Arrangement depth: the poster family
+and irregular cells** (`docs/steps/S37-arrangement-depth-todo.md`), in a new session, because a gate's next
+action is a new session (`AGENTS.md`, "Session and persistence discipline"). The work is in `66b60bc` (the
+dependency defect it exposed is fixed in `9c68b0a`); both are **local, not pushed**; this gate is its own
+commit.
 
 **Goal**: the canvas ratio becomes the layout stage's first choice — Xiaomi's 布局 model — so that a
 person says "square" or "portrait" and then picks among that shape's arrangements, and the sheet's shape
@@ -113,8 +113,21 @@ narrowed count. The numbers are `docs/CONTRACT.md` §8, "S36" — 1 candidate at
 verification document and 2 at 0.11–0.14 ms for the library's only two-member cell, against a `switch_ms`
 of 27.8–43.0 on the same project — and the whole entry is green — `cargo test` 378 s wall with the GUI suite included, and the band's own test 71.4 s of it.
 
+**Ruling (2026-10-16, human) — the gate**: **passed** — the human walked the band's new form and ruled it
+with no findings ("没啥问题"): the ratio row's placement and size against the canvas, the count control and
+the row reading as one stage, the selected pair legible, and the row read as a radio set. **No shape changes
+with the ruling**: `docs/CONTRACT.md` §3 already carries the ratio vocabulary, the order and the three
+queries, §5 the flag and the report, §9 the band's two controls, and §8 the numbers, so the gate closes with
+that half of the synchronization already done — and the walk's own record is written into
+`docs/HIG-REVIEW.md` §2's ratio-row item.
+
 **Human**
 
 - The walk of the band's new form (`docs/HIG-REVIEW.md` §2): the ratio row's placement and size against
   the canvas, the count control and the row reading as one stage, the selected pair legible, and the row
   read as a radio set (a selection always marked, and a small set — `patterns/controls/radio-buttons`).
+- **Passed** (2026-10-16): the human walked the band's new form on the running editor and ruled it
+  "没啥问题" (no problems), with no findings to act on. The pictures the walk rested on are
+  `/var/tmp/pixlay-s7/layout-band.png` — the 8-photo verification document's band as the window draws it,
+  the 4:3 row above a one-arrangement strip — and `/var/tmp/pixlay-s7/layout-band-gutter.png`, the same for
+  the four-cell square pair (`crates/pixlay/tests/layout.rs` writes both).

@@ -193,7 +193,10 @@ the canvas is **content** and the interface is **styling**, and the two must not
      alarm on the first reading — the label's own fit, named controls, and the row drawn exactly when the
      count offers more than one shape) and `tests/layout.rs` (the row's content and order, the click's landing from the core
      query, the strip it narrows to, the mark following an undo, a load and a growth); **the look is this
-     item's**, and the step's own file is `docs/steps/S36-ratio-row-doing.md`;
+     item's**, and **the human walked it on 2026-10-16 and passed it** — "没啥问题" (no problems), with no
+     findings: the row's placement and size against the canvas, the count control and the row reading as one
+     stage, the selected pair legible, and the row read as a radio set. The step's own ruling is
+     `docs/steps/S36-ratio-row-done.md`;
    - the floating buttons: do they land where the hand expects, and does the frame look right at both ends of its radius range;
    - the dialogs: does the frame's group read as the three things the document holds — with its live rows
      making the canvas redraw behind it — and (S25's own Human line, item 10 below) does the app's one dialog

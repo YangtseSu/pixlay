@@ -19,7 +19,7 @@ the assistant's suggestion, recorded for a decision nobody has made yet.
 
 ## More layouts in the library
 
-**Status: S35 landed and passed (2026-10-16); S36's work has landed (2026-10-16) with its walk as the gate; S37 is the plan's next step** — *asked for* (2026-09-27, extended 2026-10-08): the shipped library
+**Status: S35 and S36 landed and passed (2026-10-16); S37 is the plan's next step** — *asked for* (2026-09-27, extended 2026-10-08): the shipped library
 should offer more layouts, and the references the human named organize theirs by category rather than as a
 flat list. The plan's first three steps are **S35, S36 and S37** under [`docs/steps/`](steps/); this
 section holds the research they rest on and the directions they leave alone.
@@ -79,7 +79,8 @@ section holds the research they rest on and the directions they leave alone.
      over at least four aspect ratios, including **4:3**, **1:1** and a portrait member; **3:4 joined as
      the sixth ratio** (Xiaomi's page ratio, the portrait of the default 4:3 sheet) with five members; and
      the default growth chain keeps 4:3, which is the measured defect above closed.
-  2. **The ratio becomes a control** (S36) — **landed 2026-10-16, its walk is the gate**: the band has a
+  2. **The ratio becomes a control** (S36) — **landed and passed 2026-10-16** (the human's walk ruled it
+     with no findings): the band has a
      **ratio row** ahead of the strip (`templates::ratios_for`, ascending, the document's own shape
      marked, hidden where a count offers one shape), choosing one re-lays the document through
      `selection::layout_with_aspect` — the count's member of **exactly** that shape, the document's own
