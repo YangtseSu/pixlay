@@ -18,5 +18,11 @@ workspace = true
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+# `float_roundtrip` (S36, measured 2026-10-16): serde_json's default f64
+# parser is documented to allow a 1-ULP error, and this product's document
+# format is JSON — a saved crop that comes back one ULP away is a project
+# that renders differently after a save and a reopen (`CropTransform`'s
+# fields are the case). The feature makes parsing correctly rounded, at a
+# parse cost this product does not notice: a `.pixlay` is kilobytes.
+serde_json = { version = "1.0", features = ["float_roundtrip"] }
 thiserror = "2.0"

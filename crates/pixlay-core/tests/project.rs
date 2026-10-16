@@ -38,8 +38,16 @@ fn document() -> CollageDoc {
     let mut doc = CollageDoc::new(template);
     doc.cells[0] = Cell {
         source: Some(PathBuf::from("photos/a.jpg")),
+        // The zoom is a value only a **correctly rounded** parser reads back: it needs
+        // all 17 significant digits, and serde_json's default parser answers a float
+        // one ULP away for it — measured 2026-10-16, `3.7586652467163644` comes back
+        // as `3.758665246716365` without the crate's `float_roundtrip` feature, so
+        // save → load → save was not byte-identical and a loaded document was not equal
+        // to the one that was written. A crop is a
+        // *fitted* number, so any of them can be one like this: the feature is what
+        // this field holds the build to.
         crop: CropTransform {
-            zoom: 1.6,
+            zoom: 3.7586652467163644,
             offset: (0.25, -0.4),
             rotation_deg: -12.5,
         },
