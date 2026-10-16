@@ -6,7 +6,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # S36 · The sheet's ratio is a control
 
-**Progress**: doing — implemented, measured and committed 2026-10-16 (this step's commit); **the Human walk
+**Progress**: doing — implemented, measured and committed 2026-10-16 (`66b60bc`); **the Human walk
 is what is left**: the band's new form (`docs/HIG-REVIEW.md` §2's ratio-row item — the row's placement and
 size against the canvas, the count control and the row reading as one stage, the selected pair legible, and
 the row read as a radio set). Everything else on the exit list is green and its numbers are
