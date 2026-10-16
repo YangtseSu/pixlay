@@ -211,7 +211,9 @@ limit that is not in this table is a contract gap.
   name is one (`grid-6-3x2` / `grid-6-2x3`, `strip-2-2x1` / `strip-2-1x2`, `grid-8-4x2` / `grid-8-2x4`), and a distinct mnemonic
   where the arrangement is its own transpose or its variant word is taken (a `2x2`, or a hero transcribed as `t1b2` / `l4r5`:
   top band of two, left band of four over a right band of five). The six ratios the library ships are 1:1, 4:3, 3:2, 16:9, 2:3 and
-  3:4 — the last the portrait of the album page, added by S35.
+  3:4 — the last the portrait of the album page, added by S35. **Two variant words name a shape of *cell* rather than an
+  arrangement** (S37): `-elbow` for an L-shaped slot and `-tee` for a T-shaped one (`mosaic-3-elbow`, `mosaic-5-tee`,
+  `mosaic-7-elbow`) — the same vocabulary shape as `mosaic-8-s14`'s L, which is the oldest irregular cell in the library.
 - **Geometry version and document version are separate**: `template.version` follows the template family, `docVersion` follows the format.
 - **The library covers every slot count from 1 to 9**: counts 2..=9 carry at least four layouts each over at least four aspect
   ratios, including the album page (4:3), the square (1:1) and a portrait member (2:3 or 3:4) — the S35 rule, deepening S10's
@@ -219,11 +221,29 @@ limit that is not in this table is a contract gap.
   (S19, ruling 34), because one photo is a legal collage and a second one-slot layout would be the same geometry under another
   name. The CLI's `templates` reports the matrix and filters it by aspect ratio. `strip-10-10x1` was the only member above nine
   and left with S12c.
+- **Two kinds of depth are measured, not named** (S37). Both are asserted over the whole library by
+  `crates/pixlay-core/tests/templates.rs`, and both are statements about *geometry* — which is what makes them worth asserting:
+  - **a poster at every count 2..=9**: a layout whose largest cell is at least **twice its median cell** (the median being the
+    cell at index `count / 2` in descending order) — one photo with half-size cells around it, Xiaomi's 海报 reading and what the
+    `-hero` variant names. Measured over S36's library the property holds for the hero arrangement and its transcribed twins
+    (`-3-t1b2`, `-4-t1b3`, `-5-t1b4` — the same areas by construction, since a twin *is* that arrangement on a rotated sheet),
+    for `mosaic-8-s14` (3.2x, so count 8 needs no second member) and for nothing else: the loosest non-poster is
+    `mosaic-3-elbow`'s 1.6x against the tightest poster's 2.0x, and `mosaic-7-hero` — the count's only member named for the
+    arrangement — measures **1.2x** (its two largest cells tie at 0.1875, its median is 0.15625): a three-column mosaic. The
+    name is frozen data and stays, so S37 added the count's poster (`mosaic-7-l1r6`) and count 2's (`mosaic-2-hero`); the census
+    is the property's, and the one `-hero` that fails it is pinned by name so another cannot join it unnoticed.
+  - **an irregular cell at counts 3, 5, 7 and 8**: a slot whose outline is not a rectangle. From S1 to S36 the library had
+    exactly one (`mosaic-8-s14`'s L); S37 added three, at three counts, and no two repeat a shape — an elbow at counts 3 and 7
+    (the album page and the portrait page) and a tee at count 5. The machinery a concave cell needs (the clip path, the clamp's
+    vertex test, the sketch's outline stroke) was written in S2 against that single L, and every irregular member runs the same
+    invariants: pairwise zero overlap, no interior hole, a simple outline, and a cut template's areas summing to exactly 1.0.
 - **The sheet keeps its shape as the collage grows** (S35): `selection::layout_for`'s first preference is the document's own
   aspect, and every count now has a 4:3 member, so the chain the window opens on — `grid-1-1x1`, the count control from 1 to 9 —
   is 4:3 at every step (`grid-2-2x1`, then the `mosaic-*-hero` chain and `mosaic-8-s14`). Before S35 count 2 had no 4:3 layout:
   the first added photo turned the album page 3:2 and the second 16:9, where the rest of the growth stayed. The chain is a test
-  (`crates/pixlay-core/tests/templates.rs`), not a hope.
+  (`crates/pixlay-core/tests/templates.rs`), not a hope. S37's five members were appended after their count's existing ones, so
+  the chain does not move: the rule's last rung is library order, and a count whose shape and family now hold two members
+  answers with the one the library lists first.
 - **The sheet's ratio is a control** (S36): the layout band's first choice is the sheet's shape, not the arrangement.
   `templates::ratios_for(slots)` is the ratio row's content — the shapes a count offers, **ascending by ratio**
   (2:3, 3:4, 1:1, 4:3, 3:2, 16:9), the shapes a count lacks simply absent, so a shape keeps its place as the count moves —
@@ -239,13 +259,15 @@ limit that is not in this table is a contract gap.
   highlight: an undo, a project load or a count change cannot leave it lying. A ratio is written `W:H` by
   `templates::ratio_label` — a bare ratio and **not copy**: no translation, and no noun.
 - **The library's range is deeper than one layout** (S10, ruling 10): every count from 2 to 9 carries **at least four layouts over
-  at least four aspect ratios that include 4:3, 1:1 and a portrait member** (S35) — **37 templates and 200 slots** in all, which
-  `pixlay-render templates` reports and `crates/pixlay-core/tests/templates.rs` asserts as a histogram over `2..=MAX_PHOTOS` plus
-  the one-layout rule for count 1 and `3:4`'s two-member floor (a ratio is a shape of its own, not one member standing in for it).
-- **A shipped name keeps its geometry and its `templateVersion` forever**: S10 added 15 layouts and moved none, and S35 added
-  ten and moved none, which is a test as well as a regeneration diff — `crates/pixlay-core/tests/templates.rs` pins a
-  fingerprint of the geometry every template that had shipped before S10 still has, because the determinism test alone cannot
-  see a recipe edit that was regenerated with it.
+  at least four aspect ratios that include 4:3, 1:1 and a portrait member** (S35), **a poster and — where the count has one — a
+  cell that is not a rectangle** (S37) — **42 templates and 224 slots** in all, over 4:3 (12), 1:1 (10), 16:9 (7), 3:4 (6), 3:2 (4)
+  and 2:3 (3), which `pixlay-render templates` reports and `crates/pixlay-core/tests/templates.rs` asserts as a histogram over
+  `2..=MAX_PHOTOS` plus the one-layout rule for count 1, `3:4`'s two-member floor (a ratio is a shape of its own, not one member
+  standing in for it), the poster census above and the irregular members' census.
+- **A shipped name keeps its geometry and its `templateVersion` forever**: S10 added 15 layouts and moved none, S35 added
+  ten and moved none, and S37 added five and moved none, which is a test as well as a regeneration diff —
+  `crates/pixlay-core/tests/templates.rs` pins a fingerprint of the geometry every template that had shipped before S10 still
+  has, because the determinism test alone cannot see a recipe edit that was regenerated with it.
 
 ## 4. Rendering: `draw(doc, images, target)`
 
@@ -1166,6 +1188,28 @@ shape's arrangements. Measured with the ratio row in place, so the band's rebuil
 | unchanged by this step | the library: **37 templates, 200 slots** (`frozen.rs` untouched — no recipe moved); the S35 growth chain is S35's, still 4:3 at every step |
 | the test suite | `cargo test`: **green**, the GUI suite included, **378 s** wall (S35's record of the same command: 415.66 s) — the band's own test 71.4 s of it; `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings` and `reuse lint` green |
 | a dependency defect this step exposed | serde_json's default `f64` parser is 1 ULP off for values needing 17 significant digits: a crop written as `3.7586652467163644` came back as `3.758665246716365`, so a saved document was **not equal** to the one that was written and a save → load → save was not byte-identical. Fixed where it belongs, in the dependency and not in a shim: `serde_json` 1.0.154 with its **`float_roundtrip`** feature — the same numbers for `4/3`, `0.1 + 0.2`, `1e-7`, and `crates/pixlay-core/tests/project.rs`'s `document()` now carries the measured 17-digit crop so the round trip is asserted |
+
+### S37 (2026-10-16, `--release`, this machine)
+
+The library grew in **kinds**, not only in counts: the poster arrangement reached the two counts that
+lacked one, and three irregular cells joined the smoke template's single L. Renders are the fixture photos
+at 800 px and sketches are `candidate_grid(aspect)` (`/var/tmp/s37probe/`).
+
+| Item | Value |
+|---|---|
+| the library | **42 templates, 224 slots** (S36: 37 and 200) · 4:3 **12** · 1:1 **10** · 16:9 **7** · 3:4 **6** · 3:2 **4** · 2:3 **3** · layouts per count 1 → 1, 2 → **5**, 3 → **5**, 4 → 5, 5 → **6**, 6 → 5, 7 → **6**, 8 → 5, 9 → 4 — every count 2 … 9 still at four layouts or more over four ratios or more |
+| the poster property, measured over S36's library | the largest cell against the **median** cell of the same template: `mosaic-3-hero`/`-t1b2` **2.0x**, `-4-hero`/`-t1b3` **3.2x**, `-5-hero`/`-t1b4` **4.0x**, `-6-hero` **2.0x**, `-9-hero` **8.0x**, `mosaic-8-s14` **3.17x** (count 8's question answered: yes, so it needs no second member), and **`mosaic-7-hero` 1.2x** — its two largest cells tie at 0.1875, its median is 0.15625. Nothing else reaches 2.0: the loosest non-poster of S36's library is `strip-7-7x1` at **1.5x**. So the property is `largest ≥ 2 × median`, the two counts that lacked a member got one, and the one `-hero` that fails the property is pinned by name in the census (its name and geometry are frozen, so it stays a mosaic that is called a hero) |
+| the poster census after the step | 13 members satisfy it, over all eight counts 2 … 9: `mosaic-2-hero` **2.2x** (new), `-3-hero`/`-t1b2` 2.0x, `-4-hero`/`-t1b3` 3.2x, `-5-hero`/`-t1b4` 4.0x, `-5-tee` **4.87x** (new), `-6-hero` 2.0x, `-7-l1r6` **6.4x** (new), `-7-elbow` **2.0x** (new), `-8-s14` 3.17x, `-9-hero` 8.0x |
+| the irregular census | 4 members carry a slot that is not a rectangle, at 4 counts — `mosaic-3-elbow` (an L), `mosaic-5-tee` (a T), `mosaic-7-elbow` (an L on the portrait page) and `mosaic-8-s14`'s own L, which was the library's only one from S1 to S36. Three of the four tile their sheet exactly (a cut template); all four pass the pairwise-overlap, no-interior-hole and simple-outline invariants |
+| the five new layouts render | 5/5 `init --photo` (one photo per slot) then `render --long-edge 800` exit 0 — **265,187–408,874 bytes**, `ms` 75.0–147.5 (S35's ten: 74.2–251.4), `encode_ms` 85.6–182.3, `peak_rss_mb` 25.9–31.3 |
+| the sketch at the band's own grid | 128x96 for the two 4:3 members, 96x96 for the tee, 72x96 for the portrait elbow — the L and the T read as such at the band's smallest box, and each poster's big cell reads as one (`/var/tmp/s37probe/s37-sketches.png`); **the human's walk is the gate** |
+| the band's pixels | `crates/pixlay/tests/layout.rs` opened a document of each new member's own count and shape and compared the band's own sketch of it with `pixlay-render render --sketch` at `candidate_grid(aspect)` with the band's own three parameters: RMSE **0** for all five, and the band's own picture of each is written to `/var/tmp/pixlay-s7/layout-band-<name>.png` |
+| the two-member cells the step added | the band's rebuild on the two new pairs, `switch --band --canvas 1100x575`, three runs each: count 2's 4:3 (`grid-2-2x1` → `mosaic-2-hero`) `band_candidates` **2** at `band_ms` **0.1613 / 0.1663 / 0.1727** against `switch_ms` **37.5 / 37.6 / 38.1**; count 7's 4:3 (`mosaic-7-t4b3` → `mosaic-7-l1r6`) `band_candidates` **2** at **0.1410 / 0.1459 / 0.1756** against **63.3 / 65.3 / 86.9** (`sources_ms` ~0.005, `grid` 735x551 unchanged). The library now has **six** count × shape cells with two members (2/4:3, 3/4:3, 4/1:1, 5/1:1, 7/4:3, 7/3:4); S36's record carried one |
+| the shipped geometry | `frozen.rs` **24,498 bytes**; the regeneration diff is **59 insertions, 0 deletions** — every shipped template's bytes are untouched, so no project's layout or pixels move (`AGENTS.md`: a name that ships keeps its geometry forever). The pre-S10 fingerprints are unchanged |
+| the S2 invariants over the grown library | 262,144 samples per template: **0 overlapping pairs**; **0 uncovered samples** in the **40** cut templates; the two guttered ones leave a gutter the border reaches (**0 sealed samples**); every cut template's declared areas sum to **exactly 1.0** — `cargo test -p pixlay-core --test templates`, 22 tests |
+| the growth chain (`edit --add-cell` from `grid-1-1x1`), re-measured | `grid-2-2x1` → `mosaic-3-hero` → `mosaic-4-hero` → `mosaic-5-hero` → `mosaic-6-hero` → `mosaic-7-t4b3` → `mosaic-8-s14` → `mosaic-9-hero` — **unchanged**, 4:3 at every step: the five new recipes are appended after their count's existing members and the count rule's last rung is library order, so a shape and family that now hold two members answers with the one the library lists first |
+| the test suite | `cargo test`: **green**, the GUI suite included, **373.7 s** wall (S36's record of the same command: 378 s) — the band's own test **81.4 s** of it; `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings` and `reuse lint` (178 files) green |
+| two canaries this step had to move, and why they are canaries | `crates/pixlay-core/tests/hit.rs` pins the library's slot count twice (200 → **224**) so a sweep that covered less than the library would fail rather than pass quietly, and `crates/pixlay-core/tests/history.rs`'s count-control walk asserts the round trip **the rule's own answer** (`layout_for` for the keys the walk kept) instead of the name it started on — S37 makes count 2's and count 7's 4:3 and count 5's 1:1 hold two members apiece, and the rule cannot tell two members of one shape-and-family group apart. The walk's own invariant, that no layout change loses a cell, is asserted exactly as before |
 
 ## 9. The window (S7), and the shell ruling 31 re-cut (S22)
 

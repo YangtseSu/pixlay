@@ -15,7 +15,8 @@
 use std::path::{Path, PathBuf};
 
 use pixlay_core::{
-    Cell, CollageDoc, Command, CoreError, CropTransform, Frame, History, Rgba8, templates,
+    Cell, CollageDoc, Command, CoreError, CropTransform, Frame, History, Rgba8, layout_for,
+    templates,
 };
 
 fn document() -> CollageDoc {
@@ -897,15 +898,14 @@ fn no_layout_change_loses_a_cell_whatever_the_sequence_is() {
             // then carrying, and the library does not have every aspect at every
             // count (a 16:9 document steps down to 3:2 at two cells, for instance).
             // The cells below are what the retention promises; the layout comes back
-            // exactly where the walk kept **both keys the rule reads** — the aspect
-            // and the family — which is the count rule's own answer (S14b) and not
-            // this step's. Since S35 the library carries 4:3, 1:1 and a portrait
-            // member at every count, so more walks keep their aspect; the keys are
-            // read together because the family is the second rung, and a document
-            // whose family the walk leaves comes back as the layout that rung names
-            // (a 1:1 *grid* lands on S35's 1:1 mosaic at three cells and returns as
-            // the grid the library lists first — the rule cannot tell two twins of
-            // one aspect and family apart).
+            // where the walk kept **both keys the rule reads** — the aspect and the
+            // family — which is the count rule's own answer (S14b) and not this
+            // step's. Since S35 the library carries 4:3, 1:1 and a portrait member
+            // at every count, so more walks keep their aspect; the keys are read
+            // together because the family is the second rung, and a document whose
+            // family the walk leaves comes back as the layout that rung names (a
+            // 1:1 *grid* lands on S35's 1:1 mosaic at three cells and returns as the
+            // grid the library lists first).
             let mut keys_kept = true;
             for _ in 0..k {
                 history
@@ -928,9 +928,19 @@ fn no_layout_change_loses_a_cell_whatever_the_sequence_is() {
                 "{name}: `−` × {k} then `+` × {k} is the document's own cells"
             );
             assert!(doc.kept.is_empty(), "{name}: k = {k}");
+            // One count, shape and family can hold several members — count 4's two
+            // square grids since S35, and since S37 a poster or an irregular cell
+            // beside the mosaic it shares a shape and a family with — and the rule
+            // cannot tell two members of one group apart: it answers with the first
+            // the library lists (its fourth rung). So the walk returns the **rule's
+            // own answer for the keys it kept**, which is the layout it started on
+            // exactly when the start is that answer. The cells asserted above are
+            // what this test is named for, and they hold whatever the layout does.
             if keys_kept {
+                let canonical = layout_for(cells, start.template.aspect, start.template.family())
+                    .expect("the start's own count has a layout");
                 assert_eq!(
-                    doc.template.name, start.template.name,
+                    doc.template.name, canonical.name,
                     "{name}: k = {k}, with the aspect and the family kept at every step"
                 );
             }

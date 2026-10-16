@@ -515,9 +515,10 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
     // nothing for the canvas (S18's "keeps the edge" row), and every file the
     // counter moves for is the band's. It moves not at all — a sketch is a
     // template's geometry, and `decode::GalleryJob` carries no path.
-    // (`grid-4-2x2` and `grid-4-2x2g` are the library's only two layouts with both
-    // the same aspect and the same cell count — every count carries its ratios
-    // once each since S35, so it is still the only such pair.)
+    // (`grid-4-2x2` and `grid-4-2x2g` share their aspect and their cell count, which
+    // is what makes the click free for the canvas; S37 added five more such cells —
+    // count 2's and count 3's 4:3, count 5's 1:1, count 7's 4:3 and 3:4 — and this
+    // section keeps measuring this pair, whose two members differ by their gutter.)
     window.open_document(document_on("grid-4-2x2"));
     settle(&window);
     let before_band = window.decoded_sources();
@@ -550,8 +551,8 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
     );
 
     // The same parity on the unusual geometry: this document's candidates are the
-    // library's **two square four-cell layouts** — the strip is the shape's, and
-    // count 4's 1:1 pair is the only pair a count has of one shape since S35 — and
+    // library's **two square four-cell layouts** (count 4's 1:1 pair, which was the
+    // library's only two-member count × shape cell until S37 added five more), and
     // `grid-4-2x2g` is the one whose cells leave a gap: the case S29's rule draws,
     // and the case the eight-cell loop above cannot reach (the eight-cell 4:3 shape
     // has one member).
@@ -1339,6 +1340,71 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
     }
     probe_window.close();
     manager.set_color_scheme(adw::ColorScheme::ForceDark);
+
+    // ---- the depth of kind (S37): a poster at every count, irregular cells ----
+    // S37's five members are the library's first poster at two cells and at seven,
+    // and the first irregular cells beyond the smoke template's own L. Each is
+    // walked the way the library's earlier candidates were — the band's own pixels
+    // against `render --sketch` at the band's grid, RMSE 0 — on a document of that
+    // member's own count and shape, which is the only document whose strip holds it;
+    // and the band as the window draws it is written out, because whether an L or a
+    // T reads at 128x96, and whether a poster reads as one, is the Human line's
+    // question and not a machine's.
+    let style = gallery.sketch_style();
+    for name in [
+        "mosaic-2-hero",
+        "mosaic-3-elbow",
+        "mosaic-5-tee",
+        "mosaic-7-l1r6",
+        "mosaic-7-elbow",
+    ] {
+        let template = templates::get(name).unwrap_or_else(|| panic!("template {name}"));
+        let grid = templates::candidate_grid(template.aspect);
+        window.open_document(pixlay_core::CollageDoc::new(template.clone()));
+        settle(&window);
+        assert_eq!(
+            gallery.count_label().label(),
+            template.slots.len().to_string(),
+            "{name}: the band's count is the member's own"
+        );
+        assert!(
+            gallery.candidates().contains(&name.to_string()),
+            "{name} is no candidate of its own document: {:?}",
+            gallery.candidates()
+        );
+        assert_eq!(
+            gallery.selected().as_deref(),
+            Some(name),
+            "and the document is on it"
+        );
+        let (width, height, pixels) = gallery
+            .sketch(name)
+            .unwrap_or_else(|| panic!("{name} has no sketch"));
+        assert_eq!(
+            (width, height),
+            (grid.width, grid.height),
+            "{name}: the band drew it at another grid than its shape's"
+        );
+        let cli = cli_sketch(name, style);
+        assert_eq!(
+            (width, height),
+            (cli.0, cli.1),
+            "{name}: the strip and the CLI must draw the same pixel grid"
+        );
+        let difference = support::rmse(&(width, height, pixels), &cli);
+        assert_eq!(
+            difference, 0.0,
+            "{name} diverged from the CLI: RMSE {difference}"
+        );
+        let picture = support::artifact(&format!("layout-band-{name}.png"));
+        support::save_png(&picture, &support::snapshot(&gallery.root()));
+        eprintln!(
+            "{name}: {} slots, its sketch {width}x{height} at the band's grid, the band's own \
+             pixels in {}",
+            template.slots.len(),
+            picture.display()
+        );
+    }
 }
 
 /// Waits for both background builds: the canvas's bitmaps and the band's

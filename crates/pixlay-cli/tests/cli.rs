@@ -1981,8 +1981,8 @@ fn every_layout_in_the_library_renders_with_a_photo() {
     // whose slots the renderer refuses cannot sit in `frozen.rs`.
     //
     // One cell carries the photo, not every cell: the debug profile pays about
-    // 0.15 s per occupied slot (decode and resample), so all 200 slots of the
-    // library would cost ~30 s and this test alone would dominate the suite's wall
+    // 0.15 s per occupied slot (decode and resample), so all 224 slots of the
+    // library would cost ~34 s and this test alone would dominate the suite's wall
     // time, while the *per-slot* work is what the sweeps in
     // `pixlay-core/tests/framing.rs` and `pixlay-imaging/tests/layout.rs` already
     // measure for every slot of every template. What is only checkable here is the

@@ -601,6 +601,153 @@ fn every_count_from_two_up_carries_four_layouts_over_four_aspects() {
     );
 }
 
+/// A template's cell areas, largest first.
+fn areas_largest_first(template: &Template) -> Vec<f64> {
+    let mut areas: Vec<f64> = template.slots.iter().map(|slot| slot.area).collect();
+    areas.sort_by(|one, other| other.total_cmp(one));
+    areas
+}
+
+/// S37's measured definition of a **poster**: the largest cell is at least **twice
+/// the median cell** — one photo with a mass of cells half its size or less around
+/// it, which is Xiaomi's 海报 reading and what the `-hero` variant is the library's
+/// name for. The median is the cell at index `count / 2` in descending order (the
+/// lower of the two middle cells where the count is even, which is the *looser* of
+/// the two readings — no member's verdict differs between them).
+///
+/// Measured over the library as S36 left it, which is what the step's own note
+/// asked for. The property holds for
+///
+/// * the hero arrangement: `mosaic-3-hero` 0.5 against 0.25 (**2.0x**), `-4-hero`
+///   0.5 against 0.15625 (**3.2x**), `-5-hero` 0.5 against 0.125 (**4.0x**),
+///   `-6-hero` 0.25 against 0.125 (**2.0x**, its two equal panels counting as one
+///   dominant half), `-9-hero` 0.5 against 0.0625 (**8.0x**);
+/// * its **transcribed twins** (`-3-t1b2`, `-4-t1b3`, `-5-t1b4`), which carry the
+///   same areas by construction — a twin *is* the same arrangement on a rotated
+///   sheet, which is why the pair is told apart by its name and why no property can
+///   separate one from the other; and
+/// * `mosaic-8-s14`, whose L is 0.296875 against a median of 0.09375 (**3.2x**) —
+///   the step's own question about count 8, answered by the number, so count 8
+///   needs no second member;
+///
+/// and for **nothing else**: the highest any other member of S36's library reaches
+/// is `strip-7-7x1`'s **1.5x**, and `mosaic-7-hero` — the count's only member named
+/// for the arrangement — is **1.2x**. Its two largest cells tie at 0.1875 and its
+/// median is 0.15625: a three-column mosaic with a large middle, not a poster,
+/// whatever its name says. The name is frozen data and stays (`AGENTS.md`), which
+/// is why the census below is the property's and not the name's. The gap between
+/// the posters (2.0x at the tightest) and the rest (1.5x at the loosest) is what
+/// makes the definition worth asserting rather than a knife edge.
+fn is_poster(template: &Template) -> bool {
+    let areas = areas_largest_first(template);
+    match areas.split_first() {
+        Some((largest, rest)) => !rest.is_empty() && *largest >= 2.0 * rest[rest.len() / 2],
+        None => false,
+    }
+}
+
+#[test]
+fn every_count_from_two_up_carries_a_poster() {
+    // S37's rule: every count from two carries a **poster** — the arrangement the
+    // `-hero` variant names — asserted through [`is_poster`] rather than through the
+    // name, because the measurement above is what the step settled on. Count 2 had
+    // none (`strip-2-2x1` and `grid-2-2x1` are equal panes, `strip-2-2x1g` a
+    // near-equal pair, `strip-2-1x2` two rows of one size) and count 7's only
+    // `-hero` is not one, so both counts gained a member.
+    let templates = templates_under_test();
+    let posters = |count: usize| -> Vec<String> {
+        templates
+            .iter()
+            .filter(|template| template.slots.len() == count && is_poster(template))
+            .map(|template| template.name.clone())
+            .collect()
+    };
+    let mut census = Vec::new();
+    for count in 2..=MAX_PHOTOS {
+        let found = posters(count);
+        assert!(
+            !found.is_empty(),
+            "{count} cells carry no poster: no layout of that count gives one photo the \
+             dominant place (the largest cell twice the median). The library's posters are \
+             {:?}",
+            templates
+                .iter()
+                .filter(|template| is_poster(template))
+                .map(|template| (template.name.as_str(), template.slots.len()))
+                .collect::<Vec<_>>()
+        );
+        census.push((count, found));
+    }
+    // The members the step added for the counts that lacked one, named so a rename
+    // or a removal cannot pass as a stray census row.
+    for (count, name) in [(2, "mosaic-2-hero"), (7, "mosaic-7-l1r6")] {
+        assert!(
+            census[count - 2].1.iter().any(|found| found == name),
+            "{count} cells: {name} is not the poster the census found ({:?})",
+            census[count - 2].1
+        );
+    }
+
+    // The `-hero` variant is the designer's name for the arrangement, and measured
+    // it is the property for every member that carries it but one. The exception is
+    // pinned, so a later `-hero` that is not a poster cannot join it unnoticed.
+    let exceptions: Vec<&str> = templates
+        .iter()
+        .filter(|template| template.name.ends_with("-hero"))
+        .filter(|template| !is_poster(template))
+        .map(|template| template.name.as_str())
+        .collect();
+    assert_eq!(
+        exceptions,
+        ["mosaic-7-hero"],
+        "the `-hero` members that are not posters by the measured property"
+    );
+}
+
+#[test]
+fn the_library_carries_irregular_cells_across_several_counts() {
+    // S37's other kind of depth: a slot whose outline is not a rectangle. From S1
+    // until S37 the library had exactly **one** such slot — the smoke template's L,
+    // which S2's invariants were written against and which `the_smoke_template_…`
+    // pins — so everything a concave cell needs (the clip path, the clamp's
+    // vertex test, the sketch's outline stroke, the hit test's centroid premise) was
+    // exercised by one template. Three members joined it in S37, at three counts,
+    // and no two of them repeat a shape: an elbow (an L) at counts 3 and 7, drawn on
+    // the album page and on the portrait page, and a tee (a T) at count 5.
+    let templates = templates_under_test();
+    let irregular: Vec<(usize, String)> = templates
+        .iter()
+        .filter(|template| {
+            template
+                .slots
+                .iter()
+                .any(|slot| slot.outline.points.len() > 4)
+        })
+        .map(|template| (template.slots.len(), template.name.clone()))
+        .collect();
+    let counts: Vec<usize> = irregular.iter().map(|(count, _)| *count).collect();
+    let mut distinct = counts.clone();
+    distinct.sort_unstable();
+    distinct.dedup();
+    assert!(
+        irregular.len() >= 3 && distinct.len() >= 3,
+        "the library carries {} irregular members over {} counts: {irregular:?}",
+        irregular.len(),
+        distinct.len()
+    );
+    assert_eq!(
+        counts,
+        [3, 5, 7, 8],
+        "the counts an irregular cell was authored on, the smoke template's own among them"
+    );
+    for name in ["mosaic-3-elbow", "mosaic-5-tee", "mosaic-7-elbow"] {
+        assert!(
+            irregular.iter().any(|(_, found)| found == name),
+            "{name} left the library, or lost its irregular slot: {irregular:?}"
+        );
+    }
+}
+
 #[test]
 fn the_ratio_row_lists_each_counts_own_shapes_in_order() {
     // S36's row, as a query: the shapes a count offers, ascending, one entry per

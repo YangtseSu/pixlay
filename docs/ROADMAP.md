@@ -19,17 +19,18 @@ the assistant's suggestion, recorded for a decision nobody has made yet.
 
 ## More layouts in the library
 
-**Status: S35 and S36 landed and passed (2026-10-16); S37 is the plan's next step** — *asked for* (2026-09-27, extended 2026-10-08): the shipped library
+**Status: S35, S36 and S37 landed (2026-10-16); S37's work is done and its Human walk is what is left** — *asked for* (2026-09-27, extended 2026-10-08): the shipped library
 should offer more layouts, and the references the human named organize theirs by category rather than as a
 flat list. The plan's first three steps are **S35, S36 and S37** under [`docs/steps/`](steps/); this
 section holds the research they rest on and the directions they leave alone.
 
-- **What it holds today** (`pixlay-render templates --json`, 2026-10-16): **37 templates, 200 slots** over cell
-  counts 1 … 9 — one layout at count 1 (`grid-1-1x1`, which is `DEFAULT_TEMPLATE`), then four, four,
-  five, five, five, four, five and four — and over six aspects: **4:3** (9), **1:1** (9), **16:9** (7),
-  **3:4** (5), **3:2** (4), **2:3** (3). A two-to-four-photo collage, which is what the main path mostly is,
-  picks from four or five candidates, and every count carries the album page, the square and a portrait
-  shape — the four-ratio floor S35's exit asserts (`docs/CONTRACT.md` §3).
+- **What it holds today** (`pixlay-render templates --json`, 2026-10-16, after S37): **42 templates, 224
+  slots** over cell counts 1 … 9 — one layout at count 1 (`grid-1-1x1`, which is `DEFAULT_TEMPLATE`), then
+  five, five, five, six, five, six, five and four — over six aspects: **4:3** (12), **1:1** (10), **16:9**
+  (7), **3:4** (6), **3:2** (4), **2:3** (3) — with a **poster** at every count 2 … 9 and an **irregular
+  cell** at counts 3, 5, 7 and 8. A two-to-four-photo collage, which is what the main path mostly is, picks
+  from four to six candidates, and every count carries the album page, the square and a portrait shape —
+  the four-ratio floor S35's exit asserts (`docs/CONTRACT.md` §3).
 - **The measured defect S35 closed** (measured 2026-10-08, closed 2026-10-16): the window
   opens on `grid-1-1x1` (4:3), **count 2 was the only count with no 4:3 layout**, and so the first added
   photo took the sheet to 3:2 (`strip-2-2x1`) and the second to 16:9 (`strip-3-3x1`), where the rest of
@@ -51,7 +52,9 @@ section holds the research they rest on and the directions they leave alone.
     canvas ratio — 1:1 and 3:4, the latter the **portrait** sheet), **海报** (one photo dominant, the rest
     small) and **拼接** (photos joined whole, edge to edge). This taxonomy is *structural*, and two of
     its three modes are already pixlay's vocabulary: 布局 is the strip / grid / mosaic arrangements with
-    **the canvas ratio as the first filter**, and 海报 is the `mosaic-*-hero` family. 拼接 is a
+    **the canvas ratio as the first filter**, and 海报 is the poster family — the `mosaic-*-hero`
+    arrangements and their transcribed twins, and **since S37 a measured property rather than a name** (the
+    largest cell at least twice the median one, one per count 2 … 9; `docs/CONTRACT.md` §3). 拼接 is a
     **behaviour** rather than a layout — it needs fit-not-cover and a canvas derived from the inputs,
     which the frozen-aspect model does not express — and it is a direction of its own below.
   - **Why Xiaomi's model is the one that maps**: Google keeps one flat list mixing ratios because its
@@ -90,19 +93,31 @@ section holds the research they rest on and the directions they leave alone.
      --band` measures the narrowed rebuild. It came second because a count's candidates had grown past
      HIG's "small sets only" for a radio strip, and because the row is the reference's own model (布局's
      ratio split) while a pixlay template's ratio *is* the sheet's shape.
-  3. **Arrangement depth** (S37) — the poster family at the counts that lack one and the first irregular
-     cells beyond `mosaic-8-s14`'s single L: the in-model cousin of Google's "Shapes", and the depth of
-     kind after the depth of ratios.
+  3. **Arrangement depth** (S37) — **landed 2026-10-16, its Human walk (the sketch walk) is what is
+     left**: the poster family at the two counts that lacked one and the first irregular cells beyond
+     `mosaic-8-s14`'s single L — the in-model cousin of Google's "Shapes", and the depth of kind after the
+     depth of ratios. Five members: `mosaic-2-hero` (a poster at two cells), `mosaic-7-l1r6` (count 7's
+     poster, added because the measurement showed `mosaic-7-hero` is **not** one: its two largest cells
+     tie, 1.2x the median where a poster is at least 2x), and three irregular cells — an L at count 3, a T
+     at count 5 and an L at count 7. The step's whole measurement, and the reason the census is asserted
+     through the property rather than through the `-hero` name, is `docs/CONTRACT.md` §3's "two kinds of
+     depth" and §8's "S37".
 - **Not adopted, so a later session does not re-litigate**: Google's themed categories (style, above);
-  category tabs in general — a count × ratio cell holds **one or two** candidates (count 4's two square
-  grids are the only pair, and S36 is what made the cell the unit), and the threshold for
+  category tabs in general — a count × ratio cell holds **one or two** candidates (S37 leaves the library
+  with six such cells: 2/4:3, 3/4:3, 4/1:1, 5/1:1, 7/4:3 and 7/3:4, and the strip shows one shape at a
+  time, so the set a person picks from is at most two), and the threshold for
   revisiting is a cell above **six** candidates or the day template packs and user templates land; a
   "Featured" ordering (library order is deterministic and a person scanning sketches does not need
   curation at these set sizes); the 9:16 and 4:5 ratios (the same cheap recipe work the day someone asks).
+  **`mosaic-7-hero`'s name** is the one piece of the library the measurement found wanting and did not fix:
+  the name and the geometry are frozen (`AGENTS.md`), so the member stays a three-column mosaic called a
+  hero, and S37's census says so out loud instead of renaming it.
 - **A fourth family** stays as recorded: the three families are read out of the *name* (`Family::of`,
   `layout_for`'s second preference), so a family that is not `strip` / `grid` / `mosaic` waits for the
-  explicit field the template-format item below proposes — S35 … S37 do not need it, the poster family's
-  own members being `mosaic-*-hero` names already.
+  explicit field the template-format item below proposes — S35 … S37 do not need it. The poster family is
+  a **property**, not a family: it is measured (`docs/CONTRACT.md` §3) and its members are mosaics whose
+  largest cell is twice their median one, which is why count 7's poster is `mosaic-7-l1r6` and why the one
+  `-hero` that does not measure as a poster could be recorded instead of moved.
 
 ## Joining photos whole (stitching)
 

@@ -27,10 +27,20 @@ All notable changes to Pixlay are documented in this file. The format follows
 - **Ten more layouts, and the sheet keeps its shape.** Every photo count from two to nine now offers
   at least four layouts over at least four shapes, including the album page (4:3), the square and a
   portrait one; **3:4 joins as the sixth sheet ratio** (the portrait of the album page). The library
-  is 37 layouts and 200 cells, and a layout that shipped keeps its geometry — nothing an existing
-  project points at moved. The window opens on a 4:3 sheet and a first photo used to turn it 3:2 and
-  the second 16:9; the new `grid-2-2x1` closes that chain, so the sheet keeps its shape from one
-  photo to nine.
+  reached 37 layouts and 200 cells with that change, and a layout that shipped keeps its geometry —
+  nothing an existing project points at moved. The window opens on a 4:3 sheet and a first photo used
+  to turn it 3:2 and the second 16:9; the new `grid-2-2x1` closes that chain, so the sheet keeps its
+  shape from one photo to nine.
+- **Five more arrangements: the poster at the counts that lacked one, and the first cells that are not
+  rectangles.** A **poster** — the layout where one photo dominates, Xiaomi's 海报 — is now measured
+  rather than assumed (the largest cell at least twice the median one, which the shipped `-hero` family
+  and `mosaic-8-s14` satisfy and, measured, `mosaic-7-hero` does not: its two largest cells tie), and
+  every count from two to nine now offers one: `mosaic-2-hero` and `mosaic-7-l1r6` are the two that were
+  missing, and count 8's is the eight-cell layout the app has always shipped, so it needed no second
+  member. Three layouts also carry the first **irregular cells** beyond that one L: an L on the album
+  page (`mosaic-3-elbow`), a T on the square (`mosaic-5-tee`) and an L on the portrait page
+  (`mosaic-7-elbow`). The library is **42 layouts and 224 cells**; nothing that shipped before moved,
+  and the sheet still keeps its shape from one photo to nine.
 - **The sheet's shape is the layout stage's first choice.** The band gains a **ratio row**: the shapes
   the current photo count offers — 2:3, 3:4, 1:1, 4:3, 3:2 and 16:9, whichever the count carries — with
   the document's own shape marked, and the layout strip under it narrowed to that shape's arrangements.

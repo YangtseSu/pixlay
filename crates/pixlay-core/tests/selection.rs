@@ -338,10 +338,12 @@ fn the_count_rule_picks_the_layout_that_follows_the_document() {
         named(3, 1.5, Some(Family::Strip)),
         Some("strip-3-3x1".to_string())
     );
-    // The aspect rung outranks the family one: `grid-2-2x1` is the library's only
-    // 4:3 two-slot layout (S35), so a 4:3 document keeps its shape even when the
-    // strip family asks — which is what makes the album page survive a photo being
-    // added.
+    // The aspect rung outranks the family one: a 4:3 document keeps its shape even
+    // when the strip family asks, which is what makes the album page survive a photo
+    // being added. Count 2 has carried two 4:3 members since S37 (`grid-2-2x1` and
+    // `mosaic-2-hero`), so the family rung — which neither of them satisfies for a
+    // strip — leaves the two tied and library order answers with `grid-2-2x1`, the
+    // member S35 added and the layout the growth chain walks through.
     assert_eq!(
         named(2, thirds, Some(Family::Strip)),
         Some("grid-2-2x1".to_string())
@@ -465,7 +467,8 @@ fn the_ratio_query_answers_the_shape_asked_for_or_nothing() {
         Some("mosaic-8-s14".to_string())
     );
 
-    // Where a count carries two layouts of one shape (count 4's square pair), the
+    // Where a count carries two layouts of one shape (count 4's square pair, and
+    // since S37 five more: 2/4:3, 3/4:3, 5/1:1, 7/4:3 and 7/3:4), the
     // family is the tie-break `layout_for` uses, and library order is what is left
     // when the family has no member of that shape either. Count 4's two 1:1 layouts
     // are both grids, so both rows answer the earlier recipe.

@@ -111,6 +111,23 @@ const R_3_4: f64 = 3.0 / 4.0;
 /// document's own aspect and every count now has one of its own. `grid-2-2x1` is
 /// the member that made the default chain hold — before it, count 2 had no 4:3
 /// layout and the first added photo turned the album page into 3:2 and then 16:9.
+///
+/// Since S37 the library carries two kinds of arrangement the counts did not have
+/// before, both **measured rather than named** (`crates/pixlay-core/tests/templates.rs`
+/// asserts them over the whole library):
+///
+/// * a **poster** — the largest cell is at least **twice the median cell**, i.e. one
+///   photo dominates the sheet with a mass of half-size cells around it, which is
+///   Xiaomi's 海报 reading and what the `-hero` variant names — at **every count
+///   2..=9**. Measured when the step started: the hero arrangement and its
+///   transcribed twins (`t1b2` / `t1b3` / `t1b4`) satisfy it, as does
+///   `mosaic-8-s14` (3.2x), and `mosaic-7-hero` does **not** (its two largest cells
+///   tie at 0.1875, 1.2x the median) — its name is frozen and stays, so count 7 got
+///   a poster of its own (`mosaic-7-l1r6`) and count 2 got `mosaic-2-hero`.
+/// * an **irregular cell** — a slot whose outline is not a rectangle — at counts
+///   3, 5, 7 and 8: three are new (`mosaic-3-elbow`, `mosaic-5-tee`,
+///   `mosaic-7-elbow`) beside the smoke template's own L, which was the library's
+///   only one from S1 to S36.
 static RECIPES: &[Recipe] = &[
     // The whole sheet, as one cell. The library's first member since S19, when
     // the floor became one photo (ruling 34): a single photo is a legal collage,
@@ -168,6 +185,22 @@ static RECIPES: &[Recipe] = &[
         grid: 16,
         slots: &[rect(0, 0, 8, 16), rect(8, 0, 16, 16)],
     },
+    // Two panes, one dominant: the poster reading of the smallest collage, and the
+    // member count 2 lacked until S37 (the step's measurement: count 3 onward had a
+    // `-hero`, and two photos had only equal or near-equal pairs). The split is at
+    // 11/16 rather than in the middle — an equal pair *is* `grid-2-2x1` — and 11/5 is
+    // the ratio a 16-cell lattice allows that clears the poster property S37 measured
+    // and asserts (the largest cell at least twice the *median* one: 0.6875 against
+    // 0.3125 is 2.2x, and no other two-cell layout comes near). 4:3, the album page
+    // the editor opens on, so the count's poster sits on the sheet a new document
+    // already has, and the big pane is nearly square there (0.6875 x 4/3 by 1.0).
+    Recipe {
+        name: "mosaic-2-hero",
+        version: 1,
+        aspect: R_4_3,
+        grid: 16,
+        slots: &[rect(0, 0, 11, 16), rect(11, 0, 16, 16)],
+    },
     // Three columns, unequal: 5/16, 6/16, 5/16. Unequal spans are what makes a
     // strip a layout rather than a repeated pane.
     Recipe {
@@ -207,6 +240,31 @@ static RECIPES: &[Recipe] = &[
         aspect: R_1_1,
         grid: 16,
         slots: &[rect(0, 0, 16, 8), rect(0, 8, 8, 16), rect(8, 8, 16, 16)],
+    },
+    // The album page's first irregular cell: an elbow (an L) down the left with a
+    // small pane filling its bite, and one pane carrying the whole right half.
+    // Count 3's other four members are all arrangements of rectangles, so this is
+    // where the library's second cell that is *not* a rectangle arrives (S37; the
+    // smoke template's L was the only one before it) — the depth of kind beside
+    // S35's depth of shapes. All three slots are lattice-aligned and tile the sheet
+    // exactly (80 + 48 + 128 of 256), so the layout is a cut template like every
+    // mosaic. The elbow is written as a point list because that is the only shape
+    // the recipe vocabulary needs beyond a rectangle, and the pane in the bite is
+    // what makes the outline read as an L rather than as a wide left column at the
+    // band's 128x96. Measured, this is the one irregular member the poster property
+    // does *not* hold for (the elbow is 0.5 of the sheet at most and its median cell
+    // is 0.3125, 1.6x): a kind of *cell* and an arrangement are two questions, and
+    // this member answers only the first.
+    Recipe {
+        name: "mosaic-3-elbow",
+        version: 1,
+        aspect: R_4_3,
+        grid: 16,
+        slots: &[
+            Shape::Poly(&[(0, 0), (8, 0), (8, 4), (4, 4), (4, 16), (0, 16)]),
+            rect(4, 4, 8, 16),
+            rect(8, 0, 16, 16),
+        ],
     },
     // The plain 2x2 grid: four equal rectangles.
     Recipe {
@@ -366,6 +424,37 @@ static RECIPES: &[Recipe] = &[
             rect(12, 8, 16, 16),
         ],
     },
+    // The square's irregular cell: a tee (a T) with four panes in the two corners
+    // under its arms. The T is also the count's second poster — its bar and stem
+    // are one cell, 0.5703 of the sheet against a median of 0.1172, 4.9x — so a
+    // square five-photo collage can have one big photo that is not a rectangle at
+    // all, which is the reading Google's "Shapes" category exists for and the one
+    // the in-model vocabulary can actually express. The stem is 6/16 wide and the bar
+    // 5/16 tall, both wide enough to survive the band's 96x96 sketch; the four
+    // corner panes split their 5/16-wide columns at the same 5/6 line, so the
+    // layout reads as one shape over a pair of columns.
+    Recipe {
+        name: "mosaic-5-tee",
+        version: 1,
+        aspect: R_1_1,
+        grid: 16,
+        slots: &[
+            Shape::Poly(&[
+                (0, 0),
+                (16, 0),
+                (16, 5),
+                (11, 5),
+                (11, 16),
+                (5, 16),
+                (5, 5),
+                (0, 5),
+            ]),
+            rect(0, 5, 5, 11),
+            rect(0, 11, 5, 16),
+            rect(11, 5, 16, 11),
+            rect(11, 11, 16, 16),
+        ],
+    },
     // 3x2, unequal columns (5/16, 6/16, 5/16) and equal rows.
     Recipe {
         name: "grid-6-3x2",
@@ -513,6 +602,57 @@ static RECIPES: &[Recipe] = &[
             rect(0, 4, 8, 8),
             rect(0, 8, 8, 12),
             rect(0, 12, 8, 16),
+            rect(8, 0, 16, 5),
+            rect(8, 5, 16, 11),
+            rect(8, 11, 16, 16),
+        ],
+    },
+    // Seven as a left slab over a 2x3 block of small panes: `mosaic-9-hero`'s own
+    // arrangement one size down (the nine-cell hero is this with a 2x4 block), and
+    // the poster count 7 needed once the property was measured. `mosaic-7-hero`
+    // carries the name, but its two largest cells tie at 0.1875 and its median cell
+    // is 0.15625 — 1.2x, a three-column mosaic, which is not a poster by the
+    // definition S37 measured and asserts (the largest cell at least twice the
+    // median one). Its name is frozen data and stays; this member is the count's
+    // poster, named by its bands the way a transcribed hero is (`mosaic-9-l4r5`):
+    // one pane down the left, six on the right. The block's rows split 5/16, 6/16,
+    // 5/16, so each small pane is nearly square on the album page, and the layout
+    // measures 0.5 against a median of 0.078125 — 6.4x, a poster by a wide margin.
+    Recipe {
+        name: "mosaic-7-l1r6",
+        version: 1,
+        aspect: R_4_3,
+        grid: 16,
+        slots: &[
+            rect(0, 0, 8, 16),
+            rect(8, 0, 12, 5),
+            rect(12, 0, 16, 5),
+            rect(8, 5, 12, 11),
+            rect(12, 5, 16, 11),
+            rect(8, 11, 12, 16),
+            rect(12, 11, 16, 16),
+        ],
+    },
+    // The portrait page's irregular cell, and the second elbow: the same L as
+    // `mosaic-3-elbow` down the left, with the three small panes stacked in its
+    // bite and three more filling the right column. It came with the same step
+    // because the sketch is what decides whether an L reads at all — at 3:4 the
+    // candidate is drawn 72x96, the band's narrowest box, and the bite is 4/16 of
+    // the width there. The elbow is 0.3125 of the sheet against a median of
+    // 0.15625, exactly 2.0x, so this member satisfies the poster property *and*
+    // carries an irregular cell: the two questions are independent, which is what
+    // measuring rather than naming shows, and `mosaic-3-elbow` is the irregular one
+    // that is not a poster.
+    Recipe {
+        name: "mosaic-7-elbow",
+        version: 1,
+        aspect: R_3_4,
+        grid: 16,
+        slots: &[
+            Shape::Poly(&[(0, 0), (8, 0), (8, 4), (4, 4), (4, 16), (0, 16)]),
+            rect(4, 4, 8, 8),
+            rect(4, 8, 8, 12),
+            rect(4, 12, 8, 16),
             rect(8, 0, 16, 5),
             rect(8, 5, 16, 11),
             rect(8, 11, 16, 16),
