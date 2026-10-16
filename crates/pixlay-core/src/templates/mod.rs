@@ -139,15 +139,19 @@ pub fn with_slots_and_aspect(slots: usize, aspect: f64) -> Vec<Template> {
 }
 
 /// The sheet shapes the library offers at `slots`, in the **documented order**:
-/// ascending by ratio — portrait first, then the square, then the landscape shapes
-/// (S36).
+/// the two the product is mostly used at first, then the rest ascending by ratio
+/// (S36; the leading pair since S38).
 ///
 /// This is the ratio row's content: the band lists exactly these, and a count that
-/// offers one shape offers no choice to make (count 1 is the case), which is why
-/// the caller reads the length and not the row. Ordering by the ratio itself
-/// rather than by recipe order keeps the row's positions stable across counts — the
-/// shapes a count does not have are simply absent from a fixed sequence — and it is
-/// the order `ratio_label` reads in (2:3, 3:4, 1:1, 4:3, 3:2, 16:9).
+/// offers one shape offers no choice to make (count 1 is the case), which is why the
+/// caller reads the length and not the row. Ordering by the ratio itself rather than
+/// by recipe order keeps the row's positions stable across counts — the shapes a
+/// count does not have are simply absent from a fixed sequence — and it is the order
+/// the row reads in: **3:4, 1:1** (the portrait page and the square, which S38 moved
+/// to the front because the human named them the most used), then **2:3, 4:3, 3:2,
+/// 16:9**. S36's whole rule was the ascending order; S38 put the two a person reaches
+/// for first ahead of it, and every count 2 … 9 carries both, so the row starts the
+/// same way wherever a collage stands.
 pub fn ratios_for(slots: usize) -> Vec<f64> {
     let mut ratios: Vec<f64> = Vec::new();
     for entry in frozen::TEMPLATES
@@ -161,7 +165,19 @@ pub fn ratios_for(slots: usize) -> Vec<f64> {
             ratios.push(entry.aspect);
         }
     }
-    ratios.sort_by(f64::total_cmp);
+    // Ranked rather than written down as a list, so a count that lacks either
+    // leading shape simply does not offer it: 3:4 and 1:1 lead (S38), the rest
+    // sorts by its ratio as it did since S36.
+    let rank = |ratio: f64| {
+        if (ratio - 3.0 / 4.0).abs() <= ASPECT_TOLERANCE {
+            0
+        } else if (ratio - 1.0).abs() <= ASPECT_TOLERANCE {
+            1
+        } else {
+            2
+        }
+    };
+    ratios.sort_by(|a, b| rank(*a).cmp(&rank(*b)).then_with(|| f64::total_cmp(a, b)));
     ratios
 }
 

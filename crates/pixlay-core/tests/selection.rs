@@ -368,8 +368,9 @@ fn the_count_rule_picks_the_layout_that_follows_the_document() {
     assert_eq!(named(4, 1.1, None), Some("grid-4-2x2".to_string()));
 
     // 4. Library order breaks a tie the three rungs above leave standing: 0.875 is
-    //    exactly as far from 1:1 as from 3:4 — the two five-slot layouts S35 gave the
-    //    portrait shapes — so the earlier recipe, the square one, is chosen.
+    //    exactly as far from 1:1 as from 3:4 — shapes carrying several five-slot
+    //    members since S38 — so the earliest recipe of the tied ones, the square
+    //    one, is chosen.
     assert_eq!(
         named(5, 0.875, None),
         Some("mosaic-5-t2b3".to_string()),
@@ -420,7 +421,6 @@ fn the_ratio_query_answers_the_shape_asked_for_or_nothing() {
         layout_with_aspect(count, aspect, family).map(|template| template.name)
     };
     let thirds = 4.0 / 3.0;
-    let portrait = 3.0 / 4.0;
 
     // A shape with one member at that count: the library's answer and the count
     // rule's agree, because there is nothing else to pick.
@@ -428,14 +428,20 @@ fn the_ratio_query_answers_the_shape_asked_for_or_nothing() {
     assert_eq!(named(8, thirds, None), Some("mosaic-8-s14".to_string()));
     assert_eq!(named(9, thirds, None), Some("mosaic-9-hero".to_string()));
 
-    // The refusal, which is the whole difference: 3:4 is a shape the library has
-    // (counts 4, 5, 7, 8 and 9) and count 2 has none of it, where the count rule
-    // answers the nearest shape instead. `layout_for` is asserted beside it so the
-    // two answers are visibly different rules rather than one rule twice.
-    assert_eq!(named(2, portrait, None), None, "count 2 has no 3:4 layout");
+    // The refusal, which is the whole difference: 16:9 is a shape the library has
+    // and count 2 has none of it, where the count rule answers the nearest shape
+    // instead. `layout_for` is asserted beside it so the two answers are visibly
+    // different rules rather than one rule twice. (S38 gave count 2 six 3:4 members,
+    // so this contrast used to be that shape and is 16:9 now.)
+    let widescreen = 16.0 / 9.0;
     assert_eq!(
-        layout_for(2, portrait, None).map(|template| template.name),
-        Some("strip-2-1x2".to_string()),
+        named(2, widescreen, None),
+        None,
+        "count 2 has no 16:9 layout"
+    );
+    assert_eq!(
+        layout_for(2, widescreen, None).map(|template| template.name),
+        Some("strip-2-2x1".to_string()),
         "the count rule's nearest-shape answer, which this query must not give"
     );
     // 16:9 is absent at counts 1 and 2, 3:2 at 1, 3, 4, 7 and 9: the query refuses
@@ -467,11 +473,12 @@ fn the_ratio_query_answers_the_shape_asked_for_or_nothing() {
         Some("mosaic-8-s14".to_string())
     );
 
-    // Where a count carries two layouts of one shape (count 4's square pair, and
+    // Where a count carries several layouts of one shape (count 4's square pair, and
     // since S37 five more: 2/4:3, 3/4:3, 5/1:1, 7/4:3 and 7/3:4), the
     // family is the tie-break `layout_for` uses, and library order is what is left
-    // when the family has no member of that shape either. Count 4's two 1:1 layouts
-    // are both grids, so both rows answer the earlier recipe.
+    // when the family has no member of that shape either. Count 4's square layouts
+    // were two grids until S38 gave it three mosaics as well, so the family rung is
+    // now visible at this count: each kind answers its own earliest recipe.
     assert_eq!(named(4, 1.0, None), Some("grid-4-2x2".to_string()));
     assert_eq!(
         named(4, 1.0, Some(Family::Grid)),
@@ -479,8 +486,8 @@ fn the_ratio_query_answers_the_shape_asked_for_or_nothing() {
     );
     assert_eq!(
         named(4, 1.0, Some(Family::Mosaic)),
-        Some("grid-4-2x2".to_string()),
-        "no 1:1 mosaic exists at four cells, so library order decides"
+        Some("mosaic-4-t1b3-1x1".to_string()),
+        "the earliest 1:1 mosaic, which S38 added"
     );
 
     // The family preference is honoured wherever the count *can* honour it — the

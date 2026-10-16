@@ -12,6 +12,19 @@ All notable changes to Pixlay are documented in this file. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **The portrait and square sets.** Every photo count from two to nine now carries a whole set of layouts
+  at **3:4** and at **1:1** — the two shapes a phone produces: the equal and unequal pairs, the band
+  splits, the strips, the brick (running-bond) pairs, the three-band layouts and the two nine-grids — 73
+  new members (38 + 35), the library at **115 templates / 586 slots**. A member of a set is named after its
+  sheet (`strip-2-1x2-3x4`, `mosaic-2-hero-top-1x1`); nothing that shipped before moved.
+
+### Changed
+
+- **The ratio row leads with 3:4 and 1:1**, then the rest ascending (2:3, 4:3, 3:2, 16:9): the two shapes
+  most collages are made at are the first two buttons at every count 2 … 9.
+
 ## [0.2.0] - 2026-10-16
 
 ### Added

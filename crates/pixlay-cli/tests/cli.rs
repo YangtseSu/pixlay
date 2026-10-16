@@ -3842,12 +3842,11 @@ fn edit_switches_the_sheet_shape_the_ratio_row_chooses() {
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     assert_eq!(field(&output, "template"), landing.name);
 
-    // A shape the count has **no** member of refuses: exit 2 (the request is valid
-    // but the library cannot answer it), stdout empty, nothing written, and the
-    // message names the count and the ratio. Two cells carry no 3:4 — and the count
-    // rule would have answered the nearest shape, which is exactly what this query
-    // must not do.
-    let bad = dir.join("bad.pixlay");
+    // A shape the count gained in S38 lands like any other: two cells carried no 3:4
+    // before the portrait set and now carry six, and the landing is the core query's
+    // answer again — read, not written down.
+    let portrait = layout_with_aspect(2, 3.0 / 4.0, None).expect("two cells, 3:4");
+    let tall = dir.join("tall.pixlay");
     let output = run(&[
         "edit",
         "--project",
@@ -3855,21 +3854,24 @@ fn edit_switches_the_sheet_shape_the_ratio_row_chooses() {
         "--aspect",
         "3:4",
         "--out",
-        bad.to_str().expect("utf-8"),
+        tall.to_str().expect("utf-8"),
     ]);
-    assert_eq!(code(&output), 2, "{}", stderr(&output));
-    assert!(stdout(&output).is_empty(), "the refusal wrote to stdout");
-    assert!(!bad.exists(), "the refusal wrote a file");
-    for wanted in ["2-cell", "3:4"] {
-        assert!(
-            stderr(&output).contains(wanted),
-            "the refusal does not name {wanted}: {}",
-            stderr(&output)
-        );
-    }
-    eprintln!("the refusal: {}", stderr(&output).trim());
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "template"), portrait.name);
+    assert_eq!(field(&output, "aspect"), "3:4");
+    let after = CollageDoc::load(&tall).expect("loads");
+    assert_eq!(after.template.name, portrait.name);
+    assert_eq!(
+        after.cells, before.cells,
+        "a shape change keeps every surviving cell whole"
+    );
 
-    // Same for a shape outside the count's set but inside the library's.
+    // A shape the count has **no** member of refuses: exit 2 (the request is valid
+    // but the library cannot answer it), stdout empty, nothing written, and the
+    // message names the count and the ratio. Two cells carry no 16:9 — and the count
+    // rule would have answered the nearest shape (3:2), which is exactly what this
+    // query must not do.
+    let bad = dir.join("bad.pixlay");
     let output = run(&[
         "edit",
         "--project",
@@ -3880,7 +3882,16 @@ fn edit_switches_the_sheet_shape_the_ratio_row_chooses() {
         bad.to_str().expect("utf-8"),
     ]);
     assert_eq!(code(&output), 2, "{}", stderr(&output));
-    assert!(!bad.exists());
+    assert!(stdout(&output).is_empty(), "the refusal wrote to stdout");
+    assert!(!bad.exists(), "the refusal wrote a file");
+    for wanted in ["2-cell", "16:9"] {
+        assert!(
+            stderr(&output).contains(wanted),
+            "the refusal does not name {wanted}: {}",
+            stderr(&output)
+        );
+    }
+    eprintln!("the refusal: {}", stderr(&output).trim());
 
     // The switch is one edit with the framing flags, and the framing is fitted
     // against the document the switch produced — the order `--template` already has.

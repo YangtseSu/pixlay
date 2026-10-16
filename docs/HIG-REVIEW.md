@@ -214,6 +214,19 @@ the canvas is **content** and the interface is **styling**, and the two must not
      at the band's grid, that either is distinguishable from its rectangular neighbour, or that a poster
      reads as a poster. The basis, the legibility risk it leaves open and the trigger to reopen it are
      `docs/steps/S37-arrangement-depth-done.md`'s ruling block;
+   - **the portrait and square sets (S38)**: every count 2 … 9 now offers a whole set of arrangements at
+     3:4 and at 1:1, and the row leads with those two shapes — this is whether **the sets read as sets**:
+     does one shape's strip read as *the arrangements of that shape* rather than as a pile (the count 2
+     square and the count 7 portrait page hold **seven and eight** candidates, so the band's scroller is
+     what a person swipes), does the row's leading pair read as "the usual ones" rather than as "the only
+     ones", and are the near twins distinguishable in a sketch — an equal pair against a hero pair
+     (`strip-2-1x2-3x4`'s two halves against `mosaic-2-hero-top-3x4`'s 11/5), a plain pair against the
+     brick whose lower row mirrors it (`mosaic-4-brick-3x4`), and a nine-grid against its wide-middle twin
+     (`grid-9-3x3-wide-middle-3x4`, one lattice step wider and taller in the middle — 8 px at the band's
+     own grid). The L/T members S37 added stay (ruled 2026-10-17; `docs/ROADMAP.md`). The machine-checkable
+     half is `crates/pixlay/tests/layout.rs` as above — the band's own pixels against
+     `pixlay-render render --sketch` at `candidate_grid(aspect)`, RMSE 0 — and **the human walks it**: this
+     item is S38's open gate; its step file is `docs/steps/S38-portrait-and-square-sets-doing.md`;
    - the floating buttons: do they land where the hand expects, and does the frame look right at both ends of its radius range;
    - the dialogs: does the frame's group read as the three things the document holds — with its live rows
      making the canvas redraw behind it — and (S25's own Human line, item 10 below) does the app's one dialog

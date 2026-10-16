@@ -997,7 +997,11 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
         templates::ratios_for(2),
         "the row lists the two-cell count's shapes"
     );
-    assert_eq!(gallery.ratios().len(), 4, "which is four of them");
+    assert_eq!(
+        gallery.ratios().len(),
+        5,
+        "which is five of them: 3:4 and 1:1 lead, then 2:3, 4:3, 3:2 (S38)"
+    );
     assert!(gallery.ratios_visible(), "so the row is drawn");
     assert_eq!(
         gallery.selected_ratio(),
@@ -1341,24 +1345,18 @@ fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
     probe_window.close();
     manager.set_color_scheme(adw::ColorScheme::ForceDark);
 
-    // ---- the depth of kind (S37): a poster at every count, irregular cells ----
-    // S37's five members are the library's first poster at two cells and at seven,
-    // and the first irregular cells beyond the smoke template's own L. Each is
-    // walked the way the library's earlier candidates were — the band's own pixels
-    // against `render --sketch` at the band's grid, RMSE 0 — on a document of that
-    // member's own count and shape, which is the only document whose strip holds it;
-    // and the band as the window draws it is written out, because whether an L or a
-    // T reads at 128x96, and whether a poster reads as one, is the Human line's
-    // question and not a machine's.
+    // ---- every member of the library, one document each ----------------------
+    // S37 walked its five new members this way; S38 put 73 more in the library, at
+    // two cells through nine and at two shapes, so the walk is the **whole library**
+    // now: each member gets a document of its own count and shape — the only
+    // document whose strip holds it — and the band's own pixels are compared with
+    // `render --sketch` at the band's grid, RMSE 0. The band as the window draws it
+    // is written out per member, because the S38 sets' question — do a set's
+    // arrangements read as arrangements at 128x96, and are the near twins
+    // distinguishable — is the Human line's and not a machine's.
     let style = gallery.sketch_style();
-    for name in [
-        "mosaic-2-hero",
-        "mosaic-3-elbow",
-        "mosaic-5-tee",
-        "mosaic-7-l1r6",
-        "mosaic-7-elbow",
-    ] {
-        let template = templates::get(name).unwrap_or_else(|| panic!("template {name}"));
+    for template in templates::all() {
+        let name = template.name.as_str();
         let grid = templates::candidate_grid(template.aspect);
         window.open_document(pixlay_core::CollageDoc::new(template.clone()));
         settle(&window);

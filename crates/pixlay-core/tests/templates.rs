@@ -750,18 +750,33 @@ fn the_library_carries_irregular_cells_across_several_counts() {
 
 #[test]
 fn the_ratio_row_lists_each_counts_own_shapes_in_order() {
-    // S36's row, as a query: the shapes a count offers, ascending, one entry per
-    // shape, and each entry with at least one layout behind it — a row that offered
-    // a shape the strip cannot fill would be a button that switches to nowhere (the
-    // strip is `with_slots_and_aspect`, the same shape's members). The row is what a
-    // person picks first, so this is the band's own coverage rule beside S35's.
+    // The row, as a query: the shapes a count offers, in the documented order, one
+    // entry per shape, and each entry with at least one layout behind it — a row that
+    // offered a shape the strip cannot fill would be a button that switches to nowhere
+    // (the strip is `with_slots_and_aspect`, the same shape's members). The row is what
+    // a person picks first, so this is the band's own coverage rule beside S35's. The
+    // order itself moved once: S36's was ascending, and S38 put the two most-used
+    // shapes in front of it.
     let ratio_is = |one: f64, other: f64| (one - other).abs() <= ASPECT_TOLERANCE;
     for count in MIN_SLOTS..=MAX_PHOTOS {
         let row = templates::ratios_for(count);
         assert!(!row.is_empty(), "{count} cells offer no shape at all");
-        assert!(
-            row.windows(2).all(|pair| pair[0] < pair[1]),
-            "{count} cells' row is not ascending: {row:?}"
+        // S38's documented order: the portrait page (3:4) then the square (1:1), and
+        // the rest ascending, so the row is a fixed sequence with the shapes a count
+        // lacks simply absent.
+        let portrait = 3.0 / 4.0;
+        let mut documented = vec![portrait, 1.0];
+        documented.retain(|wanted| row.iter().any(|offered| ratio_is(*wanted, *offered)));
+        let mut rest: Vec<f64> = row
+            .iter()
+            .copied()
+            .filter(|offered| !documented.iter().any(|wanted| ratio_is(*wanted, *offered)))
+            .collect();
+        rest.sort_by(f64::total_cmp);
+        documented.extend(rest);
+        assert_eq!(
+            row, documented,
+            "{count} cells' row is not the documented order"
         );
         // One entry per shape: the library's members of that count, deduped.
         let mut expected: Vec<f64> = templates_under_test()
@@ -771,8 +786,10 @@ fn the_ratio_row_lists_each_counts_own_shapes_in_order() {
             .collect();
         expected.sort_by(f64::total_cmp);
         expected.dedup();
-        assert_eq!(row.len(), expected.len(), "{count} cells: {row:?}");
-        for (offered, wanted) in row.iter().zip(&expected) {
+        let mut sorted_row = row.clone();
+        sorted_row.sort_by(f64::total_cmp);
+        assert_eq!(sorted_row.len(), expected.len(), "{count} cells: {row:?}");
+        for (offered, wanted) in sorted_row.iter().zip(&expected) {
             assert!(ratio_is(*offered, *wanted), "{count} cells: {row:?}");
         }
         // Every shape the row offers has a layout behind it, and every one of those

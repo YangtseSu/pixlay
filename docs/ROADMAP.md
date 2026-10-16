@@ -19,20 +19,24 @@ the assistant's suggestion, recorded for a decision nobody has made yet.
 
 ## More layouts in the library
 
-**Status: S35, S36 and S37 landed and passed (2026-10-16) — S37's on a waiver: its sketch walk was ruled
-passed without being walked, so the look it asks about stands unjudged
-(`docs/steps/S37-arrangement-depth-done.md`)** — *asked for* (2026-09-27, extended 2026-10-08): the shipped library
+**Status: S35, S36, S37 and S38 landed (2026-10-16, 2026-10-17) — S37's on a waiver: its sketch walk was
+ruled passed without being walked, so the look it asks about stands unjudged
+(`docs/steps/S37-arrangement-depth-done.md`); S38's band walk is its open gate
+(`docs/steps/S38-portrait-and-square-sets-doing.md`)** — *asked for* (2026-09-27, extended 2026-10-08): the shipped library
 should offer more layouts, and the references the human named organize theirs by category rather than as a
-flat list. The plan's first three steps are **S35, S36 and S37** under [`docs/steps/`](steps/); this
+flat list. The plan's first four steps are **S35 … S38** under [`docs/steps/`](steps/); this
 section holds the research they rest on and the directions they leave alone.
 
-- **What it holds today** (`pixlay-render templates --json`, 2026-10-16, after S37): **42 templates, 224
+- **What it holds today** (`pixlay-render templates --json`, 2026-10-17, after S38): **115 templates, 586
   slots** over cell counts 1 … 9 — one layout at count 1 (`grid-1-1x1`, which is `DEFAULT_TEMPLATE`), then
-  five, five, five, six, five, six, five and four — over six aspects: **4:3** (12), **1:1** (10), **16:9**
-  (7), **3:4** (6), **3:2** (4), **2:3** (3) — with a **poster** at every count 2 … 9 and an **irregular
-  cell** at counts 3, 5, 7 and 8. A two-to-four-photo collage, which is what the main path mostly is, picks
-  from four to six candidates, and every count carries the album page, the square and a portrait shape —
-  the four-ratio floor S35's exit asserts (`docs/CONTRACT.md` §3).
+  seventeen, sixteen, fifteen, fourteen, sixteen, eighteen, eleven and seven — over six aspects: **3:4**
+  (44), **1:1** (45), **4:3** (12), **16:9** (7), **3:2** (4), **2:3** (3) — with a **poster** at every
+  count 2 … 9 and an **irregular cell** at counts 3, 5, 7 and 8. S38's **portrait and square sets** are
+  why: every count 2 … 9 carries a whole set of arrangements at 3:4 and at 1:1 — the two shapes a phone
+  produces — so the ratio row leads with those two (`templates::ratios_for`) and a shape a count lacks is
+  the exception rather than the rule. One shape's strip now holds up to **eight** candidates (count 7 at
+  3:4, twice S37's largest cell), the four-ratio floor S35's exit asserts still holds (`docs/CONTRACT.md`
+  §3), and the row's leading order is S38's.
 - **The measured defect S35 closed** (measured 2026-10-08, closed 2026-10-16): the window
   opens on `grid-1-1x1` (4:3), **count 2 was the only count with no 4:3 layout**, and so the first added
   photo took the sheet to 3:2 (`strip-2-2x1`) and the second to 16:9 (`strip-3-3x1`), where the rest of
@@ -106,11 +110,22 @@ section holds the research they rest on and the directions they leave alone.
      at count 5 and an L at count 7. The step's whole measurement, and the reason the census is asserted
      through the property rather than through the `-hero` name, is `docs/CONTRACT.md` §3's "two kinds of
      depth" and §8's "S37".
+  4. **The portrait and square sets** (S38, 2026-10-17) — **landed, its gate open**: the human's list asked
+     for one set per sheet shape at every count at **3:4** and **1:1**, and 73 members joined (38 + 35) so
+     the two most-used shapes have every arrangement a two-to-nine-photo collage asks for — the equal and
+     unequal pairs, the band splits, the strips, the bricks, the three-band layouts and the two nine-grids.
+     A member of a set carries its sheet as a suffix (`strip-2-1x2-3x4`, `mosaic-2-hero-top-1x1`), and the
+     ratio row now leads with 3:4 then 1:1, the rest ascending. Nothing left the library: the human
+     withdrew the first message's request to cut the L/T-cell layouts (below). The numbers are
+     `docs/CONTRACT.md` §3 and §8's "S38".
 - **Not adopted, so a later session does not re-litigate**: Google's themed categories (style, above);
-  category tabs in general — a count × ratio cell holds **one or two** candidates (S37 leaves the library
-  with six such cells: 2/4:3, 3/4:3, 4/1:1, 5/1:1, 7/4:3 and 7/3:4, and the strip shows one shape at a
-  time, so the set a person picks from is at most two), and the threshold for
-  revisiting is a cell above **six** candidates or the day template packs and user templates land; a
+  category tabs in general — **S38 crossed the threshold this bullet recorded**: a count × ratio cell now
+  holds up to **eight** candidates (2/1:1, 4/1:1 and 7/1:1 at seven, **7/3:4 at eight**), the strip
+  scrolls horizontally, and the revisit (tabs, or a curated "Featured" row) waits for a person to say the
+  strip is hard to scan; **the L/T-cell layouts stay** (ruled 2026-10-17, human: the first message of S38
+  asked for the four concave members to be cut and the human withdrew it — "不想删，都别删了。留着吧" —
+  so `mosaic-3-elbow`, `mosaic-5-tee`, `mosaic-7-elbow` and `mosaic-8-s14` are geometry the product
+  offers, and this question is closed); the
   "Featured" ordering (library order is deterministic and a person scanning sketches does not need
   curation at these set sizes); the 9:16 and 4:5 ratios (the same cheap recipe work the day someone asks).
   **`mosaic-7-hero`'s name** is the one piece of the library the measurement found wanting and did not fix:
