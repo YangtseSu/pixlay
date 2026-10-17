@@ -79,6 +79,9 @@ cores from this day alone (10:29:57, 10:40:43, 11:02:00, 13:07:12), and every on
    construction, and a test that forgets the binding fails `-D warnings` rather than flaking.
    The export worker keeps no handle, deliberately (`export.rs`'s comment): its progress and its toast
    are its own "it is done", and the decode worker is the one measured here.
+   The `#[must_use]` half was checked by un-binding one test again: `cargo clippy -p pixlay
+   --all-targets -- -D warnings` refuses it — “unused `support::Harness` that must be used,
+   crates/pixlay/tests/kept.rs:63” — so the rule is a build failure and not a note.
 
 ## Machine-checkable exit
 
@@ -90,6 +93,10 @@ cores from this day alone (10:29:57, 10:40:43, 11:02:00, 13:07:12), and every on
   120 of them). As a cross-check, `ss -x -p -a` sampled **928** times through one full run:
   `gnome-shell` is the only process ever named on the session's `wayland-0` socket, and no
   process of the suite appears at all.
+- **The session's own window list is not readable here**, so "no window of ours in it" is measured
+  through what a window needs to exist rather than by reading the list:
+  `org.gnome.Shell.Introspect.GetWindows` answers `AccessDenied` (「GetWindows is not allowed」) on this
+  machine, while a client window requires a connection to the session's socket — and there is none.
 - **The entry is green, and the crash is gone.** `cargo test -p pixlay` three times in a row,
   plain: **21 targets, 0 failures** each (443.0 s / 441.2 s / 440.2 s of test time), and
   **no core dump after 13:07:12** — the four that exist today were all taken before the fix,
