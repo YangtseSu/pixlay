@@ -234,9 +234,10 @@ the canvas is **content** and the interface is **styling**, and the two must not
      is the **2:3** split; `mosaic-7-elbow` is last in its cell; count 9 gained the **5-and-4** bands; the
      nine-grid gained an **even** member (43/42/43 of a 128 lattice); and the 1→2 growth now lands on the
      **3:4** portrait page (`DEFAULT_TEMPLATE`). **S39's band walk — the six-sheet row and the ordering —
-     is the open gate**, and it folds the re-check of those six in; the findings' record and the shapes are
-     `docs/steps/S38-portrait-and-square-sets-doing.md` and
-     `docs/steps/S39-every-sheet-gets-its-set-doing.md`;
+     was taken on 2026-10-17 and ruled passed, the six re-checked inside it** (the human: 「看过了」), so the
+     question above is judged and this item is closed; the findings' record and the shapes are
+     `docs/steps/S38-portrait-and-square-sets-done.md` and
+     `docs/steps/S39-every-sheet-gets-its-set-done.md`;
    - the floating buttons: do they land where the hand expects, and does the frame look right at both ends of its radius range;
    - the dialogs: does the frame's group read as the three things the document holds — with its live rows
      making the canvas redraw behind it — and (S25's own Human line, item 10 below) does the app's one dialog

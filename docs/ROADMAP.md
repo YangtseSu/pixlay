@@ -19,10 +19,11 @@ the assistant's suggestion, recorded for a decision nobody has made yet.
 
 ## More layouts in the library
 
-**Status: S35 … S39 landed (2026-10-16, 2026-10-17) — S37's on a waiver: its sketch walk was
+**Status: S35 … S39 landed and passed (2026-10-16, 2026-10-17) — S37's on a waiver: its sketch walk was
 ruled passed without being walked, so the look it asks about stands unjudged
-(`docs/steps/S37-arrangement-depth-done.md`); S38's six findings are built and S39 is doing, its band walk the open gate
-(`docs/steps/S39-every-sheet-gets-its-set-doing.md`)** — *asked for* (2026-09-27, extended 2026-10-08): the shipped library
+(`docs/steps/S37-arrangement-depth-done.md`); S38's six findings were built and its gate rode S39's walk,
+both ruled passed 2026-10-17 (`docs/steps/S38-portrait-and-square-sets-done.md`,
+`docs/steps/S39-every-sheet-gets-its-set-done.md`)** — *asked for* (2026-09-27, extended 2026-10-08): the shipped library
 should offer more layouts, and the references the human named organize theirs by category rather than as a
 flat list. The plan's first five steps are **S35 … S39** under [`docs/steps/`](steps/); this
 section holds the research they rest on and the directions they leave alone.
@@ -111,7 +112,8 @@ section holds the research they rest on and the directions they leave alone.
      at count 5 and an L at count 7. The step's whole measurement, and the reason the census is asserted
      through the property rather than through the `-hero` name, is `docs/CONTRACT.md` §3's "two kinds of
      depth" and §8's "S37".
-  4. **The portrait and square sets** (S38, 2026-10-17) — **landed, its gate open**: the human's list asked
+  4. **The portrait and square sets** (S38, 2026-10-17) — **landed and passed 2026-10-17** (its gate rode S39's
+     walk, below): the human's list asked
      for one set per sheet shape at every count at **3:4** and **1:1**, and 73 members joined (38 + 35) so
      the two most-used shapes have every arrangement a two-to-nine-photo collage asks for — the equal and
      unequal pairs, the band splits, the strips, the bricks, the three-band layouts and the two nine-grids.
@@ -124,7 +126,8 @@ section holds the research they rest on and the directions they leave alone.
      of a 128 lattice — exact thirds are not dyadic); and the one-slot **3:4 and 1:1 sheets** at count 1,
      with `DEFAULT_TEMPLATE` moved to the 3:4 one so the 1→2 growth lands on the portrait page. The numbers
      are `docs/CONTRACT.md` §3 and §8's "S38".
-  5. **Every sheet gets its set** (S39, 2026-10-17) — **landed, its gate open**: the human ruled "全都配齐。
+  5. **Every sheet gets its set** (S39, 2026-10-17) — **landed and passed 2026-10-17** (the human walked the
+     six-sheet row and re-checked S38's six in it: 「看过了」, then the push): the human ruled "全都配齐。
      调整每个里面的顺序，所有的比例内的模板，按照一个顺序来。异形的放到最后" after the thin-sheet question, and
      the four thin sheets (2:3, 3:2, 4:3, 16:9) got the arrangements 3:4 and 1:1 already had — the library is
      **287 templates / 1522 slots**, one arrangement × six sheets, and the generator's data model is the

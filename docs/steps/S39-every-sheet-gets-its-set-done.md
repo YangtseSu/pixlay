@@ -6,10 +6,10 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # S39 · Every sheet gets its set
 
-**Progress**: doing (2026-10-17) — **the work is on disk and the entry is green; the band walk is the gate.**
-The ruling below is built: all six sheets carry the sets, one arrangement order across a count's six cells
-with the irregular ones last, and the library is a matrix. **287 templates / 1522 slots**. **→ next: the
-Human walk (the six-sheet row, the ordering, and S38's six fixes), then the gate's own commit.**
+**Progress**: done and passed (2026-10-17, human) — the walk was taken and ruled: the human said 「看过了」
+and then asked for the push, and the ruling block under `**Result**` carries the words and the basis. The
+library stands at **287 templates / 1522 slots** and every exit is green. **→ next: nothing is scheduled**
+under `docs/steps/`; the library's next directions are `docs/ROADMAP.md`'s.
 
 **Goal**: the human's ruling of 2026-10-17 — "全都配齐。调整每个里面的顺序，所有的比例内的模板，按照一个顺序来。异形的
 放到最后" — made the four thin sheets first-class: **2:3, 3:2, 4:3 and 16:9 get the same arrangements 3:4 and 1:1
@@ -56,7 +56,10 @@ arrangement × six sheets* rather than six near-copies of the same geometry.
   of a count.
 - **"异形的放到最后"** — the concave-cell members go last.
 
-**Human**
+**Human** — **passed** (2026-10-17): the human walked the band with all six sheets' sets in it (and, in the
+same walk, re-checked S38's six findings — the two gates were ruled together) and said 「看过了」, asking for
+the push the same turn. The material is the same `/var/tmp/pixlay-s7/layout-band-<name>.png` set, re-written
+for all 287 members. The two items the walk was asked to judge:
 
 - The band walk over the six sheets: open the window, add photos, click each of the row's six buttons — does
   every sheet read as a set of arrangements, does the strip hold the same sequence whichever sheet is clicked,
@@ -95,3 +98,11 @@ own unreleased members are the only exceptions, and they are recorded above). Th
 `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test` (the GUI suite
 included, **774 s** wall — the band's walk 162.7 s of it, and every member's band picture written to
 `/var/tmp/pixlay-s7/`) and `reuse lint` (**180 files**).
+
+**Ruling (2026-10-17, human) — the gate**: **passed**. The human walked the band with all six sheets' sets in
+it — the six buttons per count, the same sequence whichever sheet is clicked, the irregulars last, and S38's
+six findings re-checked inside the same walk — and said 「看过了」, asking for the push the same turn. The
+three rulings of 2026-10-17 that built this step ("全都配齐", "所有的比例内的模板，按照一个顺序来",
+"异形的放到最后") are what the walk judged and they stand as written. **What this ruling does not say**:
+S37's arrangement-depth item stays **unjudged** (a waiver this walk does not reach); the shape the library
+now has is `docs/CONTRACT.md` §3's order plus §8 "S39"'s numbers, and nothing in it changed at the gate.
