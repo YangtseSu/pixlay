@@ -1374,6 +1374,7 @@ test process does not exit while a worker of its own is drawing**.
 | how wide that window is | the band's batch (every layout with the document's cell count, as sketches, on the same worker) is usually in flight when a test's last statement runs: the join added by the fix waited **2.43 s** at the end of `--test export` |
 | the fix | `WorkerPlan::start` hands back the `JoinHandle`; `decode.rs`'s `Worker` closes the queue and joins on drop; `EditorWindow::stop_decoding` drops the decoder; the harness's `#[must_use]` `Harness` — bound as `let _harness = support::start();` in all **18** GUI tests — stops every window it built as the test returns |
 | the entry | `cargo test -p pixlay` four times in a row (one of them under the `strace` above): **21 targets, 0 failures** each, 440–482 s of test time, and **no core dump after 13:07:12** — the four that exist were all taken before the fix, at about two per full run |
+| the human's watch (2026-10-17) | **「没有弹出」** — the desktop stayed clean through the fixed runs, which is the criterion the step was opened for |
 
 ## 9. The window (S7), and the shell ruling 31 re-cut (S22)
 

@@ -6,12 +6,13 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # S41 · The GUI suite put a dialog on the session's display
 
-**Progress**: **doing** (2026-10-17) — the two causes are named and fixed, and the machine-checkable half of the
-exit is green: the export dialog was the **session's portal**, and the `export` binary's
-SIGSEGV was the test process's **own decoding worker** being killed by `exit()` mid-draw —
-neither of them the compositor the first record suspected. What is left is the human's watch of
-their own desktop through a full `cargo test -p pixlay`. **→ next: the human's 「没有弹出」, then
-this file is renamed `-done.md`.**
+**Progress**: **done and passed** (2026-10-17, human: 「没有弹出」) — the human watched their own desktop
+through the full runs and no window appeared. Both causes are named and fixed: the export dialog was the
+**session's portal** (`GDK_DEBUG=no-portals` on the test child), and the `export` binary's SIGSEGV was the
+test process's **own decoding worker** being killed by `exit()` mid-draw (`WorkerPlan` hands back the thread,
+`decode.rs`'s `Worker` closes the queue and joins, and the harness's `Harness` stops every window it built as
+a test returns). **→ next: S40's own last item** — the human's glance at the turned sheets and the count
+control — which is the only step still open.
 
 **Goal**: no window the GUI suite creates may ever appear on the developer's own desktop. The suite is
 *headless by requirement*: it runs inside a private `mutter --wayland --headless --no-x11 --virtual-monitor
@@ -106,14 +107,26 @@ cores from this day alone (10:29:57, 10:40:43, 11:02:00, 13:07:12), and every on
 
 ## Human
 
-The human watches their own desktop through one full `cargo test -p pixlay` and sees **no window**:
-「没有弹出」. *(Waiting: the runs' own passes are recorded above; this is the one line a session cannot
-write for itself.)*
+**Passed (2026-10-17, human)**: the human watched their own desktop through the full runs and saw **no
+window** — 「没有弹出」. That is the exit's own criterion, and the runs it was watched over are the five
+with the fix in place (13:52–14:35: the `strace`/`dbus-monitor` probe run, three plain ones, and the
+workspace `cargo test`).
+
+## Ruling (2026-10-17, human)
+
+**「没有弹出」 — the step passes.** The suite is headless in the sense this step requires: neither the
+portal's dialog nor any other window of its own reaches the developer's display, and the process no longer
+exits while one of its own workers is drawing. Basis: the measurements above (0 connects to the session's
+socket, 0 `FileChooser` calls on its bus, 928 socket-owner samples naming only `gnome-shell`, and no core
+dump after 13:07:12 across six full runs) together with the human's own watch; the mechanism the first
+record suspected — the compositor's render node and a nine-mutter sequence — is refuted by the four core
+dumps that named the test process's own decoding thread instead.
 
 ## Result
 
 Two environment facts, both measured, both fixed in the suite's own harness: the suite's dialogs used to
 be the **session portal's** windows (they are now its own, `GDK_DEBUG=no-portals`), and its process used
 to exit while its **own decoding worker** was drawing in cairo (the worker is now ended and joined at the
-end of every test). The compositor, the render node and the mutter sequence the first record suspected
-are all refuted by four core dumps.
+end of every test, through `WorkerPlan`'s thread handle and `EditorWindow::stop_decoding`). The
+compositor, the render node and the mutter sequence the first record suspected are all refuted by four
+core dumps, and the human's 「没有弹出」 closes the criterion this file was opened for.
