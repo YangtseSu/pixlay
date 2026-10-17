@@ -176,7 +176,9 @@ edge with nothing cropped, which is what screenshots want.
 
 ## Template editing (custom layouts)
 
-**Status: not scheduled.** *Asked for* (2026-09-25). A layout should be authorable, not only shipped.
+**Status: planned** — `docs/steps/S42-template-recipe-todo.md` takes the first rung (the recipe artifact, its
+loader and its specification); the rungs after it are that file's "After this file" note. *Asked for*
+(2026-09-25): a layout should be authorable, not only shipped.
 
 - **What a template is today.** `Template { name, version, aspect, slots }` with `Slot { outline, area }`
   — a closed polygon in normalized `[0, 1]` coordinates plus its declared area — serde camelCase with
