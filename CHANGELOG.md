@@ -12,17 +12,19 @@ All notable changes to Pixlay are documented in this file. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-17
+
 ### Added
 
 - **Every sheet gets its set.** All six sheet shapes — 1:1, 3:4, 4:3, 2:3, 3:2 and 16:9 — now carry the same
   arrangements (the equal and unequal pairs, the band splits, the strips, the brick pairs, the three-band
   layouts, the nine-grids and the 5-and-4 bands), and every photo count from one to nine offers all six: the
-  library is **287 templates / 1522 slots**, generated from one *arrangement × sheets* matrix rather than one
-  recipe per member. Count 1 carries one sheet per shape, so a single photo can be framed on any of them.
+  collage library is **287 templates / 1522 slots**, generated from one *arrangement × sheets* matrix rather
+  than one recipe per member. Count 1 carries one sheet per shape, so a single photo can be framed on any of
+  them.
 - **One order across a count's six cells**: the user's list first, then the members the list does not name,
   then the irregular (L/T) cells last — so a strip shows the same sequence whichever sheet is clicked, and
   `crates/pixlay-core/tests/templates.rs` asserts it over the whole library.
-
 - **ID photo sheets**: one photo repeated at one of six sizes on a 6-inch (4R) print — 一寸 25×35 mm
   (295×413 px at 300 dpi), 小一寸 22×32, 大一寸 33×48, 二寸 35×49, 大二寸 35×53 and 小二寸 35×45 — with a 2 mm
   white gap between the copies and the count each size fits. **The six are listed smallest photo first**,
@@ -154,7 +156,8 @@ The first release.
   catalogs; an Arch PKGBUILD that wraps it; and a GitHub release carrying the amd64 binaries and
   the `x86_64` package.
 
-[Unreleased]: https://github.com/YangtseSu/pixlay/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/YangtseSu/pixlay/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/YangtseSu/pixlay/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/YangtseSu/pixlay/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/YangtseSu/pixlay/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/YangtseSu/pixlay/compare/v0.1.0...v0.1.1

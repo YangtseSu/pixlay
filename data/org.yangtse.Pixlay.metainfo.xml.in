@@ -44,6 +44,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
   </provides>
   <translation type="gettext">pixlay</translation>
   <releases>
+    <release version="0.3.0" date="2026-10-17"/>
     <release version="0.2.0" date="2026-10-16"/>
     <release version="0.1.2" date="2026-09-27"/>
     <release version="0.1.1" date="2026-09-27"/>
