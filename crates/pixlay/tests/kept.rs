@@ -60,7 +60,7 @@ fn photo_name(cell: &pixlay_core::Cell) -> String {
 
 #[test]
 fn a_layout_change_keeps_the_photos_it_takes_off_the_sheet() {
-    support::start();
+    let _harness = support::start();
     let app = support::app();
     let window = support::window(&app);
     let gallery = window.gallery().expect("the editor has a layout band");

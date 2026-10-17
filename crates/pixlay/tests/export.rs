@@ -25,7 +25,7 @@ use pixlay_imaging::encode::Format;
 
 #[test]
 fn the_export_takes_the_settings_and_refuses_a_source_image_or_a_lying_name() {
-    support::start();
+    let _harness = support::start();
     let app = support::app();
     let window = support::window(&app);
 

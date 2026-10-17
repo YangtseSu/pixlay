@@ -310,6 +310,12 @@ pub fn spawn(
         let outcome = run(&doc, &sources, &settings, &progress);
         report(Event::Finished(outcome));
     })
+    // The thread's handle is dropped, deliberately; the decoding worker is the one S41
+    // measured (`decode.rs`), and its drawing is what runs unprompted. An export is
+    // something the user is watching: the progress bar and the toast are its own "it is
+    // done", and keeping the handle would make closing the window wait out however much
+    // of a large export was left.
+    .map(|_thread| ())
 }
 
 /// What an export reports back.

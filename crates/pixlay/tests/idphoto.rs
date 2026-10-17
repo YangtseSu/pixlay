@@ -72,7 +72,7 @@ fn add_label(window: &pixlay::window::EditorWindow) -> String {
 
 #[test]
 fn an_id_photo_sheet_is_chosen_from_the_ratio_row_at_one_photo() {
-    support::start();
+    let _harness = support::start();
     let app = support::app();
     let window = support::window(&app);
     support::present(&window);

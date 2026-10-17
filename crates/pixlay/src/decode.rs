@@ -106,9 +106,53 @@ pub enum Event {
 
 /// The window's handle on the decoding thread.
 pub struct Decoder {
-    jobs: Sender<Job>,
+    worker: Worker,
     canvas_generation: u64,
     gallery_generation: u64,
+}
+
+/// The decoding worker: the queue the window sends on, and the thread behind it.
+///
+/// **Dropping this ends the worker and waits for it** (S41). Closing the queue is what
+/// ends `work` — its `recv` answers `Err` once the last sender is gone, so it finishes
+/// the job it was on and leaves — and the join is what makes "the worker is done"
+/// observable, which a process's exit needs: measured 2026-10-17, four core dumps in
+/// one day, each of them a GUI test binary's own `pixlay-decode` thread inside
+/// `pixman_fill`'s call through its implementation struct (the layout band's
+/// `sketch_rgb8` is the only cairo work this thread does) while the main thread was
+/// already running `exit()`'s teardown. So the suite ends the window's worker before
+/// its process exits (`tests/support`), and the window's own destruction does the same
+/// through this drop.
+struct Worker {
+    /// The request queue; `None` once this has been ended, so that the drop below can
+    /// close it *before* joining.
+    jobs: Option<Sender<Job>>,
+    /// The thread, when one was started.
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Worker {
+    /// Hands the worker one job.
+    ///
+    /// `Err` is a queue with nothing receiving it — the state a worker that died, or one
+    /// that was ended, leaves behind (S15h, PIX-014).
+    fn send(&self, job: Job) -> Result<(), Down> {
+        match &self.jobs {
+            Some(jobs) => jobs.send(job).map_err(|_| Down::Gone),
+            None => Err(Down::Gone),
+        }
+    }
+}
+
+impl Drop for Worker {
+    fn drop(&mut self) {
+        // The queue first, the thread second: the worker only leaves `recv` once the
+        // last sender is gone, so a join before this would wait for ever.
+        drop(self.jobs.take());
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
 }
 
 /// What the worker is asked for.
@@ -135,9 +179,12 @@ impl Decoder {
     ) -> Result<Self, Down> {
         let (jobs, queue) = mpsc::channel::<Job>();
         let reply = std::sync::Arc::new(reply);
-        plan.start(Kind::Decode, move || work(queue, reply))?;
+        let thread = plan.start(Kind::Decode, move || work(queue, reply))?;
         Ok(Self {
-            jobs,
+            worker: Worker {
+                jobs: Some(jobs),
+                thread,
+            },
             canvas_generation: 0,
             gallery_generation: 0,
         })
@@ -161,10 +208,10 @@ impl Decoder {
             sources,
             grid,
         });
-        self.jobs.send(job).map_err(|_| {
+        if self.worker.send(job).is_err() {
             glib::g_warning!("pixlay", "{}", Kind::reason(Kind::Decode, Down::Gone));
-            Down::Gone
-        })?;
+            return Err(Down::Gone);
+        }
         Ok(self.canvas_generation)
     }
 
@@ -183,10 +230,10 @@ impl Decoder {
             candidates,
             style,
         });
-        self.jobs.send(job).map_err(|_| {
+        if self.worker.send(job).is_err() {
             glib::g_warning!("pixlay", "{}", Kind::reason(Kind::Decode, Down::Gone));
-            Down::Gone
-        })?;
+            return Err(Down::Gone);
+        }
         Ok(self.gallery_generation)
     }
 }

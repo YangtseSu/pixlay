@@ -43,7 +43,7 @@ fn rgb(color: Rgba8) -> String {
 
 #[test]
 fn the_layout_band_offers_every_layout_with_the_photos_own_count() {
-    support::start();
+    let _harness = support::start();
     let app = support::app();
     let window = support::window(&app);
 

@@ -211,7 +211,7 @@ fn po_string(literal: &str) -> String {
 
 #[test]
 fn the_strings_are_extractable_the_catalogs_are_complete_and_the_fallback_is_english() {
-    support::start();
+    let _harness = support::start();
     // The two child halves: a process whose locale is not `C`, because a catalog
     // installed in a locale directory is selection by locale — a property of the
     // process, not of this call.

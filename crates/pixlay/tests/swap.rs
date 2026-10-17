@@ -56,7 +56,7 @@ const RMSE_THRESHOLD: f64 = 6.0;
 
 #[test]
 fn two_cells_swap_whole_by_drag_click_and_keyboard() {
-    support::start();
+    let _harness = support::start();
     let app = support::app();
     let window = support::window(&app);
     window

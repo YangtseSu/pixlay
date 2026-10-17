@@ -33,7 +33,7 @@ use pixlay_imaging::encode::Format;
 
 #[test]
 fn the_main_path_can_be_walked() {
-    support::start();
+    let _harness = support::start();
     let app = support::app();
     let window = support::window(&app);
     let started = Instant::now();

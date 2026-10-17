@@ -1358,6 +1358,22 @@ more copies) and converted to a **1/2560** lattice. Probes and renders are `/var
 | the library | **293 templates / 1580 slots** (S39: 287 / 1522) — the collage queries still answer 287, and `templates::one_photo()` answers six. `frozen.rs` is **174,874 bytes** (S39: 163,116): the six members and the emitter's `ONE_PHOTO` trailer, and every pre-S40 entry byte-identical |
 | the canaries this step moved | the slot count twice (`hit.rs`, `pixlay-imaging/tests/layout.rs`) 1522 → **1580** (the imaging sweep also walks slots rather than cells, so 1522 × 3 framings → 1580 × 3), the lattice 128 → 2560, the emitter fingerprint's cut, `contract.rs`'s slot-count range (10 and 11 refused → 19 and 24; `MAX_TEMPLATE_SLOTS` = 18 legal as a sheet), `pixlay-cli/tests/cli.rs`'s listing and library render, and the sweeps that compare the candidate queries against `templates::all` (`history.rs`, `selection.rs`, three single-template predicates) scoped to the collage library |
 
+### S41 (2026-10-17, this machine) — the GUI suite's windows are its own
+
+Two environment facts about the suite, both found by measurement and both about
+`crates/pixlay/tests/support/mod.rs`: **no dialog of the suite goes to the session's services**, and **the
+test process does not exit while a worker of its own is drawing**.
+
+| Item | Value |
+|---|---|
+| the export dialog on the developer's desktop | `mainpath`'s `win.export` calls `GtkFileDialog::save` (`window.rs`), and GTK 4.24 reached the portal: `dbus-monitor --session "interface='org.freedesktop.portal.FileChooser'"` during that test read one **`SaveFile`** — title `导出拼贴` (`gettext("Export the collage")`), seed `mainpath-framed.jpg`, parent handle `wayland:…` — which `xdg-desktop-portal-gnome` (a session process) drew on the session's compositor. GTK's gate is `gdk_display_should_use_portal (…, "org.freedesktop.portal.FileChooser", 3)` (`gtkfilechoosernativeportal.c`) |
+| the switch | `GTK_USE_PORTAL=0` does **not** turn it off (a `Gtk.FileDialog` probe still sent `SaveFile`); **`GDK_DEBUG=no-portals`** does, and the harness sets it on the test child beside `GTK_IM_MODULE`/`NO_AT_BRIDGE`. A `GtkFileDialog` is then GTK's own `GtkFileChooserDialog`, a window of the test process inside the private mutter |
+| the whole suite, after the fix | `strace -f -e trace=connect … cargo test -p pixlay`: **0** connects to the session's `/run/user/1000/wayland-0` and **63** to the private `wayland-1`; `dbus-monitor` on `/org/freedesktop/portal/desktop` through the same run: **0** `FileChooser` calls (only `portal.Settings` reads); `ss -x -p -a` sampled **928** times through one run: `gnome-shell` is the only process ever named on the session's `wayland-0` socket |
+| the `cargo test` failure at the `export` binary's teardown | **not** the compositor or the GPU: `coredumpctl` holds four SIGSEGV cores from this day (10:29:57, 10:40:43, 11:02:00, 13:07:12), every one of them the `export` test binary's own `pixlay-decode` thread in `decode::work` → `sketch_rgb8` → `cairo_paint` → `pixman_fill`, where the `call *%rax` at pixman `0xf728` (objdump) read a reused implementation struct and jumped into heap memory — while the main thread was inside `exit()` → `_dl_fini` |
+| how wide that window is | the band's batch (every layout with the document's cell count, as sketches, on the same worker) is usually in flight when a test's last statement runs: the join added by the fix waited **2.43 s** at the end of `--test export` |
+| the fix | `WorkerPlan::start` hands back the `JoinHandle`; `decode.rs`'s `Worker` closes the queue and joins on drop; `EditorWindow::stop_decoding` drops the decoder; the harness's `#[must_use]` `Harness` — bound as `let _harness = support::start();` in all **18** GUI tests — stops every window it built as the test returns |
+| the entry | `cargo test -p pixlay` four times in a row (one of them under the `strace` above): **21 targets, 0 failures** each, 440–482 s of test time, and **no core dump after 13:07:12** — the four that exist were all taken before the fix, at about two per full run |
+
 ## 9. The window (S7), and the shell ruling 31 re-cut (S22)
 
 The GUI is the fifth consumer of the same document, and what it adds is interaction. Its

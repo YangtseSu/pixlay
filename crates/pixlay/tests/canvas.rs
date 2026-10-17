@@ -34,7 +34,7 @@ const RMSE_THRESHOLD: f64 = 6.0;
 
 #[test]
 fn the_canvas_draws_what_the_cli_writes() {
-    support::start();
+    let _harness = support::start();
     let app = support::app();
     let window = support::window(&app);
 

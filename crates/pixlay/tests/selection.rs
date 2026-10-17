@@ -52,7 +52,7 @@ const RIGHT: usize = 5;
 
 #[test]
 fn the_selection_mark_is_the_theme_accent() {
-    support::start();
+    let _harness = support::start();
     let app = support::app();
     let window = support::window(&app);
 

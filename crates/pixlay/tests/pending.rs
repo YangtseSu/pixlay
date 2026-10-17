@@ -95,7 +95,7 @@ fn resolved(project: &Path, source: &Path) -> PathBuf {
 
 #[test]
 fn the_pending_edit_and_the_document_survive_every_boundary() {
-    support::start();
+    let _harness = support::start();
     let app = support::app();
     let window = support::window(&app);
     let dir = scratch();

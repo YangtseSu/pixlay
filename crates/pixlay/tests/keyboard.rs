@@ -30,7 +30,7 @@ use pixlay::i18n::{fill, gettext};
 
 #[test]
 fn the_canvas_can_be_walked_with_the_keyboard_alone() {
-    support::start();
+    let _harness = support::start();
     let app = support::app();
     let window = support::window(&app);
     window

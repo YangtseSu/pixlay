@@ -28,7 +28,7 @@ use pixlay_imaging::encode::Format;
 
 #[test]
 fn the_settings_surface_remembers_the_export_and_the_cli_ignores_the_file() {
-    support::start();
+    let _harness = support::start();
     let app = support::app();
     let window = support::window(&app);
 

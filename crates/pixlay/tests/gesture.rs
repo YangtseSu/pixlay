@@ -49,7 +49,7 @@ const GRID: i32 = 400;
 
 #[test]
 fn a_live_gesture_refines_into_the_resting_grids_own_pixels() {
-    support::start();
+    let _harness = support::start();
     let app = support::app();
     let window = support::window(&app);
 

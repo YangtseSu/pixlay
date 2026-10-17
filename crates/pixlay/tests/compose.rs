@@ -42,7 +42,7 @@ const MIN_TARGET: i32 = 24;
 
 #[test]
 fn the_compose_stage_edits_the_selected_cell_and_the_document() {
-    support::start();
+    let _harness = support::start();
     let app = support::app();
     let window = support::window(&app);
     window

@@ -41,7 +41,7 @@ use pixlay_core::{CollageDoc, CropTransform, Project};
 
 #[test]
 fn what_the_canvas_takes_from_outside() {
-    support::start();
+    let _harness = support::start();
     let app = support::app();
     let window = support::window(&app);
     window

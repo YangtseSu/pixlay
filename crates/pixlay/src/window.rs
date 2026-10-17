@@ -2855,6 +2855,23 @@ impl EditorWindow {
 
     // ---- decoding ---------------------------------------------------------
 
+    /// Ends the background decoding worker and waits for the job it was on (S41).
+    ///
+    /// **The window has no canvas left to draw for**, so the worker goes with it — and
+    /// it goes *finished*, not killed: the decoder's own `Drop` closes the queue and
+    /// joins the thread. Why that matters is measured: a process that exits while this
+    /// worker is inside cairo crashes in cairo (four core dumps on 2026-10-17, each a
+    /// GUI test binary's `pixlay-decode` thread in `pixman_fill` while the main thread
+    /// was already in `exit()`). The GUI suite calls this when a test ends
+    /// (`tests/support`'s window guard), and a window that is destroyed does it through
+    /// the same drop.
+    ///
+    /// A request after this reports the decoder as stopped, which is what a window with
+    /// no worker says — this is the end of the window's work, not a pause.
+    pub fn stop_decoding(&self) {
+        *self.imp().decoder.borrow_mut() = None;
+    }
+
     /// The grid the widget would like; asks for a decode when it changed.
     pub fn request_grid_for(&self, width: i32, height: i32) {
         let aspect = self.document().template.aspect;

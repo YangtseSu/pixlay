@@ -87,7 +87,12 @@ const CONFIG: &str = "PIXLAY_TEST_CONFIG";
 /// Every test that calls this runs on exactly one thread — libtest's worker for the single
 /// `#[test]` its binary has — because GTK has to be initialised and used from one thread,
 /// and a second test in the same binary would be a second thread.
-pub fn start() {
+///
+/// **It hands back the test's own [`Harness`]**, which the test binds
+/// (`let _harness = support::start();`): libtest calls `exit` the moment the test function
+/// returns, and the end of that function is therefore the last moment the windows'
+/// background workers can be stopped and waited for.
+pub fn start() -> Harness {
     // **A configuration directory of our own, not the session's** (S25). The app keeps
     // its export settings at `$XDG_CONFIG_HOME/pixlay/settings.json` (ruling 39), so a
     // GUI test that exports would otherwise write into the developer's own
@@ -139,6 +144,22 @@ pub fn start() {
             // and the accessibility bridge has no bus either.
             .env("GTK_IM_MODULE", "gtk-im-context-simple")
             .env("NO_AT_BRIDGE", "1")
+            // **No portal, because a portal dialog is not this process's window.** A
+            // `GtkFileDialog` does not draw in the calling process when the
+            // `org.freedesktop.portal.FileChooser` portal answers on the session bus: GTK
+            // asks the portal instead, and the *portal's* own process — a session service
+            // that is not this test — puts the dialog on the developer's desktop,
+            // parented to nothing it can resolve. Measured 2026-10-17: `mainpath` (whose
+            // own display is the private one) put
+            // `org.freedesktop.portal.FileChooser.SaveFile`, title `导出拼贴`
+            // (`window.rs`'s `gettext("Export the collage")`) and the seed
+            // `mainpath-framed.jpg`, on `dbus-monitor --session`; the human saw that
+            // window. It is invisible to a headless run and it steals focus from whoever
+            // is working, so the suite states the one environment where the dialog is its
+            // own: GDK's `no-portals` debug flag. `GTK_USE_PORTAL=0` does **not** do it
+            // (measured the same day, a `Gtk.FileDialog` probe: still `SaveFile`), and
+            // `GDK_DEBUG=portal` is not a flag GDK accepts at all.
+            .env("GDK_DEBUG", "no-portals")
             .status();
         match status {
             Ok(status) if status.success() => std::process::exit(0),
@@ -176,6 +197,41 @@ pub fn start() {
     if gtk::init().is_err() {
         panic!("the GUI tests need a display, and the private mutter did not provide one");
     }
+    // The test's own hold on the harness, which the end of its function is
+    // ([`Harness`]): the windows' workers must be done before the process exits.
+    Harness
+}
+
+/// The test's harness, held for the length of its `#[test]` function: dropping it ends
+/// every window's background work (S41).
+///
+/// **The process must not exit while the decoding worker is drawing**, and libtest
+/// returns from the test function and *then* calls `exit` — so the end of that function is
+/// the last moment the worker can be told to stop, and this guard is at it (it is
+/// declared first, so it drops last). Measured 2026-10-17: four core dumps in one day,
+/// every one of them a GUI test binary's own `pixlay-decode` thread inside
+/// `cairo_paint` → `pixman_fill` — the call through pixman's implementation struct had
+/// jumped into reused heap memory — while the main thread was already inside `exit()`'s
+/// teardown. What ends it is `EditorWindow::stop_decoding`, which joins; the windows come
+/// from [`window`], [`second_window`] and [`window_with_workers`], each of which records
+/// itself here.
+///
+/// `#[must_use]`, because a test that ran the harness without binding this would not
+/// fail — it would *flake* (the crash needs a frame being drawn at the wrong moment), and
+/// that is exactly what the measurement above cost.
+#[must_use = "bind it — `let _harness = support::start();` — or the windows' workers may still be running when the process exits"]
+pub struct Harness;
+
+impl Drop for Harness {
+    fn drop(&mut self) {
+        WINDOWS.with_borrow_mut(|windows| {
+            for weak in windows.drain(..) {
+                if let Some(window) = weak.upgrade() {
+                    window.stop_decoding();
+                }
+            }
+        });
+    }
 }
 
 /// The application, built the way `main` builds it but without an event loop of
@@ -203,6 +259,11 @@ thread_local! {
     /// them would let a wait on one window be satisfied by the other's frames.
     static FRAMES: std::cell::RefCell<std::collections::HashMap<usize, u64>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
+
+    /// The windows this harness handed out, weakly, in the order it built them —
+    /// what [`Harness`]'s drop ends the background work of.
+    static WINDOWS: std::cell::RefCell<Vec<glib::WeakRef<EditorWindow>>> =
+        const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// Counts frames for the waits: installs the tick callback that keeps `window`'s frame
@@ -247,6 +308,7 @@ pub fn second_window(app: &adw::Application) -> EditorWindow {
     watch(&window);
     window.present();
     window.pump(Duration::from_millis(300));
+    keep(&window);
     window
 }
 
@@ -262,6 +324,7 @@ pub fn window(app: &adw::Application) -> EditorWindow {
     let window = pixlay::app::active_window(app).expect("activating built a window");
     watch(&window);
     present(&window);
+    keep(&window);
     window
 }
 
@@ -275,7 +338,17 @@ pub fn window_with_workers(
     let window = EditorWindow::with_workers(app, workers);
     watch(&window);
     present(&window);
+    keep(&window);
     window
+}
+
+/// Remembers `window` weakly, so [`Harness`]'s drop can end its background work.
+///
+/// Weakly, because the registry is not something a window should be kept alive by: a
+/// window the test's own drop already destroyed has joined its worker through its own
+/// drop (`decode.rs`'s `Worker`), and `upgrade` then answers `None`.
+fn keep(window: &EditorWindow) {
+    WINDOWS.with_borrow_mut(|windows| windows.push(window.downgrade()));
 }
 
 /// Presents `window` and waits for the compositor to map it.

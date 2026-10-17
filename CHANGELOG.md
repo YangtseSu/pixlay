@@ -12,6 +12,14 @@ All notable changes to Pixlay are documented in this file. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A window's decoding worker is now ended and waited for when the window is destroyed**, instead of being
+  left running until the process exits. A worker still drawing as the process left `main` crashed inside cairo
+  (measured 2026-10-17 in the GUI suite: four core dumps in one day, every one of them the test binary's own
+  `pixlay-decode` thread in `cairo_paint` → `pixman_fill` while the main thread was already in `exit()`); a
+  quit that lands mid-decode now waits for that decode to finish.
+
 ## [0.3.0] - 2026-10-17
 
 ### Added

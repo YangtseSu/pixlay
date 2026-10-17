@@ -35,7 +35,7 @@ fn canvas_pending(window: &pixlay::EditorWindow) -> bool {
 
 #[test]
 fn a_worker_that_is_down_reports_and_clears_its_pending_state() {
-    support::start();
+    let _harness = support::start();
     let app = support::app();
 
     // ---- the decoding thread cannot be started ---------------------------

@@ -53,7 +53,7 @@ const REQUIRED: [&str; 10] = [
 
 #[test]
 fn the_interface_meets_the_machine_checkable_hig() {
-    support::start();
+    let _harness = support::start();
     // The language checks need a locale of their own, which can only be set before
     // the process starts, so they run in children that re-enter this test with
     // `PIXLAY_LANGUAGE_CHILD` set and do nothing else.

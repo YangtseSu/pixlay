@@ -11,7 +11,7 @@ render/CLI/window paths and the tests are in; the walk passed on the six upright
 the four rulings that followed it are built (the count control stays, each size is printed at the orientation that
 holds more copies, the size names are the library's own, and no export preset is added). **→ next: a glance at the
 turned sheets and the count control** (the same walk, two items), then `-done`. (The GUI-suite session window the
-same runs exposed is a separate record: `S41-session-window-during-gui-tests-todo.md`.)
+same runs exposed is a separate record: `S41-session-window-during-gui-tests-doing.md`.)
 
 **Goal**: a sheet of one photo repeated at one of the six ID-photo sizes on a 6-inch (4R, 4×6 inch) print — an
 *ID photo sheet* — reachable from the layout band's ratio row at one photo, with no second entry point and no

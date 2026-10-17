@@ -81,7 +81,7 @@ struct Switch {
 
 #[test]
 fn a_layout_switch_is_measured_from_the_click() {
-    support::start();
+    let _harness = support::start();
     let app = support::app();
     let first = support::window(&app);
     first

@@ -95,7 +95,16 @@ pub struct Workers {
 }
 
 impl WorkerPlan {
-    /// Runs `body` on a thread of its own, or does not, per the plan.
+    /// Runs `body` on a thread of its own, or does not, per the plan, and hands back the
+    /// thread it made (`None` when the plan made none) so its owner can wait for it.
+    ///
+    /// **The handle is what lets "the worker is gone" mean "gone after the job in
+    /// flight", not "killed at process exit"** (S41). Doing cairo work on a thread that
+    /// is still running when the process leaves `main` crashes inside cairo: measured
+    /// 2026-10-17, four core dumps in one day, each of them a GUI test binary's own
+    /// `pixlay-decode` thread inside `pixman_fill`'s call through its implementation
+    /// struct while the main thread was already in `exit()`'s teardown. So the owner
+    /// keeps the handle and joins (`decode.rs`).
     ///
     /// `body` owns the worker's request receiver, so `Vanish` leaving it unrun is
     /// exactly "the other end of the channel is gone": the caller's first `send`
@@ -104,12 +113,12 @@ impl WorkerPlan {
         self,
         kind: Kind,
         body: impl FnOnce() + Send + 'static,
-    ) -> Result<(), Down> {
+    ) -> Result<Option<std::thread::JoinHandle<()>>, Down> {
         match self {
             Self::Run => std::thread::Builder::new()
                 .name(format!("pixlay-{}", thread_name(kind)))
                 .spawn(body)
-                .map(|_handle| ())
+                .map(Some)
                 .map_err(|error| {
                     glib::g_warning!("pixlay", "{}: {error}", Kind::reason(kind, Down::Start));
                     Down::Start
@@ -117,7 +126,7 @@ impl WorkerPlan {
             Self::Fail => Err(Down::Start),
             Self::Vanish => {
                 drop(body);
-                Ok(())
+                Ok(None)
             }
         }
     }
