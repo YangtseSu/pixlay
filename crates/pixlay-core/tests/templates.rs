@@ -1151,13 +1151,15 @@ const ID_GAP_MM: f64 = 2.0;
 /// 小二寸 8 against 6; 大二寸 4 either way).
 type IdSheet = (&'static str, (f64, f64), (usize, usize), bool);
 
+/// **Smallest photo first** (the human's ruling of 2026-10-17), which is the library's
+/// order and therefore the strip's.
 const ID_SHEETS: &[IdSheet] = &[
-    ("id-1cun-12-2x3", (25.0, 35.0), (3, 4), false),
     ("id-1cun-small-18-3x2", (22.0, 32.0), (6, 3), true),
+    ("id-1cun-12-2x3", (25.0, 35.0), (3, 4), false),
+    ("id-2cun-small-8-3x2", (35.0, 45.0), (4, 2), true),
     ("id-1cun-large-8-3x2", (33.0, 48.0), (4, 2), true),
     ("id-2cun-8-3x2", (35.0, 49.0), (4, 2), true),
     ("id-2cun-large-4-2x3", (35.0, 53.0), (2, 2), false),
-    ("id-2cun-small-8-3x2", (35.0, 45.0), (4, 2), true),
 ];
 
 /// The four edges of a slot's own extent, `(x0, y0, x1, y1)`.

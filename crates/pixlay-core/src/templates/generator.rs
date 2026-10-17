@@ -173,6 +173,13 @@ const ID_GAP_MM: f64 = 2.0;
 /// research found (35 x 53 mm, the 413 x 626 px one the sources call the standard
 /// 二寸), so the set carries both of the sizes a studio is asked for. The counts are
 /// the largest that fit, because the sheet is printed borderless (the same ruling).
+/// The six sizes, **smallest photo first** (the human's ruling of 2026-10-17:
+/// 「按照照片尺寸大小排序，从小到大」). The order is the library's and therefore the
+/// strip's: 小一寸 22x32, 一寸 25x35, 小二寸 35x45, 大一寸 33x48, 二寸 35x49 and
+/// 大二寸 35x53 — the height is strictly ascending (32, 35, 45, 48, 49, 53) and so is
+/// the area (704, 875, 1575, 1584, 1715, 1855 mm²), so the two readings of "size"
+/// agree and neither has to be chosen.
+///
 /// Each size is authored on **the page orientation that holds more copies** (measured
 /// at the 2 mm gap): 一寸 12 upright against 10 turned; 小一寸 18 against 16; 大一寸,
 /// 二寸 and 小二寸 8 against 6; and 大二寸 4 either way, where the upright 2x2 is the
@@ -182,13 +189,18 @@ const ID_GAP_MM: f64 = 2.0;
 /// cell in any case (二寸's widest is 6.4 mm against the 48 mm a turned cell needs).
 static ID_SHEETS: &[IdSheet] = &[
     IdSheet {
+        size: "1cun-small",
+        cell_mm: (22.0, 32.0),
+        landscape: true,
+    },
+    IdSheet {
         size: "1cun",
         cell_mm: (25.0, 35.0),
         landscape: false,
     },
     IdSheet {
-        size: "1cun-small",
-        cell_mm: (22.0, 32.0),
+        size: "2cun-small",
+        cell_mm: (35.0, 45.0),
         landscape: true,
     },
     IdSheet {
@@ -205,11 +217,6 @@ static ID_SHEETS: &[IdSheet] = &[
         size: "2cun-large",
         cell_mm: (35.0, 53.0),
         landscape: false,
-    },
-    IdSheet {
-        size: "2cun-small",
-        cell_mm: (35.0, 45.0),
-        landscape: true,
     },
 ];
 

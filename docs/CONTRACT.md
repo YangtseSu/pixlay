@@ -301,14 +301,19 @@ limit that is not in this table is a contract gap.
   (`CollageDoc::cell_index`). One photo, one framing, one undo step — which is also why a sheet is all-upright or
   all-turned and never mixed: every copy shares the one crop, so it shares the one orientation, and the leftovers on
   these pages are too narrow for a turned cell in any case.
+  The six are listed **smallest photo first** (the human's ruling of 2026-10-17), which is the library's
+  order and therefore the strip's: the height is strictly ascending (32, 35, 45, 48, 49, 53 mm) and so is the
+  area (704, 875, 1575, 1584, 1715, 1855 mm²), so the two readings of "size" agree. The band's row member
+  switches to 一寸, the size most forms ask for, which is therefore the *second* member.
+
   | member | cell (mm) | px at 300 dpi | slot | copies | page |
   |---|---|---|---|---|---|
-  | `id-1cun-12-2x3` | 25×35 | 295×413 | 25.003×35.004 | 3×4 | upright (12; the turned page holds 10) |
   | `id-1cun-small-18-3x2` | 22×32 | 260×378 | 22.027×31.988 | 6×3 | turned (18; upright 16) |
+  | `id-1cun-12-2x3` | 25×35 | 295×413 | 25.003×35.004 | 3×4 | upright (12; the turned page holds 10) |
+  | `id-2cun-small-8-3x2` | 35×45 | 413×531 | 35.004×45.006 | 4×2 | turned (8; upright 6) |
   | `id-1cun-large-8-3x2` | 33×48 | 390×567 | 32.980×47.982 | 4×2 | turned (8; upright 6) |
   | `id-2cun-8-3x2` | 35×49 | 413×579 | 35.004×49.014 | 4×2 | turned (8; upright 6) |
   | `id-2cun-large-4-2x3` | 35×53 | 413×626 | 35.004×52.983 | 2×2 | upright (4 either way) |
-  | `id-2cun-small-8-3x2` | 35×45 | 413×531 | 35.004×45.006 | 4×2 | turned (8; upright 6) |
 
   The millimetres are the **recipe's** provenance (`templates/generator.rs`'s `ID_SHEET_MM`, `ID_GAP_MM`, `ID_SHEETS`) and
   the tests' measuring stick; the document, the CLI and the export keep the format's rule — ratios, and one long-edge pixel
@@ -1346,10 +1351,10 @@ more copies) and converted to a **1/2560** lattice. Probes and renders are `/var
 | Item | Value |
 |---|---|
 | the lattice | 1/2560 of the page's width — **0.0397 mm** across and 0.0595 mm down — which lands every cell within **0.03 mm** of its nominal millimetre size (the collage arrangements stay on 1/128, and the test's lattice check follows to the finer one with a 1e-9 round-off, a *representation* bound rather than a geometric tolerance) |
-| the six sheets | 一寸 `id-1cun-12-2x3` **25.003 × 35.004 mm**, 295.3 × 413.4 px, 3×4 = 12 (upright page) · 小一寸 `id-1cun-small-18-3x2` 22.027 × 31.988, 260.2 × 377.8, 6×3 = 18 (turned) · 大一寸 `id-1cun-large-8-3x2` 32.980 × 47.982, 389.5 × 566.7, 4×2 = 8 (turned) · 二寸 `id-2cun-8-3x2` 35.004 × 49.014, 413.4 × 578.9, 4×2 = 8 (turned) · 大二寸 `id-2cun-large-4-2x3` 35.004 × 52.983, 413.4 × 625.8, 2×2 = 4 (upright) · 小二寸 `id-2cun-small-8-3x2` 35.004 × 45.006, 413.4 × 531.6, 4×2 = 8 (turned). (px at the 1800-px long edge a 300 dpi 6-inch print asks for — **a floor, not a requirement**: any larger long edge at the same ratio prints the same photo, which is why nothing here needs a preset; the nominal column is 295×413 / 260×378 / 390×567 / 413×579 / 413×626 / 413×531) |
-| a rendered sheet, measured | `render --long-edge 1800` writes **1200 × 1800** for the two upright pages and **1800 × 1200** for the four turned ones; the runs of non-white pixels read **296 × 414–415** for the 一寸 sheet against its nominal 295 × 413, **261–262 × 378–379** for 小一寸, **390–391 × 568** for 大一寸, **414–415 × 580** for 二寸, **415 × 627** for 大二寸 and **414–415 × 533** for 小二寸 — the run includes the antialiased edge, so the geometry is the nominal within a pixel or two; the gap between two copies reads **22–23 px** against the 2 mm the recipe names (23.6 px) |
+| the six sheets, smallest first | 小一寸 `id-1cun-small-18-3x2` **22.027 × 31.988 mm**, 260.2 × 377.8 px, 6×3 = 18 (turned page) · 一寸 `id-1cun-12-2x3` 25.003 × 35.004, 295.3 × 413.4, 3×4 = 12 (upright) · 小二寸 `id-2cun-small-8-3x2` 35.004 × 45.006, 413.4 × 531.6, 4×2 = 8 (turned) · 大一寸 `id-1cun-large-8-3x2` 32.980 × 47.982, 389.5 × 566.7, 4×2 = 8 (turned) · 二寸 `id-2cun-8-3x2` 35.004 × 49.014, 413.4 × 578.9, 4×2 = 8 (turned) · 大二寸 `id-2cun-large-4-2x3` 35.004 × 52.983, 413.4 × 625.8, 2×2 = 4 (upright). (px at the 1800-px long edge a 300 dpi 6-inch print asks for — **a floor, not a requirement**: any larger long edge at the same ratio prints the same photo, which is why nothing here needs a preset; the nominal column is 260×378 / 295×413 / 413×531 / 390×567 / 413×579 / 413×626) |
+| a rendered sheet, measured | `render --long-edge 1800` writes **1200 × 1800** for the two upright pages and **1800 × 1200** for the four turned ones; the runs of non-white pixels read **261–262 × 378–379** for 小一寸 against its nominal 260 × 378, **296 × 414–415** for 一寸, **414–415 × 533** for 小二寸, **390–391 × 568** for 大一寸, **414–415 × 580** for 二寸 and **415 × 627** for 大二寸 — the run includes the antialiased edge, so the geometry is the nominal within a pixel or two; the gap between two copies reads **22–23 px** against the 2 mm the recipe names (23.6 px) |
 | what a sheet costs | the six above, one photo each, `render --long-edge 1800 --stats`, release: **42–48 ms** wall, peak `VmHWM` **31–33 MB**, **273–735 KB** PNG. The content is the fixture's flat square, so the byte counts are a fixture fact rather than a photo one |
-| the probe | `probe --long-edge 1800` on every sheet: `status = ok`, `occupied` = the sheet's copies (12 / 18 / 8 / 8 / 4 / 8), **0 background pixels off the backdrop**, `out_w` × `out_h` = 1200×1800 or 1800×1200, and the document's own `cells = 1`, `photos = 1` beside them |
+| the probe | `probe --long-edge 1800` on every sheet: `status = ok`, `occupied` = the sheet's copies (18 / 12 / 8 / 8 / 8 / 4), **0 background pixels off the backdrop**, `out_w` × `out_h` = 1200×1800 or 1800×1200, and the document's own `cells = 1`, `photos = 1` beside them |
 | the library | **293 templates / 1580 slots** (S39: 287 / 1522) — the collage queries still answer 287, and `templates::one_photo()` answers six. `frozen.rs` is **174,874 bytes** (S39: 163,116): the six members and the emitter's `ONE_PHOTO` trailer, and every pre-S40 entry byte-identical |
 | the canaries this step moved | the slot count twice (`hit.rs`, `pixlay-imaging/tests/layout.rs`) 1522 → **1580** (the imaging sweep also walks slots rather than cells, so 1522 × 3 framings → 1580 × 3), the lattice 128 → 2560, the emitter fingerprint's cut, `contract.rs`'s slot-count range (10 and 11 refused → 19 and 24; `MAX_TEMPLATE_SLOTS` = 18 legal as a sheet), `pixlay-cli/tests/cli.rs`'s listing and library render, and the sweeps that compare the candidate queries against `templates::all` (`history.rs`, `selection.rs`, three single-template predicates) scoped to the collage library |
 

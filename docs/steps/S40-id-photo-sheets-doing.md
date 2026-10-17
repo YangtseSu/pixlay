@@ -30,6 +30,10 @@ are rulings this step now carries:
 - 「在ID card模式，左边的选择图片张数的组件，不要去掉。加1,就自动退出，到别的模式」 — the count control stays
   on a sheet, and its `+` leaves the sheet for the count rule's two-cell collage (`AddCell` on a `onePhoto`
   document is no longer refused); `−` is the one-cell floor.
+- 「按照照片尺寸大小排序，从小到大。」 — the six sizes are listed **smallest photo first**: 小一寸 22×32,
+  一寸 25×35, 小二寸 35×45, 大一寸 33×48, 二寸 35×49, 大二寸 35×53 (the height is strictly ascending, and so
+  is the area, so the two readings of "size" agree). That is the library's order and the strip's; the row's
+  member still switches to **一寸**, the size most forms ask for, which is the second member.
 - 「那几张大的图片，有点浪费纸张。这个是以打印为目标的，所以横向纵向无所谓……你看是怎么排版能多打印几张。」 —
   each size is authored on the page orientation that holds more copies: 一寸 12 upright, 小一寸 **18**, and
   大一寸, 二寸 and 小二寸 **8** each turned, 大二寸 4 either way — **58 copies** against the upright page's 50.
@@ -54,12 +58,14 @@ are rulings this step now carries:
 
   | member | cell (mm) | tile at 1800 px | copies | page |
   |---|---|---|---|---|
-  | `id-1cun-12-2x3` | 25.003×35.004 | 296×414–415 | 3×4 = 12 | 1200×1800 |
   | `id-1cun-small-18-3x2` | 22.027×31.988 | 261–262×378–379 | 6×3 = 18 | 1800×1200 |
+  | `id-1cun-12-2x3` | 25.003×35.004 | 296×414–415 | 3×4 = 12 | 1200×1800 |
+  | `id-2cun-small-8-3x2` | 35.004×45.006 | 414–415×533 | 4×2 = 8 | 1800×1200 |
   | `id-1cun-large-8-3x2` | 32.980×47.982 | 390–391×568 | 4×2 = 8 | 1800×1200 |
   | `id-2cun-8-3x2` | 35.004×49.014 | 414–415×580 | 4×2 = 8 | 1800×1200 |
   | `id-2cun-large-4-2x3` | 35.004×52.983 | 415×627 | 2×2 = 4 | 1200×1800 |
-  | `id-2cun-small-8-3x2` | 35.004×45.006 | 414–415×533 | 4×2 = 8 | 1800×1200 |
+
+  (The table is the library's order: smallest photo first, per the ruling below.)
 
   The gap reads 22–23 px against the recipe's 2 mm (23.6 px), and every sheet's run is 42–48 ms and 31–33 MB with
   `probe` reporting `status = ok`, 0 background pixels off the backdrop and `occupied` = its copies.

@@ -36,13 +36,15 @@ const SHEET: &str = "id-1cun-12-2x3";
 
 /// The six sheets, in the library's order — the strip's own order (S40's ruling: the
 /// human's list, 大二寸 after 二寸, 小二寸 last).
+/// The six sheets, in the library's order — **smallest photo first** (the human's ruling of
+/// 2026-10-17) — which is the strip's order.
 const SHEETS: [&str; 6] = [
-    "id-1cun-12-2x3",
     "id-1cun-small-18-3x2",
+    "id-1cun-12-2x3",
+    "id-2cun-small-8-3x2",
     "id-1cun-large-8-3x2",
     "id-2cun-8-3x2",
     "id-2cun-large-4-2x3",
-    "id-2cun-small-8-3x2",
 ];
 
 /// How many of the canvas's empty-cell `+` buttons the sheet shows.

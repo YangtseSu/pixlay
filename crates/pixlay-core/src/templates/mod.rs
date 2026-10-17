@@ -124,8 +124,13 @@ fn is_collage(entry: &frozen::Frozen) -> bool {
     !frozen::ONE_PHOTO.contains(&entry.name)
 }
 
-/// The ID photo sheet the band's row member switches to (S40): the first of them in
-/// the library's order, which is 一寸 — the size almost every form asks for.
+/// The ID photo sheet the band's row member switches to (S40): **一寸**, the size almost
+/// every form asks for.
+///
+/// Not the first in the library's order, which is 小一寸 — the six are sorted by the
+/// photo's size (the human's ruling of 2026-10-17) and the default is the most-used
+/// size rather than the smallest. The strip marks whichever is current, so the two
+/// need not agree.
 pub const ID_PHOTO_DEFAULT: &str = "id-1cun-12-2x3";
 
 /// The ID photo sheets this build ships, in the library's order (S40).

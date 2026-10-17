@@ -1839,12 +1839,12 @@ fn templates_lists_the_library_and_filters_by_aspect() {
     assert_eq!(
         sheets,
         vec![
-            "id-1cun-12-2x3",
             "id-1cun-small-18-3x2",
+            "id-1cun-12-2x3",
+            "id-2cun-small-8-3x2",
             "id-1cun-large-8-3x2",
             "id-2cun-8-3x2",
             "id-2cun-large-4-2x3",
-            "id-2cun-small-8-3x2",
         ],
         "the ID photo sheets, in the library's order"
     );
