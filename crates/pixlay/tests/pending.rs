@@ -71,9 +71,10 @@ fn project_in(dir: &Path) -> PathBuf {
         std::fs::copy(support::photo(from), project_dir.join("photos").join(to))
             .expect("the fixture photo is copied");
     }
+    // A collage layout (S40): a sheet's two slots would be two copies of one cell.
     let template = templates::all()
         .into_iter()
-        .find(|template| template.slots.len() == 2)
+        .find(|template| template.slots.len() == 2 && !template.one_photo)
         .expect("the library has a two-slot layout");
     let mut doc = CollageDoc::new(template);
     doc.cells[0].source = Some(PathBuf::from("photos/a.png"));

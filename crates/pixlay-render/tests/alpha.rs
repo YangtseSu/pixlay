@@ -20,6 +20,7 @@ fn single_slot_doc() -> CollageDoc {
         name: "one".to_string(),
         version: 1,
         aspect: 1.0,
+        one_photo: false,
         slots: vec![Slot { area: 1.0, outline }],
     };
     let mut doc = CollageDoc::new(template);

@@ -31,6 +31,7 @@ fn two_slot_template() -> Template {
         name: "test-2".to_string(),
         version: 1,
         aspect: 4.0 / 3.0,
+        one_photo: false,
         slots: vec![
             pixlay_core::Slot {
                 outline: left,
@@ -245,10 +246,13 @@ fn unknown_json_fields_are_rejected() {
 
 #[test]
 fn slot_count_outside_the_limits_is_rejected() {
-    // 10 is in the list because it *was* legal: `strip-10-10x1` shipped ten slots
-    // until S12c removed it together with the product's above-nine range. 1 left
-    // the list in S19, when it became the floor (ruling 34).
-    for count in [0, 10, 11] {
+    // 10 was in this list because it *was* the ceiling: `strip-10-10x1` shipped ten
+    // slots until S12c removed it together with the product's above-nine range. 1 left
+    // the list in S19, when it became the floor (ruling 34), and 10 came back in S40:
+    // a template's slot count is the **copies** it prints (the ID photo sheets carry
+    // twelve to sixteen of one photo), so the bound a template answers to is
+    // `MAX_TEMPLATE_SLOTS` rather than the collage's nine.
+    for count in [0, 17, 24] {
         let mut doc = two_slot_doc();
         doc.template.slots = (0..count)
             .map(|_| pixlay_core::Slot {
@@ -259,10 +263,34 @@ fn slot_count_outside_the_limits_is_rejected() {
         doc.cells = vec![Cell::default(); count];
         let err = doc.validate().expect_err("slot count must be limited");
         assert!(
-            err.to_string().contains("slots; the limit is 1..=9"),
+            err.to_string().contains("slots; the limit is 1..=16"),
             "{count}: {err}"
         );
     }
+    // The ceiling itself is legal, which is what makes it a ceiling rather than a
+    // refusal one short of the largest sheet: a 16-slot **ID photo sheet** — one cell,
+    // sixteen copies of one photo — validates at exactly `MAX_TEMPLATE_SLOTS`. (A
+    // *collage* document of sixteen cells is refused, which is `MAX_SLOTS`' own test.)
+    let mut doc = two_slot_doc();
+    doc.template.one_photo = true;
+    doc.template.slots = (0..pixlay_core::MAX_TEMPLATE_SLOTS)
+        .map(|index| {
+            let (column, row) = (index % 4, index / 4);
+            let cell = 0.25;
+            let (x0, y0) = (column as f64 * cell + 0.01, row as f64 * cell + 0.01);
+            let outline = Polygon::rect(x0, y0, x0 + cell - 0.02, y0 + cell - 0.02);
+            pixlay_core::Slot {
+                area: outline.area(),
+                outline,
+            }
+        })
+        .collect();
+    doc.cells = vec![Cell::default()];
+    assert!(
+        doc.validate().is_ok(),
+        "a 16-slot sheet is inside the limit: {:?}",
+        doc.validate().err()
+    );
 }
 
 #[test]

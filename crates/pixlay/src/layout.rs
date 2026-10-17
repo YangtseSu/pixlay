@@ -107,6 +107,10 @@ pub struct Gallery {
     minus: gtk::Button,
     plus: gtk::Button,
     count: gtk::Label,
+    /// `− / N photos / +` as one widget, so the whole control can be hidden (S40):
+    /// an ID photo sheet holds one photo, so its cell count is not a number to
+    /// edit, and there is no third meaning for `+` there.
+    control: gtk::Box,
     /// The ratio row: the sheet shapes the current count offers, as a radio set
     /// (S36). Hidden while the count offers one shape, because there is nothing to
     /// choose.
@@ -116,6 +120,9 @@ pub struct Gallery {
     /// The ratios the row is currently built for, so a rebuild happens when the
     /// count changes the set — and not on every refresh.
     ratio_order: RefCell<Vec<f64>>,
+    /// The row's ID photo member (S40): built while the document holds one cell,
+    /// where the row is where a sheet of one photo is chosen.
+    id_button: RefCell<Option<gtk::ToggleButton>>,
     /// The strip's scroller, whose vertical policy is `Never`.
     strip: gtk::ScrolledWindow,
     /// The candidate cells, in library order.
@@ -222,9 +229,11 @@ impl Gallery {
             minus,
             plus,
             count,
+            control,
             ratios,
             ratio_buttons: RefCell::new(Vec::new()),
             ratio_order: RefCell::new(Vec::new()),
+            id_button: RefCell::new(None),
             strip,
             cells,
             placeholder,
@@ -322,6 +331,16 @@ impl Gallery {
     }
 
     /// The row's button for `aspect`, which is how the tests choose a shape.
+    /// The row's ID photo member, when the document holds one cell (S40).
+    pub fn id_photo_button(&self) -> Option<gtk::ToggleButton> {
+        self.id_button.borrow().clone()
+    }
+
+    /// Whether the count control is shown: it is not, on a sheet (S40).
+    pub fn count_visible(&self) -> bool {
+        self.control.is_visible()
+    }
+
     pub fn ratio_button(&self, aspect: f64) -> Option<gtk::ToggleButton> {
         self.ratio_buttons
             .borrow()
@@ -440,6 +459,15 @@ impl Gallery {
     /// a control that cannot do anything (count 1 is the case, and it is the count
     /// the window opens on).
     pub fn show_ratios(&self, window: &EditorWindow, ratios: &[f64], current: f64) {
+        // The row's ID photo member exists while the document holds **one cell**
+        // (S40, the human's ruling of 2026-10-17: "在1张照片的时候，在16:9的右边增加
+        // 证件照"): at one photo the sheet's kind is a real choice, and at two or more
+        // there is no third meaning for it.
+        let doc = window.document();
+        // One cell **and nothing kept**: the sheet has one cell to hold a photo in, so a
+        // document that keeps a cell off the sheet is one the core refuses the switch for
+        // (`OnePhotoLayout`) — and a control that would be refused should not be there.
+        let with_id = doc.cells.len() == 1 && doc.kept.is_empty();
         let changed = {
             let order = self.ratio_order.borrow();
             order.len() != ratios.len()
@@ -447,12 +475,14 @@ impl Gallery {
                     .iter()
                     .zip(ratios)
                     .any(|(now, wanted)| (now - wanted).abs() > ASPECT_TOLERANCE)
+                || self.id_button.borrow().is_some() != with_id
         };
         if changed {
             self.syncing.set(true);
             while let Some(child) = self.ratios.first_child() {
                 self.ratios.remove(&child);
             }
+            self.id_button.replace(None);
             let mut buttons = self.ratio_buttons.borrow_mut();
             buttons.clear();
             let mut first: Option<gtk::ToggleButton> = None;
@@ -465,22 +495,38 @@ impl Gallery {
                 buttons.push((aspect, button));
             }
             drop(buttons);
+            if with_id {
+                let button = id_photo_cell(window, first.as_ref(), &self.syncing);
+                self.ratios.append(&button);
+                self.id_button.replace(Some(button));
+            }
             self.ratio_order.replace(ratios.to_vec());
-            self.ratios.set_visible(ratios.len() > 1);
+            self.ratios.set_visible(ratios.len() > 1 || with_id);
             self.syncing.set(false);
         }
-        self.highlight_ratios(current);
+        self.highlight_ratios(current, doc.template.one_photo);
     }
 
     /// Marks the ratio the document is on, and only it — the row's half of
     /// [`highlight`](Self::highlight), written from the same document on the same
     /// refreshes.
-    pub fn highlight_ratios(&self, current: f64) {
+    pub fn highlight_ratios(&self, current: f64, one_photo: bool) {
         self.syncing.set(true);
         for (ratio, button) in self.ratio_buttons.borrow().iter() {
-            let picked = (ratio - current).abs() <= ASPECT_TOLERANCE;
+            // An ID photo sheet's shape is 2:3 like three other members' (S40), so
+            // the document's *kind* decides which member is marked: `one_photo` takes
+            // the ID member, and the shape buttons stay clear.
+            let picked = !one_photo && (ratio - current).abs() <= ASPECT_TOLERANCE;
             button.set_active(picked);
             if picked {
+                button.add_css_class("picked");
+            } else {
+                button.remove_css_class("picked");
+            }
+        }
+        if let Some(button) = self.id_button.borrow().as_ref() {
+            button.set_active(one_photo);
+            if one_photo {
                 button.add_css_class("picked");
             } else {
                 button.remove_css_class("picked");
@@ -510,6 +556,12 @@ impl Gallery {
     /// `AddCell` itself refuses: a growth with a kept cell waiting places that cell
     /// instead of appending one, so it never takes the document past the ceiling
     /// (and `cells` can only be `MAX_PHOTOS` with nothing kept).
+    /// Shows or hides the count control (S40): an ID photo sheet holds one photo, so
+    /// its cell count is not a number to edit and the control has nothing to say.
+    pub fn show_count(&self, visible: bool) {
+        self.control.set_visible(visible);
+    }
+
     pub fn update_control(&self, cells: usize, kept: Option<&str>) {
         self.count.set_label(&cells.to_string());
         self.minus.set_sensitive(cells > MIN_PHOTOS);
@@ -586,10 +638,28 @@ fn candidate_cell(
     let button = gtk::ToggleButton::builder().child(&image).build();
     button.set_widget_name(template);
     button.add_css_class("layout-cell");
-    a11y::label(
-        &button,
-        &fill(gettext("Layout {} of {}"), &[position.0, position.1]),
-    );
+    // An ID photo sheet's size is **copy** (S40, the human's ruling: "不知道哪个是具体
+    // 是多大的尺寸……显示『一寸』"): the sketch of a 25x35 cell and a 35x49 one are
+    // pixels apart at this box, so the size name is the tooltip and the front of the
+    // accessible name. A collage candidate keeps the positional name ruling 40 gave
+    // it, because there the name is machine identity rather than something a person
+    // reads.
+    match photo_size_name(template) {
+        Some(size) => {
+            button.set_tooltip_text(Some(&size));
+            a11y::label(
+                &button,
+                &fill(
+                    gettext("{}: layout {} of {}"),
+                    &[size, position.0.to_string(), position.1.to_string()],
+                ),
+            );
+        }
+        None => a11y::label(
+            &button,
+            &fill(gettext("Layout {} of {}"), &[position.0, position.1]),
+        ),
+    }
     // Owned, because the handler outlives this call.
     let template = template.to_string();
     button.connect_toggled(glib::clone!(
@@ -667,12 +737,77 @@ fn ratio_cell(
                 // member takes the row to no active member at all, which is the
                 // case this answers.
                 if gallery.selected_ratio().is_none() {
-                    gallery.highlight_ratios(window.document().template.aspect);
+                    let doc = window.document();
+                    gallery.highlight_ratios(doc.template.aspect, doc.template.one_photo);
                 }
             }
         }
     ));
     button
+}
+
+/// The row's ID photo member (S40): the last choice, after the six shapes.
+///
+/// A `GtkToggleButton` carrying its own label, grouped with the shape buttons so the
+/// row stays one radio set. Its label is copy rather than a ratio, so it is the one
+/// member of the row that goes through `gettext`; GTK announces a text button by its
+/// text (`crate::a11y`'s own doctrine), so no accessible name is set by hand.
+fn id_photo_cell(
+    window: &EditorWindow,
+    group: Option<&gtk::ToggleButton>,
+    syncing: &Rc<Cell<bool>>,
+) -> gtk::ToggleButton {
+    let button = gtk::ToggleButton::with_label(&gettext("ID photo"));
+    button.add_css_class("ratio-cell");
+    button.set_widget_name("id-photo");
+    if let Some(group) = group {
+        button.set_group(Some(group));
+    }
+    button.connect_toggled(glib::clone!(
+        #[weak]
+        window,
+        #[strong]
+        syncing,
+        move |button| {
+            if syncing.get() {
+                // The row writing its own mark is not a user choosing the sheet.
+                return;
+            }
+            if button.is_active() {
+                window.select_id_photo();
+            } else if let Some(gallery) = window.gallery() {
+                // The same rule as a shape's own cell: a row that went blank is
+                // written back from the document, and GTK's group bookkeeping (which
+                // deactivates the old member before emitting the new one's) is why the
+                // mark is only restored when nothing at all is active.
+                if gallery.selected_ratio().is_none() {
+                    let doc = window.document();
+                    gallery.highlight_ratios(doc.template.aspect, doc.template.one_photo);
+                }
+            }
+        }
+    ));
+    button
+}
+
+/// The size name an ID photo sheet's member is read by, or `None` for a collage
+/// layout (S40).
+///
+/// A `match` on the member's name, like `app.rs::shortcut_title`: the strings are
+/// user-visible, and keeping the `gettext` call beside the name is what lets
+/// `xgettext` see it (`po/`). The names are the machine identity; the words are copy
+/// — a Chinese studio reads 一寸 / 小一寸 / 大一寸 / 二寸 / 大二寸 / 小二寸, and the
+/// source language is English (`AGENTS.md`, "Language conventions").
+pub fn photo_size_name(template: &str) -> Option<String> {
+    match template {
+        "id-1cun-12-2x3" => Some(gettext("1-inch photo")),
+        "id-1cun-small-16-2x3" => Some(gettext("Small 1-inch photo")),
+        "id-1cun-large-6-2x3" => Some(gettext("Large 1-inch photo")),
+        "id-2cun-6-2x3" => Some(gettext("2-inch photo")),
+        "id-2cun-large-4-2x3" => Some(gettext("Large 2-inch photo")),
+        "id-2cun-small-6-2x3" => Some(gettext("Small 2-inch photo")),
+        _ => None,
+    }
 }
 
 /// An invisible label whose only job is to resolve one CSS colour.

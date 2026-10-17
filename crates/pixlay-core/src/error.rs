@@ -141,6 +141,39 @@ pub enum CoreError {
     #[error("slot {slot} cannot be swapped with itself")]
     SameSlot { slot: usize },
 
+    /// An ID photo sheet's document holds exactly one cell and keeps none (S40).
+    ///
+    /// A *document* limit, like [`CellTotalOverLimit`](Self::CellTotalOverLimit): no
+    /// command builds such a document — the sheet's slots draw one cell — and a
+    /// hand-written file that says otherwise is refused rather than drawn from a
+    /// cell it does not have.
+    #[error(
+        "an ID photo sheet holds one cell and keeps none, but this document has \
+         {cells} cell(s) and keeps {kept}"
+    )]
+    OnePhotoDocument { cells: usize, kept: usize },
+
+    /// A layout switch onto an ID photo sheet from a document that holds more than
+    /// one cell (S40).
+    ///
+    /// The sheet has one cell, so the other cells could only leave the document; the
+    /// ruling keeps a photo unless it is deleted, and there is nowhere on this sheet
+    /// to keep one. The message has to say what a caller can do instead.
+    #[error(
+        "an ID photo sheet holds one photo, and this document has {cells} cells \
+         (keeping {kept}): start a one-photo collage and choose the sheet from its \
+         layout row"
+    )]
+    OnePhotoLayout { cells: usize, kept: usize },
+
+    /// A command an ID photo sheet cannot perform (S40).
+    #[error("an ID photo sheet holds one photo and cannot {what}")]
+    OnePhotoCommand { what: &'static str },
+
+    /// More than one photo offered to an ID photo sheet (S40).
+    #[error("an ID photo sheet holds one photo, but {found} were offered")]
+    OnePhotoPhotos { found: usize },
+
     #[error("canvas would be {pixels} pixels; the limit is {max}")]
     CanvasTooLarge { pixels: u64, max: u64 },
 

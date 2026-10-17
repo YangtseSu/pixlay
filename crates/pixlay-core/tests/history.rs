@@ -848,15 +848,27 @@ fn no_layout_change_loses_a_cell_whatever_the_sequence_is() {
     // never goes down, and `−` × k then `+` × k gives the document back for every k
     // the floor allows. A delete is the one command that takes a photo out.
     for name in templates::names() {
+        // An ID photo sheet is not a layout a collage switches to (S40): its document
+        // holds one cell, so `SetTemplate` onto it is refused, and
+        // `crates/pixlay-core/tests/idphoto.rs` is where that is walked.
+        if templates::get(name).is_some_and(|template| template.one_photo) {
+            continue;
+        }
         let mut history = History::new(occupied(name)).expect("a valid document");
         let start = history.doc().clone();
         let cells = start.cells.len();
 
-        // Every template in the library, each in turn: neither the cell total nor the
+        // Every **collage** template, each in turn: neither the cell total nor the
         // photo total ever shrinks, and every state is a document this build accepts.
+        // The ID photo sheets are not layouts a nine-photo document can take (S40): a
+        // sheet holds one cell, so the switch is refused on purpose and
+        // `crates/pixlay-core/tests/idphoto.rs` is where that is walked.
         let mut held = cells;
         let mut photos = cells;
-        for template in templates::all() {
+        for template in templates::all()
+            .into_iter()
+            .filter(|template| !template.one_photo)
+        {
             history
                 .apply(Command::SetTemplate { template })
                 .expect("a layout change always applies");

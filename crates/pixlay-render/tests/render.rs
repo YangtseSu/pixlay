@@ -62,6 +62,7 @@ fn template() -> Template {
         name: "test-3".to_string(),
         version: 1,
         aspect: 4.0 / 3.0,
+        one_photo: false,
         slots,
     }
 }

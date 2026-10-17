@@ -151,6 +151,10 @@ mod imp {
         /// window's (`update_title` writes the document's name here).
         pub header: OnceCell<adw::HeaderBar>,
         pub title: OnceCell<adw::WindowTitle>,
+        /// The header's way-in button's content (S40): an ID photo sheet takes one
+        /// photo, so the action's own word changes with the document
+        /// (`update_add_label`), and the label is what the user reads.
+        pub add_content: OnceCell<adw::ButtonContent>,
         /// The app's one dialog (S25b): the document's frame above the export's two
         /// settings, built once and presented by both entry points — the header bar's
         /// frame button (`win.frame`) and the menu's *Preferences* item
@@ -268,6 +272,7 @@ mod imp {
                 cell_controls: OnceCell::new(),
                 header: OnceCell::new(),
                 title: OnceCell::new(),
+                add_content: OnceCell::new(),
                 settings_dialog: OnceCell::new(),
                 workers: Cell::new(Workers::default()),
                 decode_reported: Cell::new(false),
@@ -415,6 +420,7 @@ impl EditorWindow {
             .build();
         add.set_action_name(Some("win.add-photos"));
         a11y::label(&add, &gettext("Add photos to the collage"));
+        self.imp().add_content.set(add_content).ok();
         let undo = icon_button("edit-undo-symbolic", &gettext("Undo"));
         undo.set_action_name(Some("win.undo"));
         let redo = icon_button("edit-redo-symbolic", &gettext("Redo"));
@@ -972,7 +978,7 @@ impl EditorWindow {
     /// is its fit" (`docs/CONTRACT.md` §1).
     pub fn gesture_base(&self, slot: usize) -> Option<CropTransform> {
         self.fitted_crop(slot)
-            .or_else(|| self.document().cells.get(slot).map(|cell| cell.crop))
+            .or_else(|| self.document().cell(slot).map(|cell| cell.crop))
     }
 
     // ---- edits ------------------------------------------------------------
@@ -1181,9 +1187,18 @@ impl EditorWindow {
     /// their own with names of their own.
     fn sync_canvas_label(&self) {
         let area = self.canvas_widget();
+        let doc = self.document();
         let label = match self.selection() {
+            // A sheet's slots are the copies of one photo (S40), and the focus moves over
+            // the copies: "cell 5 of 12" would claim twelve cells where the document has
+            // one, so the name says which copy the focus is on instead. A sheet has no
+            // second cell either, which is why the swap half cannot arise.
+            Some(slot) if doc.template.one_photo => fill(
+                gettext("ID photo sheet, copy {} of {}"),
+                &[slot + 1, doc.template.slots.len()],
+            ),
             Some(slot) => {
-                let cells = self.document().template.slots.len();
+                let cells = doc.template.slots.len();
                 match self.swap_source().filter(|source| *source != slot) {
                     // A marked swap is a state of the canvas rather than of one button, so
                     // the focus's own name carries it: a screen reader that has moved the
@@ -1363,16 +1378,46 @@ impl EditorWindow {
     /// and finally the first cell stand in for it, so the arrival still lands
     /// somewhere visible.
     pub fn place_files(&self, paths: Vec<PathBuf>, at: Option<usize>) {
-        let slots = self.document().cells.len();
+        let doc = self.document();
+        let one_photo = doc.template.one_photo;
+        // The drop is aimed at a *tile*, and an ID photo sheet has as many of those as
+        // its template has slots (S40) while holding one cell.
+        let slots = if one_photo {
+            doc.template.slots.len()
+        } else {
+            doc.cells.len()
+        };
         if paths.is_empty() || slots == 0 {
             return;
         }
-        let doc = self.document();
         let start = at
             .filter(|slot| *slot < slots)
             .or_else(|| self.selection().filter(|slot| *slot < slots))
             .or_else(|| doc.cells.iter().position(|cell| cell.source.is_none()))
             .unwrap_or(0);
+        if one_photo {
+            let unused = paths.len() - 1;
+            if unused > 0 {
+                self.toast(&fill(
+                    ngettext(
+                        "An ID photo sheet holds one photo; {} was not used",
+                        "An ID photo sheet holds one photo; {} were not used",
+                        unused as u32,
+                    ),
+                    &[unused],
+                ));
+            }
+            let first = paths[0].clone();
+            if self
+                .apply(Command::PlacePhotos {
+                    places: vec![(start, first)],
+                })
+                .is_ok()
+            {
+                self.select(Some(start));
+            }
+            return;
+        }
 
         let mut places = Vec::with_capacity(paths.len().min(slots));
         // The aimed cell first: it is this file's whether it holds a photo or not.
@@ -1424,8 +1469,12 @@ impl EditorWindow {
     fn clipboard_source(&self) -> Option<(usize, PathBuf, PathBuf)> {
         let slot = self.selection()?;
         let editor = self.imp().editor.borrow();
-        let stored = editor.doc().cells.get(slot)?.source.clone()?;
-        let resolved = editor.sources().paths.get(slot).cloned().flatten()?;
+        // The slot is the tile the user pointed at; the cell is what it shows (S40:
+        // every tile of an ID photo sheet is its one cell), and the resolved paths
+        // are indexed by cell.
+        let cell = editor.doc().cell_index(slot)?;
+        let stored = editor.doc().cells.get(cell)?.source.clone()?;
+        let resolved = editor.sources().paths.get(cell).cloned().flatten()?;
         Some((slot, stored, resolved))
     }
 
@@ -1476,8 +1525,9 @@ impl EditorWindow {
         let cut = self.imp().cut.borrow_mut().take();
         let cut_path = cut.as_ref().and_then(|(slot, stored)| {
             let editor = self.imp().editor.borrow();
-            (editor.doc().cells.get(*slot)?.source.as_ref() == Some(stored))
-                .then(|| editor.sources().paths.get(*slot).cloned().flatten())
+            let cell = editor.doc().cell_index(*slot)?;
+            (editor.doc().cells.get(cell)?.source.as_ref() == Some(stored))
+                .then(|| editor.sources().paths.get(cell).cloned().flatten())
                 .flatten()
         });
         self.clipboard().read_value_async(
@@ -1514,6 +1564,10 @@ impl EditorWindow {
         cut_path: Option<PathBuf>,
     ) {
         if let (Some((from, _)), Some(cut_path)) = (cut, cut_path)
+            // A sheet has no second cell to move a photo to (S40), so a cut-then-paste
+            // there is a placement: the cut cleared the sheet's photo and this puts it
+            // back, one undo step each. `MovePhoto` would refuse it.
+            && !self.document().template.one_photo
             && from != target
             && paths.len() == 1
             && paths[0] == cut_path
@@ -1678,6 +1732,12 @@ impl EditorWindow {
     /// disagree about what "the layouts for this count and this shape" means.
     pub fn candidate_templates(&self) -> Vec<Template> {
         let doc = self.document();
+        // An ID photo sheet's strip is the sheets themselves (S40): its slot count
+        // is its copies rather than a photo count, so the count-and-shape query has
+        // nothing to say about it.
+        if doc.template.one_photo {
+            return templates::one_photo();
+        }
         templates::with_slots_and_aspect(doc.cells.len(), doc.template.aspect)
     }
 
@@ -1698,18 +1758,66 @@ impl EditorWindow {
             return;
         };
         let before = self.document();
-        let cells = template.slots.len();
         if self.apply(Command::SetTemplate { template }).is_ok() {
+            // The count the report compares against is the document's own: a sheet has
+            // one cell and twelve slots (S40), so the template's slot count is not it.
+            let cells = self.document().cells.len();
             self.report_kept(&before, cells);
         }
+    }
+
+    /// Writes the header's way-in button from the document (S40).
+    ///
+    /// A collage says "Add photos…" — a plural action, because a collage takes up to
+    /// nine. An ID photo sheet holds one photo, so the same control is a single
+    /// choose: "Add the photo…" while the sheet is empty, "Replace the photo…" once
+    /// it holds one. The tooltip and the accessible name move with it, so the button
+    /// never promises a list it cannot take.
+    fn update_add_label(&self) {
+        let Some(content) = self.imp().add_content.get() else {
+            return;
+        };
+        let doc = self.document();
+        let (label, tooltip) = if doc.template.one_photo {
+            if doc.cells.first().is_some_and(|cell| cell.source.is_some()) {
+                (
+                    gettext("Replace the photo…"),
+                    gettext("Replace the photo in the sheet"),
+                )
+            } else {
+                (
+                    gettext("Add the photo…"),
+                    gettext("Add the photo to the sheet"),
+                )
+            }
+        } else {
+            (gettext("Add photos…"), gettext("Add photos to the collage"))
+        };
+        content.set_label(&label);
+        if let Some(button) = content.parent().and_downcast::<gtk::Button>() {
+            button.set_tooltip_text(Some(&tooltip));
+            a11y::label(&button, &tooltip);
+        }
+    }
+
+    /// The ratio row's ID photo member (S40): switches the document to the library's
+    /// first ID photo sheet — 一寸, the size almost every form asks for — keeping the
+    /// one photo the document holds.
+    ///
+    /// One `Command::SetTemplate`, so it is one undo step and one Ctrl+Z back to the
+    /// collage. The core refuses it for a document with more than one cell, because
+    /// the sheet has one; the row's member only exists at one cell in the first place.
+    pub fn select_id_photo(&self) {
+        self.select_layout(templates::ID_PHOTO_DEFAULT);
     }
 
     /// Writes the gallery's highlight from the document.
     fn highlight_gallery(&self) {
         if let Some(gallery) = self.imp().gallery.get() {
             let current = self.current_template();
+            let doc = self.document();
             gallery.highlight(Some(&current));
-            gallery.highlight_ratios(self.document().template.aspect);
+            gallery.highlight_ratios(doc.template.aspect, doc.template.one_photo);
         }
     }
 
@@ -1728,7 +1836,10 @@ impl EditorWindow {
     /// own control is what moves it), so nothing is kept and nothing is placed.
     pub fn select_ratio(&self, aspect: f64) {
         let doc = self.document();
-        if (doc.template.aspect - aspect).abs() <= ASPECT_TOLERANCE {
+        // An ID photo sheet's shape is 2:3 like the collage sheet of that shape, so
+        // its own kind is not "already this shape" (S40): clicking 2:3 there has to
+        // leave the sheet, which is what `one_photo` in this test says.
+        if !doc.template.one_photo && (doc.template.aspect - aspect).abs() <= ASPECT_TOLERANCE {
             // The shape the document is already in: not an edit, and an undo step
             // that changes nothing is a step the user has to press `Ctrl+Z` through.
             self.highlight_gallery();
@@ -1739,8 +1850,10 @@ impl EditorWindow {
             return;
         };
         let before = self.document();
-        let cells = template.slots.len();
         if self.apply(Command::SetTemplate { template }).is_ok() {
+            // The count the report compares against is the document's own: a sheet has
+            // one cell and twelve slots (S40), so the template's slot count is not it.
+            let cells = self.document().cells.len();
             self.report_kept(&before, cells);
         }
     }
@@ -1983,6 +2096,28 @@ impl EditorWindow {
     /// a list the command accepts.
     pub fn add_photos(&self, paths: Vec<PathBuf>) {
         if paths.is_empty() {
+            return;
+        }
+        if self.document().template.one_photo {
+            // The sheet holds one photo (S40): the first file is it, and the rest are
+            // reported once — the same shape the ceiling's own report has, because
+            // `Command::AddPhotos` refuses a second photo outright.
+            let unused = paths.len() - 1;
+            if unused > 0 {
+                self.toast(&fill(
+                    ngettext(
+                        "An ID photo sheet holds one photo; {} was not used",
+                        "An ID photo sheet holds one photo; {} were not used",
+                        unused as u32,
+                    ),
+                    &[unused],
+                ));
+            }
+            if let Some(first) = paths.into_iter().next() {
+                let _ = self.apply(Command::AddPhotos {
+                    photos: vec![first],
+                });
+            }
             return;
         }
         let room = MAX_PHOTOS.saturating_sub(self.photo_count() + self.kept_count());
@@ -2945,6 +3080,7 @@ impl EditorWindow {
     pub fn refresh(&self) {
         self.update_actions();
         self.update_title();
+        self.update_add_label();
         self.update_banner();
         self.update_gallery_control();
         self.sync_canvas_label();
@@ -2971,6 +3107,10 @@ impl EditorWindow {
     fn update_gallery_control(&self) {
         if let Some(gallery) = self.imp().gallery.get() {
             let doc = self.document();
+            // An ID photo sheet holds one photo (S40): the count is not a number to
+            // edit there, so the whole control goes — the row's ID member and the
+            // strip are what that document is steered with.
+            gallery.show_count(!doc.template.one_photo);
             gallery.update_control(doc.cells.len(), self.kept_hint().as_deref());
             // The ratio row follows the document the same way: the count decides
             // which shapes there are to offer, and the mark is the document's own

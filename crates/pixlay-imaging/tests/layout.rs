@@ -109,9 +109,17 @@ fn every_slot_region_holds_what_the_slot_shows() {
     for name in templates::names() {
         let mut doc = document(name);
         let canvas = canvas_px(&doc);
-        for slot in 0..doc.cells.len() {
+        // Every **slot**, not every cell (S40): an ID photo sheet has one cell and
+        // twelve to sixteen slots, and "the region holds what the slot shows" is a
+        // claim about each of those slots' own geometry. `doc.cell_mut` is the
+        // document's own slot-to-cell mapping, so the sweep sets the crop the slot
+        // actually draws.
+        for slot in 0..doc.template.slots.len() {
             for framing in framings {
-                doc.cells[slot].crop = framing;
+                let Some(cell) = doc.cell_mut(slot) else {
+                    panic!("{name} slot {slot}: the document has no cell");
+                };
+                cell.crop = framing;
                 let outline = &doc.template.slots[slot].outline;
                 let bbox = outline.bbox();
                 let slot_w = bbox.width() * f64::from(canvas.width);
@@ -175,10 +183,10 @@ fn every_slot_region_holds_what_the_slot_shows() {
     }
     assert_eq!(
         studied,
-        1522 * framings.len(),
+        1572 * framings.len(),
         "the sweep must cover every slot (S10 grew the library from 64; S19 added the sheet; \
          S35 fifty-seven slots; S37 twenty-four; S38 four hundred and thirty-three; \
-         S39 eight hundred and sixty-five)"
+         S39 eight hundred and sixty-five; S40 fifty — the six ID photo sheets' copies)"
     );
 }
 

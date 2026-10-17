@@ -63,6 +63,26 @@ enum Shape {
     Poly(&'static [(u32, u32)]),
 }
 
+impl Shape {
+    /// This shape's outline, at `unit` (one lattice step, normalized).
+    ///
+    /// The one conversion from lattice units to the document's `[0,1]` geometry, so
+    /// the arrangement recipes and the ID photo sheets cannot spell it differently.
+    fn outline(&self, unit: f64) -> Polygon {
+        match self {
+            Self::Rect { x0, y0, x1, y1 } => {
+                Polygon::rect(at(*x0, unit), at(*y0, unit), at(*x1, unit), at(*y1, unit))
+            }
+            Self::Poly(points) => Polygon {
+                points: points
+                    .iter()
+                    .map(|&(x, y)| Point::new(at(x, unit), at(y, unit)))
+                    .collect(),
+            },
+        }
+    }
+}
+
 /// One template arrangement: a geometry, the sheets it is authored at, and the
 /// members whose shipped names predate the tagging rule.
 struct Arrangement {
@@ -103,6 +123,71 @@ const SHEETS: &[(&str, f64)] = &[
 const fn rect(x0: u32, y0: u32, x1: u32, y1: u32) -> Shape {
     Shape::Rect { x0, y0, x1, y1 }
 }
+
+/// The ID photo sheets' one physical page (S40): 4R is exactly **4 x 6 inch =
+/// 101.6 x 152.4 mm**, whose aspect is `2/3` — the `2x3` tag. The nominal Chinese
+/// "6 inch" (102 x 152 mm) is 0.6% larger; the paper is the inch one.
+///
+/// This is the only place in the tree where a sheet's millimetres are a *decision*:
+/// the document, the CLI and the export keep the format's rule (ratios and one
+/// long-edge pixel count), and the frozen geometry below is the normalized value
+/// this constant converts into.
+const ID_SHEET_MM: (f64, f64) = (101.6, 152.4);
+
+/// The lattice the ID sheets are authored on: 1/2560 of the page's width, so one
+/// step is 0.0397 mm across and 0.0595 mm down. 128 (the collage arrangements'
+/// lattice) would leave a cell up to 0.15 mm off its nominal size; 2560 keeps every
+/// one within 0.03 mm and within 0.6 px at the 1800-px long edge a 300 dpi print
+/// asks for (`docs/CONTRACT.md` §8, S40).
+const ID_GRID: u32 = 2560;
+
+/// One ID photo sheet: cells of one size on the 4R page, as many as fit, centred.
+struct IdSheet {
+    /// The size's own word, which the template's name carries
+    /// (`id-<size>-<slots>-2x3`). Machine vocabulary: the UI's size names are
+    /// `gettext` strings keyed by the member's name (`crates/pixlay`'s
+    /// `photo_size_name`), not this word.
+    size: &'static str,
+    /// The cell's nominal size, in millimetres.
+    cell_mm: (f64, f64),
+}
+
+/// The white between two neighbouring cells, in millimetres, on every ID sheet: a
+/// cut line, 23.6 px at 300 dpi.
+const ID_GAP_MM: f64 = 2.0;
+
+/// The ID photo sheets, in the human's list order (S40 ruling of 2026-10-17).
+///
+/// The five the human named, plus **大二寸** — the other "standard" two-inch size the
+/// research found (35 x 53 mm, the 413 x 626 px one the sources call the standard
+/// 二寸), so the set carries both of the sizes a studio is asked for. The counts are
+/// the largest that fit, because the sheet is printed borderless (the same ruling).
+static ID_SHEETS: &[IdSheet] = &[
+    IdSheet {
+        size: "1cun",
+        cell_mm: (25.0, 35.0),
+    },
+    IdSheet {
+        size: "1cun-small",
+        cell_mm: (22.0, 32.0),
+    },
+    IdSheet {
+        size: "1cun-large",
+        cell_mm: (33.0, 48.0),
+    },
+    IdSheet {
+        size: "2cun",
+        cell_mm: (35.0, 49.0),
+    },
+    IdSheet {
+        size: "2cun-large",
+        cell_mm: (35.0, 53.0),
+    },
+    IdSheet {
+        size: "2cun-small",
+        cell_mm: (35.0, 45.0),
+    },
+];
 
 /// The whole library, in the canonical order (S39): per slot count, the human's
 /// arrangements in the human's list order, then the members the list does not
@@ -1058,7 +1143,72 @@ static ARRANGEMENTS: &[Arrangement] = &[
 /// no filesystem and no iteration order to depend on, which is what "generation
 /// must be deterministic" means here.
 pub fn generate() -> Vec<Template> {
-    ARRANGEMENTS.iter().flat_map(build).collect()
+    let mut templates: Vec<Template> = ARRANGEMENTS.iter().flat_map(build).collect();
+    // The ID photo sheets come after every collage arrangement: they are a
+    // different kind of member (one photo, many copies), and no candidate query
+    // lists them, so their place only decides where a caller that walks the whole
+    // library meets them.
+    templates.extend(build_id_sheets());
+    templates
+}
+
+/// Builds the ID photo sheets (S40), in [`ID_SHEETS`] order.
+///
+/// The recipe is physical (a cell in millimetres on the 4R page) and the geometry
+/// is normalized, so the cell and gap are converted to [`ID_GRID`] units, the count
+/// is the largest that fits per axis, and the leftover is split between the two
+/// margins. Integer arithmetic on the lattice: the result is a function of the
+/// constants above, like every other member.
+fn build_id_sheets() -> Vec<Template> {
+    let unit_x = ID_SHEET_MM.0 / f64::from(ID_GRID);
+    let unit_y = ID_SHEET_MM.1 / f64::from(ID_GRID);
+    let grid = ID_GRID;
+    ID_SHEETS
+        .iter()
+        .map(|sheet| {
+            let cell_x = (sheet.cell_mm.0 / unit_x).round() as u32;
+            let cell_y = (sheet.cell_mm.1 / unit_y).round() as u32;
+            let gap_x = (ID_GAP_MM / unit_x).round() as u32;
+            let gap_y = (ID_GAP_MM / unit_y).round() as u32;
+            // c cells and c-1 gaps fit iff c * (cell + gap) <= grid + gap.
+            let count = |cell: u32, gap: u32| (grid + gap) / (cell + gap);
+            let cols = count(cell_x, gap_x);
+            let rows = count(cell_y, gap_y);
+            let used_x = cols * cell_x + (cols - 1) * gap_x;
+            let used_y = rows * cell_y + (rows - 1) * gap_y;
+            // Centred; the odd unit, when there is one, goes to the far margin.
+            let first_x = (grid - used_x) / 2;
+            let first_y = (grid - used_y) / 2;
+            let mut slots = Vec::with_capacity((cols * rows) as usize);
+            for row in 0..rows {
+                for col in 0..cols {
+                    let x0 = first_x + col * (cell_x + gap_x);
+                    let y0 = first_y + row * (cell_y + gap_y);
+                    let shape = Shape::Rect {
+                        x0,
+                        y0,
+                        x1: x0 + cell_x,
+                        y1: y0 + cell_y,
+                    };
+                    let outline = shape.outline(1.0 / f64::from(grid));
+                    slots.push(Slot {
+                        // The area is the outline's own, exactly as `build` takes it.
+                        area: outline.area(),
+                        outline,
+                    });
+                }
+            }
+            Template {
+                name: format!("id-{}-{}-2x3", sheet.size, slots.len()),
+                // The one-slot sheets' rule: a new member starts at version 1.
+                version: 1,
+                // 4R is exactly 2:3, so the aspect is the `2x3` tag's own division.
+                aspect: aspect_of("2x3"),
+                one_photo: true,
+                slots,
+            }
+        })
+        .collect()
 }
 
 fn build(arrangement: &Arrangement) -> Vec<Template> {
@@ -1075,17 +1225,7 @@ fn build(arrangement: &Arrangement) -> Vec<Template> {
         .slots
         .iter()
         .map(|shape| {
-            let outline = match shape {
-                Shape::Rect { x0, y0, x1, y1 } => {
-                    Polygon::rect(at(*x0, unit), at(*y0, unit), at(*x1, unit), at(*y1, unit))
-                }
-                Shape::Poly(points) => Polygon {
-                    points: points
-                        .iter()
-                        .map(|&(x, y)| Point::new(at(x, unit), at(y, unit)))
-                        .collect(),
-                },
-            };
+            let outline = shape.outline(unit);
             Slot {
                 // The declared area is the outline's own area, computed from the
                 // same geometry: the two cannot drift apart, and the frozen file
@@ -1114,6 +1254,7 @@ fn build(arrangement: &Arrangement) -> Vec<Template> {
                 // the field comes back the day one is needed.
                 version: 1,
                 aspect,
+                one_photo: false,
                 slots: slots.clone(),
             }
         })
@@ -1170,6 +1311,20 @@ pub fn emit_source(templates: &[Template]) -> String {
         let _ = writeln!(out, "        ],");
         let _ = writeln!(out, "    }},");
     }
+    out.push_str("];\n\n");
+    out.push_str(
+        "/// The members whose sheet holds **one photo in every slot** (S40).\n\
+         ///\n\
+         /// A name list rather than a field on every entry: the ID photo sheets are the\n\
+         /// only ones, and every other member's frozen bytes stay exactly what they were\n\
+         /// — the audit \"every member that shipped keeps its geometry byte for byte\"\n\
+         /// still reads as one diff. `templates::thaw` sets `Template::one_photo` from\n\
+         /// it, and the candidate queries skip these names (`templates::is_collage`).\n\
+         pub const ONE_PHOTO: &[&str] = &[\n",
+    );
+    for template in templates.iter().filter(|template| template.one_photo) {
+        let _ = writeln!(out, "    {:?},", template.name);
+    }
     out.push_str("];\n");
     out
 }
@@ -1194,8 +1349,13 @@ const HEADER: &str = "\
 //! `crates/pixlay-core/tests/templates.rs` regenerates this file into a scratch
 //! path and compares it byte for byte, so the arrangement and the geometry a build
 //! ships can never drift apart. Coordinates are normalized to `[0, 1]`
-//! (`AGENTS.md`) and are exact multiples of `1/128`, which is why the areas are
-//! exact binary values too.
+//! (`AGENTS.md`) and are written on a dyadic lattice: the collage arrangements on
+//! integer units of `1/128`, and the ID photo sheets (S40) on `1/2560`, which is
+//! what lands a 4R cell within 0.03 mm of its millimetre size. Every area is exact
+//! in binary floating point, which is why a cut template's sum is an equality.
+//!
+//! [`ONE_PHOTO`] names the members whose sheet holds one photo in every slot; the
+//! rest of the table is the collage library.
 
 /// One frozen template: its name, geometry version, aspect ratio and slots.
 pub struct Frozen {

@@ -80,6 +80,11 @@ impl Band {
 /// A document that was loaded through `pixlay_core::Project` is validated; a
 /// document mutated in memory is drawn as it is. Framing rotations are applied
 /// as stored: the clamp that guarantees a photo covers its slot arrives with S3.
+///
+/// The loop is over the template's **slots**, and `CollageDoc::cell_index` is what
+/// says which cell each one draws (S40): a collage layout has one cell per slot,
+/// and an ID photo sheet has one cell that every copy shares — `Images` is keyed by
+/// cell, so the one bitmap is blitted once per copy.
 pub fn draw(doc: &CollageDoc, images: &Images, target: &Target) -> Result<(), RenderError> {
     if !target.scale.is_finite() || target.scale <= 0.0 {
         return Err(RenderError::InvalidScale(target.scale));
@@ -119,18 +124,18 @@ pub fn draw(doc: &CollageDoc, images: &Images, target: &Target) -> Result<(), Re
     ctx.set_operator(Operator::Over);
 
     let canvas_aspect = target.canvas_px.aspect();
-    for index in 0..doc.cells.len() {
-        let Some(bitmap) = images.get(index) else {
+    for (index, slot) in doc.template.slots.iter().enumerate() {
+        let Some(cell) = doc.cell_index(index) else {
             continue;
         };
-        let Some(slot) = doc.template.slots.get(index) else {
+        let Some(bitmap) = images.get(cell) else {
             continue;
         };
         // The stored crop is a request; what gets drawn is its fit (S3), against
-        // the region the document's frame leaves visible (S11). The fit is taken in
-        // the space this placement uses (the output canvas pixels, whose aspect is
-        // the rounded one), so "covers the cell" is exact for the arithmetic below
-        // and not only for the document's millimetres.
+        // the region the document's frame leaves visible in **this slot** (S11).
+        // The fit is taken in the space this placement uses (the output canvas
+        // pixels, whose aspect is the rounded one), so "covers the cell" is exact
+        // for the arithmetic below and not only for the document's millimetres.
         let fit = doc.fitted_crop(index, canvas_aspect, bitmap.aspect())?;
         draw_slot(
             ctx,

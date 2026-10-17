@@ -32,6 +32,10 @@
 //! * `grid-<slots>-<cols>x<rows>` — a rectangular tiling that repeats the same
 //!   splits in both directions.
 //! * `mosaic-<slots>-<variant>` — mixed splits or a slot that is not a rectangle.
+//! * `id-<size>-<slots>-<sheet>` — an **ID photo sheet** (S40): one photo in every
+//!   slot, the same photo tiled for printing. It is not a collage candidate — its
+//!   slot count is its copies, not its photos — so the candidate queries skip it
+//!   and [`one_photo`] is the list that offers it.
 //!
 //! A `g` suffix marks a **gutter** — a strip or a grid whose panes stop short of
 //! each other, so the slots do not tile the canvas and their areas sum to less
@@ -87,6 +91,9 @@ fn thaw(entry: &frozen::Frozen) -> Template {
         name: entry.name.to_string(),
         version: entry.version,
         aspect: entry.aspect,
+        // The ID photo sheets are named in the frozen artifact's own list (S40), so
+        // every other member's bytes stay what they were.
+        one_photo: frozen::ONE_PHOTO.contains(&entry.name),
         slots,
     }
 }
@@ -105,6 +112,34 @@ pub fn names() -> Vec<&'static str> {
     frozen::TEMPLATES.iter().map(|entry| entry.name).collect()
 }
 
+/// Whether a frozen member is a **collage** layout: not an ID photo sheet (S40).
+///
+/// The candidate queries ask "which layouts does this many *photos* have", and an
+/// ID photo sheet's slot count is its copies rather than its photos — one photo is
+/// the whole document. So [`with_slots`], [`with_slots_and_aspect`], [`of_aspect`],
+/// [`ratios_for`] and the count rule skip these members, while [`all`], [`names`] and
+/// [`get`] keep them: the library a build ships includes them, and `init --template`
+/// has to find one by name.
+fn is_collage(entry: &frozen::Frozen) -> bool {
+    !frozen::ONE_PHOTO.contains(&entry.name)
+}
+
+/// The ID photo sheet the band's row member switches to (S40): the first of them in
+/// the library's order, which is 一寸 — the size almost every form asks for.
+pub const ID_PHOTO_DEFAULT: &str = "id-1cun-12-2x3";
+
+/// The ID photo sheets this build ships, in the library's order (S40).
+///
+/// The band's own list when the document is a sheet of one photo: the ratio row's
+/// ID member switches to the first of these, and the strip then offers all of them.
+pub fn one_photo() -> Vec<Template> {
+    frozen::TEMPLATES
+        .iter()
+        .filter(|entry| !is_collage(entry))
+        .map(thaw)
+        .collect()
+}
+
 /// Templates with exactly `slots` slots, in library order (S14).
 ///
 /// The layout stage's own query, and since S14b the *only* place that filter is
@@ -113,10 +148,12 @@ pub fn names() -> Vec<&'static str> {
 /// argument. The three used to be one rule with three expressions of it, which is
 /// exactly the drift the count filter cannot afford — the strip and the CLI have to
 /// agree about which layouts a count offers.
+///
+/// ID photo sheets are not candidates ([`is_collage`]): their count is copies.
 pub fn with_slots(slots: usize) -> Vec<Template> {
     frozen::TEMPLATES
         .iter()
-        .filter(|entry| entry.slots.len() == slots)
+        .filter(|entry| entry.slots.len() == slots && is_collage(entry))
         .map(thaw)
         .collect()
 }
@@ -135,7 +172,9 @@ pub fn with_slots_and_aspect(slots: usize, aspect: f64) -> Vec<Template> {
     frozen::TEMPLATES
         .iter()
         .filter(|entry| {
-            entry.slots.len() == slots && (entry.aspect - aspect).abs() <= ASPECT_TOLERANCE
+            entry.slots.len() == slots
+                && (entry.aspect - aspect).abs() <= ASPECT_TOLERANCE
+                && is_collage(entry)
         })
         .map(thaw)
         .collect()
@@ -160,7 +199,7 @@ pub fn ratios_for(slots: usize) -> Vec<f64> {
     let mut ratios: Vec<f64> = Vec::new();
     for entry in frozen::TEMPLATES
         .iter()
-        .filter(|entry| entry.slots.len() == slots)
+        .filter(|entry| entry.slots.len() == slots && is_collage(entry))
     {
         if !ratios
             .iter()
@@ -258,7 +297,7 @@ pub fn get(name: &str) -> Option<Template> {
 pub fn of_aspect(aspect: f64) -> Vec<Template> {
     frozen::TEMPLATES
         .iter()
-        .filter(|entry| (entry.aspect - aspect).abs() <= ASPECT_TOLERANCE)
+        .filter(|entry| (entry.aspect - aspect).abs() <= ASPECT_TOLERANCE && is_collage(entry))
         .map(thaw)
         .collect()
 }

@@ -370,6 +370,29 @@ the canvas is **content** and the interface is **styling**, and the two must not
      acceptable (the failure to find it names what is missing). The step's own ruling is
      `docs/steps/S34-avif-export-done.md`.
 
+14. **S40's addition: the ID photo sheets** (the step's own Human line, `docs/steps/S40-id-photo-sheets-done.md`
+   when it lands). The product gains a sheet of **one photo repeated** at one of six sizes on a 6-inch (4R)
+   print, and this item is whether that reads as what it is:
+   - **the way in**: at **one photo** the ratio row carries a last member — *ID photo* / 证件照, after 16:9 —
+     and clicking it lands on the 一寸 sheet. Does the row still read as one control (seven buttons, the sheet's
+     own size marked), and does the member disappear at two or more photos without the row looking broken?
+   - **which size**: the strip then holds the six sheets, and the sketches of 二寸 and 大二寸 are pixels apart —
+     so the **size name is the tooltip and the front of the accessible name** (「一寸照片」). Is that legible
+     by hovering and by focus, or does this item ask for a permanent caption on these six candidates only
+     (the one thing the step's plan left open)?
+   - **the framing controls on a 25 mm tile**: the per-cell strip is anchored to the canvas's bottom-start
+     corner on these sheets (a tile is under a hundred device pixels each way — the first layouts to reach the
+     "too small for both orientations" branch). Does it read as the sheet's controls rather than one copy's,
+     and does it cover nothing being looked at?
+   - **the way in for the photo**: the header's button is a **single-photo** chooser on a sheet — 添加照片…
+     while the sheet is empty, 更换照片… once it holds one — and a drop of several files keeps the first and
+     reports the rest once. Is the copy right, and does the empty sheet's own `+` appear **once** rather than
+     twelve times?
+   - **the print**: export the sheet at a 1800-px long edge (= 1200x1800) and measure a printed or on-screen
+     copy: the 一寸 tile is 295x413 px at 300 dpi, the white gap between copies is 2 mm. Does the sheet read as
+     a 证件照排版 — six sizes, each with the photo's own framing (one crop for every copy) — rather than as a
+     collage of one photo?
+
 ### The main path's scripted step list (the three-minute walk)
 
 Written for `open → add photos → pick a layout → adjust → export` — the path ruling 31 re-routed to on

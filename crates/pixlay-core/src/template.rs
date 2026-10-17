@@ -9,17 +9,26 @@ use serde::{Deserialize, Serialize};
 use crate::error::CoreError;
 use crate::geometry::{EPSILON, Point, Polygon};
 use crate::topology;
-use crate::{MAX_SLOTS, MAX_TEMPLATE_ASPECT, MIN_SLOTS, MIN_TEMPLATE_ASPECT};
+use crate::{MAX_TEMPLATE_ASPECT, MAX_TEMPLATE_SLOTS, MIN_SLOTS, MIN_TEMPLATE_ASPECT};
 
 /// Tolerance between a slot's declared area and the area of its outline.
 /// 1e-6 of a sheet edge is 0.014 px on the 14043-px reference grid.
 pub const AREA_TOLERANCE: f64 = 1e-6;
 
+/// `true` for `false`, the predicate [`Template::one_photo`] skips on.
+///
+/// A named function rather than a closure so the attribute reads as a field's
+/// default does: the key is written only by the sheets it is true for, which is
+/// what keeps a pre-S40 project's bytes unchanged.
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 /// The recipe family a template's name declares (S14).
 ///
 /// The name is `<family>-<slots>-<variant>` (`docs/CONTRACT.md` §3), and the
-/// family is how the geometry is laid out: one band, a rectangular tiling, or
-/// mixed splits. The count rule
+/// family is how the geometry is laid out: one band, a rectangular tiling, mixed
+/// splits, or — since S40 — a sheet of one photo repeated. The count rule
 /// ([`layout_for`](crate::selection::layout_for)) uses it as its second
 /// preference, so that a document that grows from five photos to six stays in the
 /// kind of layout the user was looking at when the library offers one.
@@ -31,6 +40,11 @@ pub enum Family {
     Grid,
     /// `mosaic-<slots>-<variant>`: mixed splits, or a slot that is not a rectangle.
     Mosaic,
+    /// `id-<size>-<slots>-<sheet>`: an ID photo sheet (S40) — one photo in every
+    /// slot. Its members are **not** collage candidates: the count rule and the
+    /// gallery's queries exclude them, because their slot count is the number of
+    /// copies rather than the number of photos.
+    Id,
 }
 
 impl Family {
@@ -45,6 +59,7 @@ impl Family {
             "strip" => Some(Self::Strip),
             "grid" => Some(Self::Grid),
             "mosaic" => Some(Self::Mosaic),
+            "id" => Some(Self::Id),
             _ => None,
         }
     }
@@ -55,6 +70,7 @@ impl Family {
             Self::Strip => "strip",
             Self::Grid => "grid",
             Self::Mosaic => "mosaic",
+            Self::Id => "id",
         }
     }
 }
@@ -87,6 +103,17 @@ pub struct Template {
     /// Aspect ratio (`width / height`) the geometry was authored for. The
     /// template matrix is grouped by aspect ratio (`docs/CONTRACT.md` §3).
     pub aspect: f64,
+    /// The sheet holds **one photo in every slot** (S40): an ID photo sheet.
+    ///
+    /// The document on such a template has exactly one cell
+    /// ([`CollageDoc::cell`](crate::CollageDoc::cell) resolves every slot to it), so
+    /// the photo, its framing and its undo step are one thing and the slots are the
+    /// copies the sheet prints. `false` for every collage layout, and **omitted from
+    /// the JSON then**, so a project written before S40 reads and writes
+    /// byte-identically; an older build refuses one that says `true` through
+    /// `deny_unknown_fields` rather than drawing twelve slots from one cell.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub one_photo: bool,
     /// Slots in template order. Slot identity is the index: cells, photos and
     /// hit tests all speak in terms of it.
     pub slots: Vec<Slot>,
@@ -133,11 +160,11 @@ impl Template {
                 max: MAX_TEMPLATE_ASPECT,
             });
         }
-        if !(MIN_SLOTS..=MAX_SLOTS).contains(&self.slots.len()) {
+        if !(MIN_SLOTS..=MAX_TEMPLATE_SLOTS).contains(&self.slots.len()) {
             return Err(CoreError::SlotCount {
                 found: self.slots.len(),
                 min: MIN_SLOTS,
-                max: MAX_SLOTS,
+                max: MAX_TEMPLATE_SLOTS,
             });
         }
         for (index, slot) in self.slots.iter().enumerate() {

@@ -335,6 +335,15 @@ code for one commits that change itself.
   walls and shadows.*
 - **Template geometry is frozen data**, carries a `templateVersion`, and must be generated
   deterministically. The layout of an existing project must never change.
+- **A template may put one photo in every slot** (S40). The **ID photo sheets** —
+  `id-<size>-<slots>-<sheet>`, `Template::one_photo` — print one photo repeated on a 6-inch page (4R,
+  101.6×152.4 mm, exactly 2:3) at six sizes, and their document holds **one cell**: every slot draws it
+  (`CollageDoc::cell_index`), so the photo, its framing and its undo step are one thing. That is why a
+  template's own slot ceiling (`MAX_TEMPLATE_SLOTS`, 16) is separate from the nine cells a document holds,
+  and why the candidate queries (`with_slots`, `with_slots_and_aspect`, `of_aspect`, `ratios_for`,
+  `layout_for`, the band's strip) skip these members — their slot count is the copies, not a photo count.
+  The millimetres are the generator's recipe and the tests' measuring stick, never a format field: an export
+  still takes one long-edge pixel count (`docs/CONTRACT.md` §3, §8).
 - **The framing abstraction is "parent container clips + child primitive transforms"**, not
   "compute a clip rectangle every frame and drawImage".
   Framing state uses **absolute zoom** (displayed width / canvas width), not "a multiple of fill".

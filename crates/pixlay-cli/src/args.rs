@@ -277,6 +277,10 @@ TEMPLATES OPTIONS:
     --slots <n>         List only the templates with exactly n slots, 1..=9. This
                         is the layout gallery's own query (S14): the candidates
                         for a collage of n photos. The two filters combine.
+    Both filters are **the collage library's**: an ID photo sheet (S40) is not a
+    candidate — its slots are copies of one photo rather than cells to fill — so it
+    is listed only by the unfiltered form, where `one_photo` marks it (`--json`
+    carries the same field).
 
 HIT OPTIONS:
     --project <file>    Project whose layout to test. Required unless --template
@@ -308,7 +312,9 @@ INIT OPTIONS:
                         number of photos (both bounds are named on refusal).
                         A list past nine is refused (exit 1) rather than
                         trimmed: a machine caller may not have input dropped
-                        silently. Omit for the photo-free project. Paths are
+                        silently. **An ID photo sheet takes exactly one** (S40):
+                        one photo fills every slot of it, and two are refused
+                        (exit 1). Omit for the photo-free project. Paths are
                         stored relative to the project file when the two share a
                         root, absolute otherwise, and a photo that is not there
                         is refused rather than written into the project.
@@ -320,7 +326,9 @@ EDIT OPTIONS:
                         photo paths are rebased when the copy lands elsewhere.
     --slot <i>          The cell the framing flags below apply to. Without it
                         they are refused: every other flag is about the whole
-                        document.
+                        document. **Any of an ID photo sheet's slots is its one
+                        cell** (S40), so the flags frame the sheet's single photo
+                        whichever tile is named.
     --photo <file>      The photo the `--slot` cell shows instead of the one it
                         has. Needs --slot, and a file that is not there is
                         refused rather than written into the project.
@@ -351,7 +359,9 @@ EDIT OPTIONS:
     --swap <i>,<j>      Exchange two cells whole — photo and framing both, since
                         the framing is what makes a photo look right in *that*
                         cell. Refused for the same cell twice (exit 1) and for a
-                        cell the layout does not have (exit 1).
+                        cell the layout does not have (exit 1). An ID photo sheet
+                        refuses it too (exit 2): it holds one photo, so there are
+                        no two cells to exchange.
     --template <name>   Switch the document to another layout (see
                         `templates`), keeping the surviving cells' photos and
                         framing. The count is not required to match: a layout with

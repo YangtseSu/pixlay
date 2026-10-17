@@ -42,6 +42,7 @@ fn doc() -> CollageDoc {
         name: "region-3".to_string(),
         version: 1,
         aspect: 104.0 / 78.0,
+        one_photo: false,
         slots,
     };
     CollageDoc::new(template)

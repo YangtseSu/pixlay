@@ -36,6 +36,20 @@ fn selection(count: usize) -> Selection {
     .expect("a selection inside the clamp")
 }
 
+/// The library's **collage** layouts: `templates::all` without the ID photo sheets
+/// (S40).
+///
+/// A sheet's slot count is the copies it prints, not a photo count, so the candidate
+/// queries — `Selection::layouts`, `layout_for`, `layout_with_aspect` — answer about
+/// these and not about a sheet; the sweeps below compare them against the library, and
+/// `templates::all` is what the library is.
+fn collage_templates() -> Vec<pixlay_core::Template> {
+    templates::all()
+        .into_iter()
+        .filter(|template| !template.one_photo)
+        .collect()
+}
+
 /// A document on `template` with a source in every cell.
 fn occupied(template: &str) -> CollageDoc {
     let template = templates::get(template).unwrap_or_else(|| panic!("template {template}"));
@@ -159,9 +173,9 @@ fn layouts_are_exactly_the_templates_with_that_many_slots() {
             assert_eq!(template.slots.len(), count, "{}", template.name);
         }
         // The filter is the library's own, not a second list that can drift: the
-        // names must be exactly the ones `templates::all` holds for that count,
-        // in library order.
-        let expected: Vec<String> = templates::all()
+        // names must be exactly the ones the library holds for that count, in library
+        // order — the collage library, because a sheet's slots are copies (S40).
+        let expected: Vec<String> = collage_templates()
             .into_iter()
             .filter(|template| template.slots.len() == count)
             .map(|template| template.name)
@@ -399,8 +413,9 @@ fn the_count_rule_picks_the_layout_that_follows_the_document() {
     }
 
     // The rule is a preference *among the count's own layouts*: every answer is a
-    // template the gallery would list for that count.
-    for template in templates::all() {
+    // template the gallery would list for that count. A sheet is not one of them (S40):
+    // its count is the copies, and no collage has sixteen.
+    for template in collage_templates() {
         let count = template.slots.len();
         let chosen = layout_for(count, template.aspect, template.family())
             .expect("its own count has a layout");
@@ -493,10 +508,11 @@ fn the_ratio_query_answers_the_shape_asked_for_or_nothing() {
 
     // The family preference is honoured wherever the count *can* honour it — the
     // shipped library exercises it only where a shape has several members, so the
-    // claim is asserted over the whole library: for every template, the query with
-    // its own count, shape and family answers that template unless an earlier
-    // library-order member has the same shape *and* family.
-    for template in templates::all() {
+    // claim is asserted over the whole collage library: for every template, the query
+    // with its own count, shape and family answers that template unless an earlier
+    // library-order member has the same shape *and* family. The ID photo sheets are
+    // outside it for `the_count_rule`'s reason (S40).
+    for template in collage_templates() {
         let count = template.slots.len();
         let chosen = layout_with_aspect(count, template.aspect, template.family())
             .unwrap_or_else(|| panic!("{}: its own shape has no answer", template.name));

@@ -186,9 +186,11 @@ fn every_slot_contains_its_own_centroid() {
     // A canary, not a derived number: if a template left the library the sweep
     // would cover less and still pass. S10 grew it from 64 slots to 152, S12c
     // removed `strip-10-10x1`'s ten, S19 added `grid-1-1x1`'s one, S35's ten
-    // members added 57, S37's five added 24, S38's sets added 433, and S39's —
-    // every arrangement at every sheet — added 865.
-    assert_eq!(slots, 1522, "the library's slot count changed");
+    // members added 57, S37's five added 24, S38's sets added 433, S39's —
+    // every arrangement at every sheet — added 865, and S40's six ID photo sheets
+    // added 50 (their slots are the copies of one photo, and a hit test over each
+    // copy is exactly what this sweep should cover).
+    assert_eq!(slots, 1572, "the library's slot count changed");
     assert_eq!(inside, slots);
 }
 
@@ -273,9 +275,10 @@ fn a_point_one_pixel_from_a_boundary_matches_the_analytic_answer() {
     }
 
     assert_eq!(
-        slots, 1522,
+        slots, 1572,
         "the library's slot count changed (S10 grew it from 64; S19 added one; S35 fifty-seven; \
-         S37 twenty-four; S38 four hundred and thirty-three; S39 eight hundred and sixty-five)"
+         S37 twenty-four; S38 four hundred and thirty-three; S39 eight hundred and sixty-five; \
+         S40 fifty — the six ID photo sheets' copies)"
     );
     assert!(
         inner > 2_000,
@@ -391,6 +394,7 @@ fn a_rotated_slot_is_hit_exactly() {
             name: "rotated-test".to_string(),
             version: 1,
             aspect: 1.0,
+            one_photo: false,
             slots: vec![
                 Slot {
                     area: outline.area(),

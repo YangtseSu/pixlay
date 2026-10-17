@@ -218,6 +218,22 @@ impl Command {
     /// accident. Only the index checks that no `validate` call could make live
     /// here — those are about the command's own references.
     fn apply(&self, doc: &mut CollageDoc) -> Result<(), CoreError> {
+        // The edits an ID photo sheet has nothing to act on (S40). Refused before
+        // the match rather than inside each arm: a swap would index `cells` by
+        // slot and a move would clear the sheet, so "there is one photo" has to be
+        // the answer before either touches the list.
+        if doc.template.one_photo {
+            let refused = match self {
+                Self::MovePhoto { .. } => Some("move its photo between cells"),
+                Self::SwapCells { .. } => Some("swap two cells"),
+                Self::AddCell => Some("add a cell"),
+                Self::RemoveLastCell => Some("remove a cell"),
+                _ => None,
+            };
+            if let Some(what) = refused {
+                return Err(CoreError::OnePhotoCommand { what });
+            }
+        }
         match self {
             Self::SetSource { slot, source } => {
                 cell_mut(doc, *slot)?.source = source.clone();
@@ -226,32 +242,76 @@ impl Command {
                 cell_mut(doc, *slot)?.crop = crop.normalized();
             }
             Self::SetTemplate { template } => {
+                // The sheet has one cell, so a document with more could only lose
+                // the rest — there is nowhere on it to keep one (S40).
+                if template.one_photo && (doc.cells.len() > 1 || !doc.kept.is_empty()) {
+                    return Err(CoreError::OnePhotoLayout {
+                        cells: doc.cells.len(),
+                        kept: doc.kept.len(),
+                    });
+                }
                 set_template(doc, template.clone(), Kept::Returns);
             }
             Self::AddPhotos { photos } => {
-                for photo in photos {
-                    match doc.cells.iter().position(|cell| cell.source.is_none()) {
-                        Some(slot) => doc.cells[slot].source = Some(photo.clone()),
-                        None => {
-                            // The ceiling counts what the document holds in total,
-                            // placed and kept (S28): a growth that appended a cell
-                            // would take the document past it.
-                            if doc.cells.len() + doc.kept.len() >= crate::MAX_PHOTOS {
-                                return Err(CoreError::TooManyPhotos {
-                                    max: crate::MAX_PHOTOS,
-                                });
+                if doc.template.one_photo {
+                    match photos.as_slice() {
+                        [] => {}
+                        [photo] => cell_mut(doc, 0)?.source = Some(photo.clone()),
+                        _ => {
+                            return Err(CoreError::OnePhotoPhotos {
+                                found: photos.len(),
+                            });
+                        }
+                    }
+                } else {
+                    for photo in photos {
+                        match doc.cells.iter().position(|cell| cell.source.is_none()) {
+                            Some(slot) => doc.cells[slot].source = Some(photo.clone()),
+                            None => {
+                                // The ceiling counts what the document holds in total,
+                                // placed and kept (S28): a growth that appended a cell
+                                // would take the document past it.
+                                if doc.cells.len() + doc.kept.len() >= crate::MAX_PHOTOS {
+                                    return Err(CoreError::TooManyPhotos {
+                                        max: crate::MAX_PHOTOS,
+                                    });
+                                }
+                                let slots = doc.cells.len();
+                                set_template(doc, layout_with(doc, slots + 1)?, Kept::Waits);
+                                let appended = doc.cells.len() - 1;
+                                doc.cells[appended].source = Some(photo.clone());
                             }
-                            let slots = doc.cells.len();
-                            set_template(doc, layout_with(doc, slots + 1)?, Kept::Waits);
-                            let appended = doc.cells.len() - 1;
-                            doc.cells[appended].source = Some(photo.clone());
                         }
                     }
                 }
             }
             Self::PlacePhotos { places } => {
-                for (slot, path) in places {
-                    cell_mut(doc, *slot)?.source = Some(path.clone());
+                if doc.template.one_photo {
+                    let mut source: Option<&PathBuf> = None;
+                    for (slot, path) in places {
+                        if doc.cell_index(*slot).is_none() {
+                            return Err(CoreError::NoSuchSlot {
+                                slot: *slot,
+                                slots: doc.template.slots.len(),
+                            });
+                        }
+                        match source {
+                            Some(first) if first != path => {
+                                return Err(CoreError::OnePhotoPhotos {
+                                    found: places.len(),
+                                });
+                            }
+                            Some(_) => {}
+                            None => source = Some(path),
+                        }
+                    }
+                    if let Some(path) = source {
+                        cell_mut(doc, 0)?.source = Some(path.clone());
+                    }
+                } else {
+                    for (slot, path) in places {
+                        cell_mut(doc, *slot)?.source = Some(path.clone());
+                    }
                 }
             }
             Self::MovePhoto { from, to } => {
@@ -346,7 +406,15 @@ enum Kept {
 /// one change is restored in its own order and `−` then `+` is the document it was.
 fn set_template(doc: &mut CollageDoc, template: Template, kept: Kept) {
     doc.template = template;
-    let slots = doc.template.slots.len();
+    // A **sheet** holds one cell whatever its slot count is (S40): its slots are the
+    // copies the sheet prints, not cells to fill. Every other template has one cell per
+    // slot. The switch *onto* a sheet is what `OnePhotoLayout` guards, so a document
+    // arriving here with more than one cell cannot reach this line.
+    let slots = if doc.template.one_photo {
+        1
+    } else {
+        doc.template.slots.len()
+    };
     let placed = doc.cells.len();
     if slots < placed {
         // The tail comes off the sheet and goes to the front of the kept list: the
@@ -379,10 +447,16 @@ fn layout_with(doc: &CollageDoc, count: usize) -> Result<Template, CoreError> {
     )
 }
 
+/// The cell a command names, by slot (S40).
+///
+/// The route every per-slot edit takes: on a collage layout the slot is the cell,
+/// and on an ID photo sheet every slot resolves to the one cell — which is what
+/// makes "set this slot's photo" and "set the sheet's photo" the same command. The
+/// slot index is still range-checked against the **template**, because it is a slot
+/// the caller named.
 fn cell_mut(doc: &mut CollageDoc, slot: usize) -> Result<&mut crate::Cell, CoreError> {
-    let slots = doc.cells.len();
-    doc.cells
-        .get_mut(slot)
+    let slots = doc.template.slots.len();
+    doc.cell_mut(slot)
         .ok_or(CoreError::NoSuchSlot { slot, slots })
 }
 

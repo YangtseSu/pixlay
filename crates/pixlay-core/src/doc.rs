@@ -84,7 +84,14 @@ impl CollageDoc {
     /// shape, and how many pixels a render or export puts on it is a parameter of
     /// the render, never of the document.
     pub fn new(template: Template) -> Self {
-        let cells = vec![Cell::default(); template.slots.len()];
+        let cells = vec![
+            Cell::default();
+            if template.one_photo {
+                1
+            } else {
+                template.slots.len()
+            }
+        ];
         Self {
             doc_version: DOC_VERSION,
             template,
@@ -92,6 +99,35 @@ impl CollageDoc {
             frame: Frame::default(),
             kept: Vec::new(),
         }
+    }
+
+    /// The cell a slot shows, as an index into [`cells`](Self::cells) (S40).
+    ///
+    /// A collage layout has one cell per slot, so the answer is the slot itself. An
+    /// **ID photo sheet** has one cell and many slots: the sheet's copies all draw
+    /// cell 0, and this is the one place that mapping lives — the renderer, the
+    /// preview, the hit test and the shell all ask it rather than each assuming
+    /// `slot == cell`.
+    ///
+    /// `None` when the template has no such slot.
+    pub fn cell_index(&self, slot: usize) -> Option<usize> {
+        if slot >= self.template.slots.len() {
+            return None;
+        }
+        Some(if self.template.one_photo { 0 } else { slot })
+    }
+
+    /// The cell a slot shows, or `None` when the template has no such slot.
+    /// See [`cell_index`](Self::cell_index).
+    pub fn cell(&self, slot: usize) -> Option<&Cell> {
+        self.cells.get(self.cell_index(slot)?)
+    }
+
+    /// [`cell`](Self::cell), mutable: the command layer's route from a slot to the
+    /// cell it edits.
+    pub fn cell_mut(&mut self, slot: usize) -> Option<&mut Cell> {
+        let index = self.cell_index(slot)?;
+        self.cells.get_mut(index)
     }
 
     /// Checks everything the model promises, and reports the first violation.
@@ -118,7 +154,16 @@ impl CollageDoc {
         // the render grid, whose long edge is the one parameter a caller gives.
         let canvas_aspect = self.template.aspect;
         self.template.validate()?;
-        if self.cells.len() != self.template.slots.len() {
+        if self.template.one_photo {
+            // One cell and nothing off the sheet (S40): the slots are copies, and a
+            // layout change cannot park a cell on a sheet that holds one photo.
+            if self.cells.len() != 1 || !self.kept.is_empty() {
+                return Err(CoreError::OnePhotoDocument {
+                    cells: self.cells.len(),
+                    kept: self.kept.len(),
+                });
+            }
+        } else if self.cells.len() != self.template.slots.len() {
             return Err(CoreError::CellCount {
                 cells: self.cells.len(),
                 slots: self.template.slots.len(),
@@ -225,12 +270,15 @@ impl CollageDoc {
         canvas_aspect: f64,
         photo_aspect: f64,
     ) -> Result<CropFit, CoreError> {
+        // The crop is the cell's; the geometry the fit clamps against is the
+        // slot's own (S40). On a collage layout the two are the same index, and on
+        // an ID photo sheet every slot asks cell 0 — which is what makes the one
+        // photo cover each copy.
         let crop = self
-            .cells
-            .get(slot)
+            .cell(slot)
             .ok_or(CoreError::NoSuchSlot {
                 slot,
-                slots: self.cells.len(),
+                slots: self.template.slots.len(),
             })?
             .crop;
         self.fit_crop(slot, crop, canvas_aspect, photo_aspect)

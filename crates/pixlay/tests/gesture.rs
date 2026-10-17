@@ -53,9 +53,11 @@ fn a_live_gesture_refines_into_the_resting_grids_own_pixels() {
     let app = support::app();
     let window = support::window(&app);
 
+    // A collage layout: a sheet's slots are copies (S40), and its document has one
+    // cell to put the two photos in.
     let template = templates::all()
         .into_iter()
-        .find(|template| template.slots.len() == 2)
+        .find(|template| template.slots.len() == 2 && !template.one_photo)
         .expect("the library has a two-slot layout");
     let mut doc = pixlay_core::CollageDoc::new(template);
     doc.cells[0].source = Some(support::photo("square.png"));

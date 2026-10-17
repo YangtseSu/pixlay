@@ -544,7 +544,11 @@ fn add_click(area: &gtk::DrawingArea, window: &EditorWindow, swap_click: &Rc<Cel
             if presses == 2 {
                 // The gesture a photo editor has always had: an empty slot asks
                 // for a photo, an occupied one goes back to its whole photo.
-                if window.document().cells[slot].source.is_none() {
+                if window
+                    .document()
+                    .cell(slot)
+                    .is_some_and(|cell| cell.source.is_none())
+                {
                     window.choose_photo(slot);
                 } else {
                     window.reset_framing(slot);
@@ -846,7 +850,11 @@ fn add_keys(area: &gtk::DrawingArea, window: &EditorWindow) {
                 }),
                 gdk::Key::_0 | gdk::Key::KP_0 => Some(CropTransform::IDENTITY),
                 gdk::Key::Return | gdk::Key::KP_Enter => {
-                    if window.document().cells[slot].source.is_none() {
+                    if window
+                        .document()
+                        .cell(slot)
+                        .is_some_and(|cell| cell.source.is_none())
+                    {
                         window.choose_photo(slot);
                     }
                     return glib::Propagation::Stop;
@@ -1059,6 +1067,12 @@ impl CellControls {
     }
 
     /// The strip's six controls, in the order they are laid out.
+    /// The `+` of one slot, for a test that asks how many a sheet shows (S40): an ID
+    /// photo sheet resolves every slot to one cell, so only the first tile carries one.
+    pub fn empty_button(&self, slot: usize) -> Option<gtk::Button> {
+        self.buttons.get(slot).cloned()
+    }
+
     pub fn strip_buttons(&self) -> [gtk::Button; 6] {
         [
             self.zoom_out.clone(),
@@ -1118,10 +1132,11 @@ impl CellControls {
         }
         let placement = placement(grid, width, height);
         for (slot, button) in self.buttons.iter().enumerate() {
-            let empty = doc
-                .cells
-                .get(slot)
-                .is_some_and(|cell| cell.source.is_none());
+            // A sheet is filled **once** (S40): every slot draws its one cell, so only
+            // the first tile carries the `+` — nine buttons that all open the same
+            // chooser over the same photo would read as nine cells to fill.
+            let showable = !doc.template.one_photo || slot == 0;
+            let empty = showable && doc.cell(slot).is_some_and(|cell| cell.source.is_none());
             let Some(geometry) = doc.template.slots.get(slot).filter(|_| empty) else {
                 button.set_visible(false);
                 continue;
@@ -1149,10 +1164,7 @@ impl CellControls {
             self.strip.set_visible(false);
             return;
         };
-        let occupied = doc
-            .cells
-            .get(slot)
-            .is_some_and(|cell| cell.source.is_some());
+        let occupied = doc.cell(slot).is_some_and(|cell| cell.source.is_some());
         let Some(geometry) = doc.template.slots.get(slot).filter(|_| occupied) else {
             self.strip.set_visible(false);
             return;
@@ -1179,7 +1191,18 @@ impl CellControls {
             });
             self.horizontal.set(horizontal);
         }
-        if horizontal {
+        if !fits_row && !fits_column {
+            // A cell too small for the row *and* for the column (S40): the library's
+            // smallest were the 1/16 panes, which hold the column, and the ID photo
+            // sheets are the first layouts that do not — a 25 mm tile on a 6-inch sheet
+            // is under a hundred device pixels each way. The strip is the sheet's
+            // controls rather than one copy's there (every copy shows the same photo),
+            // so it is anchored to the canvas's own bottom-start corner, where it covers
+            // nothing the user is looking at.
+            self.strip.set_margin_start(CONTROL_INSET.round() as i32);
+            self.strip
+                .set_margin_top((f64::from(height) - CONTROL_INSET - CONTROL_SIZE).round() as i32);
+        } else if horizontal {
             let centred = (left + right) / 2.0 - STRIP_LENGTH / 2.0;
             let last = right - CONTROL_INSET - STRIP_LENGTH;
             let x = if last > left + CONTROL_INSET {
@@ -1196,6 +1219,10 @@ impl CellControls {
             self.strip
                 .set_margin_top((top + CONTROL_INSET).round() as i32);
         }
+        // An ID photo sheet has one photo, so there is no second cell to swap with
+        // (S40): the control is insensitive there rather than hidden, because the strip's
+        // own length — and so its placement — is the six controls' arithmetic.
+        self.swap.set_sensitive(!doc.template.one_photo);
         // The mark's own control reads the window rather than holding a copy of it (S23):
         // an `Esc`, a `Shift`+click and a swap that happened all clear the mark, and a
         // toggle left checked with nothing marked would be a control that lies. Writing it

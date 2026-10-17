@@ -311,7 +311,7 @@ fn edit_project(args: EditArgs) -> Result<u8, Failure> {
     if let Some(slot) = args.slot {
         // Checked against the document the structural flags produced: a layout
         // switch can drop the cell the framing was meant for.
-        let slots = history.doc().cells.len();
+        let slots = history.doc().template.slots.len();
         if slot >= slots {
             return Err(Failure::Usage(format!(
                 "--slot {slot} does not exist; the template has {slots} slots"
@@ -334,7 +334,7 @@ fn edit_project(args: EditArgs) -> Result<u8, Failure> {
                 )?;
             }
             if args.rotate.is_some() || args.zoom.is_some() || args.offset.is_some() {
-                let request = history.doc().cells[slot].crop.normalized();
+                let request = cell_at(history.doc(), slot)?.crop.normalized();
                 let request = CropTransform {
                     zoom: args.zoom.unwrap_or(request.zoom),
                     offset: args.offset.unwrap_or(request.offset),
@@ -342,7 +342,7 @@ fn edit_project(args: EditArgs) -> Result<u8, Failure> {
                 }
                 .normalized();
                 let doc = history.doc().clone();
-                let photo = doc.cells[slot].source.as_deref().map(|source| {
+                let photo = cell_at(&doc, slot)?.source.as_deref().map(|source| {
                     if source.is_absolute() {
                         source.to_path_buf()
                     } else {
@@ -412,7 +412,7 @@ fn edit_project(args: EditArgs) -> Result<u8, Failure> {
     let border = doc.frame.color;
     report.text("border", rgb([border.r, border.g, border.b]));
     if let Some(slot) = args.slot {
-        let cell = &doc.cells[slot];
+        let cell = cell_at(doc, slot)?;
         report.int("slot", slot as i64);
         report.bool("occupied", cell.source.is_some());
         report.float("zoom", cell.crop.zoom);
@@ -425,6 +425,21 @@ fn edit_project(args: EditArgs) -> Result<u8, Failure> {
     report.int("bytes", bytes as i64);
     emit(&report, args.json);
     Ok(EXIT_SUCCESS)
+}
+
+/// One cell by slot, through the document's own mapping (S40).
+///
+/// The CLI speaks in slots — `--slot` names the tile a caller sees — and an ID photo
+/// sheet resolves every tile to its one cell. The bound is checked against the
+/// template before this, so a missing cell here is a document that moved under the
+/// command.
+fn cell_at(doc: &pixlay_core::CollageDoc, slot: usize) -> Result<&pixlay_core::Cell, Failure> {
+    doc.cell(slot).ok_or_else(|| {
+        Failure::Failed(format!(
+            "slot {slot} does not exist; the template has {} slots",
+            doc.template.slots.len()
+        ))
+    })
 }
 
 /// One command of S14's structural vocabulary, applied to a project's history.
@@ -480,6 +495,9 @@ fn list_templates(args: TemplatesArgs) -> Result<u8, Failure> {
             templates::ratio_label(template.aspect),
         );
         report.int(&format!("{prefix}.version"), i64::from(template.version));
+        // The sheet holds one photo in every slot (S40): a machine caller has to
+        // see which members those are, because they are not collage candidates.
+        report.bool(&format!("{prefix}.one_photo"), template.one_photo);
     }
     report.int("count", listed.len() as i64);
     emit(&report, args.json);
@@ -1186,11 +1204,16 @@ fn gesture(args: GestureArgs) -> Result<u8, Failure> {
     // from it on every build, exactly as the window's is.
     let frame = |step: u32| {
         let mut framed = doc.clone();
-        framed.cells[slot].crop = pixlay_core::CropTransform {
-            rotation_deg: doc.cells[slot].crop.rotation_deg + GESTURE_STEP_DEG * f64::from(step),
-            ..doc.cells[slot].crop
+        let crop = cell_at(&doc, slot)
+            .map(|cell| cell.crop)
+            .unwrap_or(pixlay_core::CropTransform::IDENTITY);
+        if let Some(cell) = framed.cell_mut(slot) {
+            cell.crop = pixlay_core::CropTransform {
+                rotation_deg: crop.rotation_deg + GESTURE_STEP_DEG * f64::from(step),
+                ..crop
+            }
+            .normalized();
         }
-        .normalized();
         framed
     };
 
@@ -1480,9 +1503,16 @@ fn switch(args: SwitchArgs) -> Result<u8, Failure> {
 fn probe(args: ProbeArgs) -> Result<u8, Failure> {
     let project =
         Project::load(&args.project).map_err(|error| Failure::Failed(error.to_string()))?;
-    let sources = project
+    // Every source is resolved even though the probe paints its own content (S40:
+    // `probe_bitmaps` asks the document which slots are occupied and paints one flat
+    // colour per slot): a project whose photo went away is a failure here as it is
+    // everywhere else, rather than a probe that quietly measures white.
+    let photos = project
         .sources()
-        .map_err(|error| Failure::Failed(error.to_string()))?;
+        .map_err(|error| Failure::Failed(error.to_string()))?
+        .iter()
+        .filter(|source| source.is_some())
+        .count();
     let doc = project.doc().clone();
 
     let stopwatch = stats::Stopwatch::start();
@@ -1498,7 +1528,7 @@ fn probe(args: ProbeArgs) -> Result<u8, Failure> {
     //
     // The render is full size: the probe samples pixel coordinates, and a preview
     // would move every one of them.
-    let bitmaps = pixlay_imaging::probe::probe_bitmaps(&doc, full, &sources)
+    let bitmaps = pixlay_imaging::probe::probe_bitmaps(&doc, full)
         .map_err(|error| Failure::Failed(error.to_string()))?;
     let mut images = Images::new();
     for bitmap in &bitmaps {
@@ -1520,6 +1550,11 @@ fn probe(args: ProbeArgs) -> Result<u8, Failure> {
     report.text("status", if result.ok() { "ok" } else { "failed" });
     report.text("command", "probe");
     report.int("long_edge", i64::from(long_edge));
+    // The document's own count (S40: 1 on an ID photo sheet) beside the template's,
+    // because `occupied` below counts the *slots* the render paints — twelve tiles
+    // of one photo is the sheet working, not a document with twelve cells.
+    report.int("cells", doc.cells.len() as i64);
+    report.int("photos", photos as i64);
     report.int("slots", result.slots as i64);
     report.int("occupied", result.occupied.len() as i64);
     report.int("out_w", i64::from(result.width));

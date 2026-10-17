@@ -13,10 +13,13 @@
 //! Two things make those checks decidable rather than approximate, and both are
 //! asserted here rather than assumed:
 //!
-//! * **The lattice.** Every coordinate is an integer multiple of 1/32, so every
-//!   vertex lies on a line of the 32x32 grid and an axis-parallel slot is a union
-//!   of whole cells of it. Areas are then sums of exactly representable terms, so
-//!   "sums to exactly 1.0" is an equality, not a tolerance.
+//! * **The lattice.** Every coordinate is an integer multiple of the arrangement's
+//!   own grid — 1/128 for the collage library, 1/2560 for the ID photo sheets (S40)
+//!   — so every vertex lies on a line of that lattice and an axis-parallel slot is a
+//!   union of whole cells of it. Areas are then sums of exactly representable terms,
+//!   so "sums to exactly 1.0" is an equality, not a tolerance. (2560 is not dyadic,
+//!   so a coordinate written on it is the nearest double to `k/2560` and the check
+//!   below allows the division's own round-off.)
 //! * **The sampling grid.** `SAMPLES = 512` is a multiple of 32, and the sample
 //!   points sit at cell *centers* (`(i + 0.5) / 512`, i.e. odd/1024) while every
 //!   edge lies on an even/1024 line, so no sample ever lands on a boundary and no
@@ -27,8 +30,8 @@ use std::process::Command;
 
 use pixlay_core::templates::{SMOKE_TEMPLATE, TEMPLATE_VERSION, generator};
 use pixlay_core::{
-    ASPECT_TOLERANCE, CoreError, MAX_PHOTOS, MAX_SLOTS, MIN_SLOTS, Point, Polygon, Slot, Template,
-    layout_for, templates,
+    ASPECT_TOLERANCE, CoreError, MAX_PHOTOS, MAX_SLOTS, MAX_TEMPLATE_SLOTS, MIN_SLOTS, Point,
+    Polygon, Slot, Template, layout_for, templates,
 };
 
 /// Points sampled per axis when rasterizing a template. 512 per axis is 262144
@@ -38,9 +41,23 @@ const SAMPLES: usize = 512;
 
 /// The lattice the geometry is authored on: every coordinate is a multiple of
 /// this. See the module comment for why the tests depend on it. 32 was the finest
-/// grid until S38; the even nine-grid and the 2:3 splits read 128, so the checked
-/// lattice is the finest one the library uses.
-const LATTICE: f64 = 128.0;
+/// grid until S38, 128 until S40 (the even nine-grid and the 2:3 splits), and the
+/// **ID photo sheets** are authored on 2560 — 1/2560 of the 4R page's width, which
+/// is what lands a 25 mm cell within 0.03 mm of its size (`generator::ID_GRID`).
+/// So the checked lattice is the finest one the library uses.
+///
+/// The value is not a dyadic rational (2560 = 2^9 * 5), so a coordinate written on
+/// it is the *nearest* double to `k/2560` rather than an exact one, and the check
+/// below allows the representation's own round-off — 1e-9, which is 1e-5 of a
+/// lattice step and far below anything geometry can be about. The sampling grid
+/// stays exact on both lattices: a coordinate `k/2560` can never equal a sample
+/// `(2i+1)/1024`, which would need `2k = 5(2i+1)` — an even number equal to an odd
+/// one.
+const LATTICE: f64 = 2560.0;
+
+/// How far a coordinate may sit from the nearest multiple of [`LATTICE`]: the
+/// representation's own error, not a tolerance on the geometry.
+const LATTICE_EPSILON: f64 = 1e-9;
 
 fn templates_under_test() -> Vec<Template> {
     let templates = templates::all();
@@ -97,10 +114,13 @@ fn every_coordinate_lies_on_the_lattice_and_areas_are_exact() {
         for (index, slot) in template.slots.iter().enumerate() {
             for point in &slot.outline.points {
                 for (axis, value) in [("x", point.x), ("y", point.y)] {
-                    assert_eq!(
-                        (value * LATTICE).fract(),
-                        0.0,
-                        "{} slot {index}: {axis} = {value} is off the 1/32 lattice",
+                    // Written `k/LATTICE` in the generator and read back here, so the
+                    // claim is "this is a lattice coordinate" and the epsilon is only
+                    // the division's own rounding.
+                    let steps = value * LATTICE;
+                    assert!(
+                        (steps - steps.round()).abs() <= LATTICE_EPSILON,
+                        "{} slot {index}: {axis} = {value} is off the 1/{LATTICE} lattice",
                         template.name
                     );
                 }
@@ -136,6 +156,13 @@ fn slots_never_overlap_and_leave_no_hole() {
                 "{}: {uncovered} uncovered samples in a cut template",
                 template.name
             );
+        } else if template.one_photo {
+            // An ID photo sheet's uncovered area is its cut gaps and its margins
+            // (S40): a 2x2 two-inch sheet is 52% white by design, so the "mostly
+            // covered" sanity check below does not apply to it. What does is the
+            // flood fill — every uncovered sample has to reach the border, which is
+            // the next test's own check and the loader's (`topology`).
+            assert!(uncovered > 0, "{}: a sheet with no gaps", template.name);
         } else {
             // Not a cut template: only the interior must be covered, which is
             // what "no hole" means for a layout with a gutter. A gutter is fine;
@@ -258,6 +285,7 @@ fn template(name: &str, slots: &[&[(f64, f64)]]) -> Template {
         name: name.to_string(),
         version: 1,
         aspect: 1.0,
+        one_photo: false,
         slots,
     }
 }
@@ -481,6 +509,14 @@ fn every_slot_shares_an_edge_with_its_neighbours_or_meets_the_border() {
     // could satisfy "no hole" by accident of sampling while containing a slot
     // nothing borders.
     for template in templates_under_test() {
+        if template.one_photo {
+            // An ID photo sheet's copies are separated by their cut gaps (S40), so an
+            // interior cell touches neither a neighbour nor the border — which is the
+            // layout rather than a defect. What this test guards — a slot sealed off
+            // from the sheet, with nothing bordering it — is what the sheet's own
+            // grid test measures instead (`an_id_sheet_is_a_grid_of_congruent_cells`).
+            continue;
+        }
         let seams = template.shared_edges();
         for (index, slot) in template.slots.iter().enumerate() {
             let shares = seams.iter().any(|seam| seam.a == index || seam.b == index);
@@ -506,21 +542,28 @@ fn every_slot_count_in_the_range_is_covered() {
     // comes from the constants, not from a literal, so widening the product range
     // fails here rather than silently shipping a gap.
     let templates = templates_under_test();
+    // The product's counts, which are the **collage's**: a photo count, so the ID
+    // photo sheets (whose slots are copies, S40) are not what covers one.
     for count in MIN_SLOTS..=MAX_SLOTS {
         let found: Vec<&str> = templates
             .iter()
-            .filter(|template| template.slots.len() == count)
+            .filter(|template| template.slots.len() == count && !template.one_photo)
             .map(|template| template.name.as_str())
             .collect();
         assert!(
             !found.is_empty(),
-            "no template with {count} slots; the library has: {found:?}"
+            "no collage template with {count} slots; the library has: {found:?}"
         );
     }
     for template in &templates {
+        let max = if template.one_photo {
+            MAX_TEMPLATE_SLOTS
+        } else {
+            MAX_SLOTS
+        };
         assert!(
-            (MIN_SLOTS..=MAX_SLOTS).contains(&template.slots.len()),
-            "{}: {} slots is outside the product range",
+            (MIN_SLOTS..=max).contains(&template.slots.len()),
+            "{}: {} slots is outside its own range (1..={max})",
             template.name,
             template.slots.len()
         );
@@ -795,7 +838,7 @@ fn the_ratio_row_lists_each_counts_own_shapes_in_order() {
         // One entry per shape: the library's members of that count, deduped.
         let mut expected: Vec<f64> = templates_under_test()
             .iter()
-            .filter(|template| template.slots.len() == count)
+            .filter(|template| template.slots.len() == count && !template.one_photo)
             .map(|template| template.aspect)
             .collect();
         expected.sort_by(f64::total_cmp);
@@ -831,7 +874,7 @@ fn the_ratio_row_lists_each_counts_own_shapes_in_order() {
             .collect();
         for template in templates_under_test()
             .iter()
-            .filter(|template| template.slots.len() == count)
+            .filter(|template| template.slots.len() == count && !template.one_photo)
         {
             assert!(
                 reachable.contains(&template.name),
@@ -1012,7 +1055,12 @@ fn the_matrix_is_grouped_by_aspect_ratio() {
     // a canvas and a template only fit each other when their ratios agree. A
     // portrait and a landscape variant of the same layout must be separate
     // entries, not one entry that gets stretched.
-    let templates = templates_under_test();
+    // The collage library's aspects: `of_aspect` answers about layouts a photo count
+    // can use, so an ID photo sheet (a copy count, S40) is not in the group.
+    let templates: Vec<Template> = templates_under_test()
+        .into_iter()
+        .filter(|template| !template.one_photo)
+        .collect();
     let aspects: Vec<f64> = templates.iter().map(|template| template.aspect).collect();
     assert!(
         aspects.iter().any(|&aspect| aspect < 1.0),
@@ -1060,15 +1108,19 @@ fn template_names_are_unique_and_registered() {
         assert_eq!(template.name, name);
         // The naming scheme (`templates/mod.rs`) starts with the layout family.
         assert!(
-            name.starts_with("strip-") || name.starts_with("grid-") || name.starts_with("mosaic-"),
+            ["strip-", "grid-", "mosaic-", "id-"]
+                .iter()
+                .any(|family| name.starts_with(family)),
             "{name} does not follow the family naming scheme"
         );
+        // The count is the first segment after the family that is a number: every
+        // collage family is `<family>-<slots>-<variant>-<sheet tag>`, and an ID photo
+        // sheet's name carries its size before the count (`id-1cun-small-16-2x3`, S40).
         let count: usize = name
             .split('-')
-            .nth(1)
-            .expect("the name carries a slot count")
-            .parse()
-            .expect("the slot count is a number");
+            .skip(1)
+            .find_map(|part| part.parse::<usize>().ok())
+            .unwrap_or_else(|| panic!("{name} carries no slot count"));
         assert_eq!(
             count,
             template.slots.len(),
@@ -1077,6 +1129,183 @@ fn template_names_are_unique_and_registered() {
     }
     // Unknown names are None, not a panic or a default.
     assert!(templates::get("nope").is_none());
+}
+
+/// The 4R page the ID photo sheets are authored for (S40): 4 x 6 inch, exactly
+/// 101.6 x 152.4 mm, whose aspect is 2:3 — the `2x3` sheet tag.
+const ID_SHEET_MM: (f64, f64) = (101.6, 152.4);
+
+/// The white between two copies, in millimetres: the recipe's own constant
+/// (`generator::ID_GAP_MM`), which this test reads back out of the geometry.
+const ID_GAP_MM: f64 = 2.0;
+
+/// Each ID photo sheet: its name, its nominal cell in millimetres, and the copies it
+/// carries (columns, rows). The five sizes are the human's ruling of 2026-10-17; the
+/// sixth (大二寸) is the other standard two-inch size the same ruling allowed.
+/// One ID photo sheet's spec: its name, its nominal cell in millimetres and its
+/// copies as `(columns, rows)`.
+type IdSheet = (&'static str, (f64, f64), (usize, usize));
+
+const ID_SHEETS: &[IdSheet] = &[
+    ("id-1cun-12-2x3", (25.0, 35.0), (3, 4)),
+    ("id-1cun-small-16-2x3", (22.0, 32.0), (4, 4)),
+    ("id-1cun-large-6-2x3", (33.0, 48.0), (2, 3)),
+    ("id-2cun-6-2x3", (35.0, 49.0), (2, 3)),
+    ("id-2cun-large-4-2x3", (35.0, 53.0), (2, 2)),
+    ("id-2cun-small-6-2x3", (35.0, 45.0), (2, 3)),
+];
+
+/// The four edges of a slot's own extent, `(x0, y0, x1, y1)`.
+fn extent(slot: &Slot) -> (f64, f64, f64, f64) {
+    let mut box_ = (
+        f64::INFINITY,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::NEG_INFINITY,
+    );
+    for point in &slot.outline.points {
+        box_.0 = box_.0.min(point.x);
+        box_.1 = box_.1.min(point.y);
+        box_.2 = box_.2.max(point.x);
+        box_.3 = box_.3.max(point.y);
+    }
+    box_
+}
+
+#[test]
+fn an_id_sheet_is_a_grid_of_congruent_cells() {
+    // S40: every slot of an ID photo sheet shows the same photo, so every cell is
+    // **the same rectangle on a regular grid** — which is also what lets one bitmap
+    // serve all the copies (a bitmap is sized for the slot it was built for, so a
+    // non-congruent sheet would resample). The sizes are the recipe's provenance,
+    // measured back through the page: on 101.6 x 152.4 mm a normalized extent is a
+    // millimetre one, and the bound is the lattice's own resolution (`ID_GRID`) rather
+    // than a chosen tolerance — half a step across, half a step down.
+    let step_x = ID_SHEET_MM.0 / LATTICE;
+    let step_y = ID_SHEET_MM.1 / LATTICE;
+    let sheets = templates::one_photo();
+    assert_eq!(
+        sheets.len(),
+        ID_SHEETS.len(),
+        "the ID photo sheets this build ships"
+    );
+    for template in &sheets {
+        let (_, cell_mm, (columns, rows)) = *ID_SHEETS
+            .iter()
+            .find(|(name, _, _)| *name == template.name)
+            .unwrap_or_else(|| panic!("{}: not in this test's table", template.name));
+        assert!(
+            template.one_photo,
+            "{}: a sheet holds one photo",
+            template.name
+        );
+        assert_eq!(
+            template.aspect,
+            2.0 / 3.0,
+            "{}: the 4R page is 2:3",
+            template.name
+        );
+        assert_eq!(
+            template.slots.len(),
+            columns * rows,
+            "{}: the copies of one photo",
+            template.name
+        );
+
+        let (x0, y0, x1, y1) = extent(&template.slots[0]);
+        let (width, height) = (x1 - x0, y1 - y0);
+        let gap_x = if columns > 1 {
+            extent(&template.slots[1]).0 - x1
+        } else {
+            0.0
+        };
+        let gap_y = if rows > 1 {
+            extent(&template.slots[columns]).1 - y1
+        } else {
+            0.0
+        };
+        // The nominal size, in millimetres, as the page reads it.
+        assert!(
+            (width * ID_SHEET_MM.0 - cell_mm.0).abs() <= step_x,
+            "{}: the cell is {:.3} mm across, not {}",
+            template.name,
+            width * ID_SHEET_MM.0,
+            cell_mm.0
+        );
+        assert!(
+            (height * ID_SHEET_MM.1 - cell_mm.1).abs() <= step_y,
+            "{}: the cell is {:.3} mm down, not {}",
+            template.name,
+            height * ID_SHEET_MM.1,
+            cell_mm.1
+        );
+        assert!(
+            (gap_x * ID_SHEET_MM.0 - ID_GAP_MM).abs() <= step_x,
+            "{}: the gap across is {:.3} mm, not {ID_GAP_MM}",
+            template.name,
+            gap_x * ID_SHEET_MM.0
+        );
+        assert!(
+            (gap_y * ID_SHEET_MM.1 - ID_GAP_MM).abs() <= step_y,
+            "{}: the gap down is {:.3} mm, not {ID_GAP_MM}",
+            template.name,
+            gap_y * ID_SHEET_MM.1
+        );
+
+        // Every copy is that same rectangle, and the grid is regular: row by row,
+        // each row left to right — the order the generator writes and the order the
+        // strip and `probe` read.
+        for row in 0..rows {
+            for column in 0..columns {
+                let index = row * columns + column;
+                let slot = &template.slots[index];
+                let box_ = extent(slot);
+                // Congruent to within the representation's own round-off: the
+                // coordinates are nearest doubles to `k/2560`, so a difference of two
+                // of them moves in the last bit.
+                assert!(
+                    ((box_.2 - box_.0) - width).abs() <= LATTICE_EPSILON
+                        && ((box_.3 - box_.1) - height).abs() <= LATTICE_EPSILON,
+                    "{}: slot {index} is {:.6}x{:.6}, not the first cell's {width:.6}x{height:.6}",
+                    template.name,
+                    box_.2 - box_.0,
+                    box_.3 - box_.1
+                );
+                assert_eq!(
+                    slot.outline.points.len(),
+                    4,
+                    "{}: slot {index} is a rectangle",
+                    template.name
+                );
+                let want_x = x0 + column as f64 * (width + gap_x);
+                let want_y = y0 + row as f64 * (height + gap_y);
+                assert!(
+                    (box_.0 - want_x).abs() <= step_x && (box_.1 - want_y).abs() <= step_y,
+                    "{}: slot {index} sits at ({:.4}, {:.4}), not ({want_x:.4}, {want_y:.4})",
+                    template.name,
+                    box_.0,
+                    box_.1
+                );
+            }
+        }
+
+        // The counts are the largest that fit: one more copy in either direction
+        // would leave the page. The sheet is printed borderless, so what bounds them
+        // is the page rather than a margin (the human's ruling of 2026-10-17).
+        let fits = |count: usize, cell: f64, gap: f64| {
+            count as f64 * cell + (count - 1) as f64 * gap <= 1.0
+        };
+        assert!(
+            fits(columns, width, gap_x) && !fits(columns + 1, width, gap_x),
+            "{}: {columns} columns is not the most that fit",
+            template.name
+        );
+        assert!(
+            fits(rows, height, gap_y) && !fits(rows + 1, height, gap_y),
+            "{}: {rows} rows is not the most that fit",
+            template.name
+        );
+    }
 }
 
 #[test]
@@ -1155,9 +1384,18 @@ const SHIPPED_BEFORE_S10: [(&str, u64); 11] = [
 /// relies on.
 fn fingerprint(template: &Template) -> u64 {
     let source = generator::emit_source(std::slice::from_ref(template));
-    let body = &source[source
+    let start = source
         .find("    Frozen {")
-        .expect("the emitter writes one table row per template")..];
+        .expect("the emitter writes one table row per template");
+    // Up to the table's own end: the emitter's prose and the trailer it writes after
+    // the table (S40's `ONE_PHOTO` list) are not part of a template's geometry, and
+    // hashing them would fail this test on a comment. The slice keeps the row, the
+    // closing `];` and the newline after it, which is what the fingerprints recorded
+    // here have always covered.
+    let end = source[start..]
+        .find("\n\n///")
+        .map_or(source.len(), |at| start + at + 1);
+    let body = &source[start..end];
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
     for byte in body.as_bytes() {
         hash ^= u64::from(*byte);

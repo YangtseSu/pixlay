@@ -279,6 +279,7 @@ fn hand_made(name: &str, slots: &[&[(f64, f64)]]) -> Template {
         name: name.to_string(),
         version: 1,
         aspect: 1.0,
+        one_photo: false,
         slots,
     }
 }

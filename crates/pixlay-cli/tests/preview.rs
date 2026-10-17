@@ -123,9 +123,10 @@ fn rmse(a: &[u8], b: &[u8]) -> f64 {
 #[test]
 fn the_preview_grade_source_stays_the_exports_own_renderer() {
     let dir = out_dir("preview-drift");
+    // A collage layout (S40): a four-copy sheet has one cell, and this test fills four.
     let template = templates::all()
         .into_iter()
-        .find(|template| template.slots.len() == 4)
+        .find(|template| template.slots.len() == 4 && !template.one_photo)
         .expect("the library has a four-slot layout");
     let mut doc = CollageDoc::new(template);
     for (slot, name) in [

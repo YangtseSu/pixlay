@@ -86,6 +86,10 @@ pub enum SelectionError {
         slots: usize,
         photos: usize,
     },
+    /// An ID photo sheet holds one photo (S40): the selection has another number,
+    /// and its slots are the copies rather than cells to fill.
+    #[error("an ID photo sheet holds one photo, but the selection has {photos}")]
+    OnePhoto { photos: usize },
 }
 
 /// The photos a user has picked, in the order they will land in cells.
@@ -173,6 +177,16 @@ impl Selection {
                 max: MAX_PHOTOS,
             });
         }
+        // One photo is the whole sheet (S40): the template's slots are its copies,
+        // so the document has one cell and the photo goes there.
+        if template.one_photo {
+            if photos != 1 {
+                return Err(SelectionError::OnePhoto { photos });
+            }
+            let mut doc = templates::document(template);
+            doc.cells[0].source = Some(self.photos[0].clone());
+            return Ok(doc);
+        }
         let slots = template.slots.len();
         if slots != photos {
             return Err(SelectionError::SlotCount {
@@ -225,7 +239,7 @@ pub fn layout_for(count: usize, aspect: f64, family: Option<Family>) -> Option<T
     let mut best: Option<(u8, u8, f64, Template)> = None;
     for template in templates::all()
         .into_iter()
-        .filter(|template| template.slots.len() == count)
+        .filter(|template| template.slots.len() == count && !template.one_photo)
     {
         let key = (
             u8::from((template.aspect - aspect).abs() > ASPECT_TOLERANCE),

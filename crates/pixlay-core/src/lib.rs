@@ -135,6 +135,16 @@ pub const MAX_TEMPLATE_ASPECT: f64 = 10.0;
 pub const MIN_SLOTS: usize = 1;
 pub const MAX_SLOTS: usize = 9;
 
+/// Largest slot count one template may declare (S40).
+///
+/// [`MAX_SLOTS`] bounds what a *document* holds — `cells + kept`, the photos of a
+/// collage — and stays nine. A template's own rects may be more, because the ID
+/// photo sheets put **one photo in every slot**: the document holds one cell and
+/// the slots are the copies the sheet prints, so they are geometry rather than
+/// photos. The ceiling is the largest sheet this build ships — 小一寸's 4x4 on a
+/// 6-inch page.
+pub const MAX_TEMPLATE_SLOTS: usize = 16;
+
 /// Longest edge a render or export may be asked for, in pixels.
 ///
 /// Bounded because the long edge is the one parameter that decides the output

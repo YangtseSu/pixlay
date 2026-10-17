@@ -38,8 +38,6 @@
 //! (`AGENTS.md`: nothing may be possible only in the GUI), and because the
 //! questions are about pixels, which this crate owns.
 
-use std::path::PathBuf;
-
 use pixlay_core::{CollageDoc, PixelSize, Point, Polygon, Rgba8, SharedEdge};
 
 /// The palette, indexed by cell.
@@ -85,19 +83,22 @@ impl Rgb8View<'_> {
     }
 }
 
-/// Flat bitmaps for the probe, one per occupied cell.
+/// Flat bitmaps for the probe, one per occupied slot.
 ///
 /// Sized from the same fit and the same display region as
 /// [`crate::slot_bitmap`]: a probe whose bitmaps were sized differently would be
 /// measuring a render nobody will ever produce.
+///
+/// Keyed by **cell**, like `Images` itself: one flat bitmap per occupied cell, which
+/// the renderer then blits once per slot that draws it — twelve copies of an ID photo
+/// sheet's one photo share it (S40), and their colour is therefore that cell's.
 pub fn probe_bitmaps(
     doc: &CollageDoc,
     canvas_px: PixelSize,
-    sources: &[Option<PathBuf>],
 ) -> Result<Vec<crate::SlotBitmap>, crate::ImagingError> {
     let mut bitmaps = Vec::new();
-    for (index, source) in sources.iter().enumerate() {
-        if source.is_some() {
+    for (index, cell) in doc.cells.iter().enumerate() {
+        if cell.source.is_some() {
             bitmaps.push(crate::layout::flat_bitmap(
                 doc,
                 index,
@@ -413,15 +414,13 @@ pub fn probe(doc: &CollageDoc, image: &Rgb8View<'_>) -> ProbeReport {
     let mut occupied = Vec::new();
     let mut interiors = Vec::new();
     for (index, slot) in doc.template.slots.iter().enumerate() {
-        let filled = doc
-            .cells
-            .get(index)
-            .map(|cell| cell.source.is_some())
-            .unwrap_or(false);
+        let filled = doc.cell(index).is_some_and(|cell| cell.source.is_some());
         if !filled {
             continue;
         }
-        let expected = rgb_of(palette(index));
+        // The colour is the **cell's** (S40): every slot of an ID photo sheet draws
+        // cell 0, so a copy's expected colour is that cell's and not its own index's.
+        let expected = rgb_of(palette(doc.cell_index(index).unwrap_or(index)));
         // The sample is taken inside the region the frame leaves *visible*: the point
         // farthest from that region's own boundary. Before S20 the search was over the
         // outline alone, so a cell at the sheet's edge at a large gap could be sampled
@@ -487,10 +486,7 @@ fn sample_background(doc: &CollageDoc, image: &Rgb8View<'_>) -> BackgroundProbe 
                 f64::from(y) / f64::from(image.height),
             );
             let covered = doc.template.slots.iter().enumerate().any(|(index, slot)| {
-                doc.cells
-                    .get(index)
-                    .map(|cell| cell.source.is_some())
-                    .unwrap_or(false)
+                doc.cell(index).is_some_and(|cell| cell.source.is_some())
                     && slot.outline.contains(point)
             });
             if covered {
@@ -521,12 +517,7 @@ fn near_slot(doc: &CollageDoc, point: Point, image: &Rgb8View<'_>) -> bool {
     let margin_x = 2.0 / f64::from(image.width);
     let margin_y = 2.0 / f64::from(image.height);
     doc.template.slots.iter().enumerate().any(|(index, slot)| {
-        if doc
-            .cells
-            .get(index)
-            .map(|cell| cell.source.is_none())
-            .unwrap_or(true)
-        {
+        if doc.cell(index).is_none_or(|cell| cell.source.is_none()) {
             return false;
         }
         slot.outline.distance_to_boundary(point) <= margin_x.max(margin_y) * 2.0
@@ -542,14 +533,10 @@ fn sample_seam(
     // Only two painted slots share a blend. A seam beside an empty cell is the
     // canvas edge, and probing it as a seam would report a blend between a slot
     // and white.
-    let occupied = |index: usize| {
-        doc.cells
-            .get(index)
-            .map(|cell| cell.source.is_some())
-            .unwrap_or(false)
-    };
-    let left = rgb_of(palette(seam.a));
-    let right = rgb_of(palette(seam.b));
+    let occupied = |index: usize| doc.cell(index).is_some_and(|cell| cell.source.is_some());
+    let colour = |slot: usize| rgb_of(palette(doc.cell_index(slot).unwrap_or(slot)));
+    let left = colour(seam.a);
+    let right = colour(seam.b);
     let backdrop = rgb_of(doc.frame.color);
     let (x0, y0) = pixel_of_f(seam.from, canvas);
     let (x1, y1) = pixel_of_f(seam.to, canvas);
@@ -832,11 +819,7 @@ fn sample_borders(doc: &CollageDoc, image: &Rgb8View<'_>, canvas: PixelSize) -> 
         })
         .collect();
     for (index, slot) in doc.template.slots.iter().enumerate() {
-        let filled = doc
-            .cells
-            .get(index)
-            .map(|cell| cell.source.is_some())
-            .unwrap_or(false);
+        let filled = doc.cell(index).is_some_and(|cell| cell.source.is_some());
         if !filled {
             continue;
         }

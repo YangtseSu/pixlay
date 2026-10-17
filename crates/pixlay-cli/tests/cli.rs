@@ -92,6 +92,7 @@ fn write_project(dir: &Path, name: &str, fill: bool) -> PathBuf {
         name: "test-2".to_string(),
         version: 1,
         aspect: 4.0 / 3.0,
+        one_photo: false,
         slots: vec![
             Slot {
                 area: left.area(),
@@ -985,6 +986,7 @@ fn write_square_project(dir: &Path, name: &str, frame_gap: f64) -> PathBuf {
         name: "test-2-square".to_string(),
         version: 1,
         aspect: 1.0,
+        one_photo: false,
         slots: vec![
             Slot {
                 area: left.area(),
@@ -1801,6 +1803,7 @@ fn templates_lists_the_library_and_filters_by_aspect() {
     // criterion seen from the outside.
     let count: usize = field(&all, "count").parse().unwrap();
     let mut slot_counts: Vec<usize> = Vec::new();
+    let mut sheets: Vec<String> = Vec::new();
     for index in 0..count {
         let name = field(&all, &format!("template.{index}.name"));
         let slots: usize = field(&all, &format!("template.{index}.slots"))
@@ -1808,7 +1811,15 @@ fn templates_lists_the_library_and_filters_by_aspect() {
             .unwrap();
         let aspect = field(&all, &format!("template.{index}.aspect"));
         assert!(!name.is_empty());
-        assert!((1..=9).contains(&slots), "{name}: {slots} slots");
+        // An ID photo sheet's slots are the **copies** it prints rather than the
+        // photos a document holds (S40), so the ceiling is the template's own; its
+        // `one_photo` field is what says which range applies.
+        if field(&all, &format!("template.{index}.one_photo")) == "true" {
+            assert!((1..=16).contains(&slots), "{name}: {slots} copies");
+            sheets.push(name.clone());
+        } else {
+            assert!((1..=9).contains(&slots), "{name}: {slots} slots");
+        }
         assert!(
             aspect.contains(':'),
             "{name}: aspect {aspect} is not in W:H form"
@@ -1822,6 +1833,34 @@ fn templates_lists_the_library_and_filters_by_aspect() {
             slot_counts.contains(&wanted),
             "no template with {wanted} slots in {slot_counts:?}"
         );
+    }
+    // The six sheets are in the unfiltered listing — it is the library a build
+    // ships — and `--slots`/`--aspect` answer the *collage* query, so they are not.
+    assert_eq!(
+        sheets,
+        vec![
+            "id-1cun-12-2x3",
+            "id-1cun-small-16-2x3",
+            "id-1cun-large-6-2x3",
+            "id-2cun-6-2x3",
+            "id-2cun-large-4-2x3",
+            "id-2cun-small-6-2x3",
+        ],
+        "the ID photo sheets, in the library's order"
+    );
+    for filtered in [
+        run(&["templates", "--slots", "6"]),
+        run(&["templates", "--aspect", "2:3"]),
+    ] {
+        assert_eq!(code(&filtered), 0, "{}", stderr(&filtered));
+        let filtered_count: usize = field(&filtered, "count").parse().unwrap();
+        for index in 0..filtered_count {
+            assert_eq!(
+                field(&filtered, &format!("template.{index}.one_photo")),
+                "false",
+                "a sheet reached the collage query"
+            );
+        }
     }
 
     // Filtering by canvas shape returns only that group, and the same entries
@@ -2001,7 +2040,14 @@ fn every_layout_in_the_library_renders_with_a_photo() {
     let dir = out_dir("library-renders");
     let photo = fixture_dir().join("photos/square.png");
     for name in templates::names() {
-        let slots = templates::get(name).expect("registered").slots.len();
+        let template = templates::get(name).expect("registered");
+        // An ID photo sheet holds one cell and draws it in every slot (S40); every
+        // other member has one cell per slot.
+        let cells = if template.one_photo {
+            1
+        } else {
+            template.slots.len()
+        };
         let empty = dir.join(format!("{name}.pixlay"));
         let output = run(&[
             "init",
@@ -2011,7 +2057,7 @@ fn every_layout_in_the_library_renders_with_a_photo() {
             empty.to_str().expect("utf-8 path"),
         ]);
         assert_eq!(code(&output), 0, "{name}: init: {}", stderr(&output));
-        assert_eq!(field(&output, "cells"), slots.to_string(), "{name}");
+        assert_eq!(field(&output, "cells"), cells.to_string(), "{name}");
 
         let project = dir.join(format!("{name}-photo.pixlay"));
         let output = run(&[
@@ -2048,6 +2094,142 @@ fn every_layout_in_the_library_renders_with_a_photo() {
             "{name}: the render is empty"
         );
     }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_id_photo_sheet_holds_one_photo() {
+    // S40: an ID photo sheet's slots are the copies of **one** photo, so the whole
+    // CLI path is "one photo in, twelve tiles out" — and the rules that keep it one
+    // photo are what this walks: `init` takes exactly one, `probe` reads the tiles
+    // back, `edit` frames the sheet through any of its slots, and the structural
+    // commands that need a second cell are refused.
+    let dir = out_dir("id-photo-sheet");
+    let photo = fixture_dir().join("photos/square.png");
+    let photo = photo.to_str().expect("utf-8 path");
+    let sheet = dir.join("sheet.pixlay");
+    let sheet = sheet.to_str().expect("utf-8 path");
+    let output = run(&[
+        "init",
+        "--template",
+        "id-1cun-12-2x3",
+        "--photo",
+        photo,
+        "--out",
+        sheet,
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "cells"), "1");
+    assert_eq!(field(&output, "photos"), "1");
+
+    // Two photos are a usage error (exit 1) and write nothing: the sheet has one cell,
+    // so a list is refused rather than trimmed.
+    let other = dir.join("two.pixlay");
+    let other = other.to_str().expect("utf-8 path");
+    let output = run(&[
+        "init",
+        "--template",
+        "id-1cun-12-2x3",
+        "--photo",
+        photo,
+        "--photo",
+        photo,
+        "--out",
+        other,
+    ]);
+    assert_eq!(code(&output), 1, "{}", stderr(&output));
+    assert!(!Path::new(other).exists(), "a refused init writes nothing");
+
+    // The probe paints one flat colour per slot and reads the render back: twelve
+    // occupied tiles on a page whose long edge 1800 makes exactly 1200x1800 (`2:3`).
+    let output = run(&["probe", "--project", sheet, "--long-edge", "1800"]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    // (`status` is the verdict — `ok`, or `failed` with exit 2.)
+    assert_eq!(field(&output, "status"), "ok", "{}", stderr(&output));
+    assert_eq!(field(&output, "cells"), "1");
+    assert_eq!(field(&output, "photos"), "1");
+    assert_eq!(field(&output, "slots"), "12");
+    assert_eq!(field(&output, "occupied"), "12");
+    assert_eq!(field(&output, "out_w"), "1200");
+    assert_eq!(field(&output, "out_h"), "1800");
+
+    // Any of the sheet's slots frames its one cell, and the document still holds one.
+    let framed = dir.join("framed.pixlay");
+    let framed = framed.to_str().expect("utf-8 path");
+    let output = run(&[
+        "edit",
+        "--project",
+        sheet,
+        "--slot",
+        "7",
+        "--zoom",
+        "2",
+        "--out",
+        framed,
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "cells"), "1");
+    let project = Project::load(Path::new(framed)).expect("the edited sheet loads");
+    assert_eq!(project.doc().cells.len(), 1);
+    assert_eq!(project.doc().cells[0].crop.zoom, 2.0);
+
+    // One photo replaces the sheet's photo (the same edit the window's own single-photo
+    // choice makes); a second name in one list would be refused above.
+    let replaced = dir.join("replaced.pixlay");
+    let replaced = replaced.to_str().expect("utf-8 path");
+    let output = run(&[
+        "edit",
+        "--project",
+        sheet,
+        "--add-photo",
+        photo,
+        "--out",
+        replaced,
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "cells"), "1");
+    assert_eq!(field(&output, "photos"), "1");
+
+    // The structural commands need a second cell, and the sheet has one: each is a
+    // failure (exit 2) that names the rule, and nothing is written.
+    for args in [
+        vec!["--add-cell"],
+        vec!["--remove-cell"],
+        vec!["--swap", "0,1"],
+        vec!["--add-cell", "--add-photo", photo],
+    ] {
+        let out = dir.join(format!(
+            "refused-{}.pixlay",
+            args.join("-").replace('/', "_")
+        ));
+        let mut argv = vec!["edit", "--project", sheet];
+        argv.extend(args.iter().copied());
+        argv.extend(["--out", out.to_str().expect("utf-8 path")]);
+        let output = run(&argv);
+        assert_eq!(code(&output), 2, "{args:?}: {}", stderr(&output));
+        assert!(
+            stderr(&output).contains("one photo"),
+            "{args:?}: {}",
+            stderr(&output)
+        );
+        assert!(!out.exists(), "{args:?}: a refused edit writes nothing");
+    }
+
+    // The export is a 2:3 render at the long edge asked for, one bitmap blitted twelve
+    // times.
+    let out = dir.join("sheet.png");
+    let output = run(&[
+        "render",
+        "--project",
+        sheet,
+        "--long-edge",
+        "1800",
+        "--out",
+        out.to_str().expect("utf-8 path"),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "out_w"), "1200");
+    assert_eq!(field(&output, "out_h"), "1800");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

@@ -39,6 +39,7 @@ fn doc() -> CollageDoc {
         name: "test-2".to_string(),
         version: 1,
         aspect: 4.0 / 3.0,
+        one_photo: false,
         slots: vec![
             Slot {
                 area: left.area(),
@@ -135,6 +136,7 @@ fn framed_doc(gap_rel: f64, radius_rel: f64) -> CollageDoc {
         name: "test-2-square".to_string(),
         version: 1,
         aspect: 1.0,
+        one_photo: false,
         slots: vec![
             Slot {
                 area: left.area(),
@@ -280,6 +282,7 @@ fn a_single_slot_document_has_one_uniform_border() {
         name: "test-1".to_string(),
         version: 1,
         aspect: 4.0 / 3.0,
+        one_photo: false,
         slots: vec![Slot {
             area: outline.area(),
             outline,
