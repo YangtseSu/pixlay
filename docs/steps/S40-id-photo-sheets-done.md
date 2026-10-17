@@ -6,12 +6,11 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # S40 · ID photo sheets
 
-**Progress**: implemented and re-worked to the human's rulings of 2026-10-17 — the model, the six members, the
-render/CLI/window paths and the tests are in; the walk passed on the six upright sheets (「人共没有什么问题」) and
-the four rulings that followed it are built (the count control stays, each size is printed at the orientation that
-holds more copies, the size names are the library's own, and no export preset is added). **→ next: a glance at the
-turned sheets and the count control** (the same walk, two items), then `-done`. (The GUI-suite session window the
-same runs exposed is a separate record: `S41-session-window-during-gui-tests-done.md`.)
+**Progress**: **done and passed** (2026-10-17, human) — both sittings of the walk passed: 「人共没有什么问题」
+on the six *upright* sheets, whose four follow-ups became the rulings below, and 「没问题」 on the **turned**
+sheets and the count control, which was the last item. **→ next: nothing in this file** — no file under
+`docs/steps/` is open. (The GUI-suite session window these runs exposed is a separate record, and closed the
+same day: `S41-session-window-during-gui-tests-done.md`.)
 
 **Goal**: a sheet of one photo repeated at one of the six ID-photo sizes on a 6-inch (4R, 4×6 inch) print — an
 *ID photo sheet* — reachable from the layout band's ratio row at one photo, with no second entry point and no
@@ -202,19 +201,37 @@ are rulings this step now carries:
 - `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test` (the GUI suite
   included) and `reuse lint` are green.
 
+## Ruling (2026-10-17, human) — the turned sheets, and the count control
+
+**「没问题」 — the step passes.** That was the walk's last item, and it is the one the first sitting left open:
+the four sheets the recipe prints **turned** — 小一寸 18, 小二寸 8, 大一寸 8, 二寸 8, each 1800×1200 — read as the
+same 证件照排版 (the photos upright relative to their own cut pieces, the 2 mm gap reading as a cut line), and the
+count control reads as the way out of a sheet rather than as a request for another photo.
+
+Basis: all six sheets exported at a 1800-px long edge — `pixlay-render init --template <name> --photo
+crates/pixlay-cli/tests/fixtures/photos/portrait.jpg` then `render --long-edge 1800`, into `/var/tmp/s40-sheets/`
+(the four turned at 1800×1200, 一寸 and 大二寸 at 1200×1800), with `probe --long-edge 1800` on each reading
+`status = ok`, `occupied` = its copy count (18 / 8 / 8 / 8 / 12 / 4) and `cells = 1` — read beside the app's own
+ratio row and count control.
+
 ## Human
 
-**Not passed.** The walk judges, at the same sitting (`docs/HIG-REVIEW.md` §2 item 14):
+**Passed (2026-10-17, human)**, over two sittings, and it is `docs/HIG-REVIEW.md` §2 item 14:
 
-- the six sizes: hover and focus — do 二寸 and 大二寸 read apart, and is the tooltip enough or does this ask for
-  a caption on these six candidates only;
-- the entry: does the ratio row read as one control with seven members at one photo, and does the member's
-  absence at two photos look deliberate;
-- the strip and the chooser copy on a 25 mm tile;
-- a **printed** 6-inch sheet (or the 1800-px PNG measured): is each tile the size in the table, and does the
-  2 mm gap read as a cut line;
-- the main path: open → one photo → the row's 证件照 → a size → adjust → export, under three minutes.
+- the six **upright** sheets the recipe prints, and the four questions the first message carried (the sizes, the
+  export hint, the count control, the ordering and the wasted paper): passed — 「人共没有什么问题」, the rulings
+  above;
+- the four **turned** sheets and the count control: passed — 「没问题」, on the six sheets exported at a 1800-px
+  long edge plus the row's member at one photo, the strip's tooltips and accessible names, the per-cell strip on
+  a 25 mm tile, the single-photo chooser's copy, and the single empty-cell `+`.
 
 ## Result
 
-Not yet — written when the walk is ruled, with the ruling block and the measured numbers.
+One photo repeated on a 6-inch (4R) page at six sizes, reached from the ratio row at one photo (the member after
+16:9, 证件照) and from `pixlay-render init --template id-…`: the document holds **one cell**, so the photo, its
+framing and its undo step are one thing, and the template's four to eighteen slots are the copies the sheet
+prints. The library is **293 templates / 1580 slots** (287 / 1522 before), each size authored on the page
+orientation that holds more copies — **58 copies** against the upright page's 50 — listed **smallest photo
+first**, its size name on hover and as the front of its accessible name. The measurements are `docs/CONTRACT.md`
+§8 "S40"; the plan's four open questions were ruled on 2026-10-17 (the names, no export hint, the count control
+staying, and the ordering), and the walk that closed the step is the two sitting records above.

@@ -11,8 +11,8 @@ through the full runs and no window appeared. Both causes are named and fixed: t
 **session's portal** (`GDK_DEBUG=no-portals` on the test child), and the `export` binary's SIGSEGV was the
 test process's **own decoding worker** being killed by `exit()` mid-draw (`WorkerPlan` hands back the thread,
 `decode.rs`'s `Worker` closes the queue and joins, and the harness's `Harness` stops every window it built as
-a test returns). **→ next: S40's own last item** — the human's glance at the turned sheets and the count
-control — which is the only step still open.
+a test returns). **→ next: nothing** — S40's own last item (the turned sheets and the count control) passed the
+same day, so no file under `docs/steps/` is open.
 
 **Goal**: no window the GUI suite creates may ever appear on the developer's own desktop. The suite is
 *headless by requirement*: it runs inside a private `mutter --wayland --headless --no-x11 --virtual-monitor

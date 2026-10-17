@@ -398,6 +398,15 @@ the canvas is **content** and the interface is **styling**, and the two must not
      the same 证件照排版 (the photos still upright relative to their own cut pieces), and does the count gain
      (12 / 18 / 8 / 8 / 4 / 8) read as less waste than the upright page's 12 / 16 / 6 / 6 / 4 / 6?
 
+   **The human walked this item on 2026-10-17 and passed it**, in two sittings: the six *upright* sheets with
+   the four follow-ups the same message carried (「人共没有什么问题」 — the sizes, no export hint, the count
+   control staying, the ordering), and then the four **turned** sheets and the count control (「没问题」).
+   For the second sitting all six were exported at a 1800-px long edge beside the walk
+   (`pixlay-render init --template <name> --photo …` then `render --long-edge 1800`; the four turned at
+   1800x1200, 一寸 and 大二寸 at 1200x1800, each `probe` reading `status = ok`, `occupied` = its copies and
+   `cells = 1`), so the print question was answered on the files rather than on paper. The step's own rulings
+   and measurements are `docs/steps/S40-id-photo-sheets-done.md` and `docs/CONTRACT.md` §8 "S40".
+
 ### The main path's scripted step list (the three-minute walk)
 
 Written for `open → add photos → pick a layout → adjust → export` — the path ruling 31 re-routed to on
