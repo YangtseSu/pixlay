@@ -6,11 +6,11 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # S38 · The portrait and square sets
 
-**Progress**: doing (2026-10-17, second round) — **the work is on disk; the walk's re-check is the gate**.
-The human walked the band with the sets in it on 2026-10-17 and gave six findings (rulings 3 … 8): all six
-are built — the symmetric pairs aligned, every unnamed proportion at 2:3, the count-7 L last, the
-5-and-4 bands at count 9, an even nine-grid, and the default sheet moved to 3:4. The library is **125
-templates / 657 slots**. **→ next: the re-check of the six, then the gate's own commit.**
+**Progress**: done and passed (2026-10-17, human) — the six findings were re-checked in the walk of S39's
+six-sheet row (the human: 「看过了」, and then the push), and the ruling block under `**Result**` carries the
+words and the basis. The step was already built when the re-check came, and S39 then grew the library around
+it (125 → 287 members) without touching it: nothing here depends on the library's later size. **→ next:
+nothing is scheduled** under `docs/steps/`; the library's next directions are `docs/ROADMAP.md`'s.
 
 **Goal**: every photo count from two to nine carries the two sheet shapes the human named as the most
 used — the **portrait page (3:4)** and the **square (1:1)** — with the arrangements the human listed, and
@@ -106,6 +106,10 @@ built):
 - The walk's material: `crates/pixlay/tests/layout.rs` writes the band's own picture of every member to
   `/var/tmp/pixlay-s7/layout-band-<name>.png` (115 files after S38), so the two rows can also be read
   without opening the window.
+- **Passed** (2026-10-17): the human looked at the band again while S39's walk ran — the six-sheet row
+  re-checks this step's six findings — and ruled both steps passed with 「看过了」, asking for the push the
+  same turn. The walk's material is the same `/var/tmp/pixlay-s7/layout-band-<name>.png` set, re-written for
+  all 287 members.
 
 **Implemented as** (2026-10-17) — 83 recipes, the artifact regenerated, the row re-ordered, the default moved,
 nothing removed:
@@ -146,3 +150,12 @@ count 1 … 9 leads its row with 3:4 and 1:1, and the largest count × shape cel
 chain, the poster census and the irregular census still hold, and the 3:4 chain is the one the window walks
 (ruling 8). The entry is green — `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D
 warnings`, `cargo test` (the GUI suite included) and `reuse lint` (179 files).
+
+**Ruling (2026-10-17, human) — the gate**: **passed**. The human looked at the band with the sets in it and
+said 「看过了」, and the same turn asked for the push. The six findings this step built (rulings 3 … 8) are
+what that look re-checked, and it closes the gate with no shape left open: the ratios' order, the aligned
+pairs, the 2:3 splits, the even nine-grid, the 5-and-4 bands and the 3:4 default are `docs/CONTRACT.md` §3
+with their numbers in §8, "S38". **What this ruling does not say**: S37's arrangement-depth item stays
+**unjudged** — it is a waiver, and this walk does not reach it (the 128x96 band's legibility across a
+count's twelve candidates is still nobody's judgement); everything else on this step's exit list is
+machine-checkable and green.
