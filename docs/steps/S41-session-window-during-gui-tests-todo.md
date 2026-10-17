@@ -33,6 +33,24 @@ window is this product's own chooser and not some other application's.
 | the portal | `dbus-monitor --session` during `cargo test -p pixlay --test export` **and** `--test canvas`: **0** `org.freedesktop.portal.FileChooser` calls (only `Settings` / `Documents` traffic). `GTK_USE_PORTAL` is unset, there is no `use-portal` key in `org.gtk.Settings.FileChooser` on this machine, and GTK 4.24's chooser is `gtkfilechoosernative.c` / `gtkfilechoosernativeportal.c` with the native path taken for an unsandboxed process. **So the portal is not the mechanism** |
 | the suite itself | all **17** GUI test binaries green under mutter 51.1 (the one `export` failure in the first full run was a mutter `SIGSEGV` *at teardown*, after the test had passed — a flake, and it did not recur) |
 
+## A second symptom, same harness (2026-10-17, S40's runs)
+
+A full `cargo test` — all GUI binaries in one invocation — has now failed twice at the **`export`
+binary's teardown**: its one test passes (`test the_export_... ... ok`, `test result: ok. 1 passed`), then
+`Mutter terminated with a failure: The command exited with a nonzero status: 139` (SIGSEGV) and the binary
+exits non-zero, so `cargo test` reports the crate red. The same binary run **alone** passes twice in a row
+(27.65 s and 25.87 s, no crash), and it passed inside the first, per-binary sweep; so the crash needs the
+*sequence* — nine mutters started and stopped in a row, each on `--wayland --headless --virtual-monitor
+1920x1200@60.0` with the **amdgpu** render node (`AGENTS.md` records the intended surfaceless renderer, where
+`/dev/dri` is hidden; this machine exposes it). The neighbouring binaries log
+`WL: unable to lock lockfile /run/user/1000/wayland-0.lock, maybe another compositor is running` and then pick
+`wayland-2`, so the socket names are not the crash; a GPU context created and torn down nine times is the
+standing hypothesis, and `LIBGL_ALWAYS_SOFTWARE=1` is the one-line experiment that distinguishes it. **The
+entry (`cargo test`) has to be green on this machine**, so this is part of this step's work, not a note beside
+it: either the harness lets the compositor use no GPU (`/dev/dri` hidden, as the brief records) or it waits
+for one mutter to be gone before starting the next, and the fix is measured by three consecutive green full
+runs.
+
 ## What is still unknown
 
 **Which process maps that window, and on which connection.** The measurements above rule out the two
