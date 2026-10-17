@@ -556,12 +556,6 @@ impl Gallery {
     /// `AddCell` itself refuses: a growth with a kept cell waiting places that cell
     /// instead of appending one, so it never takes the document past the ceiling
     /// (and `cells` can only be `MAX_PHOTOS` with nothing kept).
-    /// Shows or hides the count control (S40): an ID photo sheet holds one photo, so
-    /// its cell count is not a number to edit and the control has nothing to say.
-    pub fn show_count(&self, visible: bool) {
-        self.control.set_visible(visible);
-    }
-
     pub fn update_control(&self, cells: usize, kept: Option<&str>) {
         self.count.set_label(&cells.to_string());
         self.minus.set_sensitive(cells > MIN_PHOTOS);
@@ -801,11 +795,11 @@ fn id_photo_cell(
 pub fn photo_size_name(template: &str) -> Option<String> {
     match template {
         "id-1cun-12-2x3" => Some(gettext("1-inch photo")),
-        "id-1cun-small-16-2x3" => Some(gettext("Small 1-inch photo")),
-        "id-1cun-large-6-2x3" => Some(gettext("Large 1-inch photo")),
-        "id-2cun-6-2x3" => Some(gettext("2-inch photo")),
+        "id-1cun-small-18-3x2" => Some(gettext("Small 1-inch photo")),
+        "id-1cun-large-8-3x2" => Some(gettext("Large 1-inch photo")),
+        "id-2cun-8-3x2" => Some(gettext("2-inch photo")),
         "id-2cun-large-4-2x3" => Some(gettext("Large 2-inch photo")),
-        "id-2cun-small-6-2x3" => Some(gettext("Small 2-inch photo")),
+        "id-2cun-small-8-3x2" => Some(gettext("Small 2-inch photo")),
         _ => None,
     }
 }

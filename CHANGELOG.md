@@ -25,13 +25,17 @@ All notable changes to Pixlay are documented in this file. The format follows
 
 - **ID photo sheets**: one photo repeated at one of six sizes on a 6-inch (4R) print — 一寸 25×35 mm
   (295×413 px at 300 dpi), 小一寸 22×32, 大一寸 33×48, 二寸 35×49, 大二寸 35×53 and 小二寸 35×45 — with a 2 mm
-  white gap between the copies and the count each size fits. Reached from the layout band's ratio row at **one
-  photo** (the member after 16:9, *ID photo* / 证件照) or from `pixlay-render init --template id-1cun-12-2x3
-  --photo you.jpg`. The document holds **one cell** and the template's twelve to sixteen slots are the copies
-  the sheet prints, so the photo, its framing and its undo step are one thing and `Add photos…` is a
-  single-photo choice on such a sheet. Each size reads by name on hover and to a screen reader. Six new
-  members (`Template::onePhoto`, the `id` family) put the library at **293 templates / 1572 slots**, and a
-  template's own slot ceiling (`MAX_TEMPLATE_SLOTS`, 16) is now separate from the nine a document holds.
+  white gap between the copies and the count each size fits. **Each size is printed the way that holds more
+  copies** (4R has no upright side): 一寸 twelve on the upright page, 小一寸 eighteen, and 大一寸, 二寸 and
+  小二寸 eight each on the turned one, 大二寸 four either way — 58 copies against the 50 the upright page
+  holds. Reached from the layout band's ratio row at **one photo** (the member after 16:9, *ID photo* /
+  证件照) or from `pixlay-render init --template id-1cun-12-2x3 --photo you.jpg`. The document holds **one
+  cell** and the template's four to eighteen slots are the copies the sheet prints, so the photo, its framing
+  and its undo step are one thing and `Add photos…` is a single-photo choice on such a sheet; the count
+  control stays, and its `+` leaves the sheet for a collage of two cells. Each size reads by name on hover and
+  to a screen reader. Six new members (`Template::onePhoto`, the `id` family) put the library at **293
+  templates / 1580 slots**, and a template's own slot ceiling (`MAX_TEMPLATE_SLOTS`, 18) is now separate from
+  the nine a document holds.
 
 ### Changed
 

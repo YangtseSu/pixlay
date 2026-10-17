@@ -927,9 +927,12 @@ fn every_sheet_of_a_count_holds_the_arrangements_in_one_order() {
     for count in MIN_SLOTS..=MAX_PHOTOS {
         let row = templates::ratios_for(count);
         assert_eq!(row.len(), 6, "{count} cells offer {} sheets", row.len());
+        // The **collage** members of the count: an ID photo sheet's slots are its
+        // copies (S40), so it is not one of the six sheets a count offers, and
+        // `ratios_for` does not answer with its page.
         let in_count: Vec<&Template> = templates
             .iter()
-            .filter(|template| template.slots.len() == count)
+            .filter(|template| template.slots.len() == count && !template.one_photo)
             .collect();
         // The arrangements, in the order the library lists them.
         let mut arrangements: Vec<Vec<Vec<(f64, f64)>>> = Vec::new();
@@ -1115,7 +1118,7 @@ fn template_names_are_unique_and_registered() {
         );
         // The count is the first segment after the family that is a number: every
         // collage family is `<family>-<slots>-<variant>-<sheet tag>`, and an ID photo
-        // sheet's name carries its size before the count (`id-1cun-small-16-2x3`, S40).
+        // sheet's name carries its size before the count (`id-1cun-small-18-3x2`, S40).
         let count: usize = name
             .split('-')
             .skip(1)
@@ -1139,20 +1142,22 @@ const ID_SHEET_MM: (f64, f64) = (101.6, 152.4);
 /// (`generator::ID_GAP_MM`), which this test reads back out of the geometry.
 const ID_GAP_MM: f64 = 2.0;
 
-/// Each ID photo sheet: its name, its nominal cell in millimetres, and the copies it
-/// carries (columns, rows). The five sizes are the human's ruling of 2026-10-17; the
-/// sixth (大二寸) is the other standard two-inch size the same ruling allowed.
-/// One ID photo sheet's spec: its name, its nominal cell in millimetres and its
-/// copies as `(columns, rows)`.
-type IdSheet = (&'static str, (f64, f64), (usize, usize));
+/// One ID photo sheet's spec: its name, its nominal **upright** cell in millimetres, its
+/// copies as `(columns, rows)`, and whether its page is the turned one (`3x2`).
+///
+/// The six sizes are the human's ruling of 2026-10-17, and so is the orientation: the
+/// page has no upright side, so each size is printed the way that holds more copies
+/// (measured: 一寸 12 upright against 10 turned; 小一寸 18 against 16; 大一寸, 二寸 and
+/// 小二寸 8 against 6; 大二寸 4 either way).
+type IdSheet = (&'static str, (f64, f64), (usize, usize), bool);
 
 const ID_SHEETS: &[IdSheet] = &[
-    ("id-1cun-12-2x3", (25.0, 35.0), (3, 4)),
-    ("id-1cun-small-16-2x3", (22.0, 32.0), (4, 4)),
-    ("id-1cun-large-6-2x3", (33.0, 48.0), (2, 3)),
-    ("id-2cun-6-2x3", (35.0, 49.0), (2, 3)),
-    ("id-2cun-large-4-2x3", (35.0, 53.0), (2, 2)),
-    ("id-2cun-small-6-2x3", (35.0, 45.0), (2, 3)),
+    ("id-1cun-12-2x3", (25.0, 35.0), (3, 4), false),
+    ("id-1cun-small-18-3x2", (22.0, 32.0), (6, 3), true),
+    ("id-1cun-large-8-3x2", (33.0, 48.0), (4, 2), true),
+    ("id-2cun-8-3x2", (35.0, 49.0), (4, 2), true),
+    ("id-2cun-large-4-2x3", (35.0, 53.0), (2, 2), false),
+    ("id-2cun-small-8-3x2", (35.0, 45.0), (4, 2), true),
 ];
 
 /// The four edges of a slot's own extent, `(x0, y0, x1, y1)`.
@@ -1181,8 +1186,6 @@ fn an_id_sheet_is_a_grid_of_congruent_cells() {
     // measured back through the page: on 101.6 x 152.4 mm a normalized extent is a
     // millimetre one, and the bound is the lattice's own resolution (`ID_GRID`) rather
     // than a chosen tolerance — half a step across, half a step down.
-    let step_x = ID_SHEET_MM.0 / LATTICE;
-    let step_y = ID_SHEET_MM.1 / LATTICE;
     let sheets = templates::one_photo();
     assert_eq!(
         sheets.len(),
@@ -1190,19 +1193,38 @@ fn an_id_sheet_is_a_grid_of_congruent_cells() {
         "the ID photo sheets this build ships"
     );
     for template in &sheets {
-        let (_, cell_mm, (columns, rows)) = *ID_SHEETS
+        let (_, cell_mm, (columns, rows), landscape) = *ID_SHEETS
             .iter()
-            .find(|(name, _, _)| *name == template.name)
+            .find(|(name, _, _, _)| *name == template.name)
             .unwrap_or_else(|| panic!("{}: not in this test's table", template.name));
+        // The page this size is printed on: the upright one is 101.6 wide by 152.4
+        // tall, and the turned one is the same paper the other way round.
+        let page = if landscape {
+            (ID_SHEET_MM.1, ID_SHEET_MM.0)
+        } else {
+            ID_SHEET_MM
+        };
+        let step_x = page.0 / LATTICE;
+        let step_y = page.1 / LATTICE;
+        // The aspect is the **tag's own division of small integers** (exact in
+        // binary), and the page's millimetres are that ratio to within a rounding of
+        // the decimal they are written as.
+        assert_eq!(
+            template.aspect,
+            if landscape { 3.0 / 2.0 } else { 2.0 / 3.0 },
+            "{}: the page's shape",
+            template.name
+        );
+        assert!(
+            (template.aspect - page.0 / page.1).abs() <= f64::EPSILON * 4.0,
+            "{}: the paper is {:.1}x{:.1} mm",
+            template.name,
+            page.0,
+            page.1
+        );
         assert!(
             template.one_photo,
             "{}: a sheet holds one photo",
-            template.name
-        );
-        assert_eq!(
-            template.aspect,
-            2.0 / 3.0,
-            "{}: the 4R page is 2:3",
             template.name
         );
         assert_eq!(
@@ -1226,30 +1248,30 @@ fn an_id_sheet_is_a_grid_of_congruent_cells() {
         };
         // The nominal size, in millimetres, as the page reads it.
         assert!(
-            (width * ID_SHEET_MM.0 - cell_mm.0).abs() <= step_x,
+            (width * page.0 - cell_mm.0).abs() <= step_x,
             "{}: the cell is {:.3} mm across, not {}",
             template.name,
-            width * ID_SHEET_MM.0,
+            width * page.0,
             cell_mm.0
         );
         assert!(
-            (height * ID_SHEET_MM.1 - cell_mm.1).abs() <= step_y,
+            (height * page.1 - cell_mm.1).abs() <= step_y,
             "{}: the cell is {:.3} mm down, not {}",
             template.name,
-            height * ID_SHEET_MM.1,
+            height * page.1,
             cell_mm.1
         );
         assert!(
-            (gap_x * ID_SHEET_MM.0 - ID_GAP_MM).abs() <= step_x,
+            (gap_x * page.0 - ID_GAP_MM).abs() <= step_x,
             "{}: the gap across is {:.3} mm, not {ID_GAP_MM}",
             template.name,
-            gap_x * ID_SHEET_MM.0
+            gap_x * page.0
         );
         assert!(
-            (gap_y * ID_SHEET_MM.1 - ID_GAP_MM).abs() <= step_y,
+            (gap_y * page.1 - ID_GAP_MM).abs() <= step_y,
             "{}: the gap down is {:.3} mm, not {ID_GAP_MM}",
             template.name,
-            gap_y * ID_SHEET_MM.1
+            gap_y * page.1
         );
 
         // Every copy is that same rectangle, and the grid is regular: row by row,

@@ -2135,12 +2135,47 @@ impl EditorWindow {
         let filter = photo_filter();
         let filters = gio::ListStore::new::<gtk::FileFilter>();
         filters.append(&filter);
+        // A sheet takes **one** photo, so its chooser is a single file with the same
+        // word the header's button carries (S40: 「只能输入1张照片」). A collage keeps the
+        // multi-file chooser, where a folder of photos is one gesture.
+        let doc = self.document();
+        let one_photo = doc.template.one_photo;
+        let titled = if one_photo {
+            if doc.cells.first().is_some_and(|cell| cell.source.is_some()) {
+                gettext("Replace the photo in the sheet")
+            } else {
+                gettext("Add the photo to the sheet")
+            }
+        } else {
+            gettext("Add photos to the collage")
+        };
         let dialog = gtk::FileDialog::builder()
-            .title(gettext("Add photos to the collage"))
+            .title(&titled)
             .filters(&filters)
             .default_filter(&filter)
             .modal(true)
             .build();
+        if one_photo {
+            dialog.open(
+                Some(self),
+                gio::Cancellable::NONE,
+                glib::clone!(
+                    #[strong]
+                    window,
+                    move |result: Result<gio::File, glib::Error>| {
+                        let Ok(file) = result else {
+                            // A dismissed dialog is not a failure: the user changed
+                            // their mind, which is a normal thing to do.
+                            return;
+                        };
+                        if let Some(path) = file.path() {
+                            window.add_photos(vec![path]);
+                        }
+                    }
+                ),
+            );
+            return;
+        }
         dialog.open_multiple(
             Some(self),
             gio::Cancellable::NONE,
@@ -3107,10 +3142,6 @@ impl EditorWindow {
     fn update_gallery_control(&self) {
         if let Some(gallery) = self.imp().gallery.get() {
             let doc = self.document();
-            // An ID photo sheet holds one photo (S40): the count is not a number to
-            // edit there, so the whole control goes — the row's ID member and the
-            // strip are what that document is steered with.
-            gallery.show_count(!doc.template.one_photo);
             gallery.update_control(doc.cells.len(), self.kept_hint().as_deref());
             // The ratio row follows the document the same way: the count decides
             // which shapes there are to offer, and the mark is the document's own

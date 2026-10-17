@@ -154,6 +154,12 @@ pub enum Command {
     /// Refused past [`MAX_PHOTOS`](crate::MAX_PHOTOS): that is also the format's
     /// slot limit, so there is no layout to grow into. A growth with a kept cell
     /// waiting never reaches it — placing a cell back costs what the sheet gives up.
+    ///
+    /// **On an ID photo sheet this is the way out of it** (S40, the human's ruling of
+    /// 2026-10-17: 「加1,就自动退出，到别的模式」): a sheet holds one cell, so the layout
+    /// with one cell more is the count rule's two-cell collage at the sheet's shape,
+    /// and the sheet's photo is cell 0. `−` on a sheet is the one-cell floor, like any
+    /// other document at one cell.
     AddCell,
     /// Exchange two cells whole — photo *and* framing (S14b).
     ///
@@ -222,12 +228,17 @@ impl Command {
         // the match rather than inside each arm: a swap would index `cells` by
         // slot and a move would clear the sheet, so "there is one photo" has to be
         // the answer before either touches the list.
+        //
+        // The count control's own edits are **not** here (the human's ruling of
+        // 2026-10-17, 「加1,就自动退出，到别的模式」): `+` on a sheet leaves it for the
+        // collage the count rule answers with, which is what `AddCell`'s ordinary path
+        // below does — `layout_with` asks for two cells and a sheet is never one of its
+        // answers — and `−` is answered by the floor, one cell, like any other document
+        // at one cell.
         if doc.template.one_photo {
             let refused = match self {
                 Self::MovePhoto { .. } => Some("move its photo between cells"),
                 Self::SwapCells { .. } => Some("swap two cells"),
-                Self::AddCell => Some("add a cell"),
-                Self::RemoveLastCell => Some("remove a cell"),
                 _ => None,
             };
             if let Some(what) = refused {

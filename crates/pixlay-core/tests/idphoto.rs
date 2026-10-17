@@ -225,14 +225,15 @@ fn one_photo_is_what_the_sheet_accepts() {
 #[test]
 fn the_commands_that_need_a_second_cell_are_refused() {
     let doc = sheet();
-    let cases: [(&str, Command); 4] = [
+    // Neither count-control edit is here: `+` leaves the sheet for a collage and `−`
+    // is answered by the floor — `the_count_controls_plus_leaves_the_sheet` walks both.
+    // What is left are the two edits that would index a one-cell list by slot.
+    let cases: [(&str, Command); 2] = [
         (
             "move its photo between cells",
             Command::MovePhoto { from: 0, to: 5 },
         ),
         ("swap two cells", Command::SwapCells { left: 0, right: 5 }),
-        ("add a cell", Command::AddCell),
-        ("remove a cell", Command::RemoveLastCell),
     ];
     for (what, command) in cases {
         let error = applied(&doc, command).expect_err("a sheet has one cell");
@@ -248,6 +249,44 @@ fn the_commands_that_need_a_second_cell_are_refused() {
         .expect("the collage is valid")
         .apply(Command::SwapCells { left: 0, right: 1 })
         .expect("a collage swaps");
+}
+
+#[test]
+fn the_count_controls_plus_leaves_the_sheet() {
+    // 「加1,就自动退出，到别的模式」 (the human's ruling of 2026-10-17): `+` on a sheet
+    // is the count rule's own growth — two cells, at the sheet's shape — and the photo
+    // comes with it, in cell 0. The minus side is the floor and stays refused.
+    let photo = PathBuf::from("portrait.png");
+    let sheet_doc = applied(
+        &sheet(),
+        Command::SetSource {
+            slot: 0,
+            source: Some(photo.clone()),
+        },
+    )
+    .expect("the sheet takes a photo");
+    assert_eq!(sheet_doc.cells.len(), 1);
+
+    let two = applied(&sheet_doc, Command::AddCell).expect("+ leaves the sheet");
+    assert_eq!(two.cells.len(), 2, "two cells");
+    assert!(!two.template.one_photo, "a collage, not a sheet");
+    assert_eq!(
+        two.template.aspect, sheet_doc.template.aspect,
+        "the count rule keeps the page's shape",
+    );
+    assert_eq!(
+        two.cells[0].source.as_deref(),
+        Some(photo.as_path()),
+        "the sheet's photo is cell 0"
+    );
+    assert_eq!(two.cells[1], Cell::default(), "and the new cell is empty");
+    two.validate().expect("the collage is a valid document");
+
+    let error = applied(&sheet_doc, Command::RemoveLastCell).expect_err("one cell is the floor");
+    assert!(
+        matches!(error, CoreError::TooFewCells { min: 1 }),
+        "{error}"
+    );
 }
 
 #[test]

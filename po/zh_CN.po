@@ -14,7 +14,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: pixlay\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-17 10:55+0800\n"
+"POT-Creation-Date: 2026-10-17 11:57+0800\n"
 "PO-Revision-Date: 2026-09-27 16:10+0800\n"
 "Last-Translator: Pixlay contributors\n"
 "Language-Team: Simplified Chinese\n"
@@ -36,15 +36,15 @@ msgstr "拼贴"
 msgid "Editing"
 msgstr "编辑"
 
-#: crates/pixlay/src/app.rs:116 crates/pixlay/src/window.rs:3299
+#: crates/pixlay/src/app.rs:116 crates/pixlay/src/window.rs:3334
 msgid "New collage"
 msgstr "新建拼贴"
 
-#: crates/pixlay/src/app.rs:117 crates/pixlay/src/window.rs:3300
+#: crates/pixlay/src/app.rs:117 crates/pixlay/src/window.rs:3335
 msgid "Open…"
 msgstr "打开…"
 
-#: crates/pixlay/src/app.rs:118 crates/pixlay/src/window.rs:3319
+#: crates/pixlay/src/app.rs:118 crates/pixlay/src/window.rs:3354
 msgid "Keyboard shortcuts"
 msgstr "键盘快捷键"
 
@@ -53,16 +53,16 @@ msgid "Quit Pixlay"
 msgstr "退出 Pixlay"
 
 #: crates/pixlay/src/app.rs:120 crates/pixlay/src/dialogs.rs:155
-#: crates/pixlay/src/dialogs.rs:160 crates/pixlay/src/window.rs:3318
+#: crates/pixlay/src/dialogs.rs:160 crates/pixlay/src/window.rs:3353
 msgid "Preferences"
 msgstr "首选项"
 
-#: crates/pixlay/src/app.rs:121 crates/pixlay/src/window.rs:2373
-#: crates/pixlay/src/window.rs:3301
+#: crates/pixlay/src/app.rs:121 crates/pixlay/src/window.rs:2412
+#: crates/pixlay/src/window.rs:3336
 msgid "Save"
 msgstr "保存"
 
-#: crates/pixlay/src/app.rs:122 crates/pixlay/src/window.rs:3302
+#: crates/pixlay/src/app.rs:122 crates/pixlay/src/window.rs:3337
 msgid "Save as…"
 msgstr "另存为…"
 
@@ -71,12 +71,12 @@ msgid "Close the window"
 msgstr "关闭窗口"
 
 #: crates/pixlay/src/app.rs:124 crates/pixlay/src/window.rs:435
-#: crates/pixlay/src/window.rs:439 crates/pixlay/src/window.rs:2538
+#: crates/pixlay/src/window.rs:439 crates/pixlay/src/window.rs:2577
 msgid "Export the collage"
 msgstr "导出拼贴"
 
 #: crates/pixlay/src/app.rs:125 crates/pixlay/src/window.rs:409
-#: crates/pixlay/src/window.rs:1790 crates/pixlay/src/window.rs:3307
+#: crates/pixlay/src/window.rs:1794 crates/pixlay/src/window.rs:3342
 msgid "Add photos…"
 msgstr "添加照片…"
 
@@ -100,7 +100,7 @@ msgstr "复制照片"
 msgid "Paste the photo into the cell"
 msgstr "把照片粘贴到格子里"
 
-#: crates/pixlay/src/app.rs:131 crates/pixlay/src/window.rs:3312
+#: crates/pixlay/src/app.rs:131 crates/pixlay/src/window.rs:3347
 msgid "Reset the framing"
 msgstr "重置构图"
 
@@ -146,7 +146,7 @@ msgstr "与另一个格子交换"
 msgid "Clear the cell"
 msgstr "清空格子"
 
-#: crates/pixlay/src/canvas.rs:1238
+#: crates/pixlay/src/canvas.rs:1245
 msgid "Add a photo"
 msgstr "添加照片"
 
@@ -215,11 +215,11 @@ msgstr "导出的格式和大小"
 msgid "{} in per cent"
 msgstr "{}（百分比）"
 
-#: crates/pixlay/src/layout.rs:152 crates/pixlay/src/layout.rs:560
+#: crates/pixlay/src/layout.rs:152 crates/pixlay/src/layout.rs:564
 msgid "Remove the last cell"
 msgstr "移除最后一个格子"
 
-#: crates/pixlay/src/layout.rs:153 crates/pixlay/src/layout.rs:566
+#: crates/pixlay/src/layout.rs:153 crates/pixlay/src/layout.rs:570
 msgid "Add a cell"
 msgstr "添加一个格子"
 
@@ -231,64 +231,64 @@ msgstr "拼贴里的照片"
 msgid "Layouts"
 msgstr "布局"
 
-#: crates/pixlay/src/layout.rs:562 crates/pixlay/src/window.rs:1869
+#: crates/pixlay/src/layout.rs:566 crates/pixlay/src/window.rs:1873
 msgid "A collage needs at least one photo"
 msgstr "拼贴至少需要一张照片"
 
-#: crates/pixlay/src/layout.rs:565
+#: crates/pixlay/src/layout.rs:569
 #, rust-format
 msgid "Add a cell and bring back “{}”"
 msgstr "添加一个格子并放回“{}”"
 
-#: crates/pixlay/src/layout.rs:567 crates/pixlay/src/window.rs:1895
+#: crates/pixlay/src/layout.rs:571 crates/pixlay/src/window.rs:1899
 #, rust-format
 msgid "A collage takes at most {} photos"
 msgstr "一张拼贴最多放 {} 张照片"
 
-#: crates/pixlay/src/layout.rs:595 crates/pixlay/src/layout.rs:596
+#: crates/pixlay/src/layout.rs:599 crates/pixlay/src/layout.rs:600
 msgid "No layout has this many photos"
 msgstr "没有能放下这么多照片的布局"
 
-#: crates/pixlay/src/layout.rs:643
+#: crates/pixlay/src/layout.rs:647
 #, rust-format
 msgid "{}: layout {} of {}"
 msgstr "{}：第 {} 个布局，共 {} 个"
 
-#: crates/pixlay/src/layout.rs:650
+#: crates/pixlay/src/layout.rs:654
 #, rust-format
 msgid "Layout {} of {}"
 msgstr "第 {} 个布局，共 {} 个"
 
-#: crates/pixlay/src/layout.rs:750
+#: crates/pixlay/src/layout.rs:754
 msgid "ID photo"
 msgstr "证件照"
 
-#: crates/pixlay/src/layout.rs:793
+#: crates/pixlay/src/layout.rs:797
 msgid "1-inch photo"
 msgstr "一寸照片"
 
-#: crates/pixlay/src/layout.rs:794
+#: crates/pixlay/src/layout.rs:798
 msgid "Small 1-inch photo"
 msgstr "小一寸照片"
 
-#: crates/pixlay/src/layout.rs:795
+#: crates/pixlay/src/layout.rs:799
 msgid "Large 1-inch photo"
 msgstr "大一寸照片"
 
-#: crates/pixlay/src/layout.rs:796
+#: crates/pixlay/src/layout.rs:800
 msgid "2-inch photo"
 msgstr "二寸照片"
 
-#: crates/pixlay/src/layout.rs:797
+#: crates/pixlay/src/layout.rs:801
 msgid "Large 2-inch photo"
 msgstr "大二寸照片"
 
-#: crates/pixlay/src/layout.rs:798
+#: crates/pixlay/src/layout.rs:802
 msgid "Small 2-inch photo"
 msgstr "小二寸照片"
 
 #: crates/pixlay/src/window.rs:419 crates/pixlay/src/window.rs:422
-#: crates/pixlay/src/window.rs:1790 crates/pixlay/src/window.rs:2135
+#: crates/pixlay/src/window.rs:1794 crates/pixlay/src/window.rs:2150
 msgid "Add photos to the collage"
 msgstr "往拼贴里添加照片"
 
@@ -301,7 +301,7 @@ msgid "Main menu"
 msgstr "主菜单"
 
 #: crates/pixlay/src/window.rs:465 crates/pixlay/src/window.rs:556
-#: crates/pixlay/src/window.rs:3192
+#: crates/pixlay/src/window.rs:3227
 msgid "Untitled collage"
 msgstr "未命名拼贴"
 
@@ -314,7 +314,6 @@ msgid "Find it…"
 msgstr "定位…"
 
 #: crates/pixlay/src/window.rs:1197
-#, rust-format
 #, rust-format
 msgid "ID photo sheet, copy {} of {}"
 msgstr "证件照排版，第 {} 张，共 {} 张"
@@ -335,7 +334,7 @@ msgid "{} photo was not used: a collage takes at most {} photos"
 msgid_plural "{} photos were not used: a collage takes at most {} photos"
 msgstr[0] "{} 张照片没有用上：一张拼贴最多放 {} 张照片"
 
-#: crates/pixlay/src/window.rs:1403 crates/pixlay/src/window.rs:2105
+#: crates/pixlay/src/window.rs:1403 crates/pixlay/src/window.rs:2109
 #, rust-format
 msgid "An ID photo sheet holds one photo; {} was not used"
 msgid_plural "An ID photo sheet holds one photo; {} were not used"
@@ -347,158 +346,158 @@ msgid "{} photo did not fit in the collage"
 msgid_plural "{} photos did not fit in the collage"
 msgstr[0] "{} 张照片没能放进拼贴"
 
-#: crates/pixlay/src/window.rs:1586
+#: crates/pixlay/src/window.rs:1590
 msgid "The clipboard holds nothing that can go in a cell"
 msgstr "剪贴板里没有能放进格子的内容"
 
-#: crates/pixlay/src/window.rs:1587
+#: crates/pixlay/src/window.rs:1591
 #, rust-format
 msgid "The pasted image could not be written: {}"
 msgstr "无法写入粘贴的图片：{}"
 
-#: crates/pixlay/src/window.rs:1617
+#: crates/pixlay/src/window.rs:1621
 msgid "The photo could not be put on the clipboard"
 msgstr "无法把照片放进剪贴板"
 
-#: crates/pixlay/src/window.rs:1701
+#: crates/pixlay/src/window.rs:1705
 #, rust-format
 msgid "{} photo is kept and returns when the layout grows"
 msgid_plural "{} photos are kept and return when the layout grows"
 msgstr[0] "{} 张照片已留下，布局变大后会回到拼贴里"
 
-#: crates/pixlay/src/window.rs:1780
+#: crates/pixlay/src/window.rs:1784
 msgid "Replace the photo…"
 msgstr "更换照片…"
 
-#: crates/pixlay/src/window.rs:1781
+#: crates/pixlay/src/window.rs:1785 crates/pixlay/src/window.rs:2145
 msgid "Replace the photo in the sheet"
 msgstr "更换证件照里的照片"
 
-#: crates/pixlay/src/window.rs:1785
+#: crates/pixlay/src/window.rs:1789
 msgid "Add the photo…"
 msgstr "添加照片…"
 
-#: crates/pixlay/src/window.rs:1786
+#: crates/pixlay/src/window.rs:1790 crates/pixlay/src/window.rs:2147
 msgid "Add the photo to the sheet"
 msgstr "给证件照添加照片"
 
-#: crates/pixlay/src/window.rs:2277 crates/pixlay/src/window.rs:2425
+#: crates/pixlay/src/window.rs:2316 crates/pixlay/src/window.rs:2464
 msgid "Pixlay collages"
 msgstr "Pixlay 拼贴"
 
-#: crates/pixlay/src/window.rs:2282
+#: crates/pixlay/src/window.rs:2321
 msgid "Open a collage"
 msgstr "打开拼贴"
 
-#: crates/pixlay/src/window.rs:2366
+#: crates/pixlay/src/window.rs:2405
 msgid "Save the changes?"
 msgstr "要保存更改吗？"
 
-#: crates/pixlay/src/window.rs:2368
+#: crates/pixlay/src/window.rs:2407
 msgid "This collage has changes that are not saved anywhere yet."
 msgstr "这张拼贴的更改还没有保存到任何地方。"
 
-#: crates/pixlay/src/window.rs:2371
+#: crates/pixlay/src/window.rs:2410
 msgid "Cancel"
 msgstr "取消"
 
-#: crates/pixlay/src/window.rs:2372
+#: crates/pixlay/src/window.rs:2411
 msgid "Discard"
 msgstr "舍弃"
 
-#: crates/pixlay/src/window.rs:2430
+#: crates/pixlay/src/window.rs:2469
 msgid "Save the collage"
 msgstr "保存拼贴"
 
-#: crates/pixlay/src/window.rs:2482
+#: crates/pixlay/src/window.rs:2521
 #, rust-format
 msgid "Saved {}"
 msgstr "已保存 {}"
 
-#: crates/pixlay/src/window.rs:2496
+#: crates/pixlay/src/window.rs:2535
 msgid "Choose a photo"
 msgstr "选择照片"
 
-#: crates/pixlay/src/window.rs:2703
+#: crates/pixlay/src/window.rs:2742
 #, rust-format
 msgid "{} photo is missing and has to be found before the export"
 msgid_plural "{} photos are missing and have to be found before the export"
 msgstr[0] "{} 张照片缺失，导出前必须先找回"
 
-#: crates/pixlay/src/window.rs:2718
+#: crates/pixlay/src/window.rs:2757
 msgid "Preparing…"
 msgstr "正在准备…"
 
-#: crates/pixlay/src/window.rs:2752
+#: crates/pixlay/src/window.rs:2791
 #, rust-format
 msgid "{} photo is missing"
 msgid_plural "{} photos are missing"
 msgstr[0] "{} 张照片缺失"
 
-#: crates/pixlay/src/window.rs:2768
+#: crates/pixlay/src/window.rs:2807
 #, rust-format
 msgid "Preparing photo {} of {}"
 msgstr "正在准备第 {} 张照片，共 {} 张"
 
-#: crates/pixlay/src/window.rs:2770
+#: crates/pixlay/src/window.rs:2809
 msgid "Compositing…"
 msgstr "正在合成…"
 
-#: crates/pixlay/src/window.rs:2771
+#: crates/pixlay/src/window.rs:2810
 msgid "Writing the file…"
 msgstr "正在写入文件…"
 
-#: crates/pixlay/src/window.rs:2782
+#: crates/pixlay/src/window.rs:2821
 #, rust-format
 msgid "Exported {} ({} MB)"
 msgstr "已导出 {}（{} MB）"
 
-#: crates/pixlay/src/window.rs:2786
+#: crates/pixlay/src/window.rs:2825
 #, rust-format
 msgid "Export failed: {}"
 msgstr "导出失败：{}"
 
-#: crates/pixlay/src/window.rs:3017
+#: crates/pixlay/src/window.rs:3056
 #, rust-format
 msgid "{} photo could not be read"
 msgid_plural "{} photos could not be read"
 msgstr[0] "{} 张照片无法读取"
 
-#: crates/pixlay/src/window.rs:3220
+#: crates/pixlay/src/window.rs:3255
 #, rust-format
 msgid "{} photo could not be loaded"
 msgid_plural "{} photos could not be loaded"
 msgstr[0] "{} 张照片无法加载"
 
-#: crates/pixlay/src/window.rs:3303
+#: crates/pixlay/src/window.rs:3338
 msgid "Export…"
 msgstr "导出…"
 
-#: crates/pixlay/src/window.rs:3308
+#: crates/pixlay/src/window.rs:3343
 msgid "Cut"
 msgstr "剪切"
 
-#: crates/pixlay/src/window.rs:3309
+#: crates/pixlay/src/window.rs:3344
 msgid "Copy"
 msgstr "复制"
 
-#: crates/pixlay/src/window.rs:3310
+#: crates/pixlay/src/window.rs:3345
 msgid "Paste"
 msgstr "粘贴"
 
-#: crates/pixlay/src/window.rs:3320
+#: crates/pixlay/src/window.rs:3355
 msgid "About Pixlay"
 msgstr "关于 Pixlay"
 
-#: crates/pixlay/src/window.rs:3382
+#: crates/pixlay/src/window.rs:3417
 msgid "Photos"
 msgstr "照片"
 
-#: crates/pixlay/src/window.rs:3397
+#: crates/pixlay/src/window.rs:3432
 msgid "Images"
 msgstr "图像"
 
-#: crates/pixlay/src/window.rs:3426 crates/pixlay/src/window.rs:3443
+#: crates/pixlay/src/window.rs:3461 crates/pixlay/src/window.rs:3478
 msgid "collage"
 msgstr "拼贴"
 

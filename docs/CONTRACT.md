@@ -149,7 +149,7 @@ Conventions:
 |---|---|---|
 | `docVersion` | exactly `DOC_VERSION` (currently **3**); higher refused, lower refused too | see "Version policy" |
 | slot count | 1..=9 | `AGENTS.md`; nine since S12c removed the ten-slot recipe, one since S19 (ruling 34: a single photo is a legal collage, and `grid-1-1x1` is its layout) |
-| a template's slots | 1..=16 (`MAX_TEMPLATE_SLOTS`) | S40: a template's slot count is the **copies it prints**, not the photos a document holds — an ID photo sheet puts one photo in twelve to sixteen slots — so it answers to its own ceiling, the largest sheet a build ships (小一寸's 4×4). Refused by `Template::validate` with `SlotCount`. The **document** ceiling below is unchanged |
+| a template's slots | 1..=18 (`MAX_TEMPLATE_SLOTS`) | S40: a template's slot count is the **copies it prints**, not the photos a document holds — an ID photo sheet puts one photo in four to eighteen slots — so it answers to its own ceiling, the largest sheet a build ships (小一寸's 6×3 on the turned page). Refused by `Template::validate` with `SlotCount`. The **document** ceiling below is unchanged |
 | a `onePhoto` document | exactly 1 cell, nothing kept | S40: the sheet holds one photo, and `CollageDoc::validate` refuses any other count with `OnePhotoDocument`. Every slot draws that cell (`CollageDoc::cell_index`), so one photo, one framing and one undo step are the same thing |
 | cells the document holds | `cells.len() + kept.len()` ≤ 9 (`MAX_SLOTS`) | S28 (ruling 43): a layout change keeps what it cannot place, so the ceiling counts both lists — the cells on the sheet and the ones waiting. Refused by `CollageDoc::validate` with `CellTotalOverLimit`, naming both counts |
 | long edge | 1..=30000 px (`MAX_LONG_EDGE_PX`) | a pixel count, the one size parameter: what a render renders and what an export writes |
@@ -291,35 +291,43 @@ limit that is not in this table is a contract gap.
   and `crates/pixlay-core/tests/templates.rs` asserts as a histogram over `2..=MAX_PHOTOS` plus count 1's six sheets, `3:4`'s
   two-member floor (a ratio is a shape of its own, not one member standing in for it), the poster census above and the irregular
   members' census. Since S40 the library also carries the six **ID photo sheets** below, and the collection is then
-  **293 templates and 1572 slots**: the collage queries count the 287, and `templates::one_photo` the six.
+  **293 templates and 1580 slots**: the collage queries count the 287, and `templates::one_photo` the six.
 - **The ID photo sheets** (S40): `id-<size>-<slots>-<sheet>`, one photo in **every** slot, on the 4R page
-  (4×6 inch = 101.6×152.4 mm, aspect exactly 2:3 — the `2x3` tag). `Template::onePhoto` is what says so, and it changes
-  what a document on the template *is*: the document holds **one cell** (`cells.len() == 1`, `kept` empty, checked by
-  `CollageDoc::validate`) and every slot draws it (`CollageDoc::cell_index`). One photo, one framing, one undo step.
-  | member | cell (mm) | px at 300 dpi | slot | copies | grid |
+  (4×6 inch = 101.6×152.4 mm). **Which way the page is printed is the recipe's decision**: the paper has no upright
+  side, so each size is authored on the orientation that holds more copies (the human's ruling of 2026-10-17,
+  「那几张大的图片，有点浪费纸张」) — the upright page is the `2x3` tag, the turned one the same paper's `3x2`.
+  `Template::onePhoto` is what says so, and it changes what a document on the template *is*: the document holds
+  **one cell** (`cells.len() == 1`, `kept` empty, checked by `CollageDoc::validate`) and every slot draws it
+  (`CollageDoc::cell_index`). One photo, one framing, one undo step — which is also why a sheet is all-upright or
+  all-turned and never mixed: every copy shares the one crop, so it shares the one orientation, and the leftovers on
+  these pages are too narrow for a turned cell in any case.
+  | member | cell (mm) | px at 300 dpi | slot | copies | page |
   |---|---|---|---|---|---|
-  | `id-1cun-12-2x3` | 25×35 | 295×413 | 25.003×35.004 | 3×4 | 12 |
-  | `id-1cun-small-16-2x3` | 22×32 | 260×378 | 21.987×32.028 | 4×4 | 16 |
-  | `id-1cun-large-6-2x3` | 33×48 | 390×567 | 32.980×47.982 | 2×3 | 6 |
-  | `id-2cun-6-2x3` | 35×49 | 413×579 | 35.004×48.994 | 2×3 | 6 |
-  | `id-2cun-large-4-2x3` | 35×53 | 413×626 | 35.004×52.983 | 2×2 | 4 |
-  | `id-2cun-small-6-2x3` | 35×45 | 413×531 | 35.004×45.006 | 2×3 | 6 |
+  | `id-1cun-12-2x3` | 25×35 | 295×413 | 25.003×35.004 | 3×4 | upright (12; the turned page holds 10) |
+  | `id-1cun-small-18-3x2` | 22×32 | 260×378 | 22.027×31.988 | 6×3 | turned (18; upright 16) |
+  | `id-1cun-large-8-3x2` | 33×48 | 390×567 | 32.980×47.982 | 4×2 | turned (8; upright 6) |
+  | `id-2cun-8-3x2` | 35×49 | 413×579 | 35.004×49.014 | 4×2 | turned (8; upright 6) |
+  | `id-2cun-large-4-2x3` | 35×53 | 413×626 | 35.004×52.983 | 2×2 | upright (4 either way) |
+  | `id-2cun-small-8-3x2` | 35×45 | 413×531 | 35.004×45.006 | 4×2 | turned (8; upright 6) |
 
   The millimetres are the **recipe's** provenance (`templates/generator.rs`'s `ID_SHEET_MM`, `ID_GAP_MM`, `ID_SHEETS`) and
   the tests' measuring stick; the document, the CLI and the export keep the format's rule — ratios, and one long-edge pixel
   count. The gap between copies is **2 mm** (the recipe's own constant), the copies are congruent, and the cells are the
   **visible photo rectangles**: the white between them is the sheet's backdrop showing, so `frame.gapRel` stays at its
-  default 0. The counts are the largest that fit, because the sheet is printed borderless (the human's ruling of
-  2026-10-17). The lattice is `1/2560` of the page's width — 0.0397 mm across and 0.0595 mm down — which lands every cell
-  within **0.03 mm** of its nominal size; the collage arrangements stay on `1/128`.
+  default 0. The counts are the largest that fit, because the sheet is printed borderless (the same ruling). The lattice
+  is `1/2560` of the page's width — 0.04–0.06 mm a step — which lands every cell within **0.03 mm** of its nominal size;
+  the collage arrangements stay on `1/128`.
   These members are **not collage candidates**: `with_slots`, `with_slots_and_aspect`, `of_aspect`, `ratios_for` and
   `selection::layout_for` skip a `onePhoto` template (its slot count is its copies, not a photo count), while `all`,
   `names`, `get` and the new `one_photo` keep it. `Family::of` reads their `id` prefix as `Family::Id`.
 - **A `onePhoto` document is edited through one cell** (S40): `SetSource`, `SetCrop` and `ClearCell` act on the sheet's one
   cell whatever slot they name; `AddPhotos` and `PlacePhotos` take exactly one photo (a second is `OnePhotoPhotos`);
-  `MovePhoto`, `SwapCells`, `AddCell` and `RemoveCell` are refused (`OnePhotoCommand`); and `SetTemplate` **onto** such a
-  template is refused unless the document holds at most one cell and keeps nothing (`OnePhotoLayout`), because the sheet
-  has one cell to hold it. Switching **off** it is the ordinary retention rule.
+  `MovePhoto` and `SwapCells` are refused (`OnePhotoCommand`, the two edits that would read a one-cell list by slot); and
+  `SetTemplate` **onto** such a template is refused unless the document holds at most one cell and keeps nothing
+  (`OnePhotoLayout`), because the sheet has one cell to hold it. Switching **off** it is the ordinary retention rule —
+  **and the count control's `+` is the exit**: `AddCell` on a sheet takes the count rule's two-cell collage at the same
+  shape, the sheet's photo in cell 0 (the human's ruling of 2026-10-17, 「加1,就自动退出，到别的模式」); `−` is answered by
+  the one-cell floor like any other document at one cell.
 - **A shipped name keeps its geometry and its `templateVersion` forever**: S10 added 15 layouts and moved none, S35 added
   ten and moved none, and S37 added five and moved none, which is a test as well as a regeneration diff —
   `crates/pixlay-core/tests/templates.rs` pins a fingerprint of the geometry every template that had shipped before S10 still
@@ -664,7 +672,7 @@ template holds **one photo in one cell**, and the template's slots are the copie
 |---|---|
 | `templates` | the unfiltered listing is the library a build ships, so the six sheets are in it, each with `one_photo = true` (`--json` carries the same field, and the text rows carry it too); `--slots` and `--aspect` are the **collage** query — `Selection::layouts`, the band's own — and so exclude them. `--slots` keeps its 1..=9 bound because it counts *photos* |
 | `init --template id-…` | with `--photo`: exactly **one**, which fills every slot. A second is a usage error (exit 1, `an ID photo sheet holds one photo, but the selection has 2`) and nothing is written. Omitting `--photo` is the photo-free sheet |
-| `edit` | `--slot <i>` names any of the sheet's tiles and frames its one cell, once. `--add-photo` with one photo replaces the sheet's (the same edit the window's single-photo choice sends — a sheet has no empty cell to append to); a document that already holds one is not a refusal, two names in one call is (exit 2, `OnePhotoPhotos`). `--swap`, `--add-cell` and `--remove-cell` are failures (exit 2, `OnePhotoCommand`): one cell means there is nothing to exchange, add or remove |
+| `edit` | `--slot <i>` names any of the sheet's tiles and frames its one cell, once. `--add-photo` with one photo replaces the sheet's (the same edit the window's single-photo choice sends — a sheet has no empty cell to append to); a document that already holds one is not a refusal, two names in one call is (exit 2, `OnePhotoPhotos`). `--add-cell` **leaves the sheet** (S40's ruling: `+` exits to another mode): the count rule's two-cell collage at the same shape, the photo in cell 0. `--swap` is exit 2 (`OnePhotoCommand`) and `--remove-cell` is exit 2 with the one-cell floor. The flags apply in order, so `--add-cell --swap 0,1` is a collage's own edit and succeeds |
 | `edit --template id-…` | refused (exit 2, `OnePhotoLayout`) unless the document holds at most one cell **and keeps none** — the sheet has one cell to hold a photo in, and a kept cell has nowhere to wait. Leaving a sheet for a collage is the ordinary retention rule |
 | `probe` | reads the sheet as **twelve occupied slots** (`slots = 12`, `occupied = 12`) whose interiors are the one cell's colour: the probe paints a flat colour per occupied **cell** and `draw` blits it once per copy, so the expectation is the cell's own |
 | the report | `cells` is the document's own count (1) beside `photos` (1) and `slots` (the template's, 12): three numbers because the sheet is one photo drawn many times, and a caller that saw only `cells` would think the render missed eleven slots |
@@ -1331,19 +1339,19 @@ round's own unreleased members are the only ones reshaped or renamed, and they a
 
 ### S40 (2026-10-17, `--release`, this machine)
 
-The library gained the **ID photo sheets**: one photo drawn in every slot of twelve to sixteen, authored in
-millimetres on the 4R page (101.6 × 152.4 mm, aspect exactly 2:3) and converted to a **1/2560** lattice. Probes
-and renders are `/var/tmp/s40probe/`.
+The library gained the **ID photo sheets**: one photo drawn in every slot of four to eighteen, authored in
+millimetres on the 4R page (101.6 × 152.4 mm, the upright `2x3` or the turned `3x2`, whichever orientation holds
+more copies) and converted to a **1/2560** lattice. Probes and renders are `/var/tmp/s40probe/`.
 
 | Item | Value |
 |---|---|
 | the lattice | 1/2560 of the page's width — **0.0397 mm** across and 0.0595 mm down — which lands every cell within **0.03 mm** of its nominal millimetre size (the collage arrangements stay on 1/128, and the test's lattice check follows to the finer one with a 1e-9 round-off, a *representation* bound rather than a geometric tolerance) |
-| the six sheets | 一寸 `id-1cun-12-2x3` **25.003 × 35.004 mm**, 295.3 × 413.4 px, 3×4 = 12 · 小一寸 `id-1cun-small-16-2x3` 21.987 × 32.028, 259.7 × 378.3, 4×4 = 16 · 大一寸 `id-1cun-large-6-2x3` 32.980 × 47.982, 389.5 × 566.7, 2×3 = 6 · 二寸 `id-2cun-6-2x3` 35.004 × 48.994, 413.4 × 578.7, 2×3 = 6 · 大二寸 `id-2cun-large-4-2x3` 35.004 × 52.983, 413.4 × 625.8, 2×2 = 4 · 小二寸 `id-2cun-small-6-2x3` 35.004 × 45.006, 413.4 × 531.6, 2×3 = 6. (px at 300 dpi, i.e. at the 1800-px long edge a 6-inch print asks for; the nominal column is 295×413 / 260×378 / 390×567 / 413×579 / 413×626 / 413×531) |
-| a rendered sheet, measured | `render --long-edge 1800` writes **1200 × 1800**; the runs of non-white pixels read **296 × 414** for the 一寸 sheet against its nominal 295 × 413 (the run includes the antialiased edge, so the geometry is the nominal within half a pixel), **261 × 379–380** for 小一寸, **391 × 567–568** for 大一寸, **415 × 579–580** for 二寸, **415 × 627** for 大二寸 and **415 × 532–533** for 小二寸; the gap between two copies reads **22–23 px** against the 2 mm the recipe names (23.6 px) |
-| what a sheet costs | the six above, one photo each, `render --long-edge 1800 --stats`, release: **42–52 ms** wall, peak `VmHWM` **31–32 MB**, **273–615 KB** PNG. The content is the fixture's flat square, so the byte counts are a fixture fact rather than a photo one |
-| the probe | `probe --long-edge 1800` on every sheet: `status = ok`, `occupied` = the sheet's copies (12 / 16 / 6 / 6 / 4 / 6), **0 background pixels off the backdrop**, `out_w`/`out_h` = 1200×1800, and the document's own `cells = 1`, `photos = 1` beside them |
-| the library | **293 templates / 1572 slots** (S39: 287 / 1522) — the collage queries still answer 287, and `templates::one_photo()` answers six. `frozen.rs` is **173,771 bytes** (S39: 163,116): 115 insertions, 2 deletions, and every pre-S40 entry byte-identical |
-| the canaries this step moved | the slot count twice (`hit.rs`, `pixlay-imaging/tests/layout.rs`) 1522 → **1572** (the imaging sweep also walks slots rather than cells, so 1522 × 3 framings → 1572 × 3), the lattice 128 → 2560, the emitter fingerprint's cut, `contract.rs`'s slot-count range (10 and 11 refused → 17 and 24; 16 legal as a sheet), `pixlay-cli/tests/cli.rs`'s listing and library render |
+| the six sheets | 一寸 `id-1cun-12-2x3` **25.003 × 35.004 mm**, 295.3 × 413.4 px, 3×4 = 12 (upright page) · 小一寸 `id-1cun-small-18-3x2` 22.027 × 31.988, 260.2 × 377.8, 6×3 = 18 (turned) · 大一寸 `id-1cun-large-8-3x2` 32.980 × 47.982, 389.5 × 566.7, 4×2 = 8 (turned) · 二寸 `id-2cun-8-3x2` 35.004 × 49.014, 413.4 × 578.9, 4×2 = 8 (turned) · 大二寸 `id-2cun-large-4-2x3` 35.004 × 52.983, 413.4 × 625.8, 2×2 = 4 (upright) · 小二寸 `id-2cun-small-8-3x2` 35.004 × 45.006, 413.4 × 531.6, 4×2 = 8 (turned). (px at the 1800-px long edge a 300 dpi 6-inch print asks for — **a floor, not a requirement**: any larger long edge at the same ratio prints the same photo, which is why nothing here needs a preset; the nominal column is 295×413 / 260×378 / 390×567 / 413×579 / 413×626 / 413×531) |
+| a rendered sheet, measured | `render --long-edge 1800` writes **1200 × 1800** for the two upright pages and **1800 × 1200** for the four turned ones; the runs of non-white pixels read **296 × 414–415** for the 一寸 sheet against its nominal 295 × 413, **261–262 × 378–379** for 小一寸, **390–391 × 568** for 大一寸, **414–415 × 580** for 二寸, **415 × 627** for 大二寸 and **414–415 × 533** for 小二寸 — the run includes the antialiased edge, so the geometry is the nominal within a pixel or two; the gap between two copies reads **22–23 px** against the 2 mm the recipe names (23.6 px) |
+| what a sheet costs | the six above, one photo each, `render --long-edge 1800 --stats`, release: **42–48 ms** wall, peak `VmHWM` **31–33 MB**, **273–735 KB** PNG. The content is the fixture's flat square, so the byte counts are a fixture fact rather than a photo one |
+| the probe | `probe --long-edge 1800` on every sheet: `status = ok`, `occupied` = the sheet's copies (12 / 18 / 8 / 8 / 4 / 8), **0 background pixels off the backdrop**, `out_w` × `out_h` = 1200×1800 or 1800×1200, and the document's own `cells = 1`, `photos = 1` beside them |
+| the library | **293 templates / 1580 slots** (S39: 287 / 1522) — the collage queries still answer 287, and `templates::one_photo()` answers six. `frozen.rs` is **174,874 bytes** (S39: 163,116): the six members and the emitter's `ONE_PHOTO` trailer, and every pre-S40 entry byte-identical |
+| the canaries this step moved | the slot count twice (`hit.rs`, `pixlay-imaging/tests/layout.rs`) 1522 → **1580** (the imaging sweep also walks slots rather than cells, so 1522 × 3 framings → 1580 × 3), the lattice 128 → 2560, the emitter fingerprint's cut, `contract.rs`'s slot-count range (10 and 11 refused → 19 and 24; `MAX_TEMPLATE_SLOTS` = 18 legal as a sheet), `pixlay-cli/tests/cli.rs`'s listing and library render, and the sweeps that compare the candidate queries against `templates::all` (`history.rs`, `selection.rs`, three single-template predicates) scoped to the collage library |
 
 ## 9. The window (S7), and the shell ruling 31 re-cut (S22)
 

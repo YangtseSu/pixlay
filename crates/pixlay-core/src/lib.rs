@@ -141,9 +141,9 @@ pub const MAX_SLOTS: usize = 9;
 /// collage — and stays nine. A template's own rects may be more, because the ID
 /// photo sheets put **one photo in every slot**: the document holds one cell and
 /// the slots are the copies the sheet prints, so they are geometry rather than
-/// photos. The ceiling is the largest sheet this build ships — 小一寸's 4x4 on a
-/// 6-inch page.
-pub const MAX_TEMPLATE_SLOTS: usize = 16;
+/// photos. The ceiling is the largest sheet this build ships — 小一寸's six columns
+/// by three rows on the turned 6-inch page, eighteen copies.
+pub const MAX_TEMPLATE_SLOTS: usize = 18;
 
 /// Longest edge a render or export may be asked for, in pixels.
 ///

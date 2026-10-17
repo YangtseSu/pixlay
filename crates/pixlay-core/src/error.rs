@@ -166,7 +166,10 @@ pub enum CoreError {
     )]
     OnePhotoLayout { cells: usize, kept: usize },
 
-    /// A command an ID photo sheet cannot perform (S40).
+    /// A command an ID photo sheet cannot perform (S40): the two that address cells by
+    /// slot and would read a one-cell list as if it had twelve (`move`, `swap`). The
+    /// count control's own edits are answered elsewhere — `+` leaves the sheet for a
+    /// collage and `−` is the one-cell floor.
     #[error("an ID photo sheet holds one photo and cannot {what}")]
     OnePhotoCommand { what: &'static str },
 

@@ -29,7 +29,7 @@ flat list. The plan's first five steps are **S35 … S39** under [`docs/steps/`]
 section holds the research they rest on and the directions they leave alone.
 
 - **What it holds today** (`pixlay-render templates --json`, 2026-10-17, after S40): **287 templates, 1522
-  slots** of collage layouts — the library a build ships is **293 / 1572** since S40 added the six ID photo
+  slots** of collage layouts — the library a build ships is **293 / 1580** since S40 added the six ID photo
   sheets, which are not candidates (their slots are copies of one photo) — over cell counts 1 … 9 — six layouts at count 1 (the one-slot **sheets**, one per shape), then
   thirty-eight, thirty-seven, thirty-eight, twenty-eight, thirty-eight, forty-one, twenty-seven and
   thirty-four — over six sheets, and **every count 1 … 9 carries all six** since S39: **3:4** (48), **1:1**

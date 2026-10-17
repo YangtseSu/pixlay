@@ -337,7 +337,8 @@ code for one commits that change itself.
   deterministically. The layout of an existing project must never change.
 - **A template may put one photo in every slot** (S40). The **ID photo sheets** —
   `id-<size>-<slots>-<sheet>`, `Template::one_photo` — print one photo repeated on a 6-inch page (4R,
-  101.6×152.4 mm, exactly 2:3) at six sizes, and their document holds **one cell**: every slot draws it
+  101.6×152.4 mm, printed either way round — 2:3 or 3:2 — whichever holds more copies) at six sizes, and
+  their document holds **one cell**: every slot draws it
   (`CollageDoc::cell_index`), so the photo, its framing and its undo step are one thing. That is why a
   template's own slot ceiling (`MAX_TEMPLATE_SLOTS`, 16) is separate from the nine cells a document holds,
   and why the candidate queries (`with_slots`, `with_slots_and_aspect`, `of_aspect`, `ratios_for`,

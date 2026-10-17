@@ -124,9 +124,16 @@ const fn rect(x0: u32, y0: u32, x1: u32, y1: u32) -> Shape {
     Shape::Rect { x0, y0, x1, y1 }
 }
 
-/// The ID photo sheets' one physical page (S40): 4R is exactly **4 x 6 inch =
-/// 101.6 x 152.4 mm**, whose aspect is `2/3` — the `2x3` tag. The nominal Chinese
-/// "6 inch" (102 x 152 mm) is 0.6% larger; the paper is the inch one.
+/// The ID photo sheets' one physical page (S40), upright: 4R is exactly **4 x 6
+/// inch = 101.6 x 152.4 mm**, whose aspect is `2/3` — the `2x3` tag — and the turned
+/// page is the same paper's `3/2`, the `3x2` tag. The nominal Chinese "6 inch"
+/// (102 x 152 mm) is 0.6% larger; the paper is the inch one.
+///
+/// **Which way a size is printed is the recipe's own decision** ([`IdSheet::landscape`]),
+/// because the product's target is the print and the paper has no upright side: what
+/// decides is how many copies fit, which is what the human's ruling of 2026-10-17 asked
+/// for (「那几张大的图片，有点浪费纸张」). Measured over the six sizes, turning the page
+/// is what fills it for four of them.
 ///
 /// This is the only place in the tree where a sheet's millimetres are a *decision*:
 /// the document, the CLI and the export keep the format's rule (ratios and one
@@ -144,12 +151,16 @@ const ID_GRID: u32 = 2560;
 /// One ID photo sheet: cells of one size on the 4R page, as many as fit, centred.
 struct IdSheet {
     /// The size's own word, which the template's name carries
-    /// (`id-<size>-<slots>-2x3`). Machine vocabulary: the UI's size names are
+    /// (`id-<size>-<slots>-<sheet tag>`). Machine vocabulary: the UI's size names are
     /// `gettext` strings keyed by the member's name (`crates/pixlay`'s
     /// `photo_size_name`), not this word.
     size: &'static str,
-    /// The cell's nominal size, in millimetres.
+    /// The cell's nominal size, in millimetres, **upright** — the photo keeps the
+    /// orientation it is cut to, so a sheet never turns a copy.
     cell_mm: (f64, f64),
+    /// Whether this size is printed on the turned page (`3x2`): the same paper, the
+    /// cells still upright, and more copies when the row fits better that way.
+    landscape: bool,
 }
 
 /// The white between two neighbouring cells, in millimetres, on every ID sheet: a
@@ -162,30 +173,43 @@ const ID_GAP_MM: f64 = 2.0;
 /// research found (35 x 53 mm, the 413 x 626 px one the sources call the standard
 /// 二寸), so the set carries both of the sizes a studio is asked for. The counts are
 /// the largest that fit, because the sheet is printed borderless (the same ruling).
+/// Each size is authored on **the page orientation that holds more copies** (measured
+/// at the 2 mm gap): 一寸 12 upright against 10 turned; 小一寸 18 against 16; 大一寸,
+/// 二寸 and 小二寸 8 against 6; and 大二寸 4 either way, where the upright 2x2 is the
+/// tidier one. A mixed sheet — a landscape row beside a portrait one — is not
+/// expressible: every copy draws the document's one cell, so they share one framing
+/// and one orientation, and the leftovers on these pages are too narrow for a turned
+/// cell in any case (二寸's widest is 6.4 mm against the 48 mm a turned cell needs).
 static ID_SHEETS: &[IdSheet] = &[
     IdSheet {
         size: "1cun",
         cell_mm: (25.0, 35.0),
+        landscape: false,
     },
     IdSheet {
         size: "1cun-small",
         cell_mm: (22.0, 32.0),
+        landscape: true,
     },
     IdSheet {
         size: "1cun-large",
         cell_mm: (33.0, 48.0),
+        landscape: true,
     },
     IdSheet {
         size: "2cun",
         cell_mm: (35.0, 49.0),
+        landscape: true,
     },
     IdSheet {
         size: "2cun-large",
         cell_mm: (35.0, 53.0),
+        landscape: false,
     },
     IdSheet {
         size: "2cun-small",
         cell_mm: (35.0, 45.0),
+        landscape: true,
     },
 ];
 
@@ -1160,12 +1184,19 @@ pub fn generate() -> Vec<Template> {
 /// margins. Integer arithmetic on the lattice: the result is a function of the
 /// constants above, like every other member.
 fn build_id_sheets() -> Vec<Template> {
-    let unit_x = ID_SHEET_MM.0 / f64::from(ID_GRID);
-    let unit_y = ID_SHEET_MM.1 / f64::from(ID_GRID);
     let grid = ID_GRID;
     ID_SHEETS
         .iter()
         .map(|sheet| {
+            // The page this size is printed on: the same paper, turned or not (S40's
+            // ruling — the target is the print, and the paper has no upright side).
+            let (page_w, page_h, tag) = if sheet.landscape {
+                (ID_SHEET_MM.1, ID_SHEET_MM.0, "3x2")
+            } else {
+                (ID_SHEET_MM.0, ID_SHEET_MM.1, "2x3")
+            };
+            let unit_x = page_w / f64::from(grid);
+            let unit_y = page_h / f64::from(grid);
             let cell_x = (sheet.cell_mm.0 / unit_x).round() as u32;
             let cell_y = (sheet.cell_mm.1 / unit_y).round() as u32;
             let gap_x = (ID_GAP_MM / unit_x).round() as u32;
@@ -1199,11 +1230,11 @@ fn build_id_sheets() -> Vec<Template> {
                 }
             }
             Template {
-                name: format!("id-{}-{}-2x3", sheet.size, slots.len()),
+                name: format!("id-{}-{}-{tag}", sheet.size, slots.len()),
                 // The one-slot sheets' rule: a new member starts at version 1.
                 version: 1,
-                // 4R is exactly 2:3, so the aspect is the `2x3` tag's own division.
-                aspect: aspect_of("2x3"),
+                // The page's shape is the tag's own division of small integers.
+                aspect: aspect_of(tag),
                 one_photo: true,
                 slots,
             }

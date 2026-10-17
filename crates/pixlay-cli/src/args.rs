@@ -337,7 +337,10 @@ EDIT OPTIONS:
                         how a kept photo comes back; otherwise the new cell is
                         empty — the window's `+` (`Command::AddCell`). The cell
                         count is the layout's, so this is how a collage grows to
-                        hold one more photo.
+                        hold one more photo. **On an ID photo sheet it leaves the
+                        sheet** (S40): the count rule answers with a collage of one
+                        more cell at the same shape, and the sheet's photo is cell
+                        0.
     --remove-cell       Take the layout with one slot fewer — the window's `−`. The
                         cell leaves the sheet **whole and kept**: a photo leaves
                         the collage only when it is deleted (`--slot <i> --clear`,

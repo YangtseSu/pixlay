@@ -190,7 +190,7 @@ fn every_slot_contains_its_own_centroid() {
     // every arrangement at every sheet — added 865, and S40's six ID photo sheets
     // added 50 (their slots are the copies of one photo, and a hit test over each
     // copy is exactly what this sweep should cover).
-    assert_eq!(slots, 1572, "the library's slot count changed");
+    assert_eq!(slots, 1580, "the library's slot count changed");
     assert_eq!(inside, slots);
 }
 
@@ -275,10 +275,10 @@ fn a_point_one_pixel_from_a_boundary_matches_the_analytic_answer() {
     }
 
     assert_eq!(
-        slots, 1572,
+        slots, 1580,
         "the library's slot count changed (S10 grew it from 64; S19 added one; S35 fifty-seven; \
          S37 twenty-four; S38 four hundred and thirty-three; S39 eight hundred and sixty-five; \
-         S40 fifty — the six ID photo sheets' copies)"
+         S40 fifty-eight — the six ID photo sheets' copies)"
     );
     assert!(
         inner > 2_000,

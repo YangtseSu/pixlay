@@ -1815,7 +1815,7 @@ fn templates_lists_the_library_and_filters_by_aspect() {
         // photos a document holds (S40), so the ceiling is the template's own; its
         // `one_photo` field is what says which range applies.
         if field(&all, &format!("template.{index}.one_photo")) == "true" {
-            assert!((1..=16).contains(&slots), "{name}: {slots} copies");
+            assert!((1..=18).contains(&slots), "{name}: {slots} copies");
             sheets.push(name.clone());
         } else {
             assert!((1..=9).contains(&slots), "{name}: {slots} slots");
@@ -1840,11 +1840,11 @@ fn templates_lists_the_library_and_filters_by_aspect() {
         sheets,
         vec![
             "id-1cun-12-2x3",
-            "id-1cun-small-16-2x3",
-            "id-1cun-large-6-2x3",
-            "id-2cun-6-2x3",
+            "id-1cun-small-18-3x2",
+            "id-1cun-large-8-3x2",
+            "id-2cun-8-3x2",
             "id-2cun-large-4-2x3",
-            "id-2cun-small-6-2x3",
+            "id-2cun-small-8-3x2",
         ],
         "the ID photo sheets, in the library's order"
     );
@@ -2190,13 +2190,28 @@ fn an_id_photo_sheet_holds_one_photo() {
     assert_eq!(field(&output, "cells"), "1");
     assert_eq!(field(&output, "photos"), "1");
 
-    // The structural commands need a second cell, and the sheet has one: each is a
-    // failure (exit 2) that names the rule, and nothing is written.
-    for args in [
-        vec!["--add-cell"],
-        vec!["--remove-cell"],
-        vec!["--swap", "0,1"],
-        vec!["--add-cell", "--add-photo", photo],
+    // `--add-cell` **leaves the sheet** (the human's ruling of 2026-10-17: `+` exits to
+    // another mode): the count rule answers with a two-cell collage at the same shape,
+    // and the sheet's photo comes with it in cell 0.
+    let grown = dir.join("grown.pixlay");
+    let grown = grown.to_str().expect("utf-8 path");
+    let output = run(&["edit", "--project", sheet, "--add-cell", "--out", grown]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(field(&output, "cells"), "2");
+    let project = Project::load(Path::new(grown)).expect("the grown project loads");
+    assert!(!project.doc().template.one_photo, "a collage");
+    assert!(
+        project.doc().cells[0].source.is_some(),
+        "the photo is cell 0"
+    );
+
+    // The two edits that address cells by slot are failures (exit 2) that name the rule,
+    // and `--remove-cell` is the one-cell floor; nothing is written either way.
+    // (The edit flags are applied in order, so `--add-cell --swap 0,1` is *not* a refusal:
+    // the sheet has left by the time the swap runs, and the swap is a collage's own.)
+    for (args, reason) in [
+        (vec!["--swap", "0,1"], "one photo"),
+        (vec!["--remove-cell"], "at least 1 cell"),
     ] {
         let out = dir.join(format!(
             "refused-{}.pixlay",
@@ -2208,7 +2223,7 @@ fn an_id_photo_sheet_holds_one_photo() {
         let output = run(&argv);
         assert_eq!(code(&output), 2, "{args:?}: {}", stderr(&output));
         assert!(
-            stderr(&output).contains("one photo"),
+            stderr(&output).contains(reason),
             "{args:?}: {}",
             stderr(&output)
         );

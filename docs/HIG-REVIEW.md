@@ -380,6 +380,9 @@ the canvas is **content** and the interface is **styling**, and the two must not
      so the **size name is the tooltip and the front of the accessible name** (「一寸照片」). Is that legible
      by hovering and by focus, or does this item ask for a permanent caption on these six candidates only
      (the one thing the step's plan left open)?
+   - **the count control stays** (the human's ruling of 2026-10-17): it is the way out of a sheet — `+` takes
+     the two-cell collage at the same shape and the sheet's photo with it — so does the control read as
+     "leave for a collage" rather than "add a photo to the sheet", and is `−` visibly at the floor?
    - **the framing controls on a 25 mm tile**: the per-cell strip is anchored to the canvas's bottom-start
      corner on these sheets (a tile is under a hundred device pixels each way — the first layouts to reach the
      "too small for both orientations" branch). Does it read as the sheet's controls rather than one copy's,
@@ -388,10 +391,12 @@ the canvas is **content** and the interface is **styling**, and the two must not
      while the sheet is empty, 更换照片… once it holds one — and a drop of several files keeps the first and
      reports the rest once. Is the copy right, and does the empty sheet's own `+` appear **once** rather than
      twelve times?
-   - **the print**: export the sheet at a 1800-px long edge (= 1200x1800) and measure a printed or on-screen
-     copy: the 一寸 tile is 295x413 px at 300 dpi, the white gap between copies is 2 mm. Does the sheet read as
-     a 证件照排版 — six sizes, each with the photo's own framing (one crop for every copy) — rather than as a
-     collage of one photo?
+   - **the print**: export the sheet at a 1800-px long edge (1200x1800 for the upright sheets, 1800x1200 for
+     the turned ones) and measure a printed or on-screen copy: the 一寸 tile is 295x413 px at 300 dpi, the
+     white gap between copies is 2 mm. **Which way each size is printed is the recipe's choice** — 一寸 upright,
+     小一寸 and the three others turned, because that is where more copies fit — so does a turned sheet read as
+     the same 证件照排版 (the photos still upright relative to their own cut pieces), and does the count gain
+     (12 / 18 / 8 / 8 / 4 / 8) read as less waste than the upright page's 12 / 16 / 6 / 6 / 4 / 6?
 
 ### The main path's scripted step list (the three-minute walk)
 

@@ -38,11 +38,11 @@ const SHEET: &str = "id-1cun-12-2x3";
 /// human's list, 大二寸 after 二寸, 小二寸 last).
 const SHEETS: [&str; 6] = [
     "id-1cun-12-2x3",
-    "id-1cun-small-16-2x3",
-    "id-1cun-large-6-2x3",
-    "id-2cun-6-2x3",
+    "id-1cun-small-18-3x2",
+    "id-1cun-large-8-3x2",
+    "id-2cun-8-3x2",
     "id-2cun-large-4-2x3",
-    "id-2cun-small-6-2x3",
+    "id-2cun-small-8-3x2",
 ];
 
 /// How many of the canvas's empty-cell `+` buttons the sheet shows.
@@ -144,8 +144,9 @@ fn an_id_photo_sheet_is_chosen_from_the_ratio_row_at_one_photo() {
         assert!(!button.is_active(), "{aspect}: the shape is not marked");
     }
 
-    // A sheet holds one photo: the count control has nothing to edit.
-    assert!(!gallery.count_visible(), "the count control is hidden");
+    // The count control **stays** (the human's ruling of 2026-10-17): its `+` is how a
+    // sheet leaves for a collage.
+    assert!(gallery.count_visible(), "the count control is there");
 
     // The empty sheet offers one `+`, on the first tile: every slot resolves to the one
     // cell, so the other eleven have nothing to fill.
@@ -220,10 +221,8 @@ fn an_id_photo_sheet_is_chosen_from_the_ratio_row_at_one_photo() {
         "the first file is the sheet's"
     );
 
-    // The commands that need a second cell are refused where they are asked for.
+    // The commands that index cells by slot are refused where they are asked for.
     for command in [
-        Command::AddCell,
-        Command::RemoveLastCell,
         Command::SwapCells { left: 0, right: 5 },
         Command::MovePhoto { from: 0, to: 5 },
     ] {
@@ -237,28 +236,19 @@ fn an_id_photo_sheet_is_chosen_from_the_ratio_row_at_one_photo() {
     assert_eq!(window.document().cells.len(), 1, "nothing moved");
 
     // ---- leaving the sheet ----------------------------------------------------
-    // A shape's button is the way back: that shape's one-slot collage, keeping the photo.
-    gallery
-        .ratio_button(4.0 / 3.0)
-        .expect("4:3 is one of the row's shapes")
-        .set_active(true);
-    window.pump(Duration::from_millis(50));
+    // The count control's `+` is the way out (the ruling: 「加1,就自动退出，到别的模式」):
+    // the count rule answers with a two-cell collage at the same shape and the sheet's
+    // photo comes with it.
+    window.add_photo();
+    window.pump(Duration::from_millis(80));
     let doc = window.document();
-    assert_eq!(doc.cells.len(), 1, "a one-slot collage");
-    assert!(!doc.template.one_photo, "the sheet is left");
-    assert_eq!(doc.cells[0].source.as_deref(), Some(photo.as_path()));
-    assert!(gallery.count_visible(), "a collage edits its count");
-    assert!(
-        gallery.id_photo_button().is_some_and(|b| !b.is_active()),
-        "no member is marked on a collage"
+    assert_eq!(doc.cells.len(), 2, "+ left the sheet for two cells");
+    assert!(!doc.template.one_photo, "a collage, not a sheet");
+    assert_eq!(
+        doc.cells[0].source.as_deref(),
+        Some(photo.as_path()),
+        "the sheet's photo is cell 0"
     );
-
-    // Two cells take the member away: there is no sheet of one photo to choose.
-    window
-        .apply(Command::AddCell)
-        .expect("a collage grows to two cells");
-    window.pump(Duration::from_millis(50));
-    assert_eq!(window.document().cells.len(), 2);
     assert!(
         gallery.id_photo_button().is_none(),
         "the member is only for one photo"
