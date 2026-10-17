@@ -253,9 +253,14 @@ static ARRANGEMENTS: &[Arrangement] = &[
         sheets: SET,
         names: &[("3x2", "strip-2-2x1"), ("4x3", "grid-2-2x1")],
     },
-    // The unequal pair with the big cell on top: 77/128 against 51/128 — the 2:3
-    // the walk of 2026-10-17 asked for wherever a proportion is not named (exact
-    // 3:5 is not dyadic).
+    // The unequal pair with the big cell on top: 77/128 against 51/128. The walk of
+    // 2026-10-17 named this split — the small cell two thirds the big one, 1.51:1 — for
+    // the pairs its list left unnamed, and **that is this recipe's own value, not a
+    // rule** (restated by the human on 2026-10-17: a template's proportions are the
+    // template's own, and the template format makes one an authorable item). The other
+    // pairs the list does not name keep their own: 88/40 for `mosaic-2-hero`, 85/43 for
+    // the seven-cell bricks. Exact thirds and exact 2:3 are not dyadic; 128 is the grid
+    // S38 landed on.
     Arrangement {
         variant: "mosaic-2-hero-top",
         slots: &[rect(0, 0, 128, 77), rect(0, 77, 128, 128)],

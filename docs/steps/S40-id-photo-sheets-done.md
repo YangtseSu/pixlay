@@ -79,8 +79,9 @@ are rulings this step now carries:
   sheet is refused unless the document holds at most one cell and keeps none (`OnePhotoLayout`); switching off
   is the ordinary retention rule, and the count control's `+` (`AddCell`) is that exit.
 - **Limits**: `MAX_PHOTOS` / `MAX_SLOTS` stay 9 (a document still holds 1..=9 photos), and a *template's* own
-  slot count gets `MAX_TEMPLATE_SLOTS = 16` — the largest sheet, 小一寸's 4×4 — which `Template::validate` and
-  `docs/CONTRACT.md` §2 use.
+  slot count gets `MAX_TEMPLATE_SLOTS = 18` — the largest sheet, 小一寸's 6×3 on the turned page (the field
+  landed at 16 with the first sitting's 4×4 upright sheet and the turned-page commit raised it) — which
+  `Template::validate` and `docs/CONTRACT.md` §2 use.
 - **Queries**: `with_slots`, `with_slots_and_aspect`, `of_aspect`, `ratios_for`, `selection::layout_for` and the
   window's `candidate_templates` skip `onePhoto` members; `all`, `names`, `get` and the new
   `templates::one_photo()` keep them; `Family::of` reads the `id` prefix as `Family::Id`.
@@ -102,7 +103,7 @@ are rulings this step now carries:
 ## Implemented as (2026-10-17)
 
 - **The model**: `Template::one_photo` (`crates/pixlay-core/src/template.rs`), `CollageDoc::cell_index` /
-  `cell` / `cell_mut` and the one-cell validation (`doc.rs`), `MAX_TEMPLATE_SLOTS = 16` (`lib.rs`), four new
+  `cell` / `cell_mut` and the one-cell validation (`doc.rs`), `MAX_TEMPLATE_SLOTS = 18` (`lib.rs`), four new
   typed errors (`error.rs`: `OnePhotoDocument`, `OnePhotoLayout`, `OnePhotoCommand`, `OnePhotoPhotos`), the
   command rules (`history.rs`) and the query exclusions plus `templates::one_photo()` / `ID_PHOTO_DEFAULT`
   (`templates/mod.rs`).
@@ -162,22 +163,22 @@ are rulings this step now carries:
 
 | Test | Was | Now | Why |
 |---|---|---|---|
-| `pixlay-core/tests/hit.rs` (twice) | 1522 slots | **1572** | six sheets, 50 copies |
-| `pixlay-imaging/tests/layout.rs` | 1522 × 3 framings | **1572 × 3** | and the sweep walks slots |
+| `pixlay-core/tests/hit.rs` (twice) | 1522 slots | **1580** | six sheets, 58 copies |
+| `pixlay-imaging/tests/layout.rs` | 1522 × 3 framings | **1580 × 3** | and the sweep walks slots |
 | `pixlay-core/tests/templates.rs`'s lattice | 1/128 | **1/2560** | the sheets' lattice; the check allows the division's own round-off (1e-9) |
 | `templates.rs`'s count range, names, ratio row, aspect group | 1..=9, three families | per kind (`MAX_SLOTS` vs `MAX_TEMPLATE_SLOTS`), the `id` family, `onePhoto` excluded | the candidates are the collage's |
 | `templates.rs`'s fingerprint | the whole emitted source | the table alone | the emitter's `ONE_PHOTO` trailer is not geometry |
-| `contract.rs`'s slot-count test | 10 and 11 refused | **17 and 24** refused, 16 legal as a sheet | the template ceiling is 16 |
+| `contract.rs`'s slot-count test | 10 and 11 refused | **19 and 24** refused, 18 legal as a sheet | the template ceiling is 18 |
 | `pixlay-cli/tests/cli.rs`'s listing and library render | `1..=9` slots, `cells == slots` | `one_photo` rows allow 1..=18, a sheet's `cells` is 1 | the sheets are in the library |
 | `history.rs`'s no-lost-cell sweep, `selection.rs`'s three library sweeps and `templates.rs`'s per-count order walk | `templates::all()` / every member of a count | the **collage** library (`!one_photo`) | a sheet is not a layout a collage switches to (the switch is refused, walked in `idphoto.rs`), its count is its copies, and its page is not one of the six shapes a count offers |
 | `gesture.rs` / `pending.rs` / `preview.rs`'s one-template predicates | `slots.len() == 2` / `== 4` | the same, plus `!one_photo` | a four-copy sheet has one cell, and those tests fill four |
 
 ## Machine-checkable exit
 
-- `cargo run -p pixlay-core --bin pixlay-gen-templates` then `git diff` on `templates/frozen.rs`: **115
-  insertions, 2 deletions** — the two deleted lines are the header prose the emitter rewrote (the lattice
-  paragraph and the new `ONE_PHOTO` sentence), and every pre-S40 member's name, version, aspect and slots are
-  byte-identical. The file is **173,771 bytes** (S39: 163,116).
+- `cargo run -p pixlay-core --bin pixlay-gen-templates` then `git diff` on `templates/frozen.rs`: **123
+  insertions, 2 deletions** (the first sitting's 115 plus the turned sheets') — the two deleted lines are the
+  header prose the emitter rewrote (the lattice paragraph and the new `ONE_PHOTO` sentence), and every pre-S40
+  member's name, version, aspect and slots are byte-identical. The file is **174,874 bytes** (S39: 163,116).
 - `cargo test -p pixlay-core --test templates` (green): the six members' cells are within half a lattice step of
   their nominal millimetres, the copies are congruent on a regular grid, the gaps measure 2 mm, the counts are
   the largest that fit, and the library's invariants hold over them.

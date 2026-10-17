@@ -193,9 +193,11 @@ edge with nothing cropped, which is what screenshots want.
   interior hole, no more canvas than there is) — and it runs on **every** load, so a hand-written geometry
   in a `.pixlay` is already checked today. What is missing is (1) a file artifact and a loader, (2) an
   identity rule, (3) an authoring surface, (4) the bounds decisions.
-- **The four work items**: (1) a loader reading the same shape, with `area` **derived** from the outline
-  when it is absent (the declared value exists to cross-check generated data, not to burden a hand-written
-  file); (2) identity — a namespace so a user template cannot shadow a shipped name, whether the band's
+- **The four work items**: (1) a loader for a **recipe artifact** — its own type with its own
+  `formatVersion`, so the document's shape stays strict: `area` is derived from the outline **in the
+  artifact→`Template` conversion**, while a `.pixlay` keeps declaring it (that cross-check is what refuses a
+  hand-written drift, measured 2026-10-17: `template slot 0 declares area 0.75 but its outline covers 0.5`);
+  (2) identity — a namespace so a user template cannot shadow a shipped name, whether the band's
   count query lists user templates, and how `layout_for` treats one (below); (3) authoring, in rising
   cost: a file edited outside (cheap), a recipe DSL on an integer lattice like the generator's (its CLI
   half is free, which the "nothing only in the GUI" rule wants), a drawing surface in the app (a real
@@ -211,11 +213,41 @@ edge with nothing cropped, which is what screenshots want.
     template a way to fail that it cannot have today. The cheaper unification is an `include_str!`-ed
     **JSON artifact of the same shape** a user loader reads: one loader, one validator, no runtime
     lookup, no new dependency (`serde_json` is already in `pixlay-core`). The generator stays the
-    authoring tool and the determinism test keeps byte-comparing.
+    authoring tool and the determinism test keeps byte-comparing. With the artifact a **recipe** (below),
+    the shipped source can be that same file shape: one `include_str!`-ed recipe list, one emitter, and
+    `frozen.rs` stays the frozen output the determinism test byte-compares.
   - **the family stops being parsed out of the name.** `layout_for`'s second preference reads
     `Family::of(&name)`, which is what makes a free-form name awkward; it becomes an explicit
     `family: Option<Family>` field (shipped templates keep their three families, a user template may have
     none). Names are then free-form identifiers, and no UI shows them (ruling 40 of the plan, 2026-09-25).
+- **Premises the design carries** (*restated by the human, 2026-10-17*; where they differ from the round
+  above, they win):
+  - **the artifact is a recipe, and it has no aspect — the document does.** The shipped library's own source
+    is already that shape (`Arrangement`: 67 rows, 44 of them emitted at **all six sheets** since S39 and 23
+    at exactly one), so the artifact is that abstraction in a file — `{name, version, sheets[],
+    slots[{outline, area?}]}` — **materialized onto a sheet's ratio when it enters a document**, which is why
+    the document format does not move at all. The alternative — a `sheet`/ratio field on the document, so one
+    recipe serves any ratio end to end — is additive (no `docVersion` bump) but would move half of
+    S35/S36/S38/S39's "the ratio is the template's" architecture; it waits for a walk that asks for it.
+  - **`sheets[]` is a whitelist, not a promise.** Normalized geometry stretched onto another sheet is another
+    layout, and the 23 single-sheet rows are deliberate: a five-column strip at 3:4 is five slivers, and the
+    gutter variants, the `-hero` pairs and the `elbow`/`tee` cells are each authored where they read right.
+    "One recipe, any ratio" is never automatic.
+  - **a proportion is the template's own value, and it becomes authorable.** Every recipe carries its splits
+    as literal lattice numbers (77/51 for the unnamed unequal pairs, 88/40 for `mosaic-2-hero`, 85/43 for the
+    seven-cell bricks, 40/48/40 for the 3/2/3 band, 43/42/43 for the even nine-grid), the walk of 2026-10-17
+    **named** 2:3 for the pairs it left unnamed, and the human restated that this is **not a rule**. The
+    format gives a split a field — `equal`, a ratio, or lattice units — and the rounding a ratio needs on the
+    lattice (2:3 of 128 is 51.2) is the specification's business rather than the author's.
+  - **the two `2:3`s are different things, and the format must not conflate them.** `2:3` is already the
+    portrait **sheet** in the band's own vocabulary (`ratios_for`) and in every census table; a cell's
+    proportion is not an aspect and does not get called one.
+  - **the measured evidence for "a loader, not geometry work"** (2026-10-17, `pixlay-render`): a hand-written
+    concave 1:1 template inside a `.pixlay` renders, hits correctly and round-trips byte-identically through
+    `save`; five refusal classes exit 2 with their reason (two slots overlapping, an interior hole, a
+    self-crossing outline, a declared area that drifts from its outline, an unknown key). A **non-dyadic**
+    split (1/3 as `0.3333333333333333`) loads as well, so the lattice is the generator's discipline and not
+    the format's.
 
 ### The artifact is a general format, with a specification of its own
 

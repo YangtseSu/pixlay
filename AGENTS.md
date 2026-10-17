@@ -340,7 +340,8 @@ code for one commits that change itself.
   101.6×152.4 mm, printed either way round — 2:3 or 3:2 — whichever holds more copies) at six sizes, and
   their document holds **one cell**: every slot draws it
   (`CollageDoc::cell_index`), so the photo, its framing and its undo step are one thing. That is why a
-  template's own slot ceiling (`MAX_TEMPLATE_SLOTS`, 16) is separate from the nine cells a document holds,
+  template's own slot ceiling (`MAX_TEMPLATE_SLOTS`, 18 — 小一寸's six columns by three rows) is separate
+  from the nine cells a document holds,
   and why the candidate queries (`with_slots`, `with_slots_and_aspect`, `of_aspect`, `ratios_for`,
   `layout_for`, the band's strip) skip these members — their slot count is the copies, not a photo count.
   The millimetres are the generator's recipe and the tests' measuring stick, never a format field: an export
